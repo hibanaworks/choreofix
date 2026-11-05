@@ -179,6 +179,35 @@ async fn a_failed_candidate_moves_to_b_and_both_resources_guard_the_actual_commi
         let protocol = Protocol::new(&snapshot, &mut source_storage).unwrap();
         let count: usize = captures.iter().map(|capture| capture.records().len()).sum();
         let capacity = count.checked_mul(2).and_then(|n| n.checked_add(1)).unwrap();
+        let frames = bus.transport.take_observations();
+        if let Some(directory) = std::env::var_os("CHOREOFIX_HANDOFF_EVIDENCE") {
+            let directory = std::path::PathBuf::from(directory);
+            std::fs::create_dir(&directory).unwrap();
+            for (name, records) in [
+                ("protocol.bin", snapshot.as_slice()),
+                ("primary.bin", primary.as_slice()),
+                ("recovery.bin", recovery_capture.as_slice()),
+            ] {
+                let bytes: Vec<_> = records
+                    .iter()
+                    .flat_map(|record| <[u8; 16]>::from(*record))
+                    .collect();
+                std::fs::write(directory.join(name), bytes).unwrap();
+            }
+            std::fs::write(
+                directory.join("inputs.json"),
+                serde_json::to_vec_pretty(&serde_json::json!({
+                    "session": session.raw(), "derivation_capacity": capacity,
+                    "primary_checkpoint": rv.tap().checkpoint(),
+                    "recovery_checkpoint": recovery.tap().checkpoint(),
+                    "publication_observed": publication_observed,
+                    "actual_artifact": {"target":actual.target,"revision":actual.revision,"value":actual.value},
+                    "frame_journal": frames,
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        }
         let mut unfolding = vec![Unfold::Source; capacity];
         let mut choices = vec![
             RouteChoice {
@@ -222,7 +251,6 @@ async fn a_failed_candidate_moves_to_b_and_both_resources_guard_the_actual_commi
                 &mut scratch,
             )
             .expect("the actual eight-role handoff must have a checked source execution");
-        let frames = bus.transport.take_observations();
         let checked = result.actual()?;
         assert!(checked.passed);
         assert_eq!(checked.artifact, actual);
