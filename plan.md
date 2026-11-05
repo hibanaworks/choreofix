@@ -234,8 +234,21 @@ dependency tree・binary hashへ対応付け、下記では検査した版を個
 wordループの外へ出した作業sourceでも49.36秒で通った。元のglobalとlocalsideは変更していない。
 その後、同じ作業本体でreview・codebase・CI/CDの実ホスト3本を4分39秒でビルドした。
 これは本体の検査入力として固定した公開consumer sourceでの結果であり、通常consumerの
-未認定本体への依存差替えや全体認定の成功とは扱わない。本体の通常Rust gateは通過し、
-統一した生成適合試験の全割当を同じsourceで検証している。
+未認定本体への依存差替えや全体認定の成功とは扱わない。
+修正版の公開本体`a4d48cdc`では、通常Rust gate、38件の必須strict-provenance Miri、
+54のLean実装モデル、11 workloadの処理量予算と、統一した生成適合試験の通常43割当が
+同じ変更のないsourceで完了した。32分割と共有契約15種の6,530ケース、
+39,538完走script、30,644,346次操作probe、7,376,442 parked-preview probeで
+runtime-only/model-onlyは0だった。全割当と保存した結果のhashを照合し、
+6種類のproduction欠陥を戻す感度検査と縮小controlも通過した。
+2 compilerを使った一つの分割は2,750,000,000bytesのguardで停止したため未完として保存し、
+同じ生成入力・lockを1 compilerで実行して合格した。上限や入力域は変更していない。
+最終の継続実行は最大1,439,449,088bytesだった。通常CI契約の有限入力域の結果であり、
+全protocolの証明、新しい全Kani成功や拡張認定の完了とは扱わない。
+source・command・結果は本体の`target/consumer-capacity-qualification/final-audit`へ保持する。
+100 role・4,000 eventのmixed/hierarchicalのcompile負荷検査も通過した。
+通常CIの公開実行を待って同じローカル検査を繰り返すのではなく、この合格した公開本体へ
+consumerの通常Git依存を揃え、consumer自身の統合検証へ進む。
 
 この退行を本体の通常CIでも検出するため、固定した実global・localsideを使う必須回帰を追加した。
 6Eを含む3ホストのビルドに加え、実Wasmで1Hの3件同時commit受理と16Eの障害条件0・1・2、
@@ -244,6 +257,19 @@ wordループの外へ出した作業sourceでも49.36秒で通った。元のgl
 保留する元の試験を使い、単なる時間の重なりへ依存しない。モデル呼出しと採点実行は0件。
 記録は本体の`target/choreofix-regressions/run.kgEA61jY/evidence-core-contract`へ保持する。
 この回帰は本体のビルド容量と実Endpoint進行を守り、consumer全体の認定を重ねない。
+
+WASI`b5d1f98`はこの公開本体をmanifest・lock・実際のCargo metadataで一つだけ選択し、
+134.78秒で全ローカルgateを通過した。実ChoreoFS、実Wasmシェル、Leanの権限照合、
+Pico 2、strict-provenance Miri、配布archiveを含み、最大memoryは1,185,546,240bytesだった。
+検査中のsourceは変更せず、成功後に公開した。アプリのglobal・localsideを変更した結果や、
+ChoreoFix全体の統合認定としては扱わない。
+
+EPF`38b76e0`も同じ公開本体を選択し、全ローカルgateを716.67秒で完了して公開した。
+native125件、doctest2件、strict-provenance Miri109件、6つのLean証明モジュールと
+35種類の欠陥検出が成功し、最大memoryは1,371,471,872bytesだった。
+アプリ・runner・効果境界検証crateの依存更新は、この二つの公開libraryを使う。
+以下のEPFの探索改善と実6E保存記録の結果は、元の検査版へ対応付けたまま保持する。
+このlibrary単体の合格を、更新後ChoreoFixの全実Wasm・実モデルの合格へ読み替えない。
 
 EPFの公開`712b49bb`は、同じ不変sourceに対して、必要な先行操作と既確定の分岐から
 成立しない選択を先に除く。委譲で保持者が変わる場合も含む260,512問い合わせを、

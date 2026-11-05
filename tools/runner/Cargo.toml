@@ -8,8 +8,8 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 hibana-runtime = { git = "https://github.com/hibanaworks/hibana-runtime", rev = "09a803afdfb45945febed46145a68ff92a03d9e4", features = ["host"] }
-hibana = { git = "https://github.com/hibanaworks/hibana", rev = "724f3e3e6e74b5d71ced86b1a0f007ba26177969", version = "=0.10.0", default-features = false }
-hibana-epf = { git = "https://github.com/hibanaworks/hibana-epf", rev = "21078b0b2a61ce0f6d9ce11852e7cc98e73dc248" }
+hibana = { git = "https://github.com/hibanaworks/hibana", rev = "a4d48cdc4b4d42110d3d7a3fe9fe172efd91c3e0", version = "=0.10.0", default-features = false }
+hibana-epf = { git = "https://github.com/hibanaworks/hibana-epf", rev = "38b76e0366d9df303981491056221d025c4d7385" }
 choreofix-inputs = { path = "../inputs" }
 pyo3 = { version = "=0.30.1", default-features = false }
 serde_json = "=1.0.154"
