@@ -31,8 +31,12 @@ async fn a_failed_candidate_moves_to_b_and_both_resources_guard_the_actual_commi
     // Capture the actual publication value at each producer boundary, rather
     // than adding an application effect counter or a second protocol cursor.
     let observations = Cell::new(Vec::new());
+    let observed_order = Cell::new(Vec::new());
     let primary_records = Cell::new(Vec::new());
     let primary_recorder = |event: TapEvent| {
+        let mut order = observed_order.take();
+        order.push([0usize, event.ts() as usize]);
+        observed_order.set(order);
         let mut records = primary_records.take();
         let published = observations.take();
         records.push((event, published.clone()));
@@ -41,6 +45,9 @@ async fn a_failed_candidate_moves_to_b_and_both_resources_guard_the_actual_commi
     };
     let recovery_records = Cell::new(Vec::new());
     let recovery_recorder = |event: TapEvent| {
+        let mut order = observed_order.take();
+        order.push([1usize, event.ts() as usize]);
+        observed_order.set(order);
         let mut records = recovery_records.take();
         records.push(event);
         recovery_records.set(records);
@@ -201,6 +208,7 @@ async fn a_failed_candidate_moves_to_b_and_both_resources_guard_the_actual_commi
                     "primary_checkpoint": rv.tap().checkpoint(),
                     "recovery_checkpoint": recovery.tap().checkpoint(),
                     "publication_observed": publication_observed,
+                    "native_observer_order": observed_order.take(),
                     "actual_artifact": {"target":actual.target,"revision":actual.revision,"value":actual.value},
                     "frame_journal": frames,
                 }))
