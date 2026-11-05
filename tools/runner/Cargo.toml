@@ -17,3 +17,8 @@ sha2 = "=0.10.9"
 
 [lints.rust]
 unsafe_code = "forbid"
+
+[profile.test.package.hibana-epf]
+opt-level = 2
+debug-assertions = true
+overflow-checks = true

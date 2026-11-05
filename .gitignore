@@ -14,3 +14,4 @@ __pycache__/
 /vendor/rust-bash/
 /tools/runner/target/
 /tools/inputs/target/
+/proofs/endpoint-handoff/target/

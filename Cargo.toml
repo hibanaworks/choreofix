@@ -18,3 +18,8 @@ hibana-epf = { git = "https://github.com/hibanaworks/hibana-epf", rev = "0266f00
 [lints.rust]
 unsafe_code = "deny"
 long_running_const_eval = "forbid"
+
+[profile.test.package.hibana-epf]
+opt-level = 2
+debug-assertions = true
+overflow-checks = true
