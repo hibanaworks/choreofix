@@ -7,6 +7,7 @@ name = "choreofix"
 version = "0.1.0"
 dependencies = [
  "hibana",
+ "hibana-epf",
  "hibana-runtime",
  "hibana-wasip1-runtime",
  "serde_json",
@@ -15,7 +16,15 @@ dependencies = [
 [[package]]
 name = "hibana"
 version = "0.10.0"
-source = "git+https://github.com/hibanaworks/hibana?rev=d892df33205fd8c04be205948e24dd9daa9f022c#d892df33205fd8c04be205948e24dd9daa9f022c"
+source = "git+https://github.com/hibanaworks/hibana?rev=724f3e3e6e74b5d71ced86b1a0f007ba26177969#724f3e3e6e74b5d71ced86b1a0f007ba26177969"
+
+[[package]]
+name = "hibana-epf"
+version = "0.1.0"
+source = "git+https://github.com/hibanaworks/hibana-epf?rev=0266f003d604f5790fe349565827a6210dd13826#0266f003d604f5790fe349565827a6210dd13826"
+dependencies = [
+ "hibana",
+]
 
 [[package]]
 name = "hibana-runtime"
@@ -38,7 +47,7 @@ dependencies = [
 [[package]]
 name = "hibana-wasip1-runtime"
 version = "0.1.0"
-source = "git+https://github.com/hibanaworks/hibana-wasip1-runtime?rev=b4f8d7e9e5dd5f29dc8caaa6764f084361aa15db#b4f8d7e9e5dd5f29dc8caaa6764f084361aa15db"
+source = "git+https://github.com/hibanaworks/hibana-wasip1-runtime?rev=82253a5f89246baa081a5c6581f09e9c0cbb918e#82253a5f89246baa081a5c6581f09e9c0cbb918e"
 dependencies = [
  "hibana",
 ]

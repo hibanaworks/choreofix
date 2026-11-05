@@ -1,6 +1,6 @@
 # ChoreoFix 研究開発計画
 
-更新: 2026-11-03。受領した「ChoreoFix 研究開発計画」計画版1.0を反映した。
+更新: 2026-11-05。受領した「ChoreoFix 研究開発計画」計画版1.0を反映した。
 入力文書のSHA-256は[実験契約](benchmark/experiment-contract.json)に記録する。
 研究の中心は、**実資源の唯一の操作権、残存手順、実際の共有効果を結ぶ保証**である。
 委譲、投影、並行処理、prefix safety、版の照合をそれぞれ単独の新規性とはしない。
@@ -229,20 +229,41 @@ Lean証明テンプレートを修正し、実Endpoint6試験と既存135命題�
 retained-rollの展開文脈と分離証拠を生成側へ補い、モデルの条件・命題は弱めずに
 全生成Lean gateを通した。source適合検査は12,310試行・4,936 cutで不一致0件だった。
 
-続く依存更新では、アプリ・runner・handoffとEPF・WASIが本体`d892df3`だけを選ぶよう揃える。
-本体の必須生成検査48割当と追加21割当は一つの生成・実Endpoint・source照合経路を使い、
-全Kani・追加Miri等を含む[最終認定](https://github.com/hibanaworks/hibana/actions/runs/41629197677)は実行中である。
-認定対象の`741b4b0`は、macOS専用TCP試験をLinuxで0件実行して停止したCIの配置修正で、
-選択中の`d892df3`からRust・Leanモデル・manifest・検査scriptは変わっていない。
-同じsourceのローカル追加gateも未完であり、過去の成功をこの版の全検証へ読み替えない。
+11月3日の依存更新は本体`d892df3`を選んだ段階であり、
+全Kani・追加Miri等を含む[当時の認定](https://github.com/hibanaworks/hibana/actions/runs/41629197677)は取消済みである。
+配置修正`741b4b0`を含め、当時の認定を成功とは扱わない。
 EPF`d98822a`は14 CI job、WASI`60b51a9`は通常CIが成功し、それぞれmainへ取り込んだ。
-新しい本体を選ぶEPF`67933c6`はmanifestとlockだけの変更で、CIは未完である。
+本体を更新したEPF`67933c6`はmanifestとlockだけの変更で、全検証成功とは扱わない。
 WASI`b4f8d7e`は同じ依存更新に加え、重複したSMT権限モデルをLeanへ集約した。
 権限マスクの一般命題を10から14へ補い、実ChoreoFSの160照合とVMの520照合を維持した。
 Z3入力・呼出し・CI依存を削除し、自然数のbitwise恒等式が使う標準公理も正確に監査する。
 この版のCIとローカル全検証は未完である。
 アプリのglobal・localsideと各libraryのproduction Rustは変更していない。
 この依存更新を、組合せの全gate成功やChoreoFixの実Wasm・動的監査の認定として扱わない。
+
+11月5日は、本体の通常43割当を完走した`b6a9607`と公開版`724f3e3`について、
+製品コード537ファイル、公開試験301ファイル、Lean仕様185ファイル、利用例7ファイルと
+実際のstable compilerの一致を確認した。元の各割当の実行記録とhashを保持し、
+変更のない製品の通常検証へ再利用する。検査器の正規化・記録形式の変更は別の認定とし、
+新driverの32分割中12分割の成功を全割当成功とは報告しない。拡張認定も未完である。
+通常入力と完全に同じ拡張8割当を削除した。4,096実行列、41,984スコープ検査入力、
+16不合法sourceを含む一致を確認しており、通常43割当の入力域は変えていない。
+現在の追加割当は深い固定8件と深さ4〜8の抽出5件であり、全構文の網羅や一般証明ではない。
+本体の再検査を初めから繰り返さず、公開した同じ本体へconsumerを揃えて検証する。
+EPF`0266f00`はこの本体を実際に解決し、native113件とMiri102件が成功した。
+doctest2件、29欠陥の感度検査、6 Leanモジュールの定理・公理検査、Clippyと
+no_std/thumbv6mビルドは、同じ実装・仕様・native入力で成功した`93c65fe`の記録へ結ぶ。
+グラフ・履歴部分集合・出現割当等の全数の意味照合はnativeへ集約し、Miriで同じ全列挙を
+繰り返す6箇所を除いた。nativeの入力・操作列・assertionは残し、MiriはVM storage、
+resolverの寿命、実Endpoint・取消・観測、source/workspaceの境界を検査する。
+このツール別の範囲を全入力のMiri成功へ読み替えない。停止した旧Miri実行は未完として残す。
+EPFのこの成功を、本体の拡張認定、ChoreoFixの統合認定や実モデル結果へ数えない。
+WASI`82253a5`も同じ公開本体で全ローカルgateが成功した（140.00秒、
+全子孫の最大1,186,414,592bytes）。実ChoreoFS例、Lean権限照合、Pico 2のリンク・容量、
+実Wasmシェル、strict-provenance Miriと配布archiveの検査を含む。
+アプリ・runner・handoffのmanifest、lock、Cargo metadataを照合し、本体は一つだけを
+解決する。EPF・WASIのGit依存からも同じ本体が選ばれ、Tokio/mio/socket2は存在しない。
+この組合せのChoreoFix統合検証は別途実行し、library単体の成功で代用しない。
 
 本体の`8792e63`ではKani321件が成功し、全子孫の最大memoryは2,248,671,568bytesだった。
 この版はlane mismatchの観測値の説明を訂正し、tap記録の標準変換を追加した。

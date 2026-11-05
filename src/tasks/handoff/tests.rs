@@ -21,10 +21,30 @@ const VALIDATION_TIMEOUT: Duration = Duration::from_secs(60);
 #[test]
 async fn a_failed_candidate_moves_to_b_and_both_resources_guard_the_actual_commit()
 -> Result<(), crate::shell::ShellError> {
+    use hibana::runtime::tap::TapEvent;
+
     let programs = programs();
     let session = SessionId::new(301);
     let (bus, _, _) = Bus::open([], [(session, R), (session, S)]);
     let result = VerificationInput::default();
+    // These append-only observations are never read by a participant or resolver.
+    // Capture the actual publication value at each producer boundary, rather
+    // than adding an application effect counter or a second protocol cursor.
+    let observations = Cell::new(Vec::new());
+    let primary_records = Cell::new(Vec::new());
+    let primary_recorder = |event: TapEvent| {
+        let mut records = primary_records.take();
+        let published = observations.take();
+        records.push((event, published.clone()));
+        observations.set(published);
+        primary_records.set(records);
+    };
+    let recovery_records = Cell::new(Vec::new());
+    let recovery_recorder = |event: TapEvent| {
+        let mut records = recovery_records.take();
+        records.push(event);
+        recovery_records.set(records);
+    };
     let mut slab = vec![0; 1024 * 1024];
     let mut storage = SessionKitStorage::<&InMemoryTransport>::uninit();
     let rv = storage
@@ -37,6 +57,8 @@ async fn a_failed_candidate_moves_to_b_and_both_resources_guard_the_actual_commi
         .init()
         .rendezvous(&mut recovery_slab, &bus.transport)
         .unwrap();
+    rv.observe(&primary_recorder);
+    recovery.observe(&recovery_recorder);
     rv.set_resolver(
         &programs.store,
         ResolverRef::<VERIFY>::decision_state(&result, VerificationInput::decide),
@@ -60,7 +82,6 @@ async fn a_failed_candidate_moves_to_b_and_both_resources_guard_the_actual_commi
         revision: 0,
         value: 0,
     };
-    let observations = Cell::new(Vec::new());
     let mut repository = Repository {
         current: initial,
         published: Vec::new(),
@@ -117,7 +138,189 @@ async fn a_failed_candidate_moves_to_b_and_both_resources_guard_the_actual_commi
     assert_eq!(actual, recovered);
     assert_eq!(independent, 100);
     assert_eq!(repository.published, [(actual, 100)]);
-    assert_eq!(observations.take(), [actual]);
+    let observed_publication = observations.take();
+    assert_eq!(observed_publication, [actual]);
+    observations.set(observed_publication);
+
+    // The real participants, publication and captures above also run in Miri.
+    // Native conformance checks infer the complete source execution and test
+    // receipt substitution; Miri does not repeat that semantic search.
+    #[cfg(not(miri))]
+    {
+        use hibana::{g::Message, runtime::tap};
+        use hibana_epf::{
+            Acceptance, AuditStorage, Capture, ExecutionError, ExecutionStorage, ExecutionWitness,
+            Protocol, RecordId, RouteChoice, Unfold,
+        };
+
+        let primary_records = primary_records.take();
+        let publication_observed = primary_records
+            .iter()
+            .position(|(_, published)| !published.is_empty())
+            .expect("a producer observation must follow the actual publication");
+        assert!(
+            primary_records[..publication_observed]
+                .iter()
+                .all(|(_, published)| published.is_empty())
+        );
+        assert!(
+            primary_records[publication_observed..]
+                .iter()
+                .all(|(_, published)| published == &[actual])
+        );
+        let primary: Vec<_> = primary_records.iter().map(|(record, _)| *record).collect();
+        let recovery_capture = recovery_records.take();
+        let captures = [
+            Capture::new(&primary, rv.tap().checkpoint()).unwrap(),
+            Capture::new(&recovery_capture, recovery.tap().checkpoint()).unwrap(),
+        ];
+        let snapshot: Vec<_> = tap::projected(&programs.store).collect();
+        let mut source_storage = vec![0; Protocol::workspace_len(&snapshot).unwrap()];
+        let protocol = Protocol::new(&snapshot, &mut source_storage).unwrap();
+        let count: usize = captures.iter().map(|capture| capture.records().len()).sum();
+        let capacity = count.checked_mul(2).and_then(|n| n.checked_add(1)).unwrap();
+        let mut unfolding = vec![Unfold::Source; capacity];
+        let mut choices = vec![
+            RouteChoice {
+                span: [0, 0],
+                right: false
+            };
+            protocol.audit_choice_capacity(capacity).unwrap()
+        ];
+        let mut order = vec![
+            RecordId {
+                producer: 0,
+                ordinal: 0
+            };
+            count
+        ];
+        let mut occurrences = vec![None; count];
+        let mut acceptances = vec![
+            Acceptance {
+                first_poll: RecordId {
+                    producer: 0,
+                    ordinal: 0
+                },
+                before: 0,
+            };
+            count
+        ];
+        let mut scratch = vec![0; protocol.audit_workspace_len(&captures, capacity).unwrap()];
+        let audit = protocol
+            .audit(
+                &captures,
+                AuditStorage {
+                    unfolding: &mut unfolding,
+                    choices: &mut choices,
+                    execution: ExecutionStorage {
+                        session: session.raw(),
+                        order: &mut order,
+                        occurrences: &mut occurrences,
+                        acceptances: &mut acceptances,
+                    },
+                },
+                &mut scratch,
+            )
+            .expect("the actual eight-role handoff must have a checked source execution");
+        let frames = bus.transport.take_observations();
+        let checked = result.actual()?;
+        assert!(checked.passed);
+        assert_eq!(checked.artifact, actual);
+        let mut receipts = Vec::new();
+        for (position, (id, occurrence)) in audit
+            .execution()
+            .order
+            .iter()
+            .zip(audit.execution().occurrences)
+            .enumerate()
+        {
+            let record = captures[id.producer].records()[id.ordinal];
+            if record.id() != tap::ENDPOINT_RECV || record.causal_key() >> 8 != u16::from(STORE) {
+                continue;
+            }
+            let occurrence =
+                occurrence.expect("a committed receive needs a dynamic source occurrence");
+            let origin = audit.path().unfolding().origin(occurrence).unwrap();
+            let source = snapshot[2 + usize::from(origin)];
+            let label = source.arg0() as u8;
+            if label != CommitR::LOGICAL_LABEL && label != CommitS::LOGICAL_LABEL {
+                continue;
+            }
+            assert_eq!(id.producer, 0);
+            assert!(
+                id.ordinal < publication_observed,
+                "publication preceded a required receipt"
+            );
+            assert_eq!(source.id(), tap::PROJECTED_SOURCE);
+            assert_eq!((source.arg0() >> 16) as u8, STORE);
+            let sender = (source.arg0() >> 24) as u8;
+            assert_eq!(
+                sender,
+                if label == CommitR::LOGICAL_LABEL {
+                    R
+                } else {
+                    S
+                }
+            );
+            let received: Vec<_> = frames
+                .iter()
+                .filter(|frame| {
+                    frame["action"] == "receive"
+                        && frame["session"] == session.raw()
+                        && frame["frame_label"] == origin
+                })
+                .collect();
+            assert_eq!(
+                received.len(),
+                1,
+                "one frame must support this actual receipt"
+            );
+            assert_eq!(received[0]["source"], sender);
+            assert_eq!(received[0]["target"], STORE);
+            assert_eq!(received[0]["payload"], serde_json::json!(checked.bytes()));
+            receipts.push((label, occurrence, position));
+        }
+        receipts.sort_unstable();
+        assert_eq!(receipts.len(), 2);
+        assert_eq!(
+            [receipts[0].0, receipts[1].0],
+            [CommitR::LOGICAL_LABEL, CommitS::LOGICAL_LABEL]
+        );
+        assert_ne!(
+            receipts[0].1, receipts[1].1,
+            "R/S cannot reuse one source receipt"
+        );
+        // Keep the real captures and checked source path; only forge the claimed
+        // correspondence of one receive to the other resource's occurrence.
+        for (position, occurrence) in [
+            (receipts[0].2, receipts[1].1),
+            (receipts[1].2, receipts[0].1),
+        ] {
+            let execution = audit.execution();
+            let mut occurrences = execution.occurrences.to_vec();
+            occurrences[position] = Some(occurrence);
+            let changed = ExecutionWitness {
+                session: session.raw(),
+                order: execution.order,
+                occurrences: &occurrences,
+                acceptances: execution.acceptances,
+            };
+            let mut workspace = vec![
+                0;
+                audit
+                    .path()
+                    .execution_workspace_len(&captures, &changed)
+                    .unwrap()
+            ];
+            assert_eq!(
+                audit
+                    .path()
+                    .check_execution(&captures, &changed, &mut workspace),
+                Err(ExecutionError::Record { position }),
+                "one resource's actual receive cannot replace the other's receipt"
+            );
+        }
+    }
 
     Ok(())
 }
