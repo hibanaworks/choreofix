@@ -11,15 +11,10 @@ hibana-runtime = { git = "https://github.com/hibanaworks/hibana-runtime", rev = 
 serde_json = "=1.0.154"
 
 [dev-dependencies]
-hibana-epf = { git = "https://github.com/hibanaworks/hibana-epf", rev = "0266f003d604f5790fe349565827a6210dd13826" }
+hibana-epf = { git = "https://github.com/hibanaworks/hibana-epf", rev = "21078b0b2a61ce0f6d9ce11852e7cc98e73dc248" }
 
 [workspace]
 
 [lints.rust]
 unsafe_code = "deny"
 long_running_const_eval = "forbid"
-
-[profile.test.package.hibana-epf]
-opt-level = 2
-debug-assertions = true
-overflow-checks = true

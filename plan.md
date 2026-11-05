@@ -258,6 +258,22 @@ no_std/thumbv6mビルドは、同じ実装・仕様・native入力で成功し�
 resolverの寿命、実Endpoint・取消・観測、source/workspaceの境界を検査する。
 このツール別の範囲を全入力のMiri成功へ読み替えない。停止した旧Miri実行は未完として残す。
 EPFのこの成功を、本体の拡張認定、ChoreoFixの統合認定や実モデル結果へ数えない。
+その後、二つの実runtimeから得たhandoffの155記録では、自動監査が45秒で打ち切られた。
+同じ記録の実観測順には既存sourceモデルで合法な解釈があることを確認し、モデルやglobalを
+変更せず、EPFの探索を「全順序と全対応を作ってから検査」から「各記録の対応を選び、
+そのsource prefixの前提を確認してから次へ進む」形へ置き換えた。公開EPF`21078b0`では、
+同じ155記録・34送信受理を独立検査器まで通し、2回のrelease実行は0.47秒と0.71秒だった。
+これは固定入力の診断結果であり、一般的なthroughput評価や任意入力の終了保証ではない。
+native114件、doctest2件、6 Leanモジュールの定理・公理監査と29欠陥の感度検査が成功した。
+変更した探索を呼ぶ4 targetのMiri34件を再実行し、その他のMiri69件は同じ実装・試験・依存の
+`0266f00`の成功記録を保持する。最終検査を消す変異は、確定済み分岐と後のresolver判断の
+矛盾を見逃すことを確認した。Leanには、同じ不成立prefixを後続操作では修復できない命題を
+追加した。通常gateの最初の呼出しは、正しく失敗した変異の旧試験名照合で終了code 1に
+なったため、その呼出し全体を成功とは報告しない。照合名だけを修正し、成功済みの試験と
+証明を保持して、未実行だった感度試験を完了した。source/hashと各結果の対応は
+`output/review-occurrence-qualification/epf-automatic-source/epf-source-prefix-qualification-20261105-231532`
+へ記録する。consumerの依存を公開版へ揃え、無効だったtest用のEPF最適化profileを除去した。
+この組合せでのhandoffの実受信・公開効果の対応は検証中であり、完走前に認定へ数えない。
 WASI`82253a5`も同じ公開本体で全ローカルgateが成功した（140.00秒、
 全子孫の最大1,186,414,592bytes）。実ChoreoFS例、Lean権限照合、Pico 2のリンク・容量、
 実Wasmシェル、strict-provenance Miriと配布archiveの検査を含む。
