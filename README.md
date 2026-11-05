@@ -42,18 +42,22 @@ timeouts and tool-call limits.
 
 Participants use `gpt-6-luna` with `xhigh` through the existing ChatGPT login
 and Codex App Server. The runner checks the returned model, effort and login
-type. The comparison clients' subscription connection must be qualified while
-preserving their original prompts, history, tool schemas and execution order.
-That qualification is separate from ChoreoFix's own experiments.
+type. Development of the comparison clients' subscription connection is on hold;
+it does not gate ChoreoFix's own experiments. A future same-condition comparison
+will require qualification preserving the clients' original prompts, history,
+tool schemas and execution order.
 
 ## Status
 
 **Scored runs: 0 / 2,592.** The full task port and controlled comparison are
 unfinished. Existing results are integration qualifications, not benchmark
 success rates. The additional planned comparisons also have zero scored runs.
-The next research gate connects unique endpoint ownership and its remaining
-protocol to actual effects, with explicit adapter assumptions and runtime
-counterexamples, before starting the scored comparison.
+The current gate fixes one qualified core/EPF/WASI/runtime dependency set and
+checks the concrete receiver/effect boundaries on those sources before running
+ChoreoFix's own model trials. The minimal receiver-contract composition is
+implemented; applying it to every effect entry and completing the remaining
+task ports are still required. These obligations do not depend on developing a
+comparison client.
 
 The twelve migrated tasks have actual Wasm qualifications for
 three/five/seven-person Dining, seven-person collaborative
