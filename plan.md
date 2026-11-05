@@ -234,7 +234,8 @@ dependency tree・binary hashへ対応付け、下記では検査した版を個
 wordループの外へ出した作業sourceでも49.36秒で通った。元のglobalとlocalsideは変更していない。
 その後、同じ作業本体でreview・codebase・CI/CDの実ホスト3本を4分39秒でビルドした。
 これは本体の検査入力として固定した公開consumer sourceでの結果であり、通常consumerの
-未認定本体への依存差替えや全体認定の成功とは扱わない。本体の通常Rust gateは再検査中である。
+未認定本体への依存差替えや全体認定の成功とは扱わない。本体の通常Rust gateは通過し、
+統一した生成適合試験の全割当を同じsourceで検証している。
 
 この退行を本体の通常CIでも検出するため、固定した実global・localsideを使う必須回帰を追加した。
 6Eを含む3ホストのビルドに加え、実Wasmで1Hの3件同時commit受理と16Eの障害条件0・1・2、
@@ -244,13 +245,22 @@ wordループの外へ出した作業sourceでも49.36秒で通った。元のgl
 記録は本体の`target/choreofix-regressions/run.kgEA61jY/evidence-core-contract`へ保持する。
 この回帰は本体のビルド容量と実Endpoint進行を守り、consumer全体の認定を重ねない。
 
-EPFの公開`0836025`は完了済みの出現を別の分岐で救おうとする不要な探索を打ち切り、
-`2cf37f3`は既存の走査用領域でsource位置を再利用する。native115件、doctest2件、
-6 Leanモジュールと欠陥検出30件が通り、関連するMiri28件も再検査した。
-ただし、実6Eの約11,000行の記録では動的監査が依然として重く、停止した試行を成功にしない。
-6Eの完全なEPF監査、全familyの統合認定、実モデル・採点データは未完である。
-通常の本体CIへこの探索を重ねていないことと、consumer側で未解決であることを区別する。
-canonical consumerの依存は、この作業用回帰入力では更新していない。
+EPFの公開`712b49bb`は、同じ不変sourceに対して、必要な先行操作と既確定の分岐から
+成立しない選択を先に除く。委譲で保持者が変わる場合も含む260,512問い合わせを、
+固定sourceの全選択と2種類の操作順の全有効部分列から得た比較実装と照合した。
+これは全interleavingや任意のRust実装の一般証明ではない。native125件、doctest2件、
+6 Leanモジュール、欠陥検出35件、strict-provenance Miri109件が同じ製品sourceで通過した。
+故障注入driverの対象修正では、成功済み19件を保持して残る16件を実行し、全35件の一致を確認した。
+
+その版で、停止していた実6Eの保存記録を、入力・容量・global・localsideを変更せずに
+最後まで監査できた。完全capture8,127記録と1,475送信受理を20,254展開eventへ対応付け、
+最終の独立した実行検査を通過した。proof容量は元の16,255のままで、CLI実時間480.41秒、
+全子孫の最大memoryは632,979,456bytesだった。binary・入力・結果とsourceのhash、
+producer checkpointを`hibana-epf/target/query-domain-qualification/real-capture-final`へ保持する。
+この記録は固定consumerを用いた本体回帰fixtureの実WASI出力であり、新しい通常Git pinでの
+consumer再実行、全familyの認定、実効果の一般保証、実モデル・採点実験の完了ではない。
+以前に停止した試行は停止のまま残す。通常の本体CIへ監査探索を重ねず、consumerの
+依存更新と最終の実Wasm認定は、本体の必要な検証が完了した公開版で実施する。
 
 11月3日の先行依存更新では、本体`e22c0b9`へ外部executor依存と旧試験経路の除去をまとめ、
 実際に選択した本体からmemory guardを使うよう統一した。並行分離条件に追随していなかった
