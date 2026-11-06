@@ -204,6 +204,7 @@ pub fn run(output: &Path) -> Result<Value> {
                 .env("CARGO_TARGET_DIR", &runner)
                 .env("CARGO_BUILD_JOBS", "1")
                 .env("CARGO_INCREMENTAL", "0")
+                .env("CHOREOFIX_AUDITOR", output.join("qualifier"))
                 .env("CHOREOFIX_EVIDENCE_ROOT", output.join("evidence"))
                 .env(
                     format!("CHOREOFIX_{}_WASI_BINARY", family.to_uppercase()),

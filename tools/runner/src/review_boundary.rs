@@ -2,7 +2,7 @@
 //! These tests neither authorize an operation nor replace a localside.
 use crate::{
     evidence::{Result, Trace, archive_build_receipt, digest, save},
-    oracle, process, review_audit,
+    oracle, process,
 };
 use serde_json::{Value, json};
 use std::{
@@ -239,10 +239,7 @@ async fn reviewer(
     Ok(())
 }
 
-#[hibana_runtime::main]
-#[test]
-#[ignore = "uses the built WASI runtime, real wash and unchanged upstream simulator"]
-async fn real_wasi_reviews_reconsider_and_interleave_with_unchanged_upstream() -> Result<()> {
+fn ordinary_cases() -> Vec<ReviewCase> {
     let mut cases = Vec::new();
     for depth in [0, 1, 2] {
         for first in ["user_authentication", "notification_feature"] {
@@ -272,13 +269,10 @@ async fn real_wasi_reviews_reconsider_and_interleave_with_unchanged_upstream() -
             }
         }
     }
-    run_cases(cases).await
+    cases
 }
 
-#[hibana_runtime::main]
-#[test]
-#[ignore = "uses the built WASI runtime and additional unscored upstream failure injection"]
-async fn repeated_rejections_require_a_fresh_revision() -> Result<()> {
+fn repeated_rejection_cases() -> Vec<ReviewCase> {
     let mut cases = Vec::new();
     for first in ["user_authentication", "notification_feature"] {
         for schedule in [
@@ -296,7 +290,61 @@ async fn repeated_rejections_require_a_fresh_revision() -> Result<()> {
             }
         }
     }
-    run_cases(cases).await
+    cases
+}
+
+// The input builders above remain the sole definitions of the two domains.
+// Individual Rust tests give each input a stable selection and evidence name.
+macro_rules! review_tests {
+    ($cases:ident, $indices:ident; $($name:ident = $index:literal),+ $(,)?) => {
+        const $indices: &[(&str, usize)] = &[$((stringify!($name), $index)),+];
+        $(
+            #[hibana_runtime::main]
+            #[test]
+            #[ignore = "requires the qualified WASI runtime, wash, auditor and original simulator"]
+            async fn $name() -> Result<()> {
+                let case = $cases().into_iter().nth($index).ok_or("missing review case")?;
+                run_cases(vec![case]).await
+            }
+        )+
+    };
+}
+
+review_tests!(ordinary_cases, ORDINARY_TESTS;
+    ordinary_00 = 0, ordinary_01 = 1, ordinary_02 = 2, ordinary_03 = 3,
+    ordinary_04 = 4, ordinary_05 = 5, ordinary_06 = 6, ordinary_07 = 7,
+    ordinary_08 = 8, ordinary_09 = 9, ordinary_10 = 10, ordinary_11 = 11,
+    ordinary_12 = 12, ordinary_13 = 13, ordinary_14 = 14, ordinary_15 = 15,
+    ordinary_16 = 16, ordinary_17 = 17, ordinary_18 = 18, ordinary_19 = 19,
+    ordinary_20 = 20, ordinary_21 = 21, ordinary_22 = 22, ordinary_23 = 23,
+    ordinary_24 = 24, ordinary_25 = 25,
+);
+review_tests!(repeated_rejection_cases, REJECTION_TESTS;
+    repeated_00 = 0, repeated_01 = 1, repeated_02 = 2, repeated_03 = 3,
+    repeated_04 = 4, repeated_05 = 5, repeated_06 = 6, repeated_07 = 7,
+);
+
+#[test]
+fn every_declared_review_input_has_exactly_one_test() {
+    let mut manifest = Vec::new();
+    for (tests, cases) in [
+        (ORDINARY_TESTS, ordinary_cases()),
+        (REJECTION_TESTS, repeated_rejection_cases()),
+    ] {
+        let mut indices = tests.iter().map(|(_, index)| *index).collect::<Vec<_>>();
+        indices.sort_unstable();
+        assert_eq!(indices, (0..cases.len()).collect::<Vec<_>>());
+        for &(name, index) in tests {
+            let case = &cases[index];
+            manifest.push(json!({"test":format!("review_boundary::{name}"),
+                "depth":case.depth,"review_first":case.first,
+                "schedule":format!("{:?}",case.schedule),"delay_multiplier":case.delay,
+                "failure_overrides":case.extra_failures.iter().map(|&at| ("code_review",at)).collect::<Vec<_>>()}));
+        }
+    }
+    assert_eq!(ordinary_cases().len(), 26);
+    assert_eq!(repeated_rejection_cases().len(), 8);
+    println!("\n{}", json!({"review_cases":manifest}));
 }
 
 struct ReviewCase {
@@ -330,6 +378,14 @@ async fn run_cases(cases: Vec<ReviewCase>) -> Result<()> {
         std::env::var_os("CHOREOFIX_REVIEW_BUILD_RECEIPT").ok_or("review build receipt missing")?,
     );
     let receipt = archive_build_receipt(&runtime, &receipt_path, &directory)?;
+    let auditor = std::path::PathBuf::from(
+        std::env::var_os("CHOREOFIX_AUDITOR").ok_or("qualified auditor missing")?,
+    )
+    .canonicalize()?;
+    save(
+        &directory.join("auditor.json"),
+        &json!({"binary_sha256":digest(&auditor)?}),
+    )?;
     let module = Path::new("vendor/hibana-wash/target/wasm32-wasip1/release/hibana-wash.wasm");
     let mut outcomes = Vec::new();
     for ReviewCase {
@@ -466,12 +522,31 @@ async fn run_cases(cases: Vec<ReviewCase>) -> Result<()> {
                 );
             }
         }
-        let mutants = review_audit::check_mutants(
-            &case.join("events.jsonl"),
-            &case.join("resource-mutants"),
-        )?;
+        // The checked source search owns large temporary buffers. End that
+        // ownership with the worker process instead of retaining allocator
+        // pages across the entire WASI matrix. The audit and inputs are the
+        // same as the normal CLI; no observation or test case is omitted.
+        let status = std::process::Command::new(&auditor)
+            .arg("--check-review-mutants")
+            .arg(case.join("events.jsonl"))
+            .arg(case.join("resource-mutants"))
+            .stdout(std::process::Stdio::null())
+            .stderr(fs::File::create(case.join("auditor.log"))?)
+            .status()?;
+        if !status.success() {
+            return Err(format!("review audit failed ({status}); see {}", case.display()).into());
+        }
+        let mutants: Value =
+            serde_json::from_slice(&fs::read(case.join("resource-mutants/summary.json"))?)?;
+        assert_eq!(mutants["status"], "passed");
         assert_eq!(mutants["count"], if rejected == 0 { 25 } else { 28 });
         let audit = &mutants["audit"];
+        assert_eq!(audit["status"], "passed");
+        assert_eq!(audit["dynamic_protocol"]["status"], "passed");
+        assert_eq!(
+            audit["source_events_sha256"],
+            digest(&case.join("events.jsonl"))?
+        );
         if !extra_failures.is_empty() {
             let other = if review_first == "user_authentication" {
                 "notification_feature"

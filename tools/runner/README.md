@@ -100,10 +100,16 @@ cargo +stable run --locked --manifest-path tools/runner/Cargo.toml -- --check-re
 ```
 
 The review regression requires `CHOREOFIX_REVIEW_WASI_BINARY`,
-`CHOREOFIX_REVIEW_BUILD_RECEIPT` and `CHOREOFIX_EVIDENCE_ROOT`. The receipt binds
+`CHOREOFIX_REVIEW_BUILD_RECEIPT`, `CHOREOFIX_AUDITOR` and
+`CHOREOFIX_EVIDENCE_ROOT`. `--qualify-wasi` supplies its frozen CLI as the
+auditor. Each case runs the same audit in a fresh process, so large temporary
+allocations end with that process rather than accumulating across cases.
+The receipt binds
 the binary to its unchanged build-source manifest. Each run saves that manifest,
 the receipt, runtime and harness hashes, traces and mutation verdicts under the
-evidence root. The workflow runs both ignored review tests and retains these files.
+evidence root. The workflow runs all 34 ignored review cases individually and
+retains these files. A native test checks that the case indices cover each
+declared input exactly once.
 The saved receipt names the manifest relative to its evidence bundle, so moving
 the bundle preserves the reference. The original input receipt is saved with its hash.
 It covers failure conditions 0/1/2, both first
@@ -112,11 +118,13 @@ the original delays and require observed overlap, for 26 cases in total.
 Eight separate mechanism cases inject third and fourth rejections through the
 unchanged simulator's failure API, covering both first targets and both ways
 of revisiting rejected work. They do not change the scored 0/1/2 matrix.
-Every trace checks 22 record mutations, plus three that remove a later
+Every trace checks 25 record mutations, plus three that remove a later
 same-argument request, argument-file close or result when reviews repeat.
 These are integration checks, separate from scored experiments.
 
 ```sh
+cargo +stable build --locked --manifest-path tools/runner/Cargo.toml
+export CHOREOFIX_AUDITOR="$PWD/tools/runner/target/debug/choreofix-experiments"
 cargo +stable test --locked --manifest-path tools/runner/Cargo.toml \
   review_boundary:: -- --ignored --test-threads=1 --nocapture
 ```
