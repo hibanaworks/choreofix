@@ -801,7 +801,7 @@ fn a_repeated_review_cannot_reuse_an_earlier_request() -> Result<()> {
 }
 
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    audit(path)?;
+    let audited = audit(path)?;
     fs::create_dir(output)?;
     let rows = records(path)?;
     let projection = crate::projection::load(path)?;
@@ -1108,7 +1108,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
             .ok_or_else(|| format!("undetected review mutation {kind}"))?;
         verdicts.push(json!({"kind":kind,"status":"rejected","parsed_records_sha256":hash,"reason":rejection.to_string()}));
     }
-    let result = json!({"status":"passed","task":"6E","source_events_sha256":digest(path)?,"count":verdicts.len(),"mutants":verdicts,
+    let result = json!({"status":"passed","task":"6E","source_events_sha256":digest(path)?,"audit":audited,"count":verdicts.len(),"mutants":verdicts,
         "representation":"Mutants are regenerated from the original JSONL by this Rust tool; redundant raw copies are not stored"});
     save(&output.join("summary.json"), &result)?;
     Ok(result)

@@ -249,6 +249,9 @@ source・command・結果は本体の`target/consumer-capacity-qualification/fin
 100 role・4,000 eventのmixed/hierarchicalのcompile負荷検査も通過した。
 通常CIの公開実行を待って同じローカル検査を繰り返すのではなく、この合格した公開本体へ
 consumerの通常Git依存を揃え、consumer自身の統合検証へ進む。
+同じSHAの[公開通常CI](https://github.com/hibanaworks/hibana/actions/runs/42130742532)も
+全割当で成功し、mainへfast-forwardした。READMEの画像参照だけを修正した後続版は
+実装を変えていないため、consumerは合格済み実装SHAを維持する。
 
 この退行を本体の通常CIでも検出するため、固定した実global・localsideを使う必須回帰を追加した。
 6Eを含む3ホストのビルドに加え、実Wasmで1Hの3件同時commit受理と16Eの障害条件0・1・2、
@@ -270,6 +273,31 @@ native125件、doctest2件、strict-provenance Miri109件、6つのLean証明モ
 アプリ・runner・効果境界検証crateの依存更新は、この二つの公開libraryを使う。
 以下のEPFの探索改善と実6E保存記録の結果は、元の検査版へ対応付けたまま保持する。
 このlibrary単体の合格を、更新後ChoreoFixの全実Wasm・実モデルの合格へ読み替えない。
+
+この組合せのChoreoFix `1adcff7`で、アプリ44件、runner33件、handoff native15件・
+実receiverのMiri6件とClippyが成功した。1,586イベントのglobalを変更していない。
+全familyの実Wasm認定は、最初の6E guestが終了して4,972件の完全captureを保存した後、
+重いオフライン監査を改善するため明示的に停止した。guestの不正進行や試験合格とは扱わず、
+停止理由・元のsource・binary・captureを`output/qualified-stack-a4-20261106/wasi`へ保持する。
+
+公開EPF `e0690aa`では、不変のsend-call解析を一度だけ行い、各prefixの受信対応は
+毎回作り直す。送信候補は(session, source, 証拠中の順序)で索引化し、受信ごとの
+全prefix再走査を除去した。source出現数の必要条件も一巡の集計にした。
+同じ4,972記録・902受理の公開監査結果は旧`38b76e0`とbyte単位で一致し、
+同じ最適化・assertion・算術検査設定のCLIで94.90秒から41.72秒になった。
+これは一つの保存記録のオフライン監査であり、アプリやQUICの性能の結果ではない。
+最終sourceでnative128件、doctest2件、strict-provenance Miri112件、Lean6モジュール、
+38種の欠陥検出とno_std/embedded/Clippyが成功し、最大memoryは877,051,904bytesだった。
+本体SHAは変更せず、公開後に三つのmanifest・lock・実Cargo metadataをこのEPFへ揃えた。
+認定driverは同じ記録の動的監査を一回だけ行い、その結果を記録変異試験と共有する。
+監査器だけを通常debug/testでも最適化し、debug assertionとoverflow検査は有効のままにする。
+更新後の全実Wasm・実モデル認定は、完走した証拠がそろうまで未完である。
+この更新後sourceでrunner33件、handoff native15件・Miri6件とClippyが成功した。
+通常debug runnerによる保存済み実Wasm記録の監査と25種の記録変異は48.71秒で完了し、
+元の公開監査JSON全体が旧pinの結果と一致した。最大memoryは744,980,480bytesだった。
+変更していないアプリ・wash・入力検査のnative結果は`1adcff7`の記録を保持し、
+driver・文書の整理だけを理由に同じ義務を最初から実行し直さない。
+根拠は`output/epf-indexed-stack-20261106`へ保存する。
 
 EPFの公開`712b49bb`は、同じ不変sourceに対して、必要な先行操作と既確定の分岐から
 成立しない選択を先に除く。委譲で保持者が変わる場合も含む260,512問い合わせを、

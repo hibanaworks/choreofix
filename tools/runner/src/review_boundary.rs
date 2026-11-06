@@ -466,7 +466,12 @@ async fn run_cases(cases: Vec<ReviewCase>) -> Result<()> {
                 );
             }
         }
-        let audit = review_audit::audit(&case.join("events.jsonl"))?;
+        let mutants = review_audit::check_mutants(
+            &case.join("events.jsonl"),
+            &case.join("resource-mutants"),
+        )?;
+        assert_eq!(mutants["count"], if rejected == 0 { 25 } else { 28 });
+        let audit = &mutants["audit"];
         if !extra_failures.is_empty() {
             let other = if review_first == "user_authentication" {
                 "notification_feature"
@@ -507,12 +512,7 @@ async fn run_cases(cases: Vec<ReviewCase>) -> Result<()> {
             };
             assert_eq!(audit["review_targets"], expected);
         }
-        save(&case.join("resource-audit.json"), &audit)?;
-        let mutants = review_audit::check_mutants(
-            &case.join("events.jsonl"),
-            &case.join("resource-mutants"),
-        )?;
-        assert_eq!(mutants["count"], if rejected == 0 { 25 } else { 28 });
+        save(&case.join("resource-audit.json"), audit)?;
         if delay == 1.0 {
             for pair in ["code_review+implement_feature", "code_review+merge_code"] {
                 assert!(

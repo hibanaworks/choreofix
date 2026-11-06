@@ -13,7 +13,7 @@ hibana-wasip1-runtime = { git = "https://github.com/hibanaworks/hibana-wasip1-ru
 serde_json = "1.0.154"
 
 [dev-dependencies]
-hibana-epf = { git = "https://github.com/hibanaworks/hibana-epf", rev = "38b76e0366d9df303981491056221d025c4d7385" }
+hibana-epf = { git = "https://github.com/hibanaworks/hibana-epf", rev = "e0690aa120fd8a3e73bf24e5e68adeb29066e946" }
 
 [lints.rust]
 unsafe_code = "deny"
