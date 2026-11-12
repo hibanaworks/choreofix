@@ -211,6 +211,31 @@ pub fn check(artifact: &Value, rows: &[Value]) -> Result<Value> {
         }
         frames.entry((session, origin)).or_default().push_back(id);
     }
+    // A successful nonlocal commit needs its actual transport frame. Reject
+    // missing journal evidence before allocating a source-search workspace.
+    // Accepted sends without a sender commit or receive remain valid prefixes.
+    let mut commits = BTreeMap::<(u32, u16), [usize; 2]>::new();
+    for event in captures.iter().flat_map(|capture| capture.records()) {
+        let direction = match event.id() {
+            tap::ENDPOINT_SEND => 0,
+            tap::ENDPOINT_RECV => 1,
+            _ => continue,
+        };
+        let origin = event.arg1() as u16;
+        let source = snapshot
+            .get(2 + usize::from(origin))
+            .filter(|row| row.id() == tap::PROJECTED_SOURCE)
+            .ok_or("committed source occurrence")?;
+        if source.arg0() >> 24 == (source.arg0() >> 16) & 255 {
+            continue;
+        }
+        let key = (event.arg0(), origin);
+        let count = &mut commits.entry(key).or_default()[direction];
+        *count += 1;
+        if *count > frames.get(&key).map_or(0, VecDeque::len) {
+            return Err("committed operation lacks its transport frame".into());
+        }
+    }
     let count: usize = captures.iter().map(|c| c.records().len()).sum();
     let capacity = count
         .checked_mul(2)

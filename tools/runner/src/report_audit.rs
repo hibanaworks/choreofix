@@ -1,4 +1,4 @@
-//! Saved 3E effects and resource exchanges; this never drives an Endpoint.
+//! Actual report requests, content and results; EPF checks source execution.
 use crate::{
     evidence::{Result, digest, save},
     journal::{Call, check_close_pairs, close_arguments, one, records},
@@ -133,11 +133,14 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         return Err("original report participants differ".into());
     }
     let labels = crate::projection::frames(artifact, rows)?;
+    let mut journal = crate::journal::read(rows, &labels, actors)?;
+    let dynamic = crate::projection::check_dynamic(artifact, rows)?;
+    journal.bind_receives(&dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
         score,
-    } = crate::journal::read(rows, &labels, actors)?;
+    } = journal;
     let session = compiled["session"]
         .as_u64()
         .ok_or("compiled report session")?;
@@ -216,53 +219,19 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
     let mut used_calls = BTreeSet::new();
     let mut used_closes = BTreeSet::new();
     let mut admitted_frames = BTreeSet::new();
-    let mut loan_total = 0;
-    for (resource, service, result_label, expected) in [
-        (
-            document,
-            document_service,
-            label("DocumentResult")?,
-            3 + rejected,
-        ),
-        (database, database_service, label("DatabaseResult")?, 2),
+    let mut resource_total = 0;
+    for (resource, service, result_label) in [
+        (document, document_service, label("DocumentResult")?),
+        (database, database_service, label("DatabaseResult")?),
     ] {
-        let is_loan = |frame: &&crate::journal::Frame| {
-            frame.bytes.len() == 3 && u64::from(frame.bytes[0]) == resource
-        };
-        let mut loans = frames
+        let mut requests = frames
             .values()
-            .filter(|frame| {
-                frame.identity["source"] == service
-                    && [a, b, editor]
-                        .iter()
-                        .any(|vm| frame.identity["target"] == *vm)
-            })
-            .filter(is_loan)
+            .filter(|f| f.direction(resource, service))
             .collect::<Vec<_>>();
-        loans.sort_by_key(|frame| frame.sent);
-        if loans.len() != expected {
-            return Err("report resource loan count".into());
-        }
-        let mut previous = None;
-        for (index, loan) in loans.iter().enumerate() {
-            let vm = loan.identity["target"].as_u64().ok_or("loan recipient")?;
-            let next = loans.get(index + 1).map_or(rows.len(), |frame| frame.sent);
-            let returned = one(frames.values().filter(|frame| {
-                frame.direction(vm, service)
-                    && is_loan(frame)
-                    && frame.sent > loan.received.unwrap_or(usize::MAX)
-                    && frame.sent < next
-            }))?;
-            let request = one(frames.values().filter(|frame| {
-                frame.direction(resource, service)
-                    && frame.sent > loan.received.unwrap_or(usize::MAX)
-                    && frame.sent < returned.sent
-            }))?;
-            let response = one(frames.values().filter(|frame| {
-                frame.direction(service, resource)
-                    && frame.sent > loan.received.unwrap_or(usize::MAX)
-                    && frame.sent < returned.sent
-            }))?;
+        requests.sort_by_key(|f| f.sent);
+        let mut replies = BTreeSet::new();
+        for (index, request) in requests.iter().enumerate() {
+            let next = requests.get(index + 1).map_or(rows.len(), |f| f.sent);
             let tool = if request.logical_label == label("WriteOnDocument")? && resource == document
             {
                 "write_section"
@@ -277,101 +246,70 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
             } else {
                 return Err("unexpected compiled report resource request".into());
             };
-            let admission_label = match (vm, tool) {
-                (vm, "write_section") if vm == a => label("WriteA")?,
-                (vm, "write_section") if vm == b => label("WriteB")?,
-                (vm, "revise_section") if vm == a => label("ReviseA")?,
-                (vm, "revise_section") if vm == b => label("ReviseB")?,
-                (vm, "update_references") if vm == a => label("ReferencesA")?,
-                (vm, "update_references") if vm == b => label("ReferencesB")?,
-                (vm, "combine_sections") if vm == editor => label("Combine")?,
-                _ => return Err("resource operation belongs to another report participant".into()),
+            let arguments = request.value()?;
+            let (id, call) = one(calls.iter().filter(|(id, call)| {
+                !used_calls.contains(*id)
+                    && call.request["tool"] == tool
+                    && call.request["arguments"] == arguments
+                    && request.received.is_some_and(|at| at < call.emitted)
+                    && call.emitted < next
+            }))?;
+            let (agent, vm, io) = match call.request["agent"].as_str() {
+                Some("RESEARCHER_A") => ("RESEARCHER_A", a, a_io),
+                Some("RESEARCHER_B") => ("RESEARCHER_B", b, b_io),
+                Some("EDITOR") => ("EDITOR", editor, editor_io),
+                _ => return Err("resource effect belongs to another report participant".into()),
+            };
+            let admission_label = match (agent, tool) {
+                ("RESEARCHER_A", "write_section") => label("WriteA")?,
+                ("RESEARCHER_B", "write_section") => label("WriteB")?,
+                ("RESEARCHER_A", "revise_section") => label("ReviseA")?,
+                ("RESEARCHER_B", "revise_section") => label("ReviseB")?,
+                ("RESEARCHER_A", "update_references") => label("ReferencesA")?,
+                ("RESEARCHER_B", "update_references") => label("ReferencesB")?,
+                ("EDITOR", "combine_sections") => label("Combine")?,
+                _ => return Err("report admission participant/tool mismatch".into()),
             };
             let admitted = one(frames.values().filter(|frame| {
                 frame.direction(vm, service)
                     && frame.logical_label == admission_label
-                    && frame.received.is_some_and(|at| {
-                        previous.is_none_or(|before| before < at) && at < loan.sent
-                    })
+                    && !admitted_frames.contains(&frame.sent)
+                    && frame.received.is_some_and(|at| at < request.sent)
+                    && frame.value().is_ok_and(|v| v == arguments)
             }))?;
-            let arguments = request.value()?;
-            let agent = if vm == a {
-                "RESEARCHER_A"
-            } else if vm == b {
-                "RESEARCHER_B"
-            } else {
-                "EDITOR"
-            };
-            let matching = calls
-                .iter()
-                .filter(|(_, call)| {
-                    call.request["agent"] == agent
-                        && call.request["tool"] == tool
-                        && call.request["arguments"] == arguments
-                        && call.emitted > request.received.unwrap_or(usize::MAX)
-                        && call.emitted < returned.sent
-                })
-                .collect::<Vec<_>>();
-            let [(id, call)] = matching.as_slice() else {
-                return Err("resource request must select one actual report effect".into());
-            };
             let (result_at, result) = call.result()?;
-            if !used_calls.insert(**id)
+            let response = one(frames.values().filter(|frame| {
+                frame.direction(service, resource)
+                    && frame.logical_label == result_label
+                    && frame.sent > result_at
+                    && frame.sent < next
+                    && frame.value().is_ok_and(|v| v == *result)
+            }))?;
+            if !used_calls.insert(*id)
                 || !admitted_frames.insert(admitted.sent)
-                || admitted.value()? != arguments
-                || response.value()? != *result
-                || response.logical_label != result_label
-                || !(previous.is_none_or(|before| before < loan.sent)
-                    && loan.received()? < request.sent
-                    && request.received()? < call.emitted
-                    && result_at < response.sent
-                    && response.received()? < returned.sent
-                    && returned.received()? < next)
+                || !replies.insert(response.sent)
             {
-                return Err("report loan/admission/request/result/return mismatch".into());
+                return Err("reused report request/effect/result occurrence".into());
             }
             close_arguments(
                 &frames,
                 &mut used_closes,
                 vm,
-                if vm == a {
-                    a_io
-                } else if vm == b {
-                    b_io
-                } else {
-                    editor_io
-                },
+                io,
                 admitted.sent,
                 &format!("service/{tool}"),
                 &arguments,
             )?;
-            previous = Some(returned.received()?);
         }
         if frames
             .values()
-            .filter(|frame| {
-                frame.identity["target"] == service
-                    && [a, b, editor]
-                        .iter()
-                        .any(|vm| frame.identity["source"] == *vm)
-            })
-            .filter(is_loan)
+            .filter(|f| f.direction(service, resource))
             .count()
-            != loans.len()
-            || frames
-                .values()
-                .filter(|frame| frame.direction(resource, service))
-                .count()
-                != loans.len()
-            || frames
-                .values()
-                .filter(|frame| frame.direction(service, resource))
-                .count()
-                != loans.len()
+            != replies.len()
         {
-            return Err("unused or extra report resource frame".into());
+            return Err("unused or extra report resource reply".into());
         }
-        loan_total += loans.len();
+        resource_total += requests.len();
     }
 
     for (agent, vm, io, service_name) in [
@@ -813,9 +751,9 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
     }
     Ok(
         json!({"status":"passed","task":"3E","kind":"completed_actual_wasi_report_trace","scored_benchmark":false,
-        "domain_calls":calls.len(),"actual_resource_endpoint_requests":loan_total,"actual_resource_endpoint_returns":loan_total,
+        "domain_calls":calls.len(),"actual_resource_endpoint_requests":resource_total,"actual_resource_endpoint_returns":frames.values().filter(|f|f.bytes.len()==3 && [document,database].contains(&u64::from(f.bytes[0])) && [document_service,database_service].iter().any(|role|f.identity["target"]==*role)).count(),
         "actual_review_requests":reviews.len(),"forwarded_approvals":confirmations.len(),"guest_exits":actors.len(),
-        "simulator_complete":true,"violations":0,"overlapping_effect_pairs":overlaps}),
+        "simulator_complete":true,"violations":0,"overlapping_effect_pairs":overlaps,"dynamic_protocol":dynamic}),
     )
 }
 
@@ -823,7 +761,6 @@ pub fn audit(path: &Path) -> Result<Value> {
     let projection = crate::projection::load(path)?;
     let rows = records(path)?;
     let mut result = check(&rows, &projection)?;
-    result["dynamic_protocol"] = crate::projection::check_dynamic(&projection, &rows)?;
     result["source_events_sha256"] = json!(digest(path)?);
     result["compiled_projection_sha256"] = json!(digest(
         &path
@@ -835,8 +772,7 @@ pub fn audit(path: &Path) -> Result<Value> {
     Ok(result)
 }
 
-/// Check trace mutations against the static wire and business-effect audit.
-/// Dynamic source execution is a separate qualification of the original trace.
+/// Check immutable record mutations against EPF and actual effect correspondence.
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let rows = records(path)?;
     let projection = crate::projection::load(path)?;
@@ -846,7 +782,8 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .as_array()
         .ok_or("report participants")?;
     let headers = crate::projection::frames(&projection, &rows)?;
-    let journal = crate::journal::read(&rows, &headers, actors)?;
+    let mut journal = crate::journal::read(&rows, &headers, actors)?;
+    journal.bind_receives(&baseline["dynamic_protocol"])?;
     let private = ["A_IO", "B_IO", "EDITOR_IO"]
         .map(|key| name(compiled, "roles", key))
         .into_iter()
@@ -1011,9 +948,17 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         if changed == rows {
             return Err(format!("empty report mutation {kind} {id:?}").into());
         }
-        let rejection = check(&changed, &projection)
-            .err()
-            .ok_or_else(|| format!("undetected report mutation {kind} {id:?}"))?;
+        let mutant = output.join("checking.jsonl");
+        let mut file = std::io::BufWriter::new(fs::File::create_new(&mutant)?);
+        use std::io::Write;
+        for row in &changed {
+            serde_json::to_writer(&mut file, row)?;
+            writeln!(file)?;
+        }
+        file.flush()?;
+        drop(file);
+        let rejection = crate::journal::reject_mutant(path, &mutant, "--audit-report")?;
+        fs::remove_file(&mutant)?;
         let hash = format!("{:x}", Sha256::digest(serde_json::to_vec(&changed)?));
         verdicts.push(json!({"kind":kind,"frame_id":id,"status":"rejected","parsed_records_sha256":hash,"reason":rejection.to_string()}));
         *coverage.entry(kind).or_default() += 1;
@@ -1037,7 +982,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
             return Err(format!("report mutation domain did not exercise {kind}").into());
         }
     }
-    let result = json!({"status":"passed","task":"3E","scope":"static wire contracts, business/effect correspondence and completion; dynamic execution checking is separate","source_events_sha256":digest(path)?,"baseline_static_audit":baseline,"count":verdicts.len(),"coverage":coverage,"mutants":verdicts,"representation":"Each mutant is regenerated from its original trace and frame ID; redundant JSONL copies are not stored"});
+    let result = json!({"status":"passed","task":"3E","scope":"EPF source execution and one-use actual request/effect/result correspondence","source_events_sha256":digest(path)?,"baseline_audit":baseline,"count":verdicts.len(),"coverage":coverage,"mutants":verdicts,"representation":"Each mutant is regenerated from its original trace and frame ID; redundant JSONL copies are not stored"});
     save(&output.join("summary.json"), &result)?;
     Ok(result)
 }

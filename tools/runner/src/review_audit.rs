@@ -1,5 +1,4 @@
-//! Checks completed 6E WASI histories against resource transfers and original
-//! simulator calls. This module is used only after a run.
+//! Actual review requests, results and effects. EPF checks source execution.
 use crate::evidence::{Result, digest, save};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -48,42 +47,18 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
     {
         return Err("6E participants".into());
     }
+    let mut journal = crate::journal::read(rows, &labels, actors)?;
+    let dynamic = crate::projection::check_dynamic(projection, rows)?;
+    journal.bind_receives(&dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
         score,
-    } = crate::journal::read(rows, &labels, actors)?;
+    } = journal;
     if frames.values().any(|frame| frame.identity["session"] != 6) {
         return Err("wrong session".into());
     }
     let carries_control = |frame: &&Frame| frame.bytes.len() == 3 && frame.bytes[0] == 11;
-    let issued = one(frames
-        .values()
-        .filter(|f| f.direction(7, 2))
-        .filter(carries_control))?;
-    let closing_a = one(frames
-        .values()
-        .filter(|f| f.direction(2, 0))
-        .filter(carries_control))?;
-    let closing_b = one(frames
-        .values()
-        .filter(|f| f.direction(0, 1))
-        .filter(carries_control))?;
-    let closed = one(frames
-        .values()
-        .filter(|f| f.direction(1, 7))
-        .filter(carries_control))?;
-    if !(issued.received()? < closing_a.sent
-        && closing_a.received()? < closing_b.sent
-        && closing_b.received()? < closed.sent)
-    {
-        return Err("control continuation issuance or closing chain".into());
-    }
-    for frame in frames.values().filter(|f| f.identity["source"] == 11) {
-        if !(issued.received()? < frame.sent && frame.sent < closing_a.sent) {
-            return Err("control operation outside actual custody".into());
-        }
-    }
     for call in calls.values() {
         let m = &call.request;
         let actor = actors
@@ -148,77 +123,68 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
         scored.remove(at);
     }
 
-    let is_loan = |f: &&Frame| f.bytes.len() == 3 && f.bytes[0] == 13;
-    let mut loans: Vec<_> = frames
-        .values()
-        .filter(|f| f.direction(7, 0) || f.direction(7, 1))
-        .filter(is_loan)
-        .collect();
-    loans.sort_by_key(|f| f.sent);
-    if loans.len() != 4 + rejections {
-        return Err("repository loan count".into());
-    }
-    let mut previous_return = 0;
     let mut used = BTreeSet::new();
+    let mut used_requests = BTreeSet::new();
+    let mut used_replies = BTreeSet::new();
+    let mut used_admissions = BTreeSet::new();
     let mut used_closes = BTreeSet::new();
     check_close_pairs(&frames, &[(0, 8), (1, 9), (2, 10)])?;
-    for (number, loan) in loans.iter().enumerate() {
-        let vm = loan.identity["target"].as_u64().ok_or("loan target")?;
-        let next = loans.get(number + 1).map_or(rows.len(), |f| f.sent);
-        let returned = one(frames.values().filter(|f| {
-            f.direction(vm, 7)
-                && is_loan(f)
-                && f.sent > loan.received().unwrap_or(usize::MAX)
-                && f.sent < next
-        }))?;
+    let mut repository_calls = calls
+        .iter()
+        .filter(|(_, call)| call.request["tool"] != "code_review")
+        .collect::<Vec<_>>();
+    repository_calls.sort_by_key(|(_, call)| call.emitted);
+    for (index, (id, call)) in repository_calls.iter().enumerate() {
+        let next = repository_calls
+            .get(index + 1)
+            .map_or(rows.len(), |(_, call)| call.emitted);
+        let vm = match call.request["agent"].as_str() {
+            Some("DEVELOPER_A") => 0,
+            Some("DEVELOPER_B") => 1,
+            _ => return Err("repository effect participant".into()),
+        };
+        let (request_label, admission_labels) = match (vm, call.tool()?) {
+            (0, "implement_feature") => (190, [69, 76]),
+            (1, "implement_feature") => (190, [169, 176]),
+            (0, "merge_code") => (191, [70, 70]),
+            (1, "merge_code") => (191, [170, 170]),
+            _ => return Err("repository effect tool".into()),
+        };
         let request = one(frames.values().filter(|f| {
             f.direction(13, 7)
-                && f.sent > loan.received().unwrap_or(usize::MAX)
-                && f.sent < returned.sent
+                && f.logical_label == request_label
+                && !used_requests.contains(&f.sent)
+                && f.received.is_some_and(|at| at < call.emitted)
+                && f.value().is_ok_and(|v| v == call.request["arguments"])
         }))?;
+        used_requests.insert(request.sent);
+        let (result_at, result) = call.result()?;
         let reply = one(frames.values().filter(|f| {
             f.direction(7, 13)
-                && f.sent > loan.received().unwrap_or(usize::MAX)
-                && f.sent < returned.sent
+                && f.logical_label == 192
+                && !used_replies.contains(&f.sent)
+                && f.sent > result_at
+                && f.sent < next
+                && f.value().is_ok_and(|v| v == *result)
         }))?;
+        used_replies.insert(reply.sent);
         let admitted = one(frames.values().filter(|f| {
             f.direction(vm, 7)
-                && f.bytes.first() == Some(&b'{')
-                && f.received
-                    .is_some_and(|at| at > previous_return && at < loan.sent)
+                && admission_labels.contains(&f.logical_label)
+                && !used_admissions.contains(&f.sent)
+                && f.received.is_some_and(|at| at < request.sent)
+                && f.value().is_ok_and(|v| v == call.request["arguments"])
         }))?;
+        used_admissions.insert(admitted.sent);
         let arguments = request.value()?;
-        let selected: Vec<_> = calls
-            .iter()
-            .filter(|(_, c)| {
-                c.request["agent"]
-                    == if vm == 0 {
-                        "DEVELOPER_A"
-                    } else {
-                        "DEVELOPER_B"
-                    }
-                    && c.request["arguments"] == arguments
-                    && c.emitted > request.received().unwrap_or(usize::MAX)
-                    && c.emitted < returned.sent
-            })
-            .collect();
-        if selected.len() != 1 {
-            return Err("resource request does not select one actual effect".into());
-        }
-        let (id, call) = selected[0];
-        let (result_at, result) = call.result()?;
-        if !used.insert(*id)
+        if !used.insert(**id)
             || admitted.value()? != arguments
             || reply.value()? != *result
             || result["success"] != true
-            || !(previous_return < loan.sent
-                && loan.received()? < request.sent
-                && request.received()? < call.emitted
-                && result_at < reply.sent
-                && reply.received()? < returned.sent
-                && returned.received()? < next)
+            || request.received()? >= call.emitted
+            || result_at >= reply.sent
         {
-            return Err("loan/request/result/return order or contents".into());
+            return Err("repository request/effect/result correspondence".into());
         }
         let path = if call.tool()? == "implement_feature" {
             "service/implement_feature"
@@ -245,7 +211,7 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
                 .filter(|c| {
                     c.tool().is_ok_and(|s| s == "code_review")
                         && c.target().is_ok_and(|s| s == feature)
-                        && c.ended.is_some_and(|(at, _)| at < loan.sent)
+                        && c.ended.is_some_and(|(at, _)| at < call.emitted)
                 })
                 .max_by_key(|c| c.ended.map(|v| v.0))
                 .ok_or("merge without review")?;
@@ -254,7 +220,7 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
                 .filter(|c| {
                     c.tool().is_ok_and(|s| s == "implement_feature")
                         && c.target().is_ok_and(|s| s == feature)
-                        && c.started.is_some_and(|(at, _)| at < loan.sent)
+                        && c.started.is_some_and(|(at, _)| at < call.emitted)
                 })
                 .max_by_key(|c| c.started.map(|v| v.0))
                 .ok_or("merge without implementation")?;
@@ -264,23 +230,16 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
                 return Err("merge without approval of the latest implementation".into());
             }
         }
-        previous_return = returned.received()?;
     }
-    let returns = frames
-        .values()
-        .filter(|f| f.direction(0, 7) || f.direction(1, 7))
-        .filter(is_loan)
-        .count();
     let resource_requests = frames.values().filter(|f| f.direction(13, 7)).count();
     let resource_replies = frames.values().filter(|f| f.direction(7, 13)).count();
     let admissions = frames
         .values()
         .filter(|f| (f.direction(0, 7) || f.direction(1, 7)) && f.bytes.first() == Some(&b'{'))
         .count();
-    if returns != loans.len()
-        || resource_requests != loans.len()
-        || resource_replies != loans.len()
-        || admissions != loans.len()
+    if resource_requests != repository_calls.len()
+        || resource_replies != repository_calls.len()
+        || admissions != repository_calls.len()
     {
         return Err("extra or missing resource operation".into());
     }
@@ -288,7 +247,6 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
     let mut reviews = 0;
     let mut used_review_requests = BTreeSet::new();
     let mut used_review_results = BTreeSet::new();
-    let mut used_control_transfers = BTreeSet::new();
     let mut review_calls: Vec<_> = calls
         .values()
         .filter(|c| c.tool().is_ok_and(|s| s == "code_review"))
@@ -373,15 +331,6 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
         if request.received()? >= call.emitted {
             return Err("review effect before request receipt".into());
         }
-        let loan = one(frames.values().filter(|f| {
-            f.direction(2, service)
-                && carries_control(f)
-                && previous_review < f.sent
-                && f.sent < request.sent
-        }))?;
-        if loan.received()? >= request.received()? || !used_control_transfers.insert(loan.sent) {
-            return Err("review without its unique control continuation".into());
-        }
         close_arguments(
             &frames,
             &mut used_closes,
@@ -414,23 +363,6 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
         } else {
             vec![0, 1, 2, if service == 5 { 6 } else { 5 }, 7]
         };
-        let returned = one(frames.values().filter(|f| {
-            f.direction(service, 2) && carries_control(f) && result_at < f.sent && f.sent < next
-        }))?;
-        let control_received = returned.received()?;
-        if returned.logical_label
-            != if other_approved && result["success"] == true {
-                235
-            } else {
-                11
-            }
-            || !used_control_transfers.insert(returned.sent)
-            || frames.values().any(|f| {
-                f.identity["source"] == 11 && loan.sent < f.sent && f.sent < control_received
-            })
-        {
-            return Err("review control return or use during its loan".into());
-        }
         for target in recipients {
             let reply = one(frames.values().filter(|f| {
                 f.direction(service, target)
@@ -445,7 +377,7 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
                 (6, Some(false)) => 41,
                 _ => return Err("review result has no boolean success".into()),
             };
-            if reply.logical_label != label || reply.sent >= returned.sent {
+            if reply.logical_label != label {
                 return Err("compiled review reply differs from actual result".into());
             }
             if !used_review_results.insert(reply.sent) {
@@ -473,21 +405,6 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
     {
         return Err("missing or extra review result".into());
     }
-    if frames.values().filter(carries_control).count() != 4 + 2 * reviews
-        || used_control_transfers.len() != 2 * reviews
-    {
-        return Err("extra or missing control continuation transfer".into());
-    }
-    for (vm, closing) in [(0, closing_a), (1, closing_b)] {
-        let last_return = frames
-            .values()
-            .filter(|f| f.direction(vm, 7) && is_loan(f))
-            .max_by_key(|f| f.sent)
-            .ok_or("closing without a repository return")?;
-        if last_return.sent >= closing.received()? {
-            return Err("closing continuation before the participant's repository return".into());
-        }
-    }
     let effects: Vec<_> = calls.values().collect();
     let mut overlap = BTreeMap::<String, usize>::new();
     for (i, first) in effects.iter().enumerate() {
@@ -511,17 +428,16 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
         .collect::<Result<Vec<_>>>()?;
     Ok(
         json!({"status":"passed","task":"6E","kind":"completed_actual_wasi_review_trace","scored_benchmark":false,
-        "depth":fixture["depth"],"carrier_frames":frames.len(),"domain_calls":calls.len(),"actual_resource_endpoint_requests":loans.len(),
-        "actual_resource_endpoint_returns":returns,"actual_review_requests":reviews,"guest_exits":actors.len(),"simulator_complete":true,
+        "depth":fixture["depth"],"carrier_frames":frames.len(),"domain_calls":calls.len(),"actual_resource_endpoint_requests":repository_calls.len(),
+        "actual_resource_endpoint_returns":frames.values().filter(|f| (f.direction(0,7)||f.direction(1,7))&& f.bytes.len()==3 &&f.bytes[0]==13).count(),"actual_review_requests":reviews,"guest_exits":actors.len(),"simulator_complete":true,
         "violations":0,"overlapping_effect_pairs":overlap,"review_targets":targets,
-        "control_continuation_transfers":4+2*reviews}),
+        "control_continuation_transfers":frames.values().filter(carries_control).count(),"dynamic_protocol":dynamic}),
     )
 }
 pub fn audit(path: &Path) -> Result<Value> {
     let projection = crate::projection::load(path)?;
     let rows = records(path)?;
     let mut result = check(&rows, &projection)?;
-    result["dynamic_protocol"] = crate::projection::check_dynamic(&projection, &rows)?;
     result["source_events_sha256"] = json!(digest(path)?);
     result["compiled_projection_sha256"] = json!(digest(
         &path
@@ -651,7 +567,6 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         "missing_reply",
         "forged_reply",
         "missing_return",
-        "overlapping_loans",
         "effect_before_request",
         "missing_original_result",
         "forged_review_result",
@@ -691,7 +606,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 "missing_control_close" => {
                     source == Some(1) && target == Some(7) && m["payload"][0] == 11
                 }
-                "missing_loan" | "wrong_resource" | "overlapping_loans" => {
+                "missing_loan" | "wrong_resource" => {
                     source == Some(7) && matches!(target, Some(0 | 1))
                 }
                 "missing_admission" | "wrong_admission" => {
@@ -884,29 +799,6 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                     .ok_or("review mutant")?;
                 row["message"]["result"]["data"] = json!({"forged":true});
             }
-            "overlapping_loans" => {
-                let ids: Vec<_> = changed
-                    .iter()
-                    .filter(|r| frame_target(r) && r["message"]["action"] == "send")
-                    .map(|r| r["message"]["frame_id"].clone())
-                    .collect();
-                let id = ids.get(1).ok_or("second loan")?.clone();
-                let moved: Vec<_> = changed
-                    .iter()
-                    .filter(|r| {
-                        r["message"]["type"] == "protocol_frame" && r["message"]["frame_id"] == id
-                    })
-                    .cloned()
-                    .collect();
-                changed.retain(|r| {
-                    !(r["message"]["type"] == "protocol_frame" && r["message"]["frame_id"] == id)
-                });
-                let at = changed
-                    .iter()
-                    .position(|r| frame_target(r) && r["message"]["action"] == "receive")
-                    .ok_or("loan receipt")?;
-                changed.splice(at + 1..at + 1, moved);
-            }
             "effect_before_request" => {
                 let at = changed
                     .iter()
@@ -916,11 +808,29 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                             && r["message"]["tool"] == "implement_feature"
                     })
                     .ok_or("effect mutant")?;
-                let effect = changed.remove(at);
-                let before = changed
+                let request = changed
                     .iter()
-                    .position(|r| frame_target(r) && r["message"]["action"] == "receive")
+                    .find(|r| frame_target(r) && r["message"]["action"] == "send")
                     .ok_or("request receipt")?;
+                let frame_id = request["message"]["frame_id"]
+                    .as_u64()
+                    .ok_or("request ID")?;
+                let receipt = audited["dynamic_protocol"]["sessions"]
+                    .as_array()
+                    .ok_or("EPF sessions")?
+                    .iter()
+                    .flat_map(|session| session["acceptances"].as_array().into_iter().flatten())
+                    .find(|receipt| receipt["frame_id"] == frame_id)
+                    .ok_or("checked request receive")?;
+                let before = usize::try_from(
+                    receipt["receive_commit"]["journal_row"]
+                        .as_u64()
+                        .ok_or("receive commit row")?,
+                )?;
+                if before >= at {
+                    return Err("baseline effect lacks its earlier committed request".into());
+                }
+                let effect = changed.remove(at);
                 changed.insert(before, effect);
             }
             _ => {
@@ -953,9 +863,22 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
             }
         }
         let hash = format!("{:x}", Sha256::digest(serde_json::to_vec(&changed)?));
-        let rejection = check(&changed, &projection)
-            .err()
-            .ok_or_else(|| format!("undetected review mutation {kind}"))?;
+        save(
+            &output.join("progress.json"),
+            &json!({"status":"checking","mutation":kind,"parsed_records_sha256":hash,
+                "completed":verdicts}),
+        )?;
+        let mutant = output.join(format!("{kind}.jsonl"));
+        let mut file = std::io::BufWriter::new(fs::File::create_new(&mutant)?);
+        use std::io::Write;
+        for row in &changed {
+            serde_json::to_writer(&mut file, row)?;
+            writeln!(file)?;
+        }
+        file.flush()?;
+        drop(file);
+        let rejection = crate::journal::reject_mutant(path, &mutant, "--audit-review")?;
+        fs::remove_file(&mutant)?;
         verdicts.push(json!({"kind":kind,"status":"rejected","parsed_records_sha256":hash,"reason":rejection.to_string()}));
     }
     let result = json!({"status":"passed","task":"6E","source_events_sha256":digest(path)?,"audit":audited,"count":verdicts.len(),"mutants":verdicts,

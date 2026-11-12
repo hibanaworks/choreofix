@@ -127,10 +127,12 @@ revisions or establish comparative performance.
 `--check-report-mutants EVENTS NEW_DIRECTORY` checks omissions, coherent
 forgeries and duplicates of actual business frames, owned Endpoint envelopes,
 WASI closes, effect ordering, original results and completion. It operates on
-the saved records without model calls or Endpoint execution. Its static
-business/wire scope is separate from `--audit-report`'s EPF execution check.
-Source-bound dynamic evidence on identical records is retained when adding
-these static checks; the original guests do not need to run again.
+the saved records without model calls or Endpoint execution. The production
+auditor checks EPF source execution and binds its successful receive commits to
+actual request values, effects and results. It does not reconstruct another
+resource-holder or transfer-order model. Each record counterexample uses that
+same auditor in a fresh process, releasing its search storage between inputs;
+no source copy, defect restoration or rebuild is involved.
 
 The `4E` API-coordination path uses `COORDINATION` build variables and the same
 normal run and `--audit-run` commands. Each of the three actual models owns one

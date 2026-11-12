@@ -47,6 +47,13 @@ request-argument, effect, reply and simulator-score correspondence. A transport
 preview is not a committed request. Missing capture or receive evidence is not
 permission to fall back to the former auditor, and a valid finite source prefix
 alone does not establish a complete application effect.
+Use the checked Endpoint receive commit for effect chronology, rather than a
+transport preview or the arrival order of queued transport logs. Reordering
+transport observations alone does not demonstrate overlapping custody or an
+effect before its request. Negative effect-order tests must cross the actual
+receive commit. Keep record-counterexample checks on the production auditor;
+release each search workspace between inputs without restoring or rebuilding
+another implementation.
 
 Use native actual-Endpoint tests, actual Wasm/ChoreoFS execution, EPF dynamic
 source checks and independent effect/scorer audits for application obligations.

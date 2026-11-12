@@ -1,4 +1,4 @@
-//! Independent checks of saved API-task messages and original simulator results.
+//! Actual API effects and outcome-file bytes; EPF checks source execution.
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -40,340 +40,228 @@ pub fn audit(path: &Path) -> Result<Value> {
             .join("projection.json"),
     )?);
     result["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
-    result["wire_validation"] =
-        json!("static compiled header membership; dynamic eligibility is not replayed");
     Ok(result)
 }
 
 fn check(records: &[Value], projection: &Value) -> Result<Value> {
-    crate::projection::frames(projection, records)?;
-    if projection["compiled"]["task"] != records.first().ok_or("empty evidence")?["message"]["task"]
-    {
-        return Err("compiled projection belongs to a different task".into());
-    }
+    let labels = crate::projection::frames(projection, records)?;
     let fixture = &records.first().ok_or("empty evidence")?["message"];
-    if fixture["task"] != "8E" || fixture["fixtures"].as_array().ok_or("actors")?.len() != 3 {
+    let actors = fixture["fixtures"].as_array().ok_or("API actors")?;
+    if projection["compiled"]["task"] != "8E" || fixture["task"] != "8E" || actors.len() != 3 {
         return Err("unexpected API task".into());
     }
-    let depth = fixture["depth"].as_u64().ok_or("depth")?;
-    if depth > 2 {
-        return Err("depth".into());
-    }
+    let depth = fixture["depth"]
+        .as_u64()
+        .filter(|n| *n <= 2)
+        .ok_or("API depth")?;
     let passes = depth == 0;
-    let binding = |a: &str| -> Result<(u64, u64)> {
-        match a {
+    let binding = |agent: &str| -> Result<(u64, u64)> {
+        match agent {
             "DB_ADMIN" => Ok((0, 5)),
             "BACKEND_DEV" => Ok((1, 6)),
             "TESTER" => Ok((2, 7)),
-            _ => Err("unknown actor".into()),
+            _ => Err("unknown API participant".into()),
         }
     };
-    let actors = fixture["fixtures"].as_array().unwrap();
-    let mut frames = BTreeMap::<u64, (Value, i32, usize, usize)>::new();
-    let mut outstanding = BTreeMap::new();
-    let mut calls = BTreeSet::new();
-    let mut effects = BTreeMap::new();
-    let mut completed = BTreeMap::new();
-    let mut closes = BTreeMap::new();
-    let mut delivered = BTreeMap::new();
-    let mut responses = BTreeMap::new();
-    let mut loans = BTreeMap::<u64, Vec<usize>>::new();
-    let mut returns = BTreeMap::<u64, Vec<usize>>::new();
-    let mut resource_requests = BTreeMap::<u64, (usize, Value)>::new();
-    let mut resource_replies = BTreeMap::<u64, (usize, Value)>::new();
-    let mut received_replies = BTreeMap::<u64, usize>::new();
+    let mut journal = crate::journal::read(records, &labels, actors)?;
+    let dynamic = crate::projection::check_dynamic(projection, records)?;
+    let receipts = journal.bind_receives(&dynamic)?;
+    let crate::journal::Journal {
+        frames,
+        calls,
+        score,
+    } = journal;
+    if frames.values().any(|frame| frame.identity["session"] != 28)
+        || calls.len() != 3
+        || score["complete"] != passes
+        || score["violations"] != json!([])
+        || score["events"].as_array().ok_or("score events")?.len() != 3
+    {
+        return Err("incomplete API effect or score evidence".into());
+    }
+    let mut observed = Vec::new();
+    for (&id, frame) in &frames {
+        observed.push((frame.sent, 0, false, frame));
+        observed.push((
+            frame.received()?,
+            receipts[&id]["receive_commit"]["ordinal"]
+                .as_u64()
+                .ok_or("receive ordinal")?,
+            true,
+            frame,
+        ));
+    }
+    observed.sort_by_key(|(at, ordinal, _, _)| (*at, *ordinal));
     let mut notification = BTreeMap::<u64, (usize, Value)>::new();
+    let mut delivered = BTreeMap::new();
     let mut open_sent = BTreeMap::new();
     let mut first_reply = BTreeMap::new();
     let mut pending_read = BTreeSet::new();
     let mut read_bytes = BTreeMap::<u64, Vec<u8>>::new();
     let mut complete_reads = BTreeMap::<u64, usize>::new();
-    let mut exits = BTreeSet::new();
-    let mut verdict = false;
-    let mut score = None;
-    for (index, r) in records.iter().enumerate() {
-        let m = &r["message"];
-        match (r["direction"].as_str(), m["type"].as_str()) {
-            (Some("runtime"), Some("protocol_frame")) => {
-                if m["session"] != 28 {
-                    return Err("wrong session".into());
-                }
-                let id = m["frame_id"].as_u64().ok_or("frame ID")?;
-                let mut identity = m.clone();
-                identity.as_object_mut().unwrap().remove("action");
-                let row = frames.entry(id).or_insert((identity.clone(), 0, 0, 0));
-                if row.0 != identity {
-                    return Err("altered frame identity".into());
-                }
-                let source = m["source"].as_u64().ok_or("source")?;
-                let target = m["target"].as_u64().ok_or("target")?;
-                match m["action"].as_str() {
-                    Some("send") if row.1 == 0 && row.2 == 0 => {
-                        row.1 = 1;
-                        row.2 = 1;
-                        if (source == 13 && target == 11) || (source == 14 && target == 12) {
-                            open_sent.entry(target).or_insert(index);
-                        }
-                        if matches!((source, target), (3, 5) | (4, 7) | (5, 3) | (7, 4)) {
-                            let resource = if source == 3 || target == 3 { 15 } else { 16 };
-                            let bytes = payload(m)?;
-                            if bytes.len() != 3 || u64::from(bytes[0]) != resource {
-                                return Err("invalid Endpoint loan payload".into());
-                            }
-                            let list = if source == 3 || source == 4 {
-                                &mut loans
-                            } else {
-                                &mut returns
-                            };
-                            list.entry(resource).or_default().push(index);
-                        }
-                        if matches!((source, target), (0, 15) | (2, 16)) {
-                            let result = serde_json::from_slice(&payload(m)?)?;
-                            if resource_replies.insert(target, (index, result)).is_some() {
-                                return Err("duplicate resource response".into());
-                            }
-                        }
-                        if (source == 11 && target == 13) || (source == 12 && target == 14) {
-                            first_reply.entry(source).or_insert(index);
-                            if pending_read.remove(&source) {
-                                let bytes = payload(m)?;
-                                if bytes.len() < 4 || bytes[3] as usize != bytes.len() - 4 {
-                                    return Err("invalid result chunk length".into());
-                                }
-                                if bytes[0] != OUTCOME_FD || bytes[1..3] != [0, 0] {
-                                    return Err("result read failed".into());
-                                }
-                                let expected = notification
-                                    .get(&source)
-                                    .ok_or("read before notification")?
-                                    .1
-                                    .clone();
-                                let canonical = serde_json::to_vec(&expected)?;
-                                let current = read_bytes.entry(source).or_default();
-                                current.extend_from_slice(&bytes[4..]);
-                                if !canonical.starts_with(current.as_slice()) {
-                                    return Err("result file bytes differ from notification".into());
-                                }
-                                if *current == canonical {
-                                    *complete_reads.entry(source).or_default() += 1;
-                                    current.clear();
-                                }
-                            }
-                        }
+    for (at, _, received, frame) in observed {
+        let source = frame.identity["source"].as_u64().ok_or("source")?;
+        let target = frame.identity["target"].as_u64().ok_or("target")?;
+        let bytes = &frame.bytes;
+        if !received {
+            if matches!((source, target), (13, 11) | (14, 12)) {
+                open_sent.entry(target).or_insert(at);
+            }
+            if matches!((source, target), (11, 13) | (12, 14)) {
+                first_reply.entry(source).or_insert(at);
+                if pending_read.remove(&source) {
+                    if bytes.len() < 4
+                        || usize::from(bytes[3]) != bytes.len() - 4
+                        || bytes[0] != OUTCOME_FD
+                        || bytes[1..3] != [0, 0]
+                    {
+                        return Err("invalid actual outcome read".into());
                     }
-                    Some("receive") if row.1 == 1 => {
-                        row.1 = 0;
-                        row.3 += 1;
-                        if matches!((source, target), (15, 0) | (16, 2)) {
-                            let arguments = serde_json::from_slice(&payload(m)?)?;
-                            if resource_requests
-                                .insert(source, (index, arguments))
-                                .is_some()
-                            {
-                                return Err("duplicate resource request".into());
-                            }
-                        }
-                        if matches!((source, target), (0, 15) | (2, 16)) {
-                            received_replies.insert(target, index);
-                        }
-                        if ((source == 5 && target == 0)
-                            || (source == 6 && target == 1)
-                            || (source == 7 && target == 2))
-                            && m["payload"] == json!([4])
-                        {
-                            closes.insert(target, index);
-                        }
-                        if ((source == 0 && target == 15)
-                            || (source == 1 && target == 6)
-                            || (source == 2 && target == 16))
-                            && let Ok(value) = serde_json::from_slice::<Value>(&payload(m)?)
-                            && value["tool_name"].is_string()
-                            && delivered.insert(source, value).is_some()
-                        {
-                            return Err("duplicate delivered result".into());
-                        }
-                        if source == 2 && (target == 11 || target == 12) {
-                            let value: Value = serde_json::from_slice(&payload(m)?)?;
-                            if notification.insert(target, (index, value)).is_some() {
-                                return Err("duplicate result notification".into());
-                            }
-                        }
-                        if ((source == 13 && target == 11) || (source == 14 && target == 12))
-                            && payload(m)?.len() == 2
-                        {
-                            let bytes = payload(m)?;
-                            if bytes.len() != 2 {
-                                return Err("invalid result read request".into());
-                            }
-                            if bytes[0] != OUTCOME_FD || !pending_read.insert(target) {
-                                return Err("overlapping result read".into());
-                            }
-                        }
+                    let expected = &notification.get(&source).ok_or("read without outcome")?.1;
+                    let canonical = serde_json::to_vec(expected)?;
+                    let current = read_bytes.entry(source).or_default();
+                    current.extend_from_slice(&bytes[4..]);
+                    if !canonical.starts_with(current) {
+                        return Err("outcome bytes differ from actual notification".into());
                     }
-                    Some("requeue") if row.1 == 0 && row.3 > 0 => row.1 = 1,
-                    _ => return Err("invalid carrier transition".into()),
+                    if *current == canonical {
+                        *complete_reads.entry(source).or_default() += 1;
+                        current.clear();
+                    }
                 }
             }
-            (Some("runtime"), Some("execute")) => {
-                let agent = m["agent"].as_str().ok_or("agent")?;
-                let (role, _) = binding(agent)?;
-                let original = actors
-                    .iter()
-                    .find(|a| a["agent"] == agent)
-                    .ok_or("fixture agent")?;
-                if !calls.insert(agent.to_owned())
-                    || original["calls"][0]["tool"] != m["tool"]
-                    || original["calls"][0]["arguments"] != m["arguments"]
-                {
-                    return Err("task fidelity mismatch".into());
-                }
-                if closes.remove(&role).is_none() {
-                    return Err("effect without fresh projected close".into());
-                }
-                let id = m["id"].as_u64().ok_or("execute ID")?;
-                if outstanding.insert(id, m.clone()).is_some() {
-                    return Err("duplicate execution".into());
-                }
-                effects.insert(m["tool"].as_str().unwrap().to_owned(), index);
+        } else {
+            if matches!((source, target), (0, 15) | (1, 6) | (2, 16))
+                && let Ok(value) = serde_json::from_slice::<Value>(bytes)
+                && value["tool_name"].is_string()
+                && delivered.insert(source, value).is_some()
+            {
+                return Err("duplicate delivered API result".into());
             }
-            (Some("simulator"), Some("simulator_result")) => {
-                let id = m["id"].as_u64().ok_or("reply ID")?;
-                let call = outstanding.remove(&id).ok_or("unmatched result")?;
-                let tool = call["tool"].as_str().unwrap();
-                let success = tool != "run_integration_tests" || passes;
-                if m["result"]["tool_name"] != tool || m["result"]["success"] != success {
-                    return Err("incorrect original outcome".into());
-                }
-                responses.insert(
-                    call["agent"].as_str().unwrap().to_owned(),
-                    (call.clone(), m["result"].clone()),
-                );
-                completed.insert(tool.to_owned(), index);
+            if source == 2
+                && [11, 12].contains(&target)
+                && notification.insert(target, (at, frame.value()?)).is_some()
+            {
+                return Err("duplicate outcome notification".into());
             }
-            (Some("runtime"), Some("exit")) => {
-                let a = m["agent"].as_str().ok_or("exit")?;
-                binding(a)?;
-                if m["status"] != 0 || !exits.insert(a.to_owned()) {
-                    return Err("bad guest exit".into());
-                }
+            if matches!((source, target), (13, 11) | (14, 12))
+                && bytes.len() == 2
+                && (bytes[0] != OUTCOME_FD || !pending_read.insert(target))
+            {
+                return Err("overlapping or invalid outcome read".into());
             }
-            (Some("runtime"), Some("run_result")) => {
-                if verdict || m["status"] != "complete" {
-                    return Err("bad runtime verdict".into());
-                }
-                verdict = true;
-            }
-            (Some("simulator"), Some("score")) if score.replace(m.clone()).is_some() => {
-                return Err("duplicate score".into());
-            }
-            _ => {}
         }
     }
-    let score = score.ok_or("missing score")?;
+    let mut effects = BTreeMap::new();
+    let mut completed = BTreeMap::new();
+    let mut used_closes = BTreeSet::new();
+    let mut responses = BTreeMap::new();
+    for call in calls.values() {
+        let agent = call.request["agent"].as_str().ok_or("effect actor")?;
+        let (role, vm) = binding(agent)?;
+        let original = crate::journal::one(actors.iter().filter(|actor| actor["agent"] == agent))?;
+        let tool = call.tool()?;
+        if original["calls"][0]["tool"] != tool
+            || original["calls"][0]["arguments"] != call.request["arguments"]
+            || effects.insert(tool, call.emitted).is_some()
+        {
+            return Err("API effect differs from assignment".into());
+        }
+        let close = frames
+            .values()
+            .filter(|f| {
+                f.direction(vm, role)
+                    && f.bytes == [4]
+                    && f.received.is_some_and(|at| at < call.emitted)
+            })
+            .max_by_key(|f| f.received)
+            .ok_or("effect without committed close")?;
+        if !used_closes.insert(close.sent) {
+            return Err("close reused for another API effect".into());
+        }
+        let (at, result) = call.result()?;
+        if result["success"] != (tool != "run_integration_tests" || passes)
+            || delivered.remove(&role).as_ref() != Some(result)
+            || responses.insert(agent, (call, result)).is_some()
+        {
+            return Err("actual API result mismatch".into());
+        }
+        completed.insert(tool, at);
+        let event = crate::journal::one(
+            score["events"]
+                .as_array()
+                .ok_or("score events")?
+                .iter()
+                .filter(|event| event["agent"] == agent && event["tool"] == tool),
+        )?;
+        if event["args"] != call.request["arguments"]
+            || event["success"] != result["success"]
+            || event["result"] != result["data"]
+        {
+            return Err("API score differs from actual effect".into());
+        }
+    }
     let effect = |tool: &str| effects.get(tool).copied().ok_or("missing effect");
     let done = |tool: &str| completed.get(tool).copied().ok_or("missing completion");
-    if !(done("migrate_schema")? < effect("implement_backend")?
-        && done("implement_backend")? < effect("run_integration_tests")?)
+    if done("migrate_schema")? >= effect("implement_backend")?
+        || done("implement_backend")? >= effect("run_integration_tests")?
     {
-        return Err("broken task dependency".into());
+        return Err("actual API data dependency differs".into());
     }
-    for (resource, agent, tool) in [
-        (15, "DB_ADMIN", "migrate_schema"),
-        (16, "TESTER", "run_integration_tests"),
-    ] {
-        let loan = loans.remove(&resource).ok_or("missing Endpoint loan")?;
-        let returned = returns.remove(&resource).ok_or("missing Endpoint return")?;
-        let (requested, arguments) = resource_requests
-            .remove(&resource)
-            .ok_or("missing resource request")?;
-        let (replied, result) = resource_replies
-            .remove(&resource)
-            .ok_or("missing resource response")?;
-        let received = received_replies
-            .remove(&resource)
-            .ok_or("resource response not received")?;
-        let (original, response) = responses.get(agent).ok_or("missing original operation")?;
-        if loan.len() != 1
-            || returned.len() != 1
-            || arguments != original["arguments"]
-            || &result != response
-            || !(loan[0] < requested
-                && requested < effect(tool)?
-                && done(tool)? < replied
-                && replied < received
-                && received < returned[0])
+    for (resource, agent, service) in [(15, "DB_ADMIN", 0), (16, "TESTER", 2)] {
+        let (call, result) = responses.get(agent).ok_or("missing API operation")?;
+        let request =
+            crate::journal::one(frames.values().filter(|f| f.direction(resource, service)))?;
+        let reply =
+            crate::journal::one(frames.values().filter(|f| f.direction(service, resource)))?;
+        if request.value()? != call.request["arguments"]
+            || reply.value()? != **result
+            || request.received()? >= call.emitted
+            || call.result()?.0 >= reply.sent
         {
-            return Err("resource Endpoint request, result or lifetime differs".into());
+            return Err("actual resource request/effect/result differs".into());
         }
     }
-    for (agent, (call, response)) in &responses {
-        let (role, _) = binding(agent)?;
-        if delivered.remove(&role).as_ref() != Some(response) {
-            return Err("task reply differs from effect".into());
-        }
-        let events = score["events"]
-            .as_array()
-            .ok_or("events")?
-            .iter()
-            .filter(|e| e["agent"] == *agent && e["tool"] == call["tool"])
-            .collect::<Vec<_>>();
-        if events.len() != 1
-            || events[0]["args"] != call["arguments"]
-            || events[0]["success"] != response["success"]
-            || events[0]["result"] != response["data"]
-        {
-            return Err("original journal mismatch".into());
-        }
-    }
-    let test_result = &responses.get("TESTER").ok_or("tester result")?.1;
+    let test_result = responses.get("TESTER").ok_or("tester result")?.1;
+    let finished = done("run_integration_tests")?;
     for owner in [11, 12] {
         let (notified, value) = notification
             .get(&owner)
             .ok_or("missing outcome notification")?;
         if value != test_result
-            || *notified <= done("run_integration_tests")?
-            || first_reply.get(&owner).is_none_or(|i| i <= notified)
+            || *notified <= finished
+            || first_reply.get(&owner).is_none_or(|at| at <= notified)
             || complete_reads.get(&owner).is_none_or(|n| *n < 1)
         {
-            return Err("result read escaped its test dependency".into());
+            return Err("outcome file differs from actual test result".into());
         }
         if fixture["require_early_result_open"] == true
-            && open_sent
-                .get(&owner)
-                .is_none_or(|i| *i >= done("run_integration_tests").unwrap())
+            && open_sent.get(&owner).is_none_or(|at| *at >= finished)
         {
             return Err("early-read stimulus was not exercised".into());
         }
     }
-    if !verdict
-        || calls.len() != 3
-        || exits.len() != 3
-        || responses.len() != 3
-        || !outstanding.is_empty()
+    if responses.len() != 3
         || !delivered.is_empty()
         || !pending_read.is_empty()
         || read_bytes.values().any(|v| !v.is_empty())
-        || frames.values().any(|r| r.1 != 0 || r.2 != 1 || r.3 == 0)
-        || !loans.is_empty()
-        || !returns.is_empty()
-        || !resource_requests.is_empty()
-        || !resource_replies.is_empty()
-        || !received_replies.is_empty()
-        || score["complete"] != passes
-        || score["violations"] != json!([])
-        || score["events"].as_array().ok_or("events")?.len() != 3
     {
-        return Err("incomplete API boundary evidence".into());
+        return Err("incomplete API result delivery".into());
     }
-    let test_finished = done("run_integration_tests")?;
-    let early_opens = open_sent.values().filter(|i| **i < test_finished).count();
     Ok(
-        json!({"task":"8E","depth":depth,"kind":"actual_wasi_resource_delegation","model_calls":null,"scored_benchmark":false,"status":"passed","participants":3,"domain_calls":3,"actual_resource_endpoint_requests":2,"actual_resource_endpoint_returns":2,"simulator_complete":score["complete"],"expected_terminal_test_failure":!passes,"carrier_frames":frames.len(),"result_receipts":2,"read_dependency_observed":true,"result_opens":open_sent.len(),"early_result_opens":early_opens,"complete_result_reads":complete_reads,"violations":0,"guest_exits":3,"original_test_delays":fixture["test_delays"]}),
+        json!({"task":"8E","depth":depth,"kind":"actual_wasi_resource_delegation","model_calls":null,
+        "scored_benchmark":false,"status":"passed","participants":3,"domain_calls":calls.len(),
+        "actual_resource_endpoint_requests":2,
+        "actual_resource_endpoint_returns":frames.values().filter(|f|matches!((f.identity["source"].as_u64(),f.identity["target"].as_u64()),(Some(5),Some(3))|(Some(7),Some(4)))&&f.bytes.len()==3).count(),
+        "simulator_complete":score["complete"],"expected_terminal_test_failure":!passes,
+        "carrier_frames":frames.len(),"result_receipts":2,"read_dependency_observed":true,
+        "result_opens":open_sent.len(),"early_result_opens":open_sent.values().filter(|at|**at<finished).count(),
+        "complete_result_reads":complete_reads,"violations":0,"guest_exits":actors.len(),
+        "original_test_delays":fixture["test_delays"],"dynamic_protocol":dynamic}),
     )
 }
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     audit(path)?;
-    let projection = crate::projection::load(path)?;
     fs::create_dir(output)?;
     let rows = BufReader::new(File::open(path)?)
         .lines()
@@ -537,11 +425,10 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
             send(&mut out, r)?
         }
         out.flush()?;
-        let error = check(&copy, &projection)
-            .err()
-            .ok_or("accepted a mutant")?
-            .to_string();
-        reports.push(json!({"mutation":kind,"rejected":true,"error":error}));
+        let error = crate::journal::reject_mutant(path, &file, "--audit-api")?;
+        let hash = crate::evidence::digest(&file)?;
+        fs::remove_file(&file)?;
+        reports.push(json!({"mutation":kind,"rejected":true,"sha256":hash,"error":error}));
     }
     let report = json!({"mutants":reports,"original_unchanged":true});
     fs::write(

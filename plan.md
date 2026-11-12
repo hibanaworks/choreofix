@@ -3635,3 +3635,32 @@ manifest/lock/Cargo metadataの3箇所でcore/runtime/macros/WASIが各一つに
 確認した。これは依存の整合の確認であり、削除APIに依存する既存課題のビルド成功や
 実AI再認定ではない。課題側のglobal/localsideの置換と通し実行は未完であり、この境界の
 認定数は0件のまま保持する。旧APIへのfallbackは作らない。
+
+### 2026-11-13: EPFと重複する旧監査の継続・保持期間判定を除去
+
+1/2/9系統に続き、6E/3Eの監査から独自の貸出窓、返却順、制御Endpointの保持期間の
+再判定を削除した。8E/16Eの独自フレーム／貸出parserも共通journalとEPFへ統一した。
+EPFが確認したreceive commitと、実際の要求値、共有効果、返答、元simulatorの採点を
+結ぶ検査は保持する。この実データの照合をEPFだけで代替したとは扱わない。
+
+共通journalは各frameを一意のEPF receive commitへ結び付ける。transportのreceiveは
+previewであり、queueからの出力がcommit captureより遅れる場合もあるため、その到着位置を
+受信の因果順に代用しない。旧6E/16Eの「loanの輸送ログだけを早める」負例は合法なcaptureを
+変更しておらず、保持期間の違反を作っていなかったので削除した。6Eと3Eの早い実効果の負例は、
+EPFが実際に確認した受信commitより前へeffectを移す。前後の同一引数の要求・close・結果の
+欠落／重複を含む負例は維持する。
+
+保存済み6Eの14実効果と3Eの17実効果を新readerで再監査し、EPFと実データの照合が成功した。
+同じ原本への6Eの30変異、3Eの345変異も全件拒否した。これらは保存記録の監査試験であり、
+実行時攻撃の阻止件数や新しい実Wasm／実AI実験には数えない。実モデル呼出し0、採点比較0。
+記録・reader・source/hash・コマンドは`output/experiments/epf-audit-cleanup-v2/`へ保持する。
+
+最初の変異バッチは同一process内で探索領域を繰り返し確保し2.75GB guardで停止した。
+欠落frameに対応するcommitの件数を探索前に照合し、同じproduction readerを入力ごとに
+子processで実行して領域を回収する形へ修正した。sourceの復元・clone・再buildは行わない。
+停止は未完として保存し、最終の6Eは最大824,016,896 bytes、3Eは409,944,064 bytesで通過した。
+
+8E/16Eへのcapture/checkpoint接続も記述したが、実Wasmの再認定は未完である。
+現WASIライブラリから削除済みのraw completion、古いFdRequest、PrivateFs呼出しを使う
+既存localsideがbuildを拒否されたため、旧API／旧監査へ戻さない。これらは型付きChoreoFSへの
+課題移行が必要な既知の範囲であり、この監査整理を課題の完成・48課題の完了へ読み替えない。

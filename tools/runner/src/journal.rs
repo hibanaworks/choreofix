@@ -69,6 +69,43 @@ pub(crate) fn records(path: &Path) -> Result<Vec<Value>> {
         .collect()
 }
 
+/// Run a saved-record counterexample in the same production auditor, releasing
+/// its search workspace on exit. This neither rebuilds nor restores any source.
+pub(crate) fn reject_mutant(original: &Path, changed: &Path, command: &str) -> Result<String> {
+    let source = original.parent().ok_or("original evidence directory")?;
+    let output = changed.parent().ok_or("mutant evidence directory")?;
+    for name in ["projection.json", "case.json", "versions.json"] {
+        let from = source.join(name);
+        if !from.exists() {
+            continue;
+        }
+        let to = output.join(name);
+        if !to.exists() {
+            fs::copy(&from, &to)?;
+        }
+        if crate::evidence::digest(&from)? != crate::evidence::digest(&to)? {
+            return Err("mutant context differs from original evidence".into());
+        }
+    }
+    #[cfg(test)]
+    let auditor = std::env::var_os("CHOREOFIX_AUDITOR").ok_or("qualified auditor missing")?;
+    #[cfg(not(test))]
+    let auditor = std::env::current_exe()?;
+    let result = std::process::Command::new(auditor)
+        .arg(command)
+        .arg(changed)
+        .output()?;
+    let error = String::from_utf8(result.stderr)?;
+    if result.status.code() != Some(1) || !error.starts_with("Error:") {
+        return Err(format!(
+            "record counterexample was accepted or its auditor failed: status={}, stderr={error}",
+            result.status
+        )
+        .into());
+    }
+    Ok(error)
+}
+
 /// Mutate immutable observations; this never drives or changes an Endpoint.
 pub(crate) fn json_frame_mutants(
     rows: &[Value],
@@ -235,6 +272,24 @@ pub(crate) struct Journal {
 }
 
 impl Journal {
+    /// Use EPF's successful Endpoint receives for effect correspondence. The
+    /// transport journal also contains previews and can be delivered later.
+    pub(crate) fn bind_receives<'a>(
+        &mut self,
+        dynamic: &'a Value,
+    ) -> Result<BTreeMap<u64, &'a Value>> {
+        let receipts = self.receipts(dynamic)?;
+        for (&id, receipt) in &receipts {
+            let at = usize::try_from(
+                receipt["receive_commit"]["journal_row"]
+                    .as_u64()
+                    .ok_or("committed receive journal row")?,
+            )?;
+            self.frames.get_mut(&id).ok_or("accepted frame")?.received = Some(at);
+        }
+        Ok(receipts)
+    }
+
     /// Bind complete, EPF-checked receives to physical frames. These are
     /// immutable evidence references, not another source-execution replay.
     /// Transport observations can be queued after the commit capture; their
@@ -498,11 +553,13 @@ mod tests {
         ];
         let labels = crate::projection::frames(&artifact, &rows)?;
         let actors = [json!({"agent":"A"}), json!({"agent":"B"})];
-        let journal = read(&rows, &labels, &actors)?;
+        let mut journal = read(&rows, &labels, &actors)?;
         let checked = crate::projection::check_dynamic(&artifact, &rows)?;
         let receipts = journal.receipts(&checked)?;
         assert_eq!(receipts[&19]["receive_commit"]["journal_row"], 5);
         assert_eq!(journal.frames[&19].received, Some(4));
+        journal.bind_receives(&checked)?;
+        assert_eq!(journal.frames[&19].received, Some(5));
         let mut duplicate = checked.clone();
         duplicate["sessions"][0]["acceptances"]
             .as_array_mut()
@@ -525,12 +582,14 @@ mod tests {
         late.retain(|row| row["message"]["type"] != "protocol_frame");
         late.splice(4..4, transport);
         let checked_late = crate::projection::check_dynamic(&artifact, &late)?;
-        let journal_late = read(&late, &labels, &actors)?;
+        let mut journal_late = read(&late, &labels, &actors)?;
         assert!(journal_late.frames[&19].sent > 3);
         assert_eq!(
             journal_late.receipts(&checked_late)?[&19]["receive_commit"]["journal_row"],
             3
         );
+        journal_late.bind_receives(&checked_late)?;
+        assert_eq!(journal_late.frames[&19].received, Some(3));
         // EPF correctly permits a finite source prefix with an accepted send.
         // Complete application effect evidence must additionally have its receive.
         rows.remove(5);

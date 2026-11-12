@@ -253,7 +253,7 @@ async fn real_wasi_cicd_uses_resource_endpoints_and_keeps_shell_freedom() -> Res
         let audit = cicd_audit::audit(&output.join("events.jsonl"))?;
         let mutants =
             cicd_audit::check_mutants(&output.join("events.jsonl"), &output.join("mutants"))?;
-        assert_eq!(mutants["mutants"].as_array().ok_or("mutants")?.len(), 16);
+        assert_eq!(mutants["mutants"].as_array().ok_or("mutants")?.len(), 15);
         save(&output.join("audit.json"), &audit)?;
         save(&output.join("result.json"), &result)?;
         outcomes.push(json!({"depth":depth,"runtime":result,"audit":audit,"mutants":mutants}));

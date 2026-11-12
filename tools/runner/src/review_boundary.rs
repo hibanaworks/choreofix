@@ -539,7 +539,7 @@ async fn run_cases(cases: Vec<ReviewCase>) -> Result<()> {
         let mutants: Value =
             serde_json::from_slice(&fs::read(case.join("resource-mutants/summary.json"))?)?;
         assert_eq!(mutants["status"], "passed");
-        assert_eq!(mutants["count"], if rejected == 0 { 28 } else { 31 });
+        assert_eq!(mutants["count"], if rejected == 0 { 27 } else { 30 });
         let audit = &mutants["audit"];
         assert_eq!(audit["status"], "passed");
         assert_eq!(audit["dynamic_protocol"]["status"], "passed");
