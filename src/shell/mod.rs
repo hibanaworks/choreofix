@@ -3,7 +3,7 @@ pub mod global;
 pub mod imp {
     pub mod bus;
     pub mod error;
-    pub mod file_wire;
+    pub mod file_data;
     pub mod private_fs;
     pub mod report_arguments;
     pub mod repository_arguments;

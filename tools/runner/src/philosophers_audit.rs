@@ -1,38 +1,23 @@
-//! Inspect persisted observations. This code never authorizes a task operation.
-use crate::evidence::Result;
+//! Bind EPF-checked receive occurrences to actual file data, effects and replies.
+//! Source eligibility and affine custody are checked by EPF, not reimplemented.
+use crate::{evidence::Result, journal};
+use hibana::runtime::wire::{Payload, WirePayload};
+use hibana_wasip1_runtime::protocol;
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File},
-    io::{BufRead, BufReader, Write},
+    io::Write,
     path::Path,
 };
 
-struct Frame {
-    identity: Value,
-    queued: bool,
-    received: usize,
-}
-
-fn bytes(message: &Value) -> Result<Vec<u8>> {
-    message["payload"]
-        .as_array()
-        .ok_or("payload bytes")?
-        .iter()
-        .map(|value| {
-            value
-                .as_u64()
-                .and_then(|n| u8::try_from(n).ok())
-                .ok_or_else(|| "payload byte".into())
-        })
-        .collect()
+fn validate<P: WirePayload>(frame: &journal::Frame) -> Result<()> {
+    P::validate_payload(Payload::new(&frame.bytes))
+        .map_err(|error| format!("WASI payload: {error:?}").into())
 }
 
 pub fn audit(path: &Path) -> Result<Value> {
-    let records = BufReader::new(File::open(path)?)
-        .lines()
-        .map(|line| Ok(serde_json::from_str::<Value>(&line?)?))
-        .collect::<Result<Vec<_>>>()?;
+    let records = journal::records(path)?;
     let projection = crate::projection::load(path)?;
     let mut result = check(&records, &projection)?;
     result["source_events_sha256"] = json!(crate::evidence::digest(path)?);
@@ -43,428 +28,473 @@ pub fn audit(path: &Path) -> Result<Value> {
             .join("projection.json"),
     )?);
     result["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
-    result["wire_validation"] =
-        json!("static compiled header membership; dynamic eligibility is not replayed");
     Ok(result)
 }
 
 fn check(records: &[Value], projection: &Value) -> Result<Value> {
-    use crate::philosopher_identity::{roles9e as e, roles9h as h, roles9m as m};
-    crate::projection::frames(projection, records)?;
-    if projection["compiled"]["task"] != records.first().ok_or("empty evidence")?["message"]["task"]
-    {
-        return Err("compiled projection belongs to a different task".into());
-    }
+    use crate::philosopher_identity::{AGENTS, roles};
+    let labels = crate::projection::frames(projection, records)?;
+    let dynamic = crate::projection::check_dynamic(projection, records)?;
     let fixture = &records.first().ok_or("empty evidence")?["message"];
-    let actors = fixture["fixtures"].as_array().ok_or("fixtures")?;
-    if fixture["terminal_review_failure"] != false {
-        return Err("invalid dining trial configuration".into());
+    if projection["compiled"]["task"] != fixture["task"]
+        || fixture["terminal_review_failure"] != false
+    {
+        return Err("different task or invalid dining configuration".into());
     }
-    let layout: &[(&str, [u8; 5])] = match fixture["task"].as_str() {
-        Some("9E") => &[
-            (
-                "FORK_A",
-                [e::A, e::FORK_A, e::A_WASI, e::A_IO, e::FORK_A_RESOURCE],
-            ),
-            (
-                "FORK_B",
-                [e::B, e::FORK_B, e::B_WASI, e::B_IO, e::FORK_B_RESOURCE],
-            ),
-            (
-                "FORK_C",
-                [e::C, e::FORK_C, e::C_WASI, e::C_IO, e::FORK_C_RESOURCE],
-            ),
-        ],
-        Some("9M") => &[
-            (
-                "FORK_A",
-                [m::A, m::FORK_A, m::A_WASI, m::A_IO, m::FORK_A_RESOURCE],
-            ),
-            (
-                "FORK_B",
-                [m::B, m::FORK_B, m::B_WASI, m::B_IO, m::FORK_B_RESOURCE],
-            ),
-            (
-                "FORK_C",
-                [m::C, m::FORK_C, m::C_WASI, m::C_IO, m::FORK_C_RESOURCE],
-            ),
-            (
-                "FORK_D",
-                [m::D, m::FORK_D, m::D_WASI, m::D_IO, m::FORK_D_RESOURCE],
-            ),
-            (
-                "FORK_E",
-                [m::E, m::FORK_E, m::E_WASI, m::E_IO, m::FORK_E_RESOURCE],
-            ),
-        ],
-        Some("9H") => &[
-            (
-                "FORK_A",
-                [h::A, h::FORK_A, h::A_WASI, h::A_IO, h::FORK_A_RESOURCE],
-            ),
-            (
-                "FORK_B",
-                [h::B, h::FORK_B, h::B_WASI, h::B_IO, h::FORK_B_RESOURCE],
-            ),
-            (
-                "FORK_C",
-                [h::C, h::FORK_C, h::C_WASI, h::C_IO, h::FORK_C_RESOURCE],
-            ),
-            (
-                "FORK_D",
-                [h::D, h::FORK_D, h::D_WASI, h::D_IO, h::FORK_D_RESOURCE],
-            ),
-            (
-                "FORK_E",
-                [h::E, h::FORK_E, h::E_WASI, h::E_IO, h::FORK_E_RESOURCE],
-            ),
-            (
-                "FORK_F",
-                [h::F, h::FORK_F, h::F_WASI, h::F_IO, h::FORK_F_RESOURCE],
-            ),
-            (
-                "FORK_G",
-                [h::G, h::FORK_G, h::G_WASI, h::G_IO, h::FORK_G_RESOURCE],
-            ),
-        ],
+    let actors = fixture["fixtures"].as_array().ok_or("fixtures")?;
+    let count = match fixture["task"].as_str() {
+        Some("9E") => 3,
+        Some("9M") => 5,
+        Some("9H") => 7,
         _ => return Err("unknown dining task".into()),
     };
-    if actors.len() != layout.len() {
-        return Err("participant count".into());
+    // Physical integration identities, shared with the actual application.
+    // This is not a source execution or a current-holder table.
+    let layout = [
+        (
+            "FORK_A",
+            [
+                roles::A,
+                roles::FORK_A,
+                roles::A_WASI,
+                roles::A_IO,
+                roles::FORK_A_RESOURCE,
+                roles::A_THINK_FILE,
+                roles::THINK_A,
+                roles::A_EAT_FILE,
+            ],
+        ),
+        (
+            "FORK_B",
+            [
+                roles::B,
+                roles::FORK_B,
+                roles::B_WASI,
+                roles::B_IO,
+                roles::FORK_B_RESOURCE,
+                roles::B_THINK_FILE,
+                roles::THINK_B,
+                roles::B_EAT_FILE,
+            ],
+        ),
+        (
+            "FORK_C",
+            [
+                roles::C,
+                roles::FORK_C,
+                roles::C_WASI,
+                roles::C_IO,
+                roles::FORK_C_RESOURCE,
+                roles::C_THINK_FILE,
+                roles::THINK_C,
+                roles::C_EAT_FILE,
+            ],
+        ),
+        (
+            "FORK_D",
+            [
+                roles::D,
+                roles::FORK_D,
+                roles::D_WASI,
+                roles::D_IO,
+                roles::FORK_D_RESOURCE,
+                roles::D_THINK_FILE,
+                roles::THINK_D,
+                roles::D_EAT_FILE,
+            ],
+        ),
+        (
+            "FORK_E",
+            [
+                roles::E,
+                roles::FORK_E,
+                roles::E_WASI,
+                roles::E_IO,
+                roles::FORK_E_RESOURCE,
+                roles::E_THINK_FILE,
+                roles::THINK_E,
+                roles::E_EAT_FILE,
+            ],
+        ),
+        (
+            "FORK_F",
+            [
+                roles::F,
+                roles::FORK_F,
+                roles::F_WASI,
+                roles::F_IO,
+                roles::FORK_F_RESOURCE,
+                roles::F_THINK_FILE,
+                roles::THINK_F,
+                roles::F_EAT_FILE,
+            ],
+        ),
+        (
+            "FORK_G",
+            [
+                roles::G,
+                roles::FORK_G,
+                roles::G_WASI,
+                roles::G_IO,
+                roles::FORK_G_RESOURCE,
+                roles::G_THINK_FILE,
+                roles::THINK_G,
+                roles::G_EAT_FILE,
+            ],
+        ),
+    ];
+    let layout = &layout[..count];
+    if actors.len() != count
+        || actors
+            .iter()
+            .zip(AGENTS)
+            .any(|(actor, name)| actor["agent"] != name)
+    {
+        return Err("dining participant identities".into());
     }
-    let roles: BTreeSet<_> = layout
-        .iter()
-        .flat_map(|(_, roles)| roles)
-        .map(|&role| u64::from(role))
-        .collect();
-    if roles.len() != 5 * layout.len() {
-        return Err("dining role identities collide".into());
-    }
-    let forks: BTreeMap<_, _> = layout
-        .iter()
-        .map(|&(name, [_, owner, _, _, resource])| (name, (u64::from(owner), u64::from(resource))))
-        .collect();
-    let assignments: BTreeMap<_, _> = actors
-        .iter()
-        .enumerate()
-        .map(|(index, actor)| {
-            Ok((
-                actor["agent"].as_str().ok_or("actor name")?,
-                (u64::from(layout[index].1[0]), actor),
-            ))
-        })
-        .collect::<Result<_>>()?;
-    // These maps reconstruct the saved trace. They are not runtime permissions.
-    let mut held: BTreeMap<u64, Option<u64>> = forks
-        .values()
-        .map(|&(owner, resource)| (resource, Some(owner)))
-        .collect();
-    let mut in_flight = BTreeMap::<u64, u64>::new();
-    let mut loans = BTreeMap::<u64, usize>::new();
-    let mut returns = BTreeMap::<u64, usize>::new();
-    let mut frames = BTreeMap::<u64, Frame>::new();
-    let mut requests = BTreeMap::<(u64, String), Vec<(u64, Value)>>::new();
-    let mut delivered = BTreeMap::<(u64, String), Vec<Value>>::new();
-    let mut meals = BTreeSet::<(u64, u64)>::new();
-    let mut calls = BTreeMap::<&str, usize>::new();
-    let mut outstanding = BTreeMap::<u64, Value>::new();
-    let mut responses = BTreeMap::<(u64, String), Value>::new();
-    let mut active = BTreeMap::<u64, BTreeSet<String>>::new();
-    let mut maximum_eaters = 0;
-    let mut exits = BTreeSet::new();
-    let mut verdict = false;
-    let mut score = None;
-    for record in records {
-        let message = &record["message"];
-        match (record["direction"].as_str(), message["type"].as_str()) {
-            (Some("runtime"), Some("protocol_frame")) => {
-                if message["session"] != crate::philosopher_identity::SESSION {
-                    return Err("frame belongs to another dining session".into());
-                }
-                u8::try_from(message["lane"].as_u64().ok_or("frame lane")?)
-                    .map_err(|_| "frame lane exceeds its wire width")?;
-                u16::try_from(message["frame_label"].as_u64().ok_or("frame label")?)
-                    .map_err(|_| "frame label exceeds its wire width")?;
-                let id = message["frame_id"].as_u64().ok_or("frame id")?;
-                let source = message["source"].as_u64().ok_or("source")?;
-                let target = message["target"].as_u64().ok_or("target")?;
-                if !roles.contains(&source) || !roles.contains(&target) {
-                    return Err("frame refers to a role absent from this dining protocol".into());
-                }
-                let payload = bytes(message)?;
-                let mut identity = message.clone();
-                identity
-                    .as_object_mut()
-                    .ok_or("frame object")?
-                    .remove("action");
-                let first_receive = match message["action"].as_str() {
-                    Some("send") => {
-                        if frames
-                            .insert(
-                                id,
-                                Frame {
-                                    identity: identity.clone(),
-                                    queued: true,
-                                    received: 0,
-                                },
-                            )
-                            .is_some()
-                        {
-                            return Err("duplicate frame send".into());
-                        }
-                        false
-                    }
-                    Some("receive" | "requeue") => {
-                        let frame = frames.get_mut(&id).ok_or("frame has no send")?;
-                        if frame.identity != identity {
-                            return Err("altered frame identity".into());
-                        }
-                        if message["action"] == "receive" {
-                            if !frame.queued {
-                                return Err("duplicate receive".into());
-                            }
-                            frame.queued = false;
-                            frame.received += 1;
-                            frame.received == 1
-                        } else {
-                            if frame.queued || frame.received == 0 {
-                                return Err("invalid requeue".into());
-                            }
-                            frame.queued = true;
-                            false
-                        }
-                    }
-                    _ => return Err("unknown frame action".into()),
-                };
-                if forks
-                    .values()
-                    .any(|&(owner, _)| owner == source || owner == target)
-                {
-                    if payload.len() != 3 {
-                        return Err("owned Endpoint envelope".into());
-                    }
-                    let resource = u64::from(payload[0]);
-                    let owner = forks
-                        .values()
-                        .find(|&&(_, r)| r == resource)
-                        .ok_or("unknown resource")?
-                        .0;
-                    let vm = if source == owner {
-                        target
-                    } else if target == owner {
-                        source
-                    } else {
-                        return Err("wrong resource owner".into());
-                    };
-                    let actor = actors
-                        .get(vm.checked_sub(14).ok_or("guest role")? as usize)
-                        .ok_or("guest role")?;
-                    if !actor["forks"]
-                        .as_array()
-                        .ok_or("assigned forks")?
-                        .iter()
-                        .any(|name| {
-                            forks
-                                .get(name.as_str().unwrap_or(""))
-                                .is_some_and(|&(_, r)| r == resource)
-                        })
-                    {
-                        return Err("Endpoint delivered to unassigned philosopher".into());
-                    }
-                    if message["action"] == "send" {
-                        if held.insert(resource, None) != Some(Some(source))
-                            || in_flight.insert(resource, id).is_some()
-                        {
-                            return Err("duplicate or unheld Endpoint transfer".into());
-                        }
-                        if target == owner {
-                            if !meals.remove(&(resource, vm - 14)) {
-                                return Err("return precedes actual meal reply".into());
-                            }
-                            *returns.entry(resource).or_default() += 1;
-                        } else {
-                            *loans.entry(resource).or_default() += 1;
-                        }
-                    } else if first_receive
-                        && (in_flight.remove(&resource) != Some(id)
-                            || held.insert(resource, Some(target)) != Some(None))
-                    {
-                        return Err("Endpoint receive has no matching transfer".into());
-                    }
-                }
-                if first_receive && target < actors.len() as u64 {
-                    let arguments = serde_json::from_slice::<Value>(&payload).ok();
-                    if source == target + 14
-                        && arguments
-                            .as_ref()
-                            .is_some_and(|v| v["philosopher"].is_string())
-                    {
-                        requests
-                            .entry((target, "think".into()))
-                            .or_default()
-                            .push((source, arguments.unwrap()));
-                    } else if held.contains_key(&source) {
-                        if held[&source] != Some(target + 14) {
-                            return Err("request without held resource".into());
-                        }
-                        requests
-                            .entry((target, "eat".into()))
-                            .or_default()
-                            .push((source, arguments.ok_or("actual resource request JSON")?));
-                    }
-                }
-                if first_receive
-                    && source < actors.len() as u64
-                    && (target == source + 14 || held.contains_key(&target))
-                {
-                    let result: Value = serde_json::from_slice(&payload)?;
-                    let tool = result["tool_name"]
-                        .as_str()
-                        .ok_or("actual result tool")?
-                        .to_owned();
-                    if held.contains_key(&target) {
-                        if tool != "eat"
-                            || held[&target] != Some(source + 14)
-                            || !meals.insert((target, source))
-                        {
-                            return Err("meal reply without its unique resource".into());
-                        }
-                    } else if tool != "think" {
-                        return Err("result bypassed resource Endpoint".into());
-                    }
-                    delivered.entry((source, tool)).or_default().push(result);
-                }
+    let journal = journal::read(records, &labels, actors)?;
+    let mut receipts = BTreeMap::new();
+    for session in dynamic["sessions"].as_array().ok_or("EPF sessions")? {
+        if session["session"] != crate::philosopher_identity::SESSION {
+            return Err("different dining session".into());
+        }
+        for acceptance in session["acceptances"].as_array().ok_or("EPF acceptances")? {
+            let id = acceptance["frame_id"].as_u64().ok_or("accepted frame")?;
+            let received = &acceptance["receive_commit"];
+            let frame = journal.frames.get(&id).ok_or("missing accepted frame")?;
+            if received["source_event"] != frame.identity["frame_label"]
+                || received["view"] != frame.identity["target"]
+                || acceptance["send_view"] != frame.identity["source"]
+                || receipts.insert(id, acceptance).is_some()
+            {
+                return Err("missing or reused committed receive occurrence".into());
             }
-            (Some("runtime"), Some("execute")) => {
-                let agent = message["agent"].as_str().ok_or("execute agent")?;
-                let &(role, assignment) = assignments.get(agent).ok_or("unknown execute agent")?;
-                let tool = message["tool"].as_str().ok_or("execute tool")?;
-                let count = calls.entry(agent).or_default();
-                if assignment["calls"]
-                    .get(*count)
-                    .ok_or("duplicate task effect")?["tool"]
-                    != tool
-                    || !message["arguments"]["philosopher"].is_string()
-                {
-                    return Err("task fidelity mismatch".into());
-                }
-                let observed = requests
-                    .remove(&(role, tool.to_owned()))
-                    .ok_or("effect without actual projected request")?;
-                if observed
-                    .iter()
-                    .any(|(_, arguments)| arguments != &message["arguments"])
-                {
-                    return Err("request/effect argument mismatch".into());
-                }
-                if tool == "think" {
-                    if observed.len() != 1 || observed[0].0 != role + 14 {
-                        return Err("think request count".into());
-                    }
-                } else if tool == "eat" {
-                    let required = assignment["forks"]
-                        .as_array()
-                        .ok_or("forks")?
-                        .iter()
-                        .map(|name| {
-                            forks
-                                .get(name.as_str().ok_or("fork name")?)
-                                .map(|&(_, r)| r)
-                                .ok_or_else(|| "unknown fork".into())
-                        })
-                        .collect::<Result<BTreeSet<_>>>()?;
-                    if observed.len() != 2
-                        || observed.iter().map(|&(r, _)| r).collect::<BTreeSet<_>>() != required
-                        || required.iter().any(|r| held[r] != Some(role + 14))
-                        || delivered.get(&(role, "think".into())).map(Vec::len) != Some(1)
-                    {
-                        return Err(
-                            "effect without both unique Endpoints and completed think".into()
-                        );
-                    }
-                    let names = assignment["forks"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .map(|v| v.as_str().unwrap().to_owned())
-                        .collect::<BTreeSet<_>>();
-                    if active.values().any(|other| !other.is_disjoint(&names)) {
-                        return Err("overlapping physical forks".into());
-                    }
-                    active.insert(message["id"].as_u64().ok_or("execute id")?, names);
-                    maximum_eaters = maximum_eaters.max(active.len());
-                } else {
-                    return Err("unknown effect".into());
-                }
-                *count += 1;
-                if outstanding
-                    .insert(message["id"].as_u64().ok_or("execute id")?, message.clone())
-                    .is_some()
-                {
-                    return Err("duplicate execute id".into());
-                }
-            }
-            (Some("simulator"), Some("simulator_result")) => {
-                let id = message["id"].as_u64().ok_or("result id")?;
-                let call = outstanding
-                    .remove(&id)
-                    .ok_or("unmatched simulator result")?;
-                if call["tool"] != message["result"]["tool_name"]
-                    || message["result"]["success"] != true
-                {
-                    return Err("unexpected simulator result".into());
-                }
-                let role = assignments[call["agent"].as_str().ok_or("agent")?].0;
-                if responses
-                    .insert(
-                        (role, call["tool"].as_str().unwrap().to_owned()),
-                        message["result"].clone(),
-                    )
-                    .is_some()
-                {
-                    return Err("duplicate domain result".into());
-                }
-                active.remove(&id);
-            }
-            (Some("runtime"), Some("exit")) => {
-                if message["status"] != 0
-                    || !exits.insert(message["agent"].as_str().ok_or("exit agent")?.to_owned())
-                {
-                    return Err("failed or duplicate guest exit".into());
-                }
-            }
-            (Some("runtime"), Some("run_result")) => {
-                if message["status"] != "complete" || verdict {
-                    return Err("failed or duplicate runtime verdict".into());
-                }
-                verdict = true;
-            }
-            (Some("simulator"), Some("score")) if score.is_none() => {
-                score = Some(message.clone());
-            }
-            (Some("simulator"), Some("score")) => return Err("duplicate score".into()),
-            _ => {}
         }
     }
-    let score = score.ok_or("missing score")?;
-    for (&agent, &(role, assignment)) in &assignments {
-        for tool in ["think", "eat"] {
-            let result = responses
-                .get(&(role, tool.to_owned()))
-                .ok_or("missing effect result")?;
-            let values = delivered
-                .remove(&(role, tool.to_owned()))
-                .ok_or("missing received result")?;
-            if values.len() != if tool == "eat" { 2 } else { 1 }
-                || values.iter().any(|v| v != result)
-            {
-                return Err("effect and delivered result disagree".into());
+    if receipts.len() != journal.frames.len() {
+        return Err("frame without a checked committed receive".into());
+    }
+    let committed = |id: u64| -> Result<usize> {
+        usize::try_from(
+            receipts.get(&id).ok_or("frame receipt")?["receive_commit"]["journal_row"]
+                .as_u64()
+                .ok_or("receive commit observation")?,
+        )
+        .map_err(Into::into)
+    };
+    let forks: BTreeMap<_, _> = layout
+        .iter()
+        .map(|(name, ids)| (*name, (u64::from(ids[1]), u64::from(ids[4]))))
+        .collect();
+    let mut effects = BTreeMap::<u64, (usize, u64)>::new();
+    let mut rejected_closes = 0;
+    let mut read_results = 0;
+    for (index, (_, ids)) in layout.iter().enumerate() {
+        let [eat_owner, _, vm, _, _, think_view, think_owner, eat_view] = ids.map(u64::from);
+        let agent = AGENTS[index];
+        for (tool, view, owner, fd) in [
+            ("think", think_view, think_owner, 4),
+            ("eat", eat_view, eat_owner, 5),
+        ] {
+            let initial = journal::one(journal.frames.values().filter(|frame| {
+                frame.direction(owner, vm)
+                    && frame.logical_label == 10
+                    && frame.bytes.first() == Some(&(view as u8))
+            }))?;
+            if initial.bytes.len() != 3 {
+                return Err("file view was not transferred as an actual Endpoint".into());
             }
-            let events = score["events"]
-                .as_array()
-                .ok_or("score events")?
+            let exit = journal::one(
+                journal
+                    .frames
+                    .values()
+                    .filter(|frame| frame.direction(view, owner) && frame.logical_label == 241),
+            )?;
+            if exit.bytes != 0i32.to_be_bytes() {
+                return Err("file owner received a nonzero guest exit".into());
+            }
+            let mut requests = journal
+                .frames
                 .iter()
-                .filter(|e| e["agent"] == agent && e["tool"] == tool)
+                .filter(|(_, frame)| {
+                    frame.direction(view, owner)
+                        && matches!(
+                            frame.logical_label,
+                            protocol::LABEL_WASI_PATH_OPEN
+                                | protocol::LABEL_WASI_FD_WRITE_OBJECT
+                                | protocol::LABEL_WASI_FD_READ
+                                | protocol::LABEL_WASI_FD_CLOSE_OBJECT
+                                | protocol::LABEL_WASI_FD_CLOSE
+                        )
+                })
+                .map(|(&id, frame)| Ok((committed(id)?, id, frame)))
+                .collect::<Result<Vec<_>>>()?;
+            let mut replies = journal
+                .frames
+                .iter()
+                .filter(|(_, frame)| {
+                    frame.direction(owner, view)
+                        && matches!(
+                            frame.logical_label,
+                            protocol::LABEL_WASI_PATH_OPEN_RET
+                                | protocol::LABEL_WASI_FD_WRITE_OBJECT_RET
+                                | protocol::LABEL_WASI_FD_READ_RET
+                                | protocol::LABEL_WASI_FD_CLOSE_OBJECT_RET
+                                | protocol::LABEL_WASI_FD_CLOSE_REJECTED
+                                | protocol::LABEL_WASI_FD_CLOSE_RET
+                        )
+                })
+                .map(|(&id, frame)| Ok((committed(id)?, id, frame)))
+                .collect::<Result<Vec<_>>>()?;
+            requests.sort_by_key(|&(at, _, _)| at);
+            replies.sort_by_key(|&(at, _, _)| at);
+            if requests.len() != replies.len() {
+                return Err("unpaired object I/O observations".into());
+            }
+            // Reconstruct descriptor data only. EPF owns the dynamic protocol
+            // interpretation; no stage, next-operation or owner state is here.
+            let mut bytes = Vec::<u8>::new();
+            let mut offset = 0usize;
+            let mut fd_flags = 0u16;
+            let mut previous_reply = None;
+            for ((at, request_id, request), (replied, reply_id, reply)) in
+                requests.into_iter().zip(replies)
+            {
+                if at >= replied
+                    || previous_reply.is_some_and(|previous| previous >= at)
+                    || receipts[&request_id]["send_actor"] != vm
+                    || receipts[&request_id]["receive_commit"]["actor"] != owner
+                    || receipts[&reply_id]["send_actor"] != owner
+                    || receipts[&reply_id]["receive_commit"]["actor"] != vm
+                {
+                    return Err("object I/O request/reply occurrence mismatch".into());
+                }
+                previous_reply = Some(replied);
+                match (request.logical_label, reply.logical_label) {
+                    (protocol::LABEL_WASI_PATH_OPEN, protocol::LABEL_WASI_PATH_OPEN_RET) => {
+                        validate::<protocol::PathOpenReq>(request)?;
+                        validate::<protocol::PathOpenedRet>(reply)?;
+                        let errno = u16::from_be_bytes(reply.bytes[1..3].try_into()?);
+                        if errno == 0 {
+                            if reply.bytes[0] != fd
+                                || request.bytes[0] != 3
+                                || request.bytes[14..] != *format!("service/{tool}").as_bytes()
+                            {
+                                return Err("open was rebound to a different object".into());
+                            }
+                            if u16::from_be_bytes(request.bytes[9..11].try_into()?) & 8 != 0 {
+                                bytes.clear();
+                            }
+                            fd_flags = u16::from_be_bytes(request.bytes[11..13].try_into()?);
+                            offset = 0;
+                        }
+                    }
+                    (
+                        protocol::LABEL_WASI_FD_WRITE_OBJECT,
+                        protocol::LABEL_WASI_FD_WRITE_OBJECT_RET,
+                    ) => {
+                        validate::<protocol::FdWriteObjectReq>(request)?;
+                        validate::<protocol::FdWriteDoneRet>(reply)?;
+                        if request.bytes[0] != fd || reply.bytes[0] != fd {
+                            return Err("write reply belongs to a different fd".into());
+                        }
+                        let length = usize::from(reply.bytes[1]);
+                        let errno = u16::from_be_bytes(reply.bytes[2..4].try_into()?);
+                        if length > request.bytes.len() - 2 || (errno != 0 && length != 0) {
+                            return Err("invalid accepted write prefix".into());
+                        }
+                        if errno == 0 {
+                            let start = if fd_flags & 1 != 0 {
+                                bytes.len()
+                            } else {
+                                offset
+                            };
+                            let end = start.checked_add(length).ok_or("write offset overflow")?;
+                            bytes.resize(bytes.len().max(end), 0);
+                            bytes[start..end].copy_from_slice(&request.bytes[2..2 + length]);
+                            offset = end;
+                        }
+                    }
+                    (protocol::LABEL_WASI_FD_READ, protocol::LABEL_WASI_FD_READ_RET) => {
+                        validate::<protocol::FdReadReq>(request)?;
+                        validate::<protocol::FdReadDoneRet>(reply)?;
+                        let end = offset
+                            .saturating_add(usize::from(request.bytes[1]))
+                            .min(bytes.len());
+                        if request.bytes[0] != fd
+                            || reply.bytes[0] != fd
+                            || reply.bytes[1..3] != [0, 0]
+                            || bytes.get(offset..end) != Some(&reply.bytes[4..])
+                        {
+                            return Err("read bytes differ from the actual file/result".into());
+                        }
+                        if !bytes.is_empty() {
+                            read_results += 1;
+                        }
+                        offset = end;
+                    }
+                    (protocol::LABEL_WASI_FD_CLOSE, protocol::LABEL_WASI_FD_CLOSE_RET) => {
+                        validate::<protocol::FdCloseReq>(request)?;
+                        validate::<protocol::FdClosedRet>(reply)?;
+                        if request.bytes != [fd] || reply.bytes != [fd, 0, 0] {
+                            return Err("ordinary close fd/result mismatch".into());
+                        }
+                    }
+                    (
+                        protocol::LABEL_WASI_FD_CLOSE_OBJECT,
+                        protocol::LABEL_WASI_FD_CLOSE_OBJECT_RET
+                        | protocol::LABEL_WASI_FD_CLOSE_REJECTED,
+                    ) => {
+                        validate::<protocol::FdCloseObjectReq>(request)?;
+                        if request.bytes != [fd] || reply.bytes.first() != Some(&fd) {
+                            return Err("object close fd mismatch".into());
+                        }
+                        let calls = journal
+                            .calls
+                            .iter()
+                            .filter(|(_, call)| {
+                                call.request["agent"] == agent
+                                    && call.request["tool"] == tool
+                                    && at < call.emitted
+                                    && call.emitted < replied
+                            })
+                            .collect::<Vec<_>>();
+                        let arguments = serde_json::from_slice::<Value>(&bytes).ok();
+                        let valid = arguments.as_ref().is_some_and(|v| {
+                            v.as_object()
+                                .is_some_and(|v| v.get("philosopher").is_some_and(Value::is_string))
+                        });
+                        if reply.logical_label == protocol::LABEL_WASI_FD_CLOSE_REJECTED {
+                            validate::<protocol::FdCloseRejectedRet>(reply)?;
+                            if valid || !calls.is_empty() || reply.bytes != [fd, 0, 28] {
+                                return Err(
+                                    "rejected close admitted an effect or rejected valid arguments"
+                                        .into(),
+                                );
+                            }
+                            rejected_closes += 1;
+                        } else {
+                            validate::<protocol::FdClosedRet>(reply)?;
+                            if reply.bytes != [fd, 0, 0] || !valid || calls.len() != 1 {
+                                return Err("successful close lacks one admitted effect".into());
+                            }
+                            let (&call_id, call) = calls[0];
+                            let (result_at, result) = call.result()?;
+                            if result_at >= replied
+                                || call.request["arguments"]
+                                    != arguments.ok_or("invalid arguments")?
+                                || effects.insert(call_id, (at, request_id)).is_some()
+                            {
+                                return Err(
+                                    "file arguments/effect/result occurrence mismatch".into()
+                                );
+                            }
+                            bytes = serde_json::to_vec(result)?;
+                            offset = 0;
+                        }
+                    }
+                    _ => return Err("object request and reply types differ".into()),
+                }
+            }
+        }
+    }
+    if effects.len() != journal.calls.len() || effects.len() != 2 * count {
+        return Err("unmatched or missing object effect occurrence".into());
+    }
+    let mut used = BTreeSet::new();
+    let mut meals = Vec::new();
+    let mut effect_receipts = Vec::new();
+    for (index, (_, ids)) in layout.iter().enumerate() {
+        let owner = u64::from(ids[0]);
+        let agent = AGENTS[index];
+        let assignment = &actors[index];
+        for tool in ["think", "eat"] {
+            let call =
+                journal::one(journal.calls.values().filter(|call| {
+                    call.request["agent"] == agent && call.request["tool"] == tool
+                }))?;
+            let id = call.request["id"].as_u64().ok_or("effect ID")?;
+            let &(close_at, close_id) = effects.get(&id).ok_or("unbound effect")?;
+            let (result_at, result) = call.result()?;
+            let mut resources = Vec::new();
+            if result["success"] != true || result["data"]["philosopher"] != agent {
+                return Err("unexpected original dining result".into());
+            }
+            if tool == "eat" {
+                let required = assignment["forks"]
+                    .as_array()
+                    .filter(|v| v.len() == 2)
+                    .ok_or("two physical forks")?;
+                let mut names = BTreeSet::new();
+                for name in required {
+                    let name = name.as_str().ok_or("fork name")?;
+                    if !names.insert(name) {
+                        return Err("same physical fork twice".into());
+                    }
+                    let &(fork_owner, resource) = forks.get(name).ok_or("unknown physical fork")?;
+                    let find = |source, target, label| -> Result<(u64, &journal::Frame)> {
+                        let sender = if source == resource {
+                            if target == owner { fork_owner } else { owner }
+                        } else {
+                            source
+                        };
+                        let (&id, frame) = journal::one(journal.frames.iter().filter(
+                            |(frame_id, frame)| {
+                                frame.direction(source, target)
+                                    && u64::from(frame.logical_label) == label
+                                    && (label != 10
+                                        || frame.bytes.first() == Some(&(resource as u8)))
+                                    && receipts[*frame_id]["send_actor"] == sender
+                            },
+                        ))
+                        .map_err(|error| {
+                            format!(
+                                "{agent}/{tool} frame {source}->{target}, label {label}: {error}"
+                            )
+                        })?;
+                        Ok((id, frame))
+                    };
+                    let (intent_id, intent) = find(owner, fork_owner, resource)?;
+                    let (request_id, request) = find(resource, owner, resource)?;
+                    let (loan_id, loan) = find(fork_owner, owner, 10)?;
+                    let (reply_id, reply) = find(resource, fork_owner, resource)?;
+                    let (return_id, returned) = find(owner, fork_owner, 10)?;
+                    if intent.value()? != call.request["arguments"]
+                        || request.value()? != call.request["arguments"]
+                        || reply.value()? != *result
+                        || loan.bytes.len() != 3
+                        || returned.bytes.len() != 3
+                        || !(close_at < committed(intent_id)?
+                            && committed(intent_id)? < committed(request_id)?
+                            && committed(request_id)? < committed(loan_id)?
+                            && committed(loan_id)? < call.emitted
+                            && result_at < committed(reply_id)?
+                            && committed(reply_id)? < committed(return_id)?)
+                        || receipts[&request_id]["send_actor"] != fork_owner
+                        || receipts[&request_id]["receive_commit"]["actor"] != owner
+                        || receipts[&loan_id]["receive_commit"]["actor"] != owner
+                        || receipts[&reply_id]["send_actor"] != owner
+                        || receipts[&reply_id]["receive_commit"]["actor"] != fork_owner
+                    {
+                        return Err("effect lacks its two committed resource requests, Endpoints or actual replies".into());
+                    }
+                    for id in [intent_id, request_id, loan_id, reply_id, return_id] {
+                        if !used.insert(id) {
+                            return Err("resource occurrence reused by another effect".into());
+                        }
+                    }
+                    resources.push(json!({"resource":resource,"intent_frame":intent_id,
+                        "request_frame":request_id,"request_receive":receipts[&request_id]["receive_commit"],
+                        "endpoint_frame":loan_id,"endpoint_receive":receipts[&loan_id]["receive_commit"],
+                        "result_frame":reply_id,"return_frame":return_id}));
+                }
+                meals.push((call.started()?.1, call.ended()?.1, names));
+            }
+            let events = journal.score["events"]
+                .as_array()
+                .ok_or("original events")?
+                .iter()
+                .filter(|event| event["agent"] == agent && event["tool"] == tool)
                 .collect::<Vec<_>>();
             let expected_args = if tool == "think" {
                 json!({})
@@ -475,56 +505,79 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 || events[0]["args"] != expected_args
                 || events[0]["result"] != result["data"]
                 || events[0]["success"] != result["success"]
-                || result["data"]["philosopher"] != agent
             {
-                return Err("original simulator result mismatch".into());
+                return Err("original simulator score and actual effect differ".into());
             }
+            effect_receipts.push(json!({"effect_id":id,"agent":agent,"tool":tool,
+                "object_frame":close_id,"object_receive":receipts[&close_id]["receive_commit"],
+                "arguments":call.request["arguments"],"resources":resources}));
         }
     }
-    let expected_parallel = actors.len() / 2;
-    if !verdict
-        || exits.len() != actors.len()
-        || calls.len() != actors.len()
-        || calls.values().any(|&n| n != 2)
-        || !outstanding.is_empty()
-        || !requests.is_empty()
-        || !delivered.is_empty()
-        || !meals.is_empty()
-        || !in_flight.is_empty()
-        || !active.is_empty()
-        || frames.values().any(|f| f.queued || f.received == 0)
-        || forks.values().any(|&(owner, resource)| {
-            held[&resource] != Some(owner)
-                || loans.get(&resource) != Some(&2)
-                || returns.get(&resource) != Some(&2)
-        })
-        || score["complete"] != true
-        || score["violations"] != json!([])
-        || score["events"].as_array().ok_or("events")?.len() != 2 * actors.len()
+    for (&id, frame) in &journal.frames {
+        if forks.values().any(|&(owner, resource)| {
+            frame.identity["source"] == owner
+                || frame.identity["target"] == owner
+                || frame.identity["source"] == resource
+                || frame.identity["target"] == resource
+        }) && !used.contains(&id)
+        {
+            return Err("unused or excessive physical resource frame".into());
+        }
+    }
+    let mut maximum_eaters = 0;
+    for (index, (start, end, names)) in meals.iter().enumerate() {
+        let mut overlaps = 0;
+        for (other_index, (other_start, other_end, other_names)) in meals.iter().enumerate() {
+            if index != other_index
+                && start < other_end
+                && other_start < end
+                && !names.is_disjoint(other_names)
+            {
+                return Err("effects overlap on the same physical fork".into());
+            }
+            if other_start <= start && start < other_end {
+                overlaps += 1;
+            }
+        }
+        maximum_eaters = maximum_eaters.max(overlaps);
+    }
+    if journal.score["complete"] != true
+        || journal.score["violations"] != json!([])
+        || journal.score["events"]
+            .as_array()
+            .ok_or("score events")?
+            .len()
+            != 2 * count
         || maximum_eaters == 0
-        || maximum_eaters > expected_parallel
+        || maximum_eaters > count / 2
     {
-        return Err("incomplete delegation boundary evidence".into());
+        return Err("incomplete dining outcome or invalid physical overlap".into());
     }
     Ok(
-        json!({"task":fixture["task"],"kind":"actual_wasi_resource_delegation","model_calls":null,"scored_benchmark":false,"status":"passed","participants":actors.len(),"domain_calls":2*actors.len(),"carrier_frames":frames.len(),"max_disjoint_eaters":maximum_eaters,"simulator_complete":true,"actual_resource_endpoint_requests":2*actors.len(),"actual_resource_endpoint_returns":2*actors.len(),"violations":0,"guest_exits":exits.len(),"original_test_delays":fixture["test_delays"]}),
+        json!({"task":fixture["task"],"kind":"bound_choreofs_resource_effect_receipts",
+        "model_calls":null,"scored_benchmark":false,"status":"passed","participants":count,
+        "domain_calls":journal.calls.len(),"carrier_frames":journal.frames.len(),
+        "max_disjoint_eaters":maximum_eaters,"simulator_complete":true,
+        "actual_resource_endpoint_requests":2*count,"actual_resource_endpoint_returns":2*count,
+        "object_effect_receipts":effects.len(),"rejected_object_closes":rejected_closes,
+        "effect_receipts":effect_receipts,
+        "observed_result_reads":read_results,"violations":0,"guest_exits":actors.len(),
+        "dynamic_protocol":dynamic,"original_test_delays":fixture["test_delays"]}),
     )
 }
 
-fn send(output: &mut impl Write, value: &Value) -> Result<()> {
-    serde_json::to_writer(&mut *output, value)?;
-    writeln!(output)?;
-    Ok(())
-}
-
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    audit(path)?;
+    let baseline = audit(path)?;
     let projection = crate::projection::load(path)?;
+    let records = journal::records(path)?;
+    let labels = crate::projection::frames(&projection, &records)?;
+    let first_eat = baseline["effect_receipts"]
+        .as_array()
+        .ok_or("effect receipts")?
+        .iter()
+        .find(|receipt| receipt["agent"] == "PHILOSOPHER_A" && receipt["tool"] == "eat")
+        .ok_or("first eating effect receipt")?;
     fs::create_dir(output)?;
-    let records = BufReader::new(File::open(path)?)
-        .lines()
-        .map(|line| Ok(serde_json::from_str::<Value>(&line?)?))
-        .collect::<Result<Vec<_>>>()?;
     let mut checked = Vec::new();
     for mutation in [
         "wrong_frame_label",
@@ -535,169 +588,250 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         "forged_result",
         "missing_exit",
         "false_score",
-        "response_before_second_request",
+        "effect_before_second_request",
         "consistent_unknown_private_role",
         "consistent_wrong_session",
+        "coherent_arguments",
+        "coherent_write_bytes",
+        "coherent_read_result",
+        "missing_object_close",
+        "missing_capture",
+        "missing_checkpoint",
+        "duplicate_effect_fresh_id",
+        "missing_resource_return",
     ] {
         let mut copy = records.clone();
-        if matches!(mutation, "wrong_frame_label" | "wrong_lane") {
-            let frame = copy
-                .iter()
-                .find(|row| row["message"]["type"] == "protocol_frame")
-                .ok_or("frame for header mutation")?["message"]
-                .clone();
-            let field = if mutation == "wrong_frame_label" {
-                "frame_label"
-            } else {
-                "lane"
-            };
-            let replacement = if mutation == "wrong_frame_label" {
-                65535
-            } else {
-                (frame["lane"].as_u64().ok_or("observed lane")? + 1) % 256
-            };
-            for row in &mut copy {
-                if row["message"]["type"] == "protocol_frame"
-                    && row["message"]["frame_id"] == frame["frame_id"]
-                {
-                    row["message"][field] = json!(replacement);
+        match mutation {
+            "wrong_frame_label"
+            | "wrong_lane"
+            | "consistent_unknown_private_role"
+            | "consistent_wrong_session" => {
+                let frame = records
+                    .iter()
+                    .find(|row| row["message"]["type"] == "protocol_frame")
+                    .ok_or("header mutation frame")?["message"]
+                    .clone();
+                let (field, replacement) = match mutation {
+                    "wrong_frame_label" => ("frame_label", 65535),
+                    "wrong_lane" => ("lane", (frame["lane"].as_u64().ok_or("lane")? + 1) % 256),
+                    "consistent_unknown_private_role" => ("source", 254),
+                    "consistent_wrong_session" => (
+                        "session",
+                        u64::from(crate::philosopher_identity::SESSION) + 1,
+                    ),
+                    _ => unreachable!(),
+                };
+                for row in &mut copy {
+                    if row["message"]["type"] == "protocol_frame"
+                        && row["message"]["frame_id"] == frame["frame_id"]
+                    {
+                        row["message"][field] = json!(replacement);
+                    }
                 }
             }
-        } else {
-            let index = copy
-                .iter()
-                .position(|r| {
-                    let m = &r["message"];
-                    match mutation {
-                        "missing_request" => {
-                            r["direction"] == "runtime"
-                                && m["type"] == "protocol_frame"
-                                && m["action"] == "receive"
-                                && m["source"] == 28
-                                && m["target"] == 0
-                        }
-                        "altered_frame" => {
-                            r["direction"] == "runtime"
-                                && m["type"] == "protocol_frame"
-                                && m["action"] == "receive"
-                        }
-                        "forged_arguments" => m["type"] == "execute",
-                        "forged_result" => {
-                            r["direction"] == "simulator" && m["type"] == "simulator_result"
-                        }
-                        "missing_exit" => m["type"] == "exit",
-                        "false_score" => m["type"] == "score",
-                        "response_before_second_request" => true,
-                        "consistent_unknown_private_role" => {
-                            r["direction"] == "runtime"
-                                && m["type"] == "protocol_frame"
-                                && m["source"].as_u64().is_some_and(|role| role >= 14)
-                                && m["target"].as_u64().is_some_and(|role| role >= 14)
-                        }
-                        "consistent_wrong_session" => m["type"] == "protocol_frame",
-                        _ => false,
-                    }
-                })
-                .ok_or("mutation target missing")?;
-            match mutation {
-                "missing_request" | "missing_exit" => {
-                    copy.remove(index);
+            "missing_request" | "missing_object_close" | "missing_resource_return" => {
+                let id = match mutation {
+                    "missing_request" => &first_eat["resources"][0]["request_frame"],
+                    "missing_object_close" => &first_eat["object_frame"],
+                    "missing_resource_return" => &first_eat["resources"][0]["return_frame"],
+                    _ => unreachable!(),
+                };
+                let before = copy.len();
+                copy.retain(|row| {
+                    !(row["message"]["type"] == "protocol_frame"
+                        && row["message"]["frame_id"] == *id)
+                });
+                if before == copy.len() {
+                    return Err("missing frame mutation assignment".into());
                 }
-                "altered_frame" => copy[index]["message"]["source"] = json!(254),
-                "forged_arguments" => {
-                    copy[index]["message"]["arguments"] = json!({"philosopher":42})
-                }
-                "forged_result" => {
-                    copy[index]["message"]["result"]["data"] = json!({"forged":true})
-                }
-                "false_score" => {
-                    copy[index]["message"]["complete"] = json!(
-                        !copy[index]["message"]["complete"]
-                            .as_bool()
-                            .ok_or("score completion")?
-                    )
-                }
-                "response_before_second_request" => {
-                    use crate::philosopher_identity::{roles9e, roles9h, roles9m};
-                    let right = match records[0]["message"]["task"].as_str() {
-                        Some("9E") => roles9e::FORK_C_RESOURCE,
-                        Some("9M") => roles9m::FORK_E_RESOURCE,
-                        Some("9H") => roles9h::FORK_G_RESOURCE,
-                        _ => return Err("unknown dining task".into()),
-                    };
-                    let request = records
-                        .iter()
-                        .find(|r| {
-                            let m = &r["message"];
-                            m["type"] == "protocol_frame"
-                                && m["action"] == "send"
-                                && m["source"] == right
-                                && m["target"] == 0
-                        })
-                        .ok_or("actual right-resource request")?["message"]["frame_id"]
-                        .clone();
-                    let moved = copy
-                        .iter()
-                        .filter(|r| {
-                            r["message"]["type"] == "protocol_frame"
-                                && r["message"]["frame_id"] == request
-                        })
-                        .cloned()
-                        .collect::<Vec<_>>();
-                    copy.retain(|r| {
-                        !(r["message"]["type"] == "protocol_frame"
-                            && r["message"]["frame_id"] == request)
-                    });
-                    let after = copy
-                        .iter()
-                        .position(|r| {
-                            let m = &r["message"];
-                            m["type"] == "protocol_frame"
-                                && m["action"] == "receive"
-                                && m["source"] == 0
-                                && m["target"] == roles9e::FORK_A_RESOURCE
-                        })
-                        .ok_or("actual meal receipt")?
-                        + 1;
-                    copy.splice(after..after, moved);
-                }
-                "consistent_unknown_private_role" => {
-                    let id = copy[index]["message"]["frame_id"].clone();
-                    for row in &mut copy {
-                        if row["message"]["type"] == "protocol_frame"
-                            && row["message"]["frame_id"] == id
-                        {
-                            row["message"]["source"] = json!(254);
-                        }
-                    }
-                }
-                "consistent_wrong_session" => {
-                    let id = copy[index]["message"]["frame_id"].clone();
-                    for row in &mut copy {
-                        if row["message"]["type"] == "protocol_frame"
-                            && row["message"]["frame_id"] == id
-                        {
-                            row["message"]["session"] =
-                                json!(crate::philosopher_identity::SESSION + 1);
-                        }
-                    }
-                }
-                _ => unreachable!(),
             }
+            "altered_frame" => {
+                let row = copy
+                    .iter_mut()
+                    .find(|row| {
+                        row["message"]["type"] == "protocol_frame"
+                            && row["message"]["action"] == "receive"
+                    })
+                    .ok_or("receive observation")?;
+                row["message"]["source"] = json!(254);
+            }
+            "forged_arguments" => {
+                let row = copy
+                    .iter_mut()
+                    .find(|row| {
+                        row["direction"] == "runtime" && row["message"]["type"] == "execute"
+                    })
+                    .ok_or("effect observation")?;
+                row["message"]["arguments"] = json!({"philosopher":42});
+            }
+            "coherent_arguments" => {
+                let id = first_eat["effect_id"].as_u64().ok_or("effect ID")?;
+                for row in &mut copy {
+                    if row["message"]["id"] == id
+                        && ((row["direction"] == "runtime" && row["message"]["type"] == "execute")
+                            || row["direction"] == "domain_start")
+                    {
+                        row["message"]["arguments"]["philosopher"] =
+                            json!("UNADMITTED_DISPLAY_NAME");
+                    }
+                }
+            }
+            "coherent_write_bytes" | "coherent_read_result" => {
+                let label = if mutation == "coherent_write_bytes" {
+                    protocol::LABEL_WASI_FD_WRITE_OBJECT
+                } else {
+                    protocol::LABEL_WASI_FD_READ_RET
+                };
+                let frame = records
+                    .iter()
+                    .find(|row| {
+                        let m = &row["message"];
+                        m["type"] == "protocol_frame"
+                            && m["action"] == "send"
+                            && m["frame_id"]
+                                .as_u64()
+                                .is_some_and(|id| labels.get(&id) == Some(&label))
+                            && m["payload"].as_array().is_some_and(|bytes| {
+                                bytes.len() > 5 && matches!(bytes[0].as_u64(), Some(4 | 5))
+                            })
+                    })
+                    .ok_or("file data mutation frame")?["message"]
+                    .clone();
+                let offset = if mutation == "coherent_write_bytes" {
+                    2
+                } else {
+                    4
+                };
+                let byte = frame["payload"][offset].as_u64().ok_or("file byte")?;
+                for row in &mut copy {
+                    if row["message"]["type"] == "protocol_frame"
+                        && row["message"]["frame_id"] == frame["frame_id"]
+                    {
+                        row["message"]["payload"][offset] = json!(byte ^ 1);
+                    }
+                }
+            }
+            "forged_result" => {
+                let row = copy
+                    .iter_mut()
+                    .find(|row| {
+                        row["direction"] == "simulator"
+                            && row["message"]["type"] == "simulator_result"
+                    })
+                    .ok_or("original effect result")?;
+                row["message"]["result"]["data"] = json!({"forged":true});
+            }
+            "missing_exit" | "missing_capture" | "missing_checkpoint" => {
+                let kind = match mutation {
+                    "missing_exit" => "exit",
+                    "missing_capture" => "protocol_capture",
+                    "missing_checkpoint" => "protocol_checkpoint",
+                    _ => unreachable!(),
+                };
+                let index = copy
+                    .iter()
+                    .position(|row| row["message"]["type"] == kind)
+                    .ok_or("missing record mutation assignment")?;
+                copy.remove(index);
+            }
+            "false_score" => {
+                let row = copy
+                    .iter_mut()
+                    .find(|row| row["message"]["type"] == "score")
+                    .ok_or("score observation")?;
+                row["message"]["complete"] = json!(false);
+            }
+            "effect_before_second_request" => {
+                let before = first_eat["resources"]
+                    .as_array()
+                    .ok_or("two resource receipts")?
+                    .iter()
+                    .filter_map(|resource| resource["request_receive"]["journal_row"].as_u64())
+                    .max()
+                    .ok_or("second resource receipt")?;
+                let before = before as usize;
+                let old = copy
+                    .iter()
+                    .position(|row| {
+                        row["direction"] == "runtime"
+                            && row["message"]["type"] == "execute"
+                            && row["message"]["id"] == first_eat["effect_id"]
+                    })
+                    .ok_or("effect observation")?;
+                if before >= old {
+                    return Err("baseline effect precedes its resource receipt".into());
+                }
+                let row = copy.remove(old);
+                copy.insert(before, row);
+            }
+            "duplicate_effect_fresh_id" => {
+                let id = first_eat["effect_id"].as_u64().ok_or("effect ID")?;
+                let fresh = records
+                    .iter()
+                    .filter_map(|row| row["message"]["id"].as_u64())
+                    .max()
+                    .ok_or("RPC IDs")?
+                    .checked_add(1)
+                    .ok_or("fresh RPC ID overflow")?;
+                let mut extra = records
+                    .iter()
+                    .filter(|row| {
+                        row["message"]["id"] == id
+                            && ((row["direction"] == "runtime"
+                                && row["message"]["type"] == "execute")
+                                || row["direction"] == "domain_start"
+                                || row["direction"] == "domain_end"
+                                || (row["direction"] == "simulator"
+                                    && row["message"]["type"] == "simulator_result"))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if extra.len() != 4 {
+                    return Err("complete effect lifecycle mutation assignment".into());
+                }
+                for row in &mut extra {
+                    row["message"]["id"] = json!(fresh);
+                }
+                let before = records
+                    .iter()
+                    .position(|row| {
+                        row["direction"] == "simulator"
+                            && row["message"]["type"] == "simulator_result"
+                            && row["message"]["id"] == id
+                    })
+                    .ok_or("effect result observation")?
+                    + 1;
+                copy.splice(before..before, extra);
+            }
+            _ => unreachable!(),
+        }
+        // These mutations keep the complete source execution valid. Their
+        // rejection demonstrates the additional, application-data obligation.
+        let epf_still_valid = matches!(
+            mutation,
+            "coherent_arguments"
+                | "coherent_write_bytes"
+                | "coherent_read_result"
+                | "effect_before_second_request"
+                | "duplicate_effect_fresh_id"
+        );
+        if epf_still_valid {
+            crate::projection::check_dynamic(&projection, &copy)?;
         }
         let mutant_path = output.join(format!("{mutation}.jsonl"));
-        let mut file = std::io::BufWriter::new(File::create(&mutant_path)?);
-        for record in &copy {
-            send(&mut file, record)?;
+        let mut file = std::io::BufWriter::new(File::create_new(&mutant_path)?);
+        for row in &copy {
+            serde_json::to_writer(&mut file, row)?;
+            writeln!(file)?;
         }
         file.flush()?;
         let error = check(&copy, &projection)
             .err()
-            .ok_or("audit accepted mutated evidence")?
+            .ok_or_else(|| format!("audit accepted {mutation}"))?
             .to_string();
-        checked.push(json!({"mutation":mutation, "rejected":true, "error":error}));
+        checked.push(json!({"mutation":mutation,"rejected":true,"epf_execution_preserved":epf_still_valid.then_some(true),"error":error}));
     }
-    let result = json!({"mutants":checked, "original_unchanged":true});
+    let result = json!({"mutants":checked,"original_unchanged":true});
     fs::write(
         output.join("mutants.json"),
         format!("{}\n", serde_json::to_string_pretty(&result)?),

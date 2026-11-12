@@ -18,23 +18,6 @@ impl<const OPERATION: u8> ReportArguments<OPERATION> {
             .map_err(|_| ShellError::message("invalid report arguments"))?;
         Ok(Self(bytes.to_vec()))
     }
-    pub fn from_close(closed: &crate::shell::imp::file_wire::ClosedFile) -> ShellResult<Self> {
-        let path: &[u8] = match OPERATION {
-            1 => b"service/research_topic",
-            2 => b"service/write_section",
-            3 => b"service/revise_section",
-            4 => b"service/update_references",
-            5 => b"service/review_sections",
-            6 => b"service/combine_sections",
-            _ => return Err(ShellError::message("unknown report operation")),
-        };
-        if closed.completion.0.errno() != 0 || closed.path != path {
-            return Err(ShellError::message(
-                "service file does not match the report request",
-            ));
-        }
-        Self::from_bytes(&closed.bytes)
-    }
     pub fn into_value(self) -> Value {
         serde_json::from_slice(&self.0).expect("validated report arguments")
     }

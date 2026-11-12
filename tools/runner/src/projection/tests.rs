@@ -1,5 +1,30 @@
 use super::*;
 
+// These fixtures isolate static wire/actor checks. Their source rows declare
+// the full inventory; the complete EPF format is tested in dynamic.rs.
+fn declare_fixture_roles(programs: &mut [Value]) {
+    let source: Vec<_> = programs
+        .iter()
+        .enumerate()
+        .map(|(index, program)| {
+            let role = program["role"].as_u64().unwrap();
+            json!([
+                index,
+                hibana::runtime::tap::PROJECTED_SOURCE,
+                0,
+                role << 24 | role << 16,
+                0
+            ])
+        })
+        .collect();
+    for program in programs {
+        program["rows"]
+            .as_array_mut()
+            .unwrap()
+            .extend(source.clone());
+    }
+}
+
 fn artifact() -> Value {
     let mut programs = Vec::new();
     for role in [0, 1, 2, 5, 6, 7, 8, 9, 10, 13] {
@@ -28,6 +53,7 @@ fn artifact() -> Value {
         }
         programs.push(json!({"role":role,"rows":rows}));
     }
+    declare_fixture_roles(&mut programs);
     json!({"format_version":1,"runtime_binary_sha256":"a".repeat(64),
         "compiled":{"type":"compiled_projection","format_version":1,"task":"6E",
         "roles":{"a":0,"b":1,"review":2,"review_a":5,"review_b":6,"repo":7,
@@ -80,6 +106,32 @@ fn a_new_named_role_task_checks_its_published_inventory_without_another_allow_li
     assert!(contracts(&image["compiled"]).is_err());
     image["compiled"]["task"] = json!("unknown");
     assert!(contracts(&image["compiled"]).is_err());
+    Ok(())
+}
+
+#[test]
+fn real_source_inventory_keeps_missing_actors_visible_without_task_role_tables() -> Result<()> {
+    use hibana::{Endpoint, g, runtime::program::project};
+    type File<'run> = g::Msg<10, Endpoint<'run, 35>>;
+    type Request = g::Msg<20, u32>;
+    type Reply = g::Msg<21, u32>;
+    let global = g::seq(
+        g::send::<42, 14, File>(),
+        g::seq(g::send::<35, 42, Request>(), g::send::<42, 35, Reply>()),
+    );
+    let image = json!({"type":"compiled_projection","format_version":1,"task":"9E",
+    "programs":[
+        {"role":42,"rows":hibana::runtime::tap::projected(&project::<42>(&global)).map(|r|[r.ts(),u32::from(r.id()),u32::from(r.causal_key()),r.arg0(),r.arg1()]).collect::<Vec<_>>()},
+        {"role":14,"rows":hibana::runtime::tap::projected(&project::<14>(&global)).map(|r|[r.ts(),u32::from(r.id()),u32::from(r.causal_key()),r.arg0(),r.arg1()]).collect::<Vec<_>>()},
+        {"role":35,"rows":hibana::runtime::tap::projected(&project::<35>(&global)).map(|r|[r.ts(),u32::from(r.id()),u32::from(r.causal_key()),r.arg0(),r.arg1()]).collect::<Vec<_>>()},
+    ]});
+    assert_eq!(contracts(&image)?.len(), 3);
+    let mut incomplete = image;
+    incomplete["programs"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|p| p["role"] == 14);
+    assert!(contracts(&incomplete).is_err());
     Ok(())
 }
 
@@ -236,6 +288,7 @@ fn cicd_artifact() -> Value {
         }
         programs.push(json!({"role":role,"rows":rows}));
     }
+    declare_fixture_roles(&mut programs);
     json!({"format_version":1,"runtime_binary_sha256":"a".repeat(64),
         "compiled":{"type":"compiled_projection","format_version":1,"task":"16E","programs":programs}})
 }

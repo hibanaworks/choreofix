@@ -54,7 +54,7 @@ impl Call {
             .ok_or_else(|| "tool name".into())
     }
 }
-pub(crate) fn one<'a, T: 'a>(items: impl Iterator<Item = &'a T>) -> Result<&'a T> {
+pub(crate) fn one<T>(items: impl Iterator<Item = T>) -> Result<T> {
     let mut items = items;
     let frame = items.next().ok_or("missing matching frame")?;
     if items.next().is_some() {

@@ -1,17 +1,15 @@
-use super::{
-    bus::{Bus, Terminal},
-    file_wire::{ClosedFile, FILE_BYTES, SERVICE_FD},
-};
+use super::bus::{Bus, Terminal};
 use crate::shell::{ShellError, ShellResult};
 use hibana_wasip1_runtime::{
     choreofs::{ChoreoFsObject, ChoreoFsObjectSet, ChoreoFsWrite, FdSpec, ObjectId},
-    exchange::FdBindingTable,
     protocol::{self, FdBinding, FdReadRow, FdReaddirRow, FdWriteRow},
 };
 
 const READ: u64 = 1 << 1;
 pub const WRITE: u64 = 1 << 6;
 const READDIR: u64 = 1 << 14;
+const ROOT_DIRECTORY_FD: usize = 16;
+const ROOT_FD_SLOTS: usize = ROOT_DIRECTORY_FD + 1;
 const READ_WRITE: FdBinding = FdBinding {
     read: Some(FdReadRow::Base),
     write: Some(FdWriteRow::Base),
@@ -27,31 +25,52 @@ const UNBOUND_PATHS: [&[u8]; 8] = [
 // ownership authority. All file operations consume ChoreoFS operation results.
 pub struct PrivateFs<'a> {
     pub input: Vec<u8>,
-    reply: Vec<u8>,
-    pub service_path: Vec<u8>,
-    pub service_bytes: Vec<u8>,
     pub work: [Vec<u8>; 8],
     pub paths: [Vec<u8>; 8],
     listing: Vec<u8>,
-    pub offsets: [usize; 16],
-    pub fd_flags: [u16; 16],
+    service_listing: Vec<u8>,
+    root_listing: Vec<u8>,
+    pub offsets: [usize; ROOT_FD_SLOTS],
+    pub fd_flags: [u16; ROOT_FD_SLOTS],
     pub output: Vec<u8>,
     pub terminal: Terminal,
     pub bus: &'a Bus,
 }
 
 impl<'a> PrivateFs<'a> {
-    pub fn new(terminal: Terminal, bus: &'a Bus) -> Self {
+    pub fn new(terminal: Terminal, bus: &'a Bus, files: &[ChoreoFsObject<'static>]) -> Self {
+        let mut service_listing = Vec::new();
+        for file in files {
+            let name = file
+                .path()
+                .rsplit(|byte| *byte == b'/')
+                .next()
+                .expect("file name");
+            directory_entry(
+                &mut service_listing,
+                name,
+                file.object().0 as u64,
+                protocol::WASIP1_FILETYPE_REGULAR_FILE,
+            );
+        }
+        let mut root_listing = Vec::new();
+        for (name, inode) in [(b"service".as_slice(), 16), (b"work".as_slice(), 14)] {
+            directory_entry(
+                &mut root_listing,
+                name,
+                inode,
+                protocol::WASIP1_FILETYPE_DIRECTORY,
+            );
+        }
         Self {
             input: Vec::new(),
-            reply: Vec::new(),
-            service_path: b"\0arguments".to_vec(),
-            service_bytes: Vec::new(),
             work: std::array::from_fn(|_| Vec::new()),
             paths: std::array::from_fn(|_| Vec::new()),
             listing: Vec::new(),
-            offsets: [0; 16],
-            fd_flags: [0; 16],
+            service_listing,
+            root_listing,
+            offsets: [0; ROOT_FD_SLOTS],
+            fd_flags: [0; ROOT_FD_SLOTS],
             output: Vec::new(),
             terminal,
             bus,
@@ -85,7 +104,7 @@ impl PrivateFs<'_> {
         }
     }
 
-    pub fn objects(&self) -> ChoreoFsObjectSet<'_, 16> {
+    pub fn objects(&self) -> ChoreoFsObjectSet<'_, 15> {
         ChoreoFsObjectSet::new([
             ChoreoFsObject::readable(
                 b"llm/stdin",
@@ -112,13 +131,6 @@ impl PrivateFs<'_> {
                 FdSpec::new(3, READDIR, 1),
                 b"",
                 FdBinding::readdir(FdReaddirRow::Base),
-            ),
-            ChoreoFsObject::readable(
-                b"service/result",
-                ObjectId(5),
-                FdSpec::new(5, READ, 1),
-                &self.reply,
-                FdBinding::read(FdReadRow::Base),
             ),
             ChoreoFsObject::read_write(
                 self.work_path(0),
@@ -189,14 +201,15 @@ impl PrivateFs<'_> {
                 b"",
                 ObjectId(15),
                 FdSpec::new(15, READDIR, 1),
-                b"",
+                &self.root_listing,
                 FdBinding::readdir(FdReaddirRow::Base),
             ),
-            ChoreoFsObject::writable(
-                &self.service_path,
-                ObjectId(SERVICE_FD as u32),
-                FdSpec::new(SERVICE_FD, WRITE, 1),
-                FdBinding::write(FdWriteRow::Object),
+            ChoreoFsObject::readdir(
+                b"service",
+                ObjectId(16),
+                FdSpec::new(16, READDIR, 1),
+                &self.service_listing,
+                FdBinding::readdir(FdReaddirRow::Base),
             ),
         ])
     }
@@ -208,25 +221,6 @@ impl PrivateFs<'_> {
         }
         match operation.object() {
             Some(ObjectId(1 | 2)) => self.output.extend_from_slice(operation.bytes()),
-            Some(ObjectId(4)) => {
-                let start = if self.fd_flags[4] & 1 != 0 {
-                    self.service_bytes.len()
-                } else {
-                    self.offsets[4]
-                };
-                let Some(end) = start
-                    .checked_add(operation.bytes().len())
-                    .filter(|end| *end <= FILE_BYTES)
-                else {
-                    return Ok(protocol::FdWriteDoneRet(
-                        protocol::FdWriteDone::new_with_errno(SERVICE_FD, 0, 22),
-                    ));
-                };
-                self.service_bytes
-                    .resize(self.service_bytes.len().max(end), 0);
-                self.service_bytes[start..end].copy_from_slice(operation.bytes());
-                self.offsets[4] = end;
-            }
             Some(ObjectId(fd @ 6..=13)) => {
                 let fd = fd as usize;
                 let file = &mut self.work[fd - 6];
@@ -257,50 +251,13 @@ impl PrivateFs<'_> {
         }
         Ok(operation.written())
     }
-    pub fn closed_file(&self, completion: protocol::FdClosedRet) -> ClosedFile {
-        let (path, bytes) = if completion.0.fd() == SERVICE_FD && completion.0.errno() == 0 {
-            (self.service_path.clone(), self.service_bytes.clone())
-        } else {
-            (Vec::new(), Vec::new())
-        };
-        ClosedFile {
-            completion,
-            path,
-            bytes,
-        }
-    }
-    pub fn result_chunk(&mut self, operation: ChoreoFsWrite<'_>, offset: usize) -> ShellResult<()> {
-        if !operation.is_writable() {
-            return Err(ShellError::message("result file is not writable"));
-        }
-        let end = offset
-            .checked_add(operation.bytes().len())
-            .ok_or_else(|| ShellError::message("result offset overflow"))?;
-        let len = if offset == 0 {
-            end
-        } else {
-            self.reply.len().max(end)
-        };
-        self.reply
-            .try_reserve(len.saturating_sub(self.reply.len()))
-            .map_err(|error| ShellError::message(format!("result allocation failed: {error}")))?;
-        self.reply.resize(len, 0);
-        self.reply[offset..end].copy_from_slice(operation.bytes());
-        let _completion = operation.written();
-        Ok(())
-    }
 }
-pub fn bindings() -> FdBindingTable {
-    let mut bindings = FdBindingTable::empty();
-    for (fd, binding) in [
-        (0, FdBinding::read(FdReadRow::Base)),
-        (1, FdBinding::write(FdWriteRow::Base)),
-        (2, FdBinding::write(FdWriteRow::Base)),
-        (3, FdBinding::readdir(FdReaddirRow::Base)),
-    ] {
-        bindings
-            .bind_fd(fd, binding)
-            .expect("four fixed initial bindings fit");
-    }
-    bindings
+
+fn directory_entry(bytes: &mut Vec<u8>, name: &[u8], inode: u64, kind: u8) {
+    let next = (bytes.len() + 24 + name.len()) as u64;
+    bytes.extend_from_slice(&next.to_le_bytes());
+    bytes.extend_from_slice(&inode.to_le_bytes());
+    bytes.extend_from_slice(&(name.len() as u32).to_le_bytes());
+    bytes.extend_from_slice(&[kind, 0, 0, 0]);
+    bytes.extend_from_slice(name);
 }

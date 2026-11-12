@@ -323,7 +323,9 @@ pub fn check(artifact: &Value, rows: &[Value]) -> Result<Value> {
                 .ok_or("acceptance lacks a checked source occurrence")?;
             intervals.push(json!({"producer":streams.keys().nth(acceptance.first_poll.producer),
                 "first_poll":acceptance.first_poll.ordinal,"before":acceptance.before,"frame_id":frame,
-                "occurrence":occurrence,"receive_commit":receive_commits.get(occurrence)}));
+                "occurrence":occurrence,"send_actor":call.causal_key()>>8,
+                "send_view":call.causal_key() as u8,
+                "receive_commit":receive_commits.get(occurrence)}));
         }
         reports.push(json!({"session":session,"expanded_events":source.event_count(),"order":correspondence,"acceptances":intervals}));
     }
@@ -411,6 +413,8 @@ mod tests {
         let delivery = &report["sessions"][0]["acceptances"][0];
         assert_eq!(delivery["frame_id"], 19);
         assert_eq!(delivery["occurrence"], 0);
+        assert_eq!(delivery["send_actor"], 7);
+        assert_eq!(delivery["send_view"], 7);
         assert_eq!(
             delivery["receive_commit"],
             json!({"producer":42,"ordinal":2,"journal_row":4,

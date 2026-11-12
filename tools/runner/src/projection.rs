@@ -35,6 +35,7 @@ pub(crate) fn contracts(compiled: &Value) -> Result<BTreeMap<u16, [u8; 6]>> {
     let mut owners = BTreeSet::new();
     let mut resources = BTreeSet::new();
     let mut represented = BTreeSet::new();
+    let mut source_roles = None;
     for program in compiled["programs"].as_array().ok_or("compiled programs")? {
         let role = program["role"]
             .as_u64()
@@ -46,6 +47,7 @@ pub(crate) fn contracts(compiled: &Value) -> Result<BTreeMap<u16, [u8; 6]>> {
         let mut actor_rows = Vec::new();
         let mut actor = None;
         let mut seen = BTreeSet::new();
+        let mut declared = BTreeSet::new();
         for row in program["rows"].as_array().ok_or("compiled rows")?.iter() {
             let row = row
                 .as_array()
@@ -59,6 +61,17 @@ pub(crate) fn contracts(compiled: &Value) -> Result<BTreeMap<u16, [u8; 6]>> {
                     .ok_or("compiled row word")?;
             }
             let [at, kind, actors, packed, peers] = words;
+            if kind == u64::from(hibana::runtime::tap::PROJECTED_SOURCE) {
+                declared.extend([(packed >> 24) & 255, (packed >> 16) & 255]);
+                match actors >> 8 {
+                    0 => {}
+                    1 if peers <= 255 => {
+                        declared.insert(peers);
+                    }
+                    _ => return Err("invalid compiled source payload kind".into()),
+                }
+                continue;
+            }
             // Static frame membership uses local rows. Complete compiled-source
             // validation and dynamic eligibility are checked separately by EPF.
             if !matches!(kind, LOCAL | SEND | RECV) {
@@ -105,6 +118,14 @@ pub(crate) fn contracts(compiled: &Value) -> Result<BTreeMap<u16, [u8; 6]>> {
             }
             directions.entry(wire).or_default().insert(kind);
         }
+        if declared.is_empty()
+            || source_roles
+                .as_ref()
+                .is_some_and(|previous| previous != &declared)
+        {
+            return Err("compiled programs lack a common source role inventory".into());
+        }
+        source_roles = Some(declared);
         if let Some(actor) = actor {
             match images.entry(actor) {
                 std::collections::btree_map::Entry::Vacant(entry) => {
@@ -118,29 +139,20 @@ pub(crate) fn contracts(compiled: &Value) -> Result<BTreeMap<u16, [u8; 6]>> {
             }
         }
     }
-    let expected = match compiled["task"].as_str() {
-        Some("1E" | "2E" | "9E") => (0..5)
-            .flat_map(|group| (0..3).map(move |role| group * 7 + role))
-            .collect(),
-        Some("1M" | "2M" | "9M") => (0..5)
-            .flat_map(|group| (0..5).map(move |role| group * 7 + role))
-            .collect(),
-        Some("1H" | "2H" | "9H") => (0..35).collect(),
-        Some("8E") => (0..17).collect(),
-        Some("16E") => (0..=12).collect(),
-        // Other accepted task formats publish the exact role inventory.
-        // Do not maintain a second task allow-list beside the format check.
-        _ => compiled["roles"]
-            .as_object()
-            .ok_or("compiled role names")?
+    let expected = source_roles.ok_or("missing compiled source role inventory")?;
+    if let Some(names) = compiled["roles"].as_object() {
+        let named = names
             .values()
             .map(|role| {
                 role.as_u64()
                     .filter(|role| *role <= 255)
                     .ok_or_else(|| "compiled named role".into())
             })
-            .collect::<Result<BTreeSet<_>>>()?,
-    };
+            .collect::<Result<BTreeSet<_>>>()?;
+        if named != expected {
+            return Err("compiled role names disagree with the source".into());
+        }
+    }
     if roles != expected
         || headers.is_empty()
         || images

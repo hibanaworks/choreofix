@@ -8,6 +8,11 @@ wording makes that prohibition explicit. No model/scored run is added.
 
 ## Required boundary
 
+ChoreoFS is an object interface to projected communication, not shared storage.
+The file view can be private to a participant. "Shared operation" below means
+an operation affecting a shared resource, not shared file contents. This audit
+does not propose a shared filesystem or move authority into pathname metadata.
+
 A shared file/fd must be bound to its actual owned or borrowed Endpoint before
 its request is processed. The requested file operation itself must traverse the
 business choreography. An independently admitted generic I/O close, followed
@@ -194,3 +199,146 @@ there is no compatibility `next_file` or raw completion fallback. **No task is
 qualified under this boundary yet**, and existing application sources depending
 on the removed API require that migration. The 29 historical ports and all 48
 target tasks remain recorded; do not count a broken or unexecuted port as done.
+
+## Object-close distinction and adapter removal in progress
+
+WASI `dcfb2c5` distinguishes `FdCloseObjectReq` from an ordinary read-only close.
+A typed `FdCloseRejectedRet` requires a nonzero errno and preserves a retry path.
+A real-Wasm fixture performs rejected write-close, retry, successful object close,
+then read-only reopen/close on the same fd. Only the successful object-close
+causes the fixture's effect; reading/closing the result cannot repeat it.
+
+The ordinary library gate passed on unchanged source: 90 native library tests,
+8 example tests, 88 library and 8 example strict-provenance Miri tests, the same
+Lean correspondence checks, docs, Clippy, std-Wasm execution and package check.
+Pico 2 link reports 327,136 bytes of flash and 154,568 bytes of RAM including
+reserved stack; the gate's maximum descendant memory was 702,545,920 bytes.
+Evidence is `hibana-wasip1-runtime/output/verification/choreofs-object-close-v1/`.
+These are library checks, not an application qualification or AI experiment.
+
+The common `file_wire` mailbox, result-chunk protocol and service-path dispatch
+were deleted from the working ChoreoFix shell. The common library builds.
+The old task adapters still require replacement; neither that library build nor
+the new WASI gate certifies them. No additional qualified task or scored run is
+counted.
+
+## Dining replacement implemented; real-Wasm qualification unfinished
+
+The working dining global and localsides for 9E/9M/9H now use the bound guest
+driver. They no longer forward raw pending calls or dispatch closed pathname
+mailboxes. Each think/eat object has an actual file-operation view delegated to
+the guest. The receiver consumes standard received WASI requests through
+ChoreoFS. Ordinary read close cannot initiate an effect. Invalid argument close
+returns EINVAL without modifying the file's bytes, permitting a corrected retry.
+
+An eat effect receiver obtains two real fork requests and both actual fork
+Endpoint values, compares their exact arguments with the admitted file bytes,
+executes the effect, returns the actual result through both resource Endpoints,
+then returns those Endpoints. File-operation views are consumed at guest exit;
+they are not physical forks and have no redundant return for future reuse.
+The real fork return remains mandatory. The root I/O choreography ends only
+after the declared guest/file completion, without an application phase flag.
+
+The complete product binary (including 3, 5 and 7 participants) builds with
+`long_running_const_eval=forbid`; the guarded build took 3m08s and peaked at
+656,326,656 bytes. All-source hashes, dirty patches, canonical dependencies,
+actual binary hash and build-only receipt are retained in
+`output/experiments/dining-bound-choreofs-v1/build-final/`. The result explicitly
+states `built_not_qualified`, model calls 0 and scored runs 0.
+
+The dining independent auditor and scripted real-Wasm boundary tests still
+describe the previous protocol and must be replaced before qualification. The
+application's old native task tests also require replacement/removal with the
+corresponding new real-Wasm coverage. No historical pass certifies this source.
+
+## Direct localside bodies and resolver registration repair
+
+The application `localside::philosopher::File` wrapper has been deleted. The
+3/5/7-participant localsides now declare the file owners as inline scoped async
+bodies. Endpoint transfer, receive, offer, parallel resource operations, actual
+effect, replies and resource returns remain visible in those bodies. There is
+no replacement protocol object or method chain. `FileData` owns bytes, offset
+and descriptor data only; it owns no Endpoint and performs no communication.
+The application rules explicitly forbid reintroducing this wrapper pattern.
+
+The source audit inspected the function/type declarations across 166 production
+localside files in 25 task families, and Endpoint-containing types in the task
+and shell code. This is a source inspection, not qualification of every task.
+The older two-stage adapters listed above remain migration work.
+
+The first resolved-input version incorrectly registered the same resolver ID
+for distinct decisions in one compiled global. Resolver registration is
+program-wide, so later registrations replaced earlier input references. This
+was an application construction error. Each independent decision now has a
+distinct ID in the global and its matching registration. No core production
+code was changed, and no localside ordering workaround was added.
+
+The product binary for all three sizes built on unchanged inputs in 3m07s,
+peaking at 883,261,440 bytes. Its build-only receipt is under
+`output/experiments/dining-bound-choreofs-v1/build-direct-localsides/`.
+
+The actual 9E Wasm run in
+`philosophers-rust-boundary-1794492659965890000/9E-normal/` completed all three
+guests, all six effects, protocol completion and the common simulator score,
+with zero simulator violations. The same run's complete 3,078-record capture
+passed the shared static projection and EPF dynamic source audit. This audit
+does not certify application effects. The legacy dining effect auditor rejects
+the new role layout; replacement of that auditor and the remaining five Wasm
+conditions are unfinished. This was scripted Wasm execution, with model calls 0
+and scored experimental runs 0, not a real-AI qualification.
+
+The two focused core input-prefix/parallel-offer tests pass. Running the whole
+`callsite_regression` target yielded 21 passes and one failure in the existing
+`routefree_parallel_progress_preserves_all_completion_and_fault_cases` test:
+its send-only `MisplacedOffer` probe returned Pending where immediate rejection
+is required. That unresolved result is not counted as a full core gate pass.
+
+## EPF and effect-data correspondence; serial guest self-wait
+
+The dining auditor's separate `held`, `in_flight` and protocol-progress replay
+have been deleted. It uses the shared journal reader and EPF's checked dynamic
+receive occurrences. Its additional obligation is data correspondence: actual
+WASI open/write/read data and close occurrence, actual effect arguments, both
+committed resource requests and Endpoint receives, actual effect result and
+resource replies, and the common simulator's real score. The receipt report
+retains the effect/RPC ID, object frame and dynamic receive, and both resource
+receipts; this is offline evidence, not runtime authority or a second source.
+
+Nineteen record mutations are rejected on the saved 9E trace. Five preserve
+EPF-valid source execution: coherent effect-argument substitution, coherent
+file-write substitution, coherent result-read substitution, an effect before
+its second resource receive, and a fresh RPC ID reusing one close for a second
+effect. These are the concrete reason to retain the value/effect check in
+addition to EPF. The remaining protocol mutations are rejected through the
+shared projection/EPF/journal checks, without a dining ownership model.
+
+The source-fixed product build in `build-effect-receipts/` took 3m08s and peaked
+at 871,170,048 bytes. Product Clippy passed. Runner native tests were 52 passed,
+98 ignored; the ignored mechanism test was then explicitly executed. Its
+normal 9E/9M/9H cases completed with matching EPF/effect/score evidence, actual
+meal overlap 1/2/3 and all 19 mutations rejected per case. The result is under
+`philosophers-rust-boundary-1794494955552470000/`.
+
+The full six-condition test stopped at the first adversarial case: all three
+guests attempted `eat` before `think`, and the fd-close imports waited instead
+of returning a recoverable error. No domain effect ran in this failing case.
+The actual raw trace is retained; the remaining two adversarial cases did not
+run and are not counted as passes. No model or scored experiment ran.
+
+This was reduced to a three-role real-Wasm library test, with close order
+4,3,4 and required errno results EACCES,success,success. It reproduces in 0.01s:
+the guest owns both root and file views, but its early file request waits for
+the root action that the same serial interpreter cannot execute while blocked.
+Generic `OtherViewPending` is needed by legitimate concurrent Endpoint views;
+turning all such waits into errors would break that contract. The correction
+must express the actual closed borrow/ownership of the guest's views at the
+library boundary, preserving asynchronous waits on independently driven views.
+No application flag, phase adapter, request reordering or shortened test is an
+acceptable substitute. No core production change has been made for this case.
+
+Library evidence is `hibana-wasip1-runtime/output/verification/choreofs-self-wait-v1/`.
+Before adding this newly exposed obligation, the existing ordinary WASI gate
+passed on unchanged source: 91 native tests, 8 example tests, 89 Miri library
+tests and 8 Miri example tests; Lean, Pico 2 link and packaging also passed.
+The new reproducer fails, so those earlier successes are not a claim that the
+current library or the six application conditions are fully qualified.

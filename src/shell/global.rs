@@ -34,7 +34,7 @@ pub fn private_io<const VM: u8, const ANSWER: u8>() -> impl Projectable {
     );
     let close = g::seq(
         g::send::<VM, ANSWER, protocol::FdCloseReqMsg>(),
-        g::send::<ANSWER, VM, crate::shell::imp::file_wire::ClosedFileMsg>(),
+        g::send::<ANSWER, VM, protocol::FdCloseRetMsg>(),
     );
     let open = g::seq(
         g::send::<VM, ANSWER, protocol::PathOpenReqMsg>(),
@@ -62,16 +62,7 @@ pub fn private_io<const VM: u8, const ANSWER: u8>() -> impl Projectable {
                             prestat_name,
                             g::route(
                                 file_stat,
-                                g::route(
-                                    close,
-                                    g::route(
-                                        open,
-                                        g::route(
-                                            path_stat,
-                                            g::route(memory_grow, g::send::<VM, ANSWER, Exit>()),
-                                        ),
-                                    ),
-                                ),
+                                g::route(close, g::route(open, g::route(path_stat, memory_grow))),
                             ),
                         ),
                     ),
@@ -79,13 +70,5 @@ pub fn private_io<const VM: u8, const ANSWER: u8>() -> impl Projectable {
             ),
         ),
     );
-    let object_write = g::seq(
-        g::send::<VM, ANSWER, protocol::FdWriteObjectReqMsg>(),
-        g::send::<ANSWER, VM, protocol::FdWriteObjectRetMsg>(),
-    );
-    g::route(
-        g::send::<VM, ANSWER, crate::shell::imp::file_wire::ResultChunkMsg>(),
-        g::route(object_write, io),
-    )
-    .roll()
+    io.roll()
 }

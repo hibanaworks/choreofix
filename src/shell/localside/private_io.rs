@@ -1,13 +1,10 @@
-use crate::shell::imp::file_wire::{
-    ClosedFileMsg, RESULT_CHUNK_LABEL, RESULT_FD, ResultChunk, ResultChunkMsg, SERVICE_FD,
-};
 use crate::shell::{
     ShellError, ShellResult,
     global::Exit,
     imp::private_fs::{PrivateFs, WRITE},
 };
 use hibana_wasip1_runtime::{
-    choreofs::{ChoreoFsObject, ChoreoFsObjectSet, ChoreoFsRequest, FdSpec, ObjectId},
+    choreofs::{ChoreoFsRequest, ObjectId},
     protocol,
 };
 
@@ -23,18 +20,6 @@ pub async fn run<const ROLE: u8>(
                 let status = branch.recv::<Exit>().await?;
                 io.terminal.finish(io.bus, status, io.output).await?;
                 return Ok(());
-            }
-            RESULT_CHUNK_LABEL => {
-                let request = branch.recv::<ResultChunkMsg>().await?;
-                let offset = ResultChunk::offset(&request);
-                let objects = ChoreoFsObjectSet::new([ChoreoFsObject::writable(
-                    b"service/result",
-                    ObjectId(RESULT_FD as u32),
-                    FdSpec::new(RESULT_FD, WRITE, 1),
-                    protocol::FdBinding::write(protocol::FdWriteRow::Base),
-                )]);
-                let operation = objects.choreofs().fd_write(request);
-                io.result_chunk(operation, offset)?;
             }
             protocol::LABEL_WASI_FD_READDIR => {
                 let request = branch.recv::<protocol::FdReaddirReqMsg>().await?;
@@ -81,14 +66,6 @@ pub async fn run<const ROLE: u8>(
                 let response = io.write(operation)?;
                 endpoint.send::<protocol::FdWriteRetMsg>(&response).await?;
             }
-            protocol::LABEL_WASI_FD_WRITE_OBJECT => {
-                let request = branch.recv::<protocol::FdWriteObjectReqMsg>().await?;
-                let operation = io.objects().choreofs().fd_write(request);
-                let response = io.write(operation)?;
-                endpoint
-                    .send::<protocol::FdWriteObjectRetMsg>(&response)
-                    .await?;
-            }
             protocol::LABEL_WASI_PATH_OPEN => {
                 let received = branch.recv::<protocol::PathOpenReqMsg>().await?;
                 let response = 'path_open: {
@@ -97,25 +74,6 @@ pub async fn run<const ROLE: u8>(
                         return Err(ShellError::message("non-root path_open"));
                     }
                     let path = request.path().strip_prefix(b"/").unwrap_or(request.path());
-                    if path.starts_with(b"service/") && path != b"service/result" {
-                        let objects = ChoreoFsObjectSet::new([ChoreoFsObject::writable(
-                            path,
-                            ObjectId(SERVICE_FD as u32),
-                            FdSpec::new(SERVICE_FD, WRITE, 1),
-                            protocol::FdBinding::write(protocol::FdWriteRow::Object),
-                        )]);
-                        let open = objects.choreofs().path_open(received);
-                        if open.is_open() {
-                            io.service_path.clear();
-                            io.service_path.extend_from_slice(path);
-                            if request.open_flags() & 8 != 0 {
-                                io.service_bytes.clear();
-                            }
-                            io.offsets[4] = 0;
-                            io.fd_flags[4] = request.fd_flags();
-                        }
-                        break 'path_open open.opened_ret();
-                    }
                     let created = if !io.paths.iter().any(|existing| existing == path)
                         && request.open_flags() & 1 != 0
                         && request.rights_base() & WRITE != 0
@@ -206,9 +164,8 @@ pub async fn run<const ROLE: u8>(
             }
             protocol::LABEL_WASI_FD_CLOSE => {
                 let request = branch.recv::<protocol::FdCloseReqMsg>().await?;
-                let completion = io.objects().choreofs().fd_close(request);
-                let response = io.closed_file(completion);
-                endpoint.send::<ClosedFileMsg>(&response).await?;
+                let response = io.objects().choreofs().fd_close(request);
+                endpoint.send::<protocol::FdCloseRetMsg>(&response).await?;
             }
             protocol::LABEL_WASI_PATH_FILESTAT_GET => {
                 let request = branch.recv::<protocol::PathFilestatGetReqMsg>().await?;

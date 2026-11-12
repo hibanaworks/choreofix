@@ -23,7 +23,7 @@ fn response(reply: &Value) -> Result<Value> {
 async fn participant(
     guest: &process::Guest,
     simulator: &oracle::Simulator,
-    actor: Value,
+    (actor, adversarial): (Value, bool),
 ) -> Result<Value> {
     let agent = actor["agent"].as_str().ok_or("participant")?;
     let count = |events: &[Value]| {
@@ -44,32 +44,39 @@ async fn participant(
             .ok_or("private output")?
             .contains("7\n")
     );
-    for arguments in [json!({}), json!({"philosopher":"any display name"})] {
-        let early = guest
-            .command(agent, format!("echo '{arguments}' > /service/eat"))
-            .await?;
-        assert!(
-            early["stdout"]
-                .as_str()
-                .ok_or("early output")?
-                .contains("wash:"),
-            "{early}"
-        );
-        assert_eq!(count(&simulator.observed_events().await?), 0);
+    if adversarial {
+        for arguments in [json!({}), json!({"philosopher":"any display name"})] {
+            let early = guest
+                .command(agent, format!("echo '{arguments}' > /service/eat"))
+                .await?;
+            assert!(
+                early["stdout"]
+                    .as_str()
+                    .ok_or("early output")?
+                    .contains("wash:"),
+                "{early}"
+            );
+            assert_eq!(count(&simulator.observed_events().await?), 0);
+        }
     }
     let mut results = Vec::new();
     for call in actor["calls"].as_array().ok_or("original calls")? {
         let tool = call["tool"].as_str().ok_or("tool")?;
-        for arguments in [json!({}), json!({"philosopher":42})] {
-            let before = count(&simulator.observed_events().await?);
-            let rejected = guest
-                .command(
-                    agent,
-                    format!("echo '{arguments}' > /service/{tool}; cat /service/result"),
-                )
-                .await?;
-            assert_eq!(response(&rejected)?["status"], "invalid_arguments");
-            assert_eq!(count(&simulator.observed_events().await?), before);
+        if adversarial {
+            for arguments in [json!({}), json!({"philosopher":42})] {
+                let before = count(&simulator.observed_events().await?);
+                let rejected = guest
+                    .command(agent, format!("echo '{arguments}' > /service/{tool}"))
+                    .await?;
+                assert!(
+                    rejected["stdout"]
+                        .as_str()
+                        .ok_or("rejection output")?
+                        .contains("wash:"),
+                    "{rejected}"
+                );
+                assert_eq!(count(&simulator.observed_events().await?), before);
+            }
         }
         // This original argument is a display value; it must not change the
         // participant or its actual fork pair. Padding crosses a guest chunk.
@@ -78,7 +85,7 @@ async fn participant(
             .command(
                 agent,
                 format!(
-                    "printf '%s' '{}{arguments}' > /service/{tool}; cat /service/result",
+                    "printf '%s' '{}{arguments}' > /service/{tool}; cat /service/{tool}",
                     " ".repeat(512)
                 ),
             )
@@ -86,18 +93,20 @@ async fn participant(
         let result = response(&accepted)?;
         assert_eq!(result["success"], true, "{agent}/{tool}: {result}");
         results.push(result);
-        let before = count(&simulator.observed_events().await?);
-        let duplicate = guest
-            .command(agent, format!("echo '{arguments}' > /service/{tool}"))
-            .await?;
-        assert!(
-            duplicate["stdout"]
-                .as_str()
-                .ok_or("duplicate output")?
-                .contains("wash:"),
-            "{duplicate}"
-        );
-        assert_eq!(count(&simulator.observed_events().await?), before);
+        if adversarial {
+            let before = count(&simulator.observed_events().await?);
+            let duplicate = guest
+                .command(agent, format!("echo '{arguments}' > /service/{tool}"))
+                .await?;
+            assert!(
+                duplicate["stdout"]
+                    .as_str()
+                    .ok_or("duplicate output")?
+                    .contains("wash:"),
+                "{duplicate}"
+            );
+            assert_eq!(count(&simulator.observed_events().await?), before);
+        }
     }
     assert_eq!(count(&simulator.observed_events().await?), 2);
     let private = guest.command(agent, "cat /work/note".into()).await?;
@@ -116,7 +125,7 @@ async fn participant(
 async fn inputs<const N: usize>(
     guest: &process::Guest,
     simulator: &oracle::Simulator,
-    actors: [Value; N],
+    (actors, adversarial): ([Value; N], bool),
 ) -> Result<Vec<Value>> {
     let mut results: [Value; N] = core::array::from_fn(|_| Value::Null);
     let mut actors = actors.into_iter();
@@ -126,7 +135,7 @@ async fn inputs<const N: usize>(
     async {
         for (actor, output) in inputs {
             async move {
-                *output = participant(guest, simulator, actor).await?;
+                *output = participant(guest, simulator, (actor, adversarial)).await?;
             };
         }
         Ok(())
@@ -152,14 +161,24 @@ async fn all_dining_levels_use_both_resource_endpoints_through_wasi() -> Result<
             ));
     fs::create_dir_all(&root)?;
     let mut summary = Vec::new();
-    for task in ["9E", "9M", "9H"] {
-        let case = root.join(task);
+    for (task, adversarial) in [
+        ("9E", false),
+        ("9M", false),
+        ("9H", false),
+        ("9E", true),
+        ("9M", true),
+        ("9H", true),
+    ] {
+        let case = root.join(format!(
+            "{task}-{}",
+            if adversarial { "adversarial" } else { "normal" }
+        ));
         fs::create_dir(&case)?;
         let versions = snapshot::freeze(task, &case)?;
         save(
             &case.join("case.json"),
             &json!({"task":task,"depth":0,"model_calls":0,
-            "kind":"scripted_actual_wasi_boundary","scored_benchmark":false,
+            "kind":"scripted_actual_wasi_boundary","scored_benchmark":false,"adversarial_inputs":adversarial,
             "domain_delay_multiplier":1.0,"test_barriers":"none","versions":versions}),
         )?;
         let trace = Trace::create(&case.join("events.jsonl"))?;
@@ -184,8 +203,11 @@ async fn all_dining_levels_use_both_resource_endpoints_through_wasi() -> Result<
                             inputs(
                                 &guest,
                                 &simulator,
-                                <[Value; 3]>::try_from(actors.clone())
-                                    .map_err(|_| "dining actor count")?,
+                                (
+                                    <[Value; 3]>::try_from(actors.clone())
+                                        .map_err(|_| "dining actor count")?,
+                                    adversarial,
+                                ),
                             )
                             .await
                         }
@@ -193,8 +215,11 @@ async fn all_dining_levels_use_both_resource_endpoints_through_wasi() -> Result<
                             inputs(
                                 &guest,
                                 &simulator,
-                                <[Value; 5]>::try_from(actors.clone())
-                                    .map_err(|_| "dining actor count")?,
+                                (
+                                    <[Value; 5]>::try_from(actors.clone())
+                                        .map_err(|_| "dining actor count")?,
+                                    adversarial,
+                                ),
                             )
                             .await
                         }
@@ -202,8 +227,11 @@ async fn all_dining_levels_use_both_resource_endpoints_through_wasi() -> Result<
                             inputs(
                                 &guest,
                                 &simulator,
-                                <[Value; 7]>::try_from(actors.clone())
-                                    .map_err(|_| "dining actor count")?,
+                                (
+                                    <[Value; 7]>::try_from(actors.clone())
+                                        .map_err(|_| "dining actor count")?,
+                                    adversarial,
+                                ),
                             )
                             .await
                         }
@@ -233,7 +261,7 @@ async fn all_dining_levels_use_both_resource_endpoints_through_wasi() -> Result<
                 .as_array()
                 .ok_or("mutation verdicts")?
                 .len(),
-            11
+            19
         );
         summary.push(
             json!({"task":task,"model_calls":0,"scored_benchmark":false,"audit":audit,

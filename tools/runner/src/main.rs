@@ -403,7 +403,7 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
     } else if cicd {
         "Hibana passes the build-server or deployment-environment Endpoint to your WASI participant. Your actual request and result travel through that Endpoint before it returns. The developer's build precedes integration testing, which precedes deployment. Hibana sends build-complete, tests-passed and both deployment-complete notifications. You do not call acquire/release or notification tools. Read your actual result, then finish. This original task has no retry loop or injected domain failures."
     } else if dining {
-        "Hibana passes both fork endpoints to your guest. Eating requires the requests sent through both endpoints, and both endpoints return afterwards. You do not call acquire/release tools. Your operations always apply to your participant. The philosopher string is passed to the original simulator. Both effects run once, then finish."
+        "Your think and eat objects are bound to their actual projected Endpoint operations. Eating uses both actual fork Endpoints at the effect owner and returns them afterwards. You do not call acquire/release tools. The philosopher string is caller-supplied display data; it does not change your participant or its physical fork pair. Read each actual result from the same operation object. Both effects run once, then finish."
     } else if task == "1H" {
         "Hibana passes both module endpoints to your guest. Committing requires requests through both endpoints. You do not call acquire/release tools. This replaces the original sequential acquisition procedure. The feature and module pair must match your assignment. Module endpoints return before testing so that independent developers can continue. Read each actual test result. If it fails, reconsider your implementation, then implement, commit and test again. Finish after your tests pass."
     } else if coding {
@@ -412,6 +412,11 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
         "Hibana passes the database or test-environment Endpoint to the WASI participant. The request and actual result travel through that Endpoint before it returns. Migration completion precedes backend work, and backend completion precedes integration testing. You do not call acquire/release or notification tools. Use your assigned arguments. DB_ADMIN and BACKEND_DEV must also read the read-only /service/outcome object, which contains the original test result. That read may wait until the test finishes while other participants continue. A failed integration test is terminal in the task description and simulator. Report its actual result and finish, without adding a revision or retry."
     } else {
         "Hibana passes both section Endpoints to your WASI guest in parallel. Your actual write request travels through both Endpoints; the actual result comes back through both before they return. You do not call acquire/release tools. This deliberately replaces the original sequential acquisition procedure. The target must match your assigned topic, section or pair of resource names. The review result is terminal, so do not add retries to a failed review."
+    };
+    let response_object = if dining {
+        "Read the same operation object for its actual response."
+    } else {
+        "Read /service/result for the actual response."
     };
     Ok(format!(
         r#"You are {agent}. Carry out your work in the original task below.
@@ -432,7 +437,7 @@ guest and private files.
 Your writable domain objects are {objects}.
 Write the matching operation's JSON argument object and close it to request
 the operation. Shell redirection closes its output after writing.
-Read /service/result for the actual response. These objects are not commands.
+{response_object} These objects are not commands.
 {coordination}
 Independent participants and domain operations run concurrently. A request
 waiting for its dependency does not block the other guests.

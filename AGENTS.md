@@ -110,6 +110,12 @@ Keep each participant's send/recv/offer/par, branches, loops and concurrent
 completion boundaries directly in its localside body. Do not extract protocol
 steps into helper functions or chains of wrappers. Codecs, data validation,
 cryptography, buffer operations and actual I/O are separate from protocol flow.
+Do not wrap an Endpoint, file data and decision input in an application `File`
+or similar object with `think`, `eat`, `execute` or other protocol methods.
+Declare those participants directly in the runtime scope and keep their complete
+Endpoint flow in the async body. Data-only storage must not own an Endpoint or
+invoke send, recv, offer or par. Relocating or renaming a protocol wrapper does
+not satisfy this rule.
 
 Never work around a core, projection or runtime-checking defect by arranging the
 localside differently. Reordering operations, adding notifications or receives,
@@ -479,11 +485,15 @@ implementation. Shell variables and syntax are computation, not task authority.
 ChoreoFS is the object interface to projected communication. It is not a second
 authorization engine. A pathname, fd fact, rights mask, directory listing, or
 successful open does not authorize a task effect.
+Do not describe or implement ChoreoFS as shared storage. A participant's file
+view represents projected operations; its contents need not be shared with
+another participant. "Shared operation" refers to an effect on shared resources,
+not to shared file bytes. Bind the operation to its real Endpoint authority.
 
 Do not accept shared operations into a generic request mailbox and, after
 close, use application path/phase branches to dispatch them to a separate
 business Endpoint. Passing generic WASI I/O through an Endpoint does not bind
-the file operation to its business choreography. Bind each shared file/fd to
+the file operation to its business choreography. Bind each effectful file/fd to
 the actual owned or borrowed Endpoint from the outset, so that the operation
 itself is admitted by the global. Do not join unrelated private-I/O and business
 graphs with an application adapter, callback, permission table or phase logic.
@@ -492,7 +502,7 @@ processing; they must not reimplement allowed operations or expected progress.
 
 Audit the actual request path of every task against this boundary. If ChoreoFS
 cannot express it, evolve hibana-wasip1-runtime rather than copying the adapter
-or introducing application wrappers. Break the API when needed. A shared file
+or introducing application wrappers. Break the API when needed. An effectful file
 must carry its real Endpoint authority in its type. The safe public path must
 exclude unbound requests, fabricated completion and reuse for another fd, run
 or request occurrence. Unsafe integration promises or after-the-fact audit are

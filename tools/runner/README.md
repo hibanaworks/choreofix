@@ -268,7 +268,16 @@ cargo +stable test --locked --manifest-path tools/runner/Cargo.toml \
 Dining checks use the original 3/5/7-person environments through the Rust
 connection and actual wash guests. They cover private work, early and duplicate
 operations, malformed arguments, argument preservation, both fork Endpoints,
-and observed overlap of independent meals. Nine record mutations must fail.
+and observed overlap of independent meals. There are six conditions: normal
+and adversarial input for each participant count. Nineteen record mutations
+must fail. EPF checks the complete source execution; the dining effect check
+only binds its committed receive occurrences to admitted file bytes, actual
+resource requests, physical effects/replies and the common simulator score.
+It does not recreate protocol progress or a current resource-holder table.
+Five mutations retain EPF-valid execution while changing effect arguments,
+file data, result data, effect timing or effect multiplicity; the effect check
+must reject these separately. This is recorded-data validation, not nineteen
+runtime attacks.
 The selected runtime requires `CHOREOFIX_PHILOSOPHERS_WASI_BINARY` and
 `CHOREOFIX_PHILOSOPHERS_BUILD_RECEIPT`; `CHOREOFIX_EVIDENCE_ROOT` selects a new
 evidence directory. No model client is required for these scripted checks.

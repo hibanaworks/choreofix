@@ -3,16 +3,8 @@ use crate::imp::json::decode;
 use crate::shell::{ShellError, ShellResult};
 use serde_json::Value;
 
-pub fn file_arguments(
-    file: &crate::shell::imp::file_wire::ClosedFile,
-    path: &[u8],
-) -> ShellResult<Value> {
-    if file.completion.0.errno() != 0 || file.path != path {
-        return Err(ShellError::message(
-            "service file does not match the request",
-        ));
-    }
-    let arguments = decode(&file.bytes)?;
+pub fn arguments(bytes: &[u8]) -> ShellResult<Value> {
+    let arguments = decode(bytes)?;
     patient(&arguments)?;
     Ok(arguments)
 }
