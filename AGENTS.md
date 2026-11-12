@@ -480,6 +480,25 @@ ChoreoFS is the object interface to projected communication. It is not a second
 authorization engine. A pathname, fd fact, rights mask, directory listing, or
 successful open does not authorize a task effect.
 
+Do not accept shared operations into a generic request mailbox and, after
+close, use application path/phase branches to dispatch them to a separate
+business Endpoint. Passing generic WASI I/O through an Endpoint does not bind
+the file operation to its business choreography. Bind each shared file/fd to
+the actual owned or borrowed Endpoint from the outset, so that the operation
+itself is admitted by the global. Do not join unrelated private-I/O and business
+graphs with an application adapter, callback, permission table or phase logic.
+Path resolution, fd/offset/content storage and argument codecs remain data
+processing; they must not reimplement allowed operations or expected progress.
+
+Audit the actual request path of every task against this boundary. If ChoreoFS
+cannot express it, evolve hibana-wasip1-runtime rather than copying the adapter
+or introducing application wrappers. Break the API when needed. A shared file
+must carry its real Endpoint authority in its type. The safe public path must
+exclude unbound requests, fabricated completion and reuse for another fd, run
+or request occurrence. Unsafe integration promises or after-the-fact audit are
+not substitutes. Preserve earlier source-bound results without treating them
+as qualification of this revised file/Endpoint boundary.
+
 Shell freedom does not grant access to other participants' private objects or
 the host filesystem. Private computation may read and write its own objects
 without task ordering constraints. If an original task constrains a shared

@@ -3568,3 +3568,24 @@ ChoreoFixの認定は、実AIの自由なhibana-wash操作→WASI要求→実End
 
 本体の検証中ソースはprogress-20261112（fb7e1db2d）として公開した。通常全gate未完のため
 remote mainは既存版を維持している。この進捗tagを合格・リリースとは扱わない。
+
+### 2026-11-12: ChoreoFSと業務要求の結合を全課題で棚卸し
+
+共有ファイルを汎用要求投函先として受け付け、close後にパス・段階分岐で業務Endpointへ
+振り直す二段アダプターを禁止した。共通およびrepo AGENTS.mdへ明記し、アプリのwrapperや
+flagで補わず、必要ならWASI runtimeの型・公開APIから修正する。3Mへ追加しかけていた
+未公開の著者／編集者アダプターと、そのための試作global変更は除去した。既に公開した
+native 132イベント部品と実記録は維持するが、実Wasm／実AI成功には読み替えない。
+
+全23family・29課題の入口をanalysis/choreofs-boundary-audit.mdへ列挙した。
+17family・65ファイルにnext_fileの汎用close境界があり、旧review／食事の手書き経路を
+含めて19family・21課題で同型の結合不足を確認した。残る4family・8課題には直接の型付き
+WASI要求とChoreoFS処理もあり、全てを同一実装と断定せず各分岐の結合を点検する。
+この静的棚卸しは、実要求経路の最終認定や文字列／ファイル存在CIではない。
+
+WASI runtimeの公開complete APIについても、実Wasmのfd_close 2件をEndpoint 0・
+ChoreoFS処理0で成功完了しexit 0になる反例を確認した。共有効果を迂回したとの主張や
+メモリ不具合ではなく、完了に実Endpointの受理を要求しないAPI契約の不足である。
+原本・実行binary・library hashはWASIのoutput/verification/choreofs-unbound-completion-v1。
+実Endpointの権利を持つファイル型、要求／返信／guest完了を切り離せない正規APIへの置換は未実装。
+旧29課題の版に紐づく結果は保存するが、この新しいファイル結合境界の合格件数には数えない。

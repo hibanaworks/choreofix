@@ -813,6 +813,22 @@
       "core_normal_contract_complete": false,
       "scored_runs": 0,
       "scope": "Finite source-bound port qualification with actual Wasm, common scoring, complete EPF capture, one-use effect audit and an unscored live pilot. Not full-core verification, general Rust refinement, all interleavings or a scored comparison."
+    },
+    "direct_choreofs_boundary": {
+      "status": "audit_and_public_api_counterexample_confirmed_replacement_unimplemented",
+      "audit": "analysis/choreofs-boundary-audit.md",
+      "inspected_families": 23,
+      "source_bound_historical_tasks": 29,
+      "generic_mailbox_families": 19,
+      "generic_mailbox_tasks": 21,
+      "direct_or_mixed_families": 4,
+      "direct_or_mixed_tasks": 8,
+      "next_file_source_files": 65,
+      "strengthened_boundary_qualified_tasks": 0,
+      "unsafe_application_miri_required": false,
+      "model_calls": 0,
+      "scored_runs": 0,
+      "note": "Existing source-bound task results retain their scope. None is relabeled as qualification of the strengthened file/Endpoint/call coupling. The full 48-task goal remains."
     }
   },
   "shared_build_procedure": {
