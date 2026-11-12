@@ -815,20 +815,22 @@
       "scope": "Finite source-bound port qualification with actual Wasm, common scoring, complete EPF capture, one-use effect audit and an unscored live pilot. Not full-core verification, general Rust refinement, all interleavings or a scored comparison."
     },
     "direct_choreofs_boundary": {
-      "status": "audit_and_public_api_counterexample_confirmed_replacement_unimplemented",
+      "status": "bound_library_ordinary_gates_pass_task_migration_unfinished",
       "audit": "analysis/choreofs-boundary-audit.md",
       "inspected_families": 23,
       "source_bound_historical_tasks": 29,
-      "generic_mailbox_families": 19,
-      "generic_mailbox_tasks": 21,
-      "direct_or_mixed_families": 4,
-      "direct_or_mixed_tasks": 8,
+      "generic_mailbox_families": 20,
+      "generic_mailbox_tasks": 24,
+      "direct_or_mixed_families": 3,
+      "direct_or_mixed_tasks": 5,
       "next_file_source_files": 65,
       "strengthened_boundary_qualified_tasks": 0,
       "unsafe_application_miri_required": false,
       "model_calls": 0,
       "scored_runs": 0,
-      "note": "Existing source-bound task results retain their scope. None is relabeled as qualification of the strengthened file/Endpoint/call coupling. The full 48-task goal remains."
+      "note": "Binding was already required. All 26 current task directories and shared I/O were inspected. Codebase design also has a mailbox path: 20 families/24 tasks confirmed. The bound WASI library passed its full ordinary local gate, including Miri at the library boundary; task globals/localsides still require migration. Historical results retain their original scope; no task is qualified under the direct boundary. The full 48-task goal remains.",
+      "wasi_library_revision": "0362074",
+      "wasi_library_ordinary_gates": "passed_local"
     }
   },
   "shared_build_procedure": {

@@ -1,8 +1,13 @@
 # ChoreoFix 研究開発計画
 
-更新: 2026-11-11。受領した「ChoreoFix 研究開発計画」計画版1.0を反映した。
+更新: 2026-11-12。受領した「ChoreoFix 研究開発計画」計画版1.0を反映した。
 入力文書のSHA-256は[実験契約](benchmark/experiment-contract.json)に記録する。
 研究の中心は、**実資源の唯一の操作権、残存手順、実際の共有効果を結ぶ保証**である。
+
+現在はChoreoFS境界の是正を優先している。全26 taskディレクトリと共通I/Oを点検し、
+旧29課題・23系統のうち20系統・24課題で、汎用close後に別業務Endpointへ振り直す
+経路を確認した。WASI runtime側を実Endpointを所有するファイル型へ変更中であり、
+この境界での課題認定は0件。旧実行の成果・採点は保持するが、新経路の成功へ読み替えない。
 委譲、投影、並行処理、prefix safety、版の照合をそれぞれ単独の新規性とはしない。
 
 既存A比較の採点対象は **0 / 2,592実行**。追加B–Gは **0 / 1,368実行**で、
@@ -3589,3 +3594,44 @@ ChoreoFS処理0で成功完了しexit 0になる反例を確認した。共有�
 原本・実行binary・library hashはWASIのoutput/verification/choreofs-unbound-completion-v1。
 実Endpointの権利を持つファイル型、要求／返信／guest完了を切り離せない正規APIへの置換は未実装。
 旧29課題の版に紐づく結果は保存するが、この新しいファイル結合境界の合格件数には数えない。
+
+### 2026-11-12: ChoreoFS の型付き結合を実装中
+
+全23系統の再点検では、codebaseのdesign経路も汎用close/mailboxの後に
+別task Endpointへ要求しており、確認済みは20系統・24課題へ更新する。
+残るwriting/API/CI-CDの3系統・5課題にも公開raw completionへの依存があり、
+ファイルと実Endpointの結合としての認定は0件。これは既存の要求の実装不足であり、
+新しい条件を後付けしたものではない。
+
+WASI runtimeの作業版は、共有ファイルが実Endpointを所有するChoreoFsFilesを
+guest起動前に渡す形へ変更した。raw pending/completionとnext_fileは公開経路から
+削除し、実要求・実返信を同じ結合で処理する。完了したguest終了時だけ実Endpointを
+回収でき、取消後の別filesystemへの差替えを許さない。実Wasm/Endpointの5試験、
+公開型境界を含むdoctest9件、全target Clippyが通過した。
+
+組込み・ライブラリMiri等の全gateと課題global/localsideの移行はまだ完了していない。
+削除APIに依存するアプリのビルドが自動的に成立したとは扱わない。旧29課題の結果は
+元source・元範囲に保持し、今回の結合の成功へ読み替えない。48課題の移行・実AI/実Wasm・
+EPF・実効果・共通simulator採点という目標は維持する。
+
+### 2026-11-12: 型付きChoreoFSライブラリの通常認定が完了
+
+`hibana-wasip1-runtime`の`0362074`をmainへpushした。生のWASI完了値と
+汎用close/mailboxを公開APIから削除し、ファイルが実Endpointを所有する経路に統一した。
+独自payloadを任意のWASI要求へ読み替えるChoreoFsRequest実装も外部へ開放しない。
+preopenのfd実データを保持し、fd全u8域の直接索引と成功したguest writeback後の
+定数時間更新へ整理した。pollの16件という既存入力域は変更していない。
+
+同一sourceで通常gateが完走した。nativeライブラリ88件＋例8件、compile-fail10件、
+Miriはライブラリ86件＋例8件、Leanは20＋14定理と実VM520・ChoreoFS160判定の
+照合、Pico 2の実Endpoint poll・リンク、Clippy/doc/配布アーカイブが通過した。
+Pico 2はflash325,152bytes、24KiB予約stack込みRAM154,568bytesであり、実機と
+worst-case stackの実測までを主張しない。全gateの最大メモリは702,464,000bytes。
+完全な記録と検査source hashはWASIの`output/verification/choreofs-bound-files-final-source`
+へ保持した。公開CIの完了待ちはローカル合格へ積み上げない。
+
+アプリ・runner・handoff fixtureもruntimeの正本の隣接worktreeを参照するよう揃え、
+manifest/lock/Cargo metadataの3箇所でcore/runtime/macros/WASIが各一つに解決することを
+確認した。これは依存の整合の確認であり、削除APIに依存する既存課題のビルド成功や
+実AI再認定ではない。課題側のglobal/localsideの置換と通し実行は未完であり、この境界の
+認定数は0件のまま保持する。旧APIへのfallbackは作らない。

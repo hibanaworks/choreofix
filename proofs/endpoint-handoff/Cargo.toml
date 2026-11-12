@@ -14,7 +14,7 @@ required-features = ["projection-profile"]
 [dependencies]
 hibana = { path = "../../../hibana", version = "=0.10.0" }
 hibana-wasip1-runtime = { path = "../../../hibana-wasip1-runtime" }
-hibana-runtime = { git = "https://github.com/hibanaworks/hibana-runtime", rev = "09a803afdfb45945febed46145a68ff92a03d9e4", features = ["host"] }
+hibana-runtime = { path = "../../../hibana-runtime", version = "=0.1.0", features = ["host"] }
 serde_json = "=1.0.154"
 
 [dev-dependencies]
