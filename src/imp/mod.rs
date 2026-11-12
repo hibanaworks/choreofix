@@ -1,3 +1,5 @@
-pub(crate) mod domain;
-pub(crate) mod projection;
-pub(crate) mod transport;
+pub mod domain;
+pub mod json;
+pub mod patient;
+pub mod projection;
+pub mod transport;

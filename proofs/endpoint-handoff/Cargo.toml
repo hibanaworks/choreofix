@@ -4,16 +4,29 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[features]
+projection-profile = []
+
+[[example]]
+name = "feature_delivery_projection"
+required-features = ["projection-profile"]
+
 [dependencies]
-hibana = { git = "https://github.com/hibanaworks/hibana", rev = "a4d48cdc4b4d42110d3d7a3fe9fe172efd91c3e0", version = "=0.10.0" }
-hibana-wasip1-runtime = { git = "https://github.com/hibanaworks/hibana-wasip1-runtime", rev = "b5d1f9828263301797603eb225212a1f36e9b89a" }
+hibana = { path = "../../../hibana", version = "=0.10.0" }
+hibana-wasip1-runtime = { path = "../../../hibana-wasip1-runtime" }
 hibana-runtime = { git = "https://github.com/hibanaworks/hibana-runtime", rev = "09a803afdfb45945febed46145a68ff92a03d9e4", features = ["host"] }
 serde_json = "=1.0.154"
 
 [dev-dependencies]
-hibana-epf = { git = "https://github.com/hibanaworks/hibana-epf", rev = "e0690aa120fd8a3e73bf24e5e68adeb29066e946" }
+hibana-epf = { path = "../../../hibana-epf" }
 
 [workspace]
+
+# Match the production runner's offline-auditor compilation conditions.
+# Retain assertions; this changes neither the source search nor its capacity.
+[profile.dev.package.hibana-epf]
+opt-level = 3
+debug-assertions = true
 
 [lints.rust]
 unsafe_code = "deny"

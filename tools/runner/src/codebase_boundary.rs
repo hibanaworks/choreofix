@@ -258,7 +258,7 @@ async fn case<const N: usize>(
     let (guest, runtime_loop) = process::guest(
         &case.join("runtime").canonicalize()?,
         &case.join("wash.wasm").canonicalize()?,
-        task,
+        &[task],
         &case,
         trace,
         simulator.clone(),

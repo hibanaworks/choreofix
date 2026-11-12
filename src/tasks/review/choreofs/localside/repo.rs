@@ -7,12 +7,16 @@ use hibana::Endpoint;
 #[hibana_runtime::scope]
 pub async fn run<'r, D: Domain>(
     endpoint: &mut Endpoint<'r, REPO>,
-    mut repository: Endpoint<'r, REPO_ENDPOINT>,
+    (mut repository, control): (Endpoint<'r, REPO_ENDPOINT>, Endpoint<'r, REVIEW>),
     domain: &D,
 ) -> ShellResult<()> {
+    endpoint.send::<ReviewControl>(control).await?;
     loop {
         let branch = endpoint.offer().await?;
         match branch.label() {
+            REVIEW => {
+                drop(branch.recv::<ReviewControl>().await?);
+            }
             69 | 76 | 169 | 176 => {
                 let (agent, feature, admitted) = match branch.label() {
                     69 => ("DEVELOPER_A", FEATURE_A, branch.recv::<ImplementA>().await?),

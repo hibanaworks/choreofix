@@ -1,3 +1,8 @@
+use choreofix::{imp, shell};
+
+#[path = "../tasks/writing/mod.rs"]
+mod writing;
+
 #[hibana_runtime::main]
 async fn main() -> choreofix::shell::ShellResult<()> {
     let mut args = std::env::args().skip(1);
@@ -8,12 +13,9 @@ async fn main() -> choreofix::shell::ShellResult<()> {
         .next()
         .ok_or_else(|| choreofix::shell::ShellError::message("missing writing task"))?;
     if path == "--projection" {
-        println!(
-            "{}",
-            choreofix::tasks::writing::choreofs::projection(&level)?
-        );
+        println!("{}", writing::choreofs::projection(&level)?);
         return Ok(());
     }
     let module = std::fs::read(path)?;
-    choreofix::tasks::writing::choreofs::run_stdio(&module, &level).await
+    writing::choreofs::run_stdio(&module, &level).await
 }

@@ -223,7 +223,7 @@ async fn real_wasi_cicd_uses_resource_endpoints_and_keeps_shell_freedom() -> Res
             &json!({"task":"16E","depth":depth,"model_calls":0,"runtime_binary_sha256":projection["runtime_binary_sha256"],"compiled_projection_sha256":digest(&output.join("projection.json"))?,"scored_benchmark":false,"build":receipt,"wasm_sha256":digest(wasm)?,"harness_binary_sha256":digest(&std::env::current_exe()?)?,"harness_source_sha256":digest(Path::new("tools/runner/src/cicd_boundary.rs"))?,"oracle_source_sha256":digest(Path::new("tools/runner/src/oracle.rs"))?,"audit_source_sha256":digest(Path::new("tools/runner/src/cicd_audit.rs"))?}),
         )?;
         let (guest, runtime_loop) =
-            process::guest(&runtime, wasm, "16E", &output, trace, simulator.clone())?;
+            process::guest(&runtime, wasm, &["16E"], &output, trace, simulator.clone())?;
         let actors: [Value; 3] = fixture["fixtures"]
             .as_array()
             .ok_or("original participants")?
@@ -301,8 +301,14 @@ async fn real_wasi_cicd_early_exit_has_no_domain_effect() -> Result<()> {
         "harness_source_sha256":digest(Path::new("tools/runner/src/cicd_boundary.rs"))?,
         "oracle_source_sha256":digest(Path::new("tools/runner/src/oracle.rs"))?,"wasm_sha256":digest(module)?}),
     )?;
-    let (guest, runtime_loop) =
-        process::guest(&runtime, module, "16E", &output, trace, simulator.clone())?;
+    let (guest, runtime_loop) = process::guest(
+        &runtime,
+        module,
+        &["16E"],
+        &output,
+        trace,
+        simulator.clone(),
+    )?;
     let (command, result) = hibana_runtime::race(
         async {
             async { Ok(guest.command("DEVELOPER", "exit 0".into()).await) };

@@ -40,7 +40,11 @@ cargo +stable clippy --locked --manifest-path tools/inputs/Cargo.toml --all-targ
 The behavioral tests mutate source bytes, input metadata, task/file sets and
 experiment conditions. They also test real Git archive extraction, existing
 file preservation, missing revisions and rejection of a tracked symlink.
-Other self-authored Python tools remain migration debt outside this tool.
+Saved source inventories retain their own declared simulator contract. Verifying
+an archive recomputes every world byte, task and metadata entry against that
+archive's manifest; it does not replace its version label with the current
+manifest-writer version. This is input integrity, not a new semantic
+qualification or permission to pool experiments with different world versions.
 
 The same tool inspects Wasm declarations and checks the shell build without
 executing a guest or importing Python:

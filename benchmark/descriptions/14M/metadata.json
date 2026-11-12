@@ -1,0 +1,69 @@
+{
+  "agents": [
+    "BIOLOGIST",
+    "CHEMIST",
+    "LEAD_SCIENTIST",
+    "REGULATORY_SPECIALIST",
+    "TOXICOLOGIST"
+  ],
+  "resources": [
+    "CELL_LAB",
+    "HPLC",
+    "MASS_SPEC"
+  ],
+  "agent_resources": {
+    "BIOLOGIST": [
+      "CELL_LAB",
+      "HPLC"
+    ],
+    "CHEMIST": [
+      "HPLC",
+      "MASS_SPEC"
+    ],
+    "LEAD_SCIENTIST": [
+      "HPLC",
+      "MASS_SPEC"
+    ],
+    "REGULATORY_SPECIALIST": [],
+    "TOXICOLOGIST": [
+      "CELL_LAB",
+      "HPLC",
+      "MASS_SPEC"
+    ]
+  },
+  "tool_resource_map": {
+    "run_hplc_analysis": [
+      "HPLC"
+    ],
+    "run_mass_spec_analysis": [
+      "MASS_SPEC"
+    ],
+    "run_cell_assay": [
+      "CELL_LAB"
+    ],
+    "verify_regulatory_compliance": [],
+    "submit_decision": []
+  },
+  "tool_delays": {
+    "run_hplc_analysis": [
+      1.0,
+      5.0
+    ],
+    "run_mass_spec_analysis": [
+      1.0,
+      5.0
+    ],
+    "run_cell_assay": [
+      1.0,
+      5.0
+    ],
+    "verify_regulatory_compliance": [
+      1.0,
+      5.0
+    ],
+    "submit_decision": [
+      0.0,
+      0.0
+    ]
+  }
+}

@@ -1,3 +1,8 @@
+use choreofix::{imp, shell};
+
+#[path = "../tasks/codebase/mod.rs"]
+mod codebase;
+
 #[hibana_runtime::main]
 async fn main() -> choreofix::shell::ShellResult<()> {
     let mut args = std::env::args().skip(1);
@@ -8,12 +13,9 @@ async fn main() -> choreofix::shell::ShellResult<()> {
         .next()
         .ok_or_else(|| choreofix::shell::ShellError::message("missing codebase task"))?;
     if path == "--projection" {
-        println!(
-            "{}",
-            choreofix::tasks::codebase::choreofs::projection(&level)?
-        );
+        println!("{}", codebase::choreofs::projection(&level)?);
         return Ok(());
     }
     let module = std::fs::read(path)?;
-    choreofix::tasks::codebase::choreofs::run_stdio(&module, &level).await
+    codebase::choreofs::run_stdio(&module, &level).await
 }

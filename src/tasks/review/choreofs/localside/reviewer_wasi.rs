@@ -1,6 +1,7 @@
 //! The reviewer's actual request selects a projected branch; each independent
 //! projected operation is driven concurrently where the global uses par.
-use super::super::{global::*, imp::RepositoryArguments};
+use super::super::global::*;
+use crate::shell::imp::repository_arguments::RepositoryArguments;
 use crate::shell::{
     ShellError, ShellResult,
     global::Exit as IoExit,
@@ -19,6 +20,7 @@ pub async fn run(
     selection: &super::super::imp::ReviewTarget,
 ) -> ShellResult<i32> {
     let [mut task, mut private] = endpoint.par()?;
+    let mut control = Some(task.recv::<ReviewControl>().await?);
     let mut fuel_id = 0u16;
     loop {
         match guest.resume_wasi_boundary(protocol::BudgetRun::new(fuel_id, 0, 100_000))? {
@@ -139,32 +141,36 @@ pub async fn run(
                                 json!({"status":"invalid_arguments","error":error.to_string()}),
                                 28,
                             ),
+                            Ok(_) if control.is_none() => (
+                                json!({"status":"out_of_order","error":"review control has been transferred"}),
+                                8,
+                            ),
                             Ok((feature, value)) => {
                                 let bytes = serde_json::to_vec(&value)
                                     .map_err(|e| ShellError::message(e.to_string()))?;
                                 let arguments = RepositoryArguments::<3>::from_bytes(&bytes)?;
                                 selection.record(feature);
-                                loop {
-                                    let branch = task.offer().await?;
+                                'review_request: {
+                                    let review_control =
+                                        control.as_mut().expect("owned review control");
+                                    let branch = review_control.offer().await?;
                                     match branch.label() {
-                                        90 => {
-                                            branch.recv::<ReadyA>().await?;
-                                            continue;
-                                        }
-                                        91 => {
-                                            branch.recv::<ReadyB>().await?;
-                                            continue;
-                                        }
                                         80 if feature == FEATURE_A => {
                                             branch.send::<FirstA>(&arguments).await?;
-                                            task.send::<FirstA>(&arguments).await?;
-                                            task.send::<FirstA>(&arguments).await?;
-                                            task.send::<FirstA>(&arguments).await?;
-                                            task.send::<FirstA>(&arguments).await?;
+                                            review_control.send::<FirstA>(&arguments).await?;
+                                            review_control.send::<FirstA>(&arguments).await?;
+                                            review_control.send::<FirstA>(&arguments).await?;
                                             task.recv::<ReadyA>().await?;
                                             let [mut review, mut other] = task.par()?;
                                             async {
                                                 async {
+                                                    review
+                                                        .send::<ReviewControl>(
+                                                            control
+                                                                .take()
+                                                                .expect("owned review control"),
+                                                        )
+                                                        .await?;
                                                     review.send::<ReviewA>(&arguments).await?;
                                                 };
                                                 async {
@@ -176,14 +182,20 @@ pub async fn run(
                                         }
                                         81 if feature == FEATURE_B => {
                                             branch.send::<FirstB>(&arguments).await?;
-                                            task.send::<FirstB>(&arguments).await?;
-                                            task.send::<FirstB>(&arguments).await?;
-                                            task.send::<FirstB>(&arguments).await?;
-                                            task.send::<FirstB>(&arguments).await?;
+                                            review_control.send::<FirstB>(&arguments).await?;
+                                            review_control.send::<FirstB>(&arguments).await?;
+                                            review_control.send::<FirstB>(&arguments).await?;
                                             task.recv::<ReadyB>().await?;
                                             let [mut review, mut other] = task.par()?;
                                             async {
                                                 async {
+                                                    review
+                                                        .send::<ReviewControl>(
+                                                            control
+                                                                .take()
+                                                                .expect("owned review control"),
+                                                        )
+                                                        .await?;
                                                     review.send::<ReviewB>(&arguments).await?;
                                                 };
                                                 async {
@@ -195,25 +207,43 @@ pub async fn run(
                                         }
                                         82 if feature == FEATURE_A => {
                                             branch.send::<AgainABeforeB>(&arguments).await?;
-                                            task.send::<AgainABeforeB>(&arguments).await?;
-                                            task.send::<AgainABeforeB>(&arguments).await?;
-                                            task.send::<AgainABeforeB>(&arguments).await?;
-                                            task.send::<AgainABeforeB>(&arguments).await?;
+                                            review_control
+                                                .send::<AgainABeforeB>(&arguments)
+                                                .await?;
+                                            review_control
+                                                .send::<AgainABeforeB>(&arguments)
+                                                .await?;
                                             task.recv::<ReadyA>().await?;
+                                            task.send::<ReviewControl>(
+                                                control.take().expect("owned review control"),
+                                            )
+                                            .await?;
                                             task.send::<ReReviewA>(&arguments).await?;
                                         }
                                         83 if feature == FEATURE_B => {
                                             branch.send::<BDuringARevision>(&arguments).await?;
-                                            task.send::<BDuringARevision>(&arguments).await?;
-                                            task.send::<BDuringARevision>(&arguments).await?;
-                                            task.send::<BDuringARevision>(&arguments).await?;
-                                            task.send::<BDuringARevision>(&arguments).await?;
+                                            review_control
+                                                .send::<BDuringARevision>(&arguments)
+                                                .await?;
+                                            review_control
+                                                .send::<BDuringARevision>(&arguments)
+                                                .await?;
+                                            review_control
+                                                .send::<BDuringARevision>(&arguments)
+                                                .await?;
                                             let [mut other, mut review] = task.par()?;
                                             async {
                                                 async {
                                                     other.recv::<ReadyA>().await?;
                                                 };
                                                 async {
+                                                    review
+                                                        .send::<ReviewControl>(
+                                                            control
+                                                                .take()
+                                                                .expect("owned review control"),
+                                                        )
+                                                        .await?;
                                                     review.send::<ReviewB>(&arguments).await?;
                                                 };
                                                 Ok(())
@@ -222,41 +252,63 @@ pub async fn run(
                                         }
                                         84 if feature == FEATURE_B => {
                                             branch.send::<BAfterAMerge>(&arguments).await?;
-                                            task.send::<BAfterAMerge>(&arguments).await?;
-                                            task.send::<BAfterAMerge>(&arguments).await?;
-                                            task.send::<BAfterAMerge>(&arguments).await?;
-                                            task.send::<BAfterAMerge>(&arguments).await?;
+                                            review_control.send::<BAfterAMerge>(&arguments).await?;
+                                            review_control.send::<BAfterAMerge>(&arguments).await?;
+                                            task.send::<ReviewControl>(
+                                                control.take().expect("owned review control"),
+                                            )
+                                            .await?;
                                             task.send::<ReviewB>(&arguments).await?;
                                         }
                                         85 if feature == FEATURE_A => {
                                             branch.send::<AgainAAfterB>(&arguments).await?;
-                                            task.send::<AgainAAfterB>(&arguments).await?;
-                                            task.send::<AgainAAfterB>(&arguments).await?;
-                                            task.send::<AgainAAfterB>(&arguments).await?;
-                                            task.send::<AgainAAfterB>(&arguments).await?;
+                                            review_control.send::<AgainAAfterB>(&arguments).await?;
+                                            review_control.send::<AgainAAfterB>(&arguments).await?;
+                                            task.send::<ReviewControl>(
+                                                control.take().expect("owned review control"),
+                                            )
+                                            .await?;
                                             task.send::<ReReviewA>(&arguments).await?;
                                         }
                                         86 if feature == FEATURE_B => {
                                             branch.send::<AgainBBeforeA>(&arguments).await?;
-                                            task.send::<AgainBBeforeA>(&arguments).await?;
-                                            task.send::<AgainBBeforeA>(&arguments).await?;
-                                            task.send::<AgainBBeforeA>(&arguments).await?;
-                                            task.send::<AgainBBeforeA>(&arguments).await?;
+                                            review_control
+                                                .send::<AgainBBeforeA>(&arguments)
+                                                .await?;
+                                            review_control
+                                                .send::<AgainBBeforeA>(&arguments)
+                                                .await?;
                                             task.recv::<ReadyB>().await?;
+                                            task.send::<ReviewControl>(
+                                                control.take().expect("owned review control"),
+                                            )
+                                            .await?;
                                             task.send::<ReReviewB>(&arguments).await?;
                                         }
                                         87 if feature == FEATURE_A => {
                                             branch.send::<ADuringBRevision>(&arguments).await?;
-                                            task.send::<ADuringBRevision>(&arguments).await?;
-                                            task.send::<ADuringBRevision>(&arguments).await?;
-                                            task.send::<ADuringBRevision>(&arguments).await?;
-                                            task.send::<ADuringBRevision>(&arguments).await?;
+                                            review_control
+                                                .send::<ADuringBRevision>(&arguments)
+                                                .await?;
+                                            review_control
+                                                .send::<ADuringBRevision>(&arguments)
+                                                .await?;
+                                            review_control
+                                                .send::<ADuringBRevision>(&arguments)
+                                                .await?;
                                             let [mut other, mut review] = task.par()?;
                                             async {
                                                 async {
                                                     other.recv::<ReadyB>().await?;
                                                 };
                                                 async {
+                                                    review
+                                                        .send::<ReviewControl>(
+                                                            control
+                                                                .take()
+                                                                .expect("owned review control"),
+                                                        )
+                                                        .await?;
                                                     review.send::<ReviewA>(&arguments).await?;
                                                 };
                                                 Ok(())
@@ -265,40 +317,50 @@ pub async fn run(
                                         }
                                         88 if feature == FEATURE_A => {
                                             branch.send::<AAfterBMerge>(&arguments).await?;
-                                            task.send::<AAfterBMerge>(&arguments).await?;
-                                            task.send::<AAfterBMerge>(&arguments).await?;
-                                            task.send::<AAfterBMerge>(&arguments).await?;
-                                            task.send::<AAfterBMerge>(&arguments).await?;
+                                            review_control.send::<AAfterBMerge>(&arguments).await?;
+                                            review_control.send::<AAfterBMerge>(&arguments).await?;
+                                            task.send::<ReviewControl>(
+                                                control.take().expect("owned review control"),
+                                            )
+                                            .await?;
                                             task.send::<ReviewA>(&arguments).await?;
                                         }
                                         89 if feature == FEATURE_B => {
                                             branch.send::<AgainBAfterA>(&arguments).await?;
-                                            task.send::<AgainBAfterA>(&arguments).await.map_err(
-                                                |error| {
-                                                    ShellError::message(format!(
-                                                        "review B intent to review A: {error:?}"
-                                                    ))
-                                                },
-                                            )?;
-                                            task.send::<AgainBAfterA>(&arguments).await?;
-                                            task.send::<AgainBAfterA>(&arguments).await?;
-                                            task.send::<AgainBAfterA>(&arguments).await?;
+                                            review_control.send::<AgainBAfterA>(&arguments).await?;
+                                            review_control.send::<AgainBAfterA>(&arguments).await?;
+                                            task.send::<ReviewControl>(
+                                                control.take().expect("owned review control"),
+                                            )
+                                            .await?;
                                             task.send::<ReReviewB>(&arguments).await?;
                                         }
                                         92 if feature == FEATURE_A => {
                                             branch
                                                 .send::<AgainADuringBRevision>(&arguments)
                                                 .await?;
-                                            task.send::<AgainADuringBRevision>(&arguments).await?;
-                                            task.send::<AgainADuringBRevision>(&arguments).await?;
-                                            task.send::<AgainADuringBRevision>(&arguments).await?;
-                                            task.send::<AgainADuringBRevision>(&arguments).await?;
+                                            review_control
+                                                .send::<AgainADuringBRevision>(&arguments)
+                                                .await?;
+                                            review_control
+                                                .send::<AgainADuringBRevision>(&arguments)
+                                                .await?;
+                                            review_control
+                                                .send::<AgainADuringBRevision>(&arguments)
+                                                .await?;
                                             let [mut other, mut review] = task.par()?;
                                             async {
                                                 async {
                                                     other.recv::<ReadyB>().await?;
                                                 };
                                                 async {
+                                                    review
+                                                        .send::<ReviewControl>(
+                                                            control
+                                                                .take()
+                                                                .expect("owned review control"),
+                                                        )
+                                                        .await?;
                                                     review.send::<ReReviewA>(&arguments).await?;
                                                 };
                                                 Ok(())
@@ -309,16 +371,28 @@ pub async fn run(
                                             branch
                                                 .send::<AgainBDuringARevision>(&arguments)
                                                 .await?;
-                                            task.send::<AgainBDuringARevision>(&arguments).await?;
-                                            task.send::<AgainBDuringARevision>(&arguments).await?;
-                                            task.send::<AgainBDuringARevision>(&arguments).await?;
-                                            task.send::<AgainBDuringARevision>(&arguments).await?;
+                                            review_control
+                                                .send::<AgainBDuringARevision>(&arguments)
+                                                .await?;
+                                            review_control
+                                                .send::<AgainBDuringARevision>(&arguments)
+                                                .await?;
+                                            review_control
+                                                .send::<AgainBDuringARevision>(&arguments)
+                                                .await?;
                                             let [mut other, mut review] = task.par()?;
                                             async {
                                                 async {
                                                     other.recv::<ReadyA>().await?;
                                                 };
                                                 async {
+                                                    review
+                                                        .send::<ReviewControl>(
+                                                            control
+                                                                .take()
+                                                                .expect("owned review control"),
+                                                        )
+                                                        .await?;
                                                     review.send::<ReReviewB>(&arguments).await?;
                                                 };
                                                 Ok(())
@@ -327,24 +401,36 @@ pub async fn run(
                                         }
                                         94 if feature == FEATURE_B => {
                                             branch.send::<AgainBBeforeAReview>(&arguments).await?;
-                                            task.send::<AgainBBeforeAReview>(&arguments).await?;
-                                            task.send::<AgainBBeforeAReview>(&arguments).await?;
-                                            task.send::<AgainBBeforeAReview>(&arguments).await?;
-                                            task.send::<AgainBBeforeAReview>(&arguments).await?;
+                                            review_control
+                                                .send::<AgainBBeforeAReview>(&arguments)
+                                                .await?;
+                                            review_control
+                                                .send::<AgainBBeforeAReview>(&arguments)
+                                                .await?;
                                             task.recv::<ReadyB>().await?;
+                                            task.send::<ReviewControl>(
+                                                control.take().expect("owned review control"),
+                                            )
+                                            .await?;
                                             task.send::<ReReviewB>(&arguments).await?;
                                         }
                                         95 if feature == FEATURE_A => {
                                             branch.send::<AgainABeforeBReview>(&arguments).await?;
-                                            task.send::<AgainABeforeBReview>(&arguments).await?;
-                                            task.send::<AgainABeforeBReview>(&arguments).await?;
-                                            task.send::<AgainABeforeBReview>(&arguments).await?;
-                                            task.send::<AgainABeforeBReview>(&arguments).await?;
+                                            review_control
+                                                .send::<AgainABeforeBReview>(&arguments)
+                                                .await?;
+                                            review_control
+                                                .send::<AgainABeforeBReview>(&arguments)
+                                                .await?;
                                             task.recv::<ReadyA>().await?;
+                                            task.send::<ReviewControl>(
+                                                control.take().expect("owned review control"),
+                                            )
+                                            .await?;
                                             task.send::<ReReviewA>(&arguments).await?;
                                         }
                                         _ => {
-                                            break (
+                                            break 'review_request (
                                                 json!({"status":"out_of_order","error":"review is unavailable in the projected protocol"}),
                                                 8,
                                             );
@@ -362,7 +448,23 @@ pub async fn run(
                                             )));
                                         }
                                     };
-                                    break (
+                                    let returned = task.offer().await?;
+                                    match returned.label() {
+                                        11 => {
+                                            control = Some(returned.recv::<ReviewControl>().await?);
+                                        }
+                                        235 => {
+                                            let finished =
+                                                returned.recv::<ReviewsComplete>().await?;
+                                            task.send::<ReviewControl>(finished).await?;
+                                        }
+                                        label => {
+                                            return Err(ShellError::message(format!(
+                                                "unexpected review control return {label}"
+                                            )));
+                                        }
+                                    }
+                                    break 'review_request (
                                         serde_json::from_slice::<Value>(&bytes)
                                             .map_err(|e| ShellError::message(e.to_string()))?,
                                         0,
@@ -429,31 +531,10 @@ pub async fn run(
             }
             WasiBoundaryStep::Exit(exit) => {
                 let status = exit.status() as i32;
-                {
-                    let [mut a, mut b] = task.par()?;
-                    async {
-                        async {
-                            a.recv::<ExitA>().await?;
-                        };
-                        async {
-                            b.recv::<ExitB>().await?;
-                        };
-                        Ok(())
-                    }
-                    .await?;
-                }
-                {
-                    let [mut a, mut b] = task.par()?;
-                    async {
-                        async {
-                            a.send::<ReviewExitA>(&status).await?;
-                        };
-                        async {
-                            b.send::<ReviewExitB>(&status).await?;
-                        };
-                        Ok(())
-                    }
-                    .await?;
+                if control.is_some() {
+                    return Err(ShellError::message(
+                        "guest exited while it still owns review control",
+                    ));
                 }
                 task.send::<RepoExit>(&status).await?;
                 private.send::<IoExit>(&status).await?;

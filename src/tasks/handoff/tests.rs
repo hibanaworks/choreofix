@@ -243,6 +243,11 @@ async fn a_failed_candidate_moves_to_b_and_both_resources_guard_the_actual_commi
             count
         ];
         let mut scratch = vec![0; protocol.audit_workspace_len(&captures, capacity).unwrap()];
+        let observed_producers: Vec<_> = captures
+            .iter()
+            .enumerate()
+            .flat_map(|(producer, capture)| std::iter::repeat_n(producer, capture.records().len()))
+            .collect();
         let audit = protocol
             .audit(
                 &captures,
@@ -251,6 +256,7 @@ async fn a_failed_candidate_moves_to_b_and_both_resources_guard_the_actual_commi
                     choices: &mut choices,
                     execution: ExecutionStorage {
                         session: session.raw(),
+                        observed_producers: &observed_producers,
                         order: &mut order,
                         occurrences: &mut occurrences,
                         acceptances: &mut acceptances,

@@ -12,11 +12,11 @@ use std::{
     future::poll_fn,
     io::{Stdin, Stdout},
     os::fd::AsFd,
-    task::{Poll, Waker},
+    task::{Context, Poll, Waker},
 };
 
 pub struct Bus {
-    pub(crate) transport: crate::imp::transport::InMemoryTransport,
+    pub transport: crate::imp::transport::InMemoryTransport,
     connection: Cell<Connection>,
 }
 
@@ -75,7 +75,7 @@ impl Bus {
         });
         let bindings = resources.map(|(session, role)| {
             // SAFETY: one fresh simulator trial assigns each listed role a
-            // distinct physical resource. Every runtime reaches these same
+            // distinct resource or request object. Every runtime reaches these same
             // bindings. Endpoint transfers and failures never reissue them.
             #[allow(unsafe_code)]
             let binding = unsafe { EndpointBinding::new() };
@@ -160,22 +160,23 @@ impl Bus {
 }
 
 impl Reply<'_> {
-    async fn receive(self) -> ShellResult<Value> {
-        poll_fn(|cx| {
-            self.bus.connection(|connection| {
-                let (result, wake) = connection
-                    .responses
-                    .get_mut(&self.id)
-                    .expect("an owned RPC receipt remains registered");
-                if let Some(value) = result.take() {
-                    Poll::Ready(Ok(value))
-                } else {
-                    *wake = Some(cx.waker().clone());
-                    Poll::Pending
-                }
-            })
+    fn poll_response(&self, cx: &mut Context<'_>) -> Poll<ShellResult<Value>> {
+        self.bus.connection(|connection| {
+            let (result, wake) = connection
+                .responses
+                .get_mut(&self.id)
+                .expect("an owned RPC receipt remains registered");
+            if let Some(value) = result.take() {
+                Poll::Ready(Ok(value))
+            } else {
+                *wake = Some(cx.waker().clone());
+                Poll::Pending
+            }
         })
-        .await
+    }
+
+    fn receive(self) -> impl Future<Output = ShellResult<Value>> {
+        poll_fn(move |cx| self.poll_response(cx))
     }
 }
 
@@ -376,16 +377,99 @@ impl Terminal {
 }
 
 impl Domain for Bus {
-    async fn execute(
+    fn execute(
         &self,
         agent: &'static str,
         tool: &'static str,
         arguments: Value,
-    ) -> Result<Value, String> {
-        let reply = self.reply().map_err(|error| error.to_string())?;
-        let mut values = self.transport.take_observations();
-        values.push(json!({"type":"execute", "id":reply.id, "agent":agent, "tool":tool, "arguments":arguments}));
-        self.enqueue(values, None);
-        reply.receive().await.map_err(|error| error.to_string())
+    ) -> impl Future<Output = Result<Value, String>> {
+        // The unpolled request stays lazy. Once accepted, the actual RPC
+        // receipt can be borrowed by a race without cancelling the operation.
+        let mut request =
+            Some(json!({"type":"execute", "agent":agent, "tool":tool, "arguments":arguments}));
+        let mut receipt = None;
+        poll_fn(move |cx| {
+            if let Some(mut request) = request.take() {
+                let reply = match self.reply() {
+                    Ok(reply) => reply,
+                    Err(error) => return Poll::Ready(Err(error.to_string())),
+                };
+                request["id"] = json!(reply.id);
+                let mut values = self.transport.take_observations();
+                values.push(request);
+                self.enqueue(values, None);
+                receipt = Some(reply);
+            }
+            let result = receipt
+                .as_ref()
+                .expect("completed RPC future polled again")
+                .poll_response(cx);
+            if result.is_ready() {
+                receipt.take();
+            }
+            result.map(|value| value.map_err(|error| error.to_string()))
+        })
+    }
+}
+
+#[cfg(test)]
+impl Bus {
+    /// A native world peer consumes the same RPC queue and replies as stdio.
+    /// It never reads or advances Endpoint progress. N is the fixture's actual
+    /// effect population, not a production task/completion counter.
+    #[hibana_runtime::scope]
+    pub(crate) async fn fixture_peer<const N: usize>(
+        &self,
+        domain: &impl Domain,
+        tools: &[&'static str],
+    ) -> ShellResult<()> {
+        for _ in [(); N] {
+            async {
+                let request = poll_fn(|cx| {
+                    self.connection(|connection| {
+                        while let Some((values, receipt)) = connection.outgoing.pop_front() {
+                            if receipt.is_some() {
+                                return Poll::Ready(Err(ShellError::message(
+                                    "effect fixture cannot acknowledge terminal output",
+                                )));
+                            }
+                            if let Some(request) =
+                                values.into_iter().find(|v| v["type"] == "execute")
+                            {
+                                return Poll::Ready(Ok(request));
+                            }
+                        }
+                        connection.output_waiter = Some(cx.waker().clone());
+                        Poll::Pending
+                    })
+                })
+                .await?;
+                let agent = self
+                    .connection(|connection| {
+                        connection
+                            .terminals
+                            .keys()
+                            .copied()
+                            .find(|name| request["agent"] == *name)
+                    })
+                    .ok_or_else(|| ShellError::message("unknown fixture actor"))?;
+                let tool = tools
+                    .iter()
+                    .copied()
+                    .find(|name| request["tool"] == *name)
+                    .ok_or_else(|| ShellError::message("unknown fixture tool"))?;
+                let result = domain
+                    .execute(agent, tool, request["arguments"].clone())
+                    .await
+                    .map_err(ShellError::message)?;
+                self.respond(
+                    request["id"]
+                        .as_u64()
+                        .ok_or_else(|| ShellError::message("fixture RPC id missing"))?,
+                    result,
+                )?;
+            };
+        }
+        Ok(())
     }
 }

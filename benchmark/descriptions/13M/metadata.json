@@ -1,0 +1,24 @@
+{
+  "agents": ["ANALYST", "BIOLOGIST", "CHEMIST", "QC_CONTROLLER"],
+  "resources": ["CENTRIFUGE", "FUME_HOOD", "SPECTROMETER"],
+  "tool_delays": {
+    "run_analysis": [1.0, 5.0],
+    "run_separation": [1.0, 5.0],
+    "run_bioassay": [1.0, 5.0],
+    "run_synthesis": [1.0, 5.0],
+    "verify_result": [1.0, 5.0]
+  },
+  "agent_resources": {
+    "ANALYST": ["CENTRIFUGE", "SPECTROMETER"],
+    "BIOLOGIST": ["CENTRIFUGE", "SPECTROMETER"],
+    "CHEMIST": ["CENTRIFUGE", "FUME_HOOD", "SPECTROMETER"],
+    "QC_CONTROLLER": ["FUME_HOOD", "SPECTROMETER"]
+  },
+  "tool_resource_map": {
+    "run_analysis": ["SPECTROMETER"],
+    "run_bioassay": [],
+    "run_separation": ["CENTRIFUGE"],
+    "run_synthesis": ["FUME_HOOD"],
+    "verify_result": ["FUME_HOOD", "SPECTROMETER"]
+  }
+}

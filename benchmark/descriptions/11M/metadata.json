@@ -1,0 +1,29 @@
+{
+  "agents": ["DISPATCHER", "INSPECTOR", "WORKER_A", "WORKER_B", "WORKER_C"],
+  "resources": ["INSPECTOR", "STATION_ALPHA", "STATION_BETA", "STATION_GAMMA", "TOOL_CABINET"],
+  "agent_resources": {
+    "DISPATCHER": [],
+    "INSPECTOR": ["INSPECTOR"],
+    "WORKER_A": ["STATION_ALPHA", "STATION_BETA", "TOOL_CABINET"],
+    "WORKER_B": ["STATION_BETA", "STATION_GAMMA", "TOOL_CABINET"],
+    "WORKER_C": ["STATION_ALPHA", "STATION_GAMMA", "TOOL_CABINET"]
+  },
+  "tool_resource_map": {
+    "dispatch_rework": [],
+    "do_job": {
+      "argument": "job_id",
+      "values": {
+        "alpha_job_a": ["STATION_ALPHA", "TOOL_CABINET"],
+        "beta_job_a": ["STATION_BETA"],
+        "beta_job_b": ["STATION_BETA", "TOOL_CABINET"],
+        "gamma_job_b": ["STATION_GAMMA"],
+        "gamma_job_c": ["STATION_GAMMA", "TOOL_CABINET"],
+        "alpha_job_c": ["STATION_ALPHA"]
+      }
+    },
+    "inspect_quality": ["INSPECTOR"]
+  },
+  "resource_capacity": {
+    "TOOL_CABINET": 2
+  }
+}

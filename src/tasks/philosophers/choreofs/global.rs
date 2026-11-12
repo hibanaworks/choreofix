@@ -8,8 +8,6 @@ use hibana::{
     runtime::program::{Projectable, RoleProgram, project},
 };
 pub const SERVICE_FD: u8 = 4;
-pub const SERVICE_PREFIX: &[u8] = b"service/";
-pub const RESULT_PATH: &[u8] = b"service/result";
 pub type Think = g::Msg<1, PhilosopherArguments>;
 pub type Thought<'a> = g::Msg<2, &'a [u8]>;
 pub type Eat<const RESOURCE: u8> = g::Msg<RESOURCE, PhilosopherArguments>;

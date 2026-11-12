@@ -464,3 +464,6 @@ revising_fixture!(
                (notify,NOTIFY,notify_resource,NOTIFY_RESOURCE,ANALYTICS,ANALYTICS_RESOURCE,PAYMENT,PAYMENT_RESOURCE),
                (analytics,ANALYTICS,analytics_resource,ANALYTICS_RESOURCE,NOTIFY,NOTIFY_RESOURCE,SEARCH,SEARCH_RESOURCE),
                (search,SEARCH,search_resource,SEARCH_RESOURCE,ANALYTICS,ANALYTICS_RESOURCE,AUTH,AUTH_RESOURCE)]);
+
+mod owned_exclusion;
+mod wasi_admission;

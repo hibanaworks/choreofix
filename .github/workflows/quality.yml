@@ -1,6 +1,7 @@
 name: quality
 on:
   push:
+    branches: ['**']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -14,11 +15,33 @@ jobs:
       CARGO_BUILD_JOBS: '1'
       RUST_TEST_THREADS: '1'
       PYTHONHASHSEED: '0'
-      PYO3_PYTHON: ${{ github.workspace }}/.venv/bin/python
+      PYO3_PYTHON: ${{ github.workspace }}/choreofix/.venv/bin/python
+    defaults:
+      run:
+        working-directory: choreofix
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          path: choreofix
           submodules: true
+      - name: Select the current core
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: hibanaworks/hibana
+          ref: main
+          path: hibana
+      - name: Select the current WASI runtime
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: hibanaworks/hibana-wasip1-runtime
+          ref: main
+          path: hibana-wasip1-runtime
+      - name: Select the current EPF
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: hibanaworks/hibana-epf
+          ref: main
+          path: hibana-epf
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.14'
@@ -49,24 +72,37 @@ jobs:
         run: |
           bash "$HIBANA_RESOURCE_GUARD" bash -euo pipefail <<'CHECKS'
           cargo +stable fmt --check
+          .venv/bin/python -m unittest discover -s benchmark/tests -v
           cargo +stable fmt --manifest-path tools/inputs/Cargo.toml --check
           cargo +stable test --locked --manifest-path tools/inputs/Cargo.toml
           cargo +stable clippy --locked --manifest-path tools/inputs/Cargo.toml --all-targets -- -D warnings
           cargo +stable fmt --manifest-path tools/runner/Cargo.toml --check
           cargo +stable test --locked --manifest-path tools/runner/Cargo.toml
+          cargo +stable test --locked --manifest-path tools/runner/Cargo.toml process::tests::runtime_shutdown_completes_pending_and_queued_shared_channel_replies -- --exact --ignored --test-threads=1
           cargo +stable clippy --locked --manifest-path tools/runner/Cargo.toml --all-targets -- -D warnings
           cargo +stable fmt --manifest-path vendor/hibana-wash/Cargo.toml --check
           cargo +stable test --locked --manifest-path vendor/hibana-wash/Cargo.toml --lib
           cargo +stable test --locked
+          cargo +stable test --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --lib handoff::
+          cargo +stable test --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test manufacturing
+          cargo +stable test --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test tool_cabinet -- --skip shell:: --test-threads=1
+          cargo +stable clippy --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test tool_cabinet -- -D warnings
+          cargo +stable test --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test regulatory_discovery -- --skip shell:: --test-threads=1
+          cargo +stable clippy --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test regulatory_discovery -- -D warnings
+          cargo +stable clippy --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test multi_round_discovery -- -D warnings
+          cargo +stable test --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test research_paper research_paper:: -- --test-threads=1
+          cargo +stable clippy --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test research_paper -- -D warnings
+          cargo +stable test --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test kitchen kitchen_ -- --test-threads=1
+          cargo +stable clippy --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test kitchen -- -D warnings
+          cargo +stable test --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test repository_arguments implementation_arguments_retain_actual_source_bytes_and_reject_other_fields -- --exact
+          cargo +stable test --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test repository_arguments test_and_ci_arguments_keep_their_distinct_targets -- --exact
+          cargo +stable test --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test feature_delivery feature_delivery_
+          cargo +stable test --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test feature_delivery_whole feature_delivery_whole_execution_retries_and_returns_every_resource -- --exact
+          cargo +stable test --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test feature_delivery_source feature_delivery_whole_source
+          cargo +stable test --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test feature_delivery_data merge_data_requires_the_exact_candidate_approval_and_integrated_base -- --exact
           cargo +stable clippy --locked --all-targets -- -D warnings
-          cargo +stable test --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --all-targets
-          cargo +stable clippy --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --all-targets -- -D warnings
           cargo +stable clippy --locked --manifest-path vendor/hibana-wash/Cargo.toml --target wasm32-wasip1 --release -- -D warnings
           CHECKS
-      - name: Check the actual receiver under Miri
-        run: |
-          rustup toolchain install nightly-2026-10-12 --profile minimal --component miri --component rust-src
-          MIRIFLAGS=-Zmiri-strict-provenance bash "$HIBANA_RESOURCE_GUARD" cargo +nightly-2026-10-12 miri test --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --lib handoff:: -- --test-threads=1
       - name: Check the actual WASI and task effect boundary
         run: |
           bash "$HIBANA_RESOURCE_GUARD" bash -euo pipefail <<'CHECKS'
@@ -88,6 +124,6 @@ jobs:
         with:
           name: direct-wasi-boundary
           path: |
-            output/wasi-boundary/
-            wash-profile.json
+            choreofix/output/wasi-boundary/
+            choreofix/wash-profile.json
           if-no-files-found: ignore

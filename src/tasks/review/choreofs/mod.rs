@@ -51,7 +51,7 @@ async fn run_guests(
         )
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
         rv.set_resolver(
-            &p.review_wasi,
+            &p.review,
             ResolverRef::<SELECT_REVIEW>::decision_state(
                 &selected_review,
                 imp::ReviewTarget::decide,
@@ -60,11 +60,12 @@ async fn run_guests(
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
         let mut repo = rv.enter(session, &p.repo)?;
         let repository = rv.enter(session, &p.repo_endpoint)?;
+        let review_control = rv.enter(session, &p.review)?;
         let mut a_wasi = rv.enter(session, &p.a_wasi)?;
         let mut b_wasi = rv.enter(session, &p.b_wasi)?;
         let mut review_wasi = rv.enter(session, &p.review_wasi)?;
-        let mut review_a = rv.enter(session, &p.review_a)?;
-        let mut review_b = rv.enter(session, &p.review_b)?;
+        let review_a = rv.enter(session, &p.review_a)?;
+        let review_b = rv.enter(session, &p.review_b)?;
         let mut a_io = rv.enter(session, &p.a_io)?;
         let mut b_io = rv.enter(session, &p.b_io)?;
         let mut review_io = rv.enter(session, &p.review_io)?;
@@ -83,13 +84,13 @@ async fn run_guests(
         let review_guest =
             review_store.init(module, GuestMemory::new(&mut review_memory), bindings())?;
         async {
-            localside::reviewer_a::run(&mut review_a, bus, &review_a_result).await?;
+            localside::reviewer_a::run(review_a, bus, &review_a_result).await?;
         };
         async {
-            localside::reviewer_b::run(&mut review_b, bus, &review_b_result).await?;
+            localside::reviewer_b::run(review_b, bus, &review_b_result).await?;
         };
         async {
-            localside::repo::run(&mut repo, repository, bus).await?;
+            localside::repo::run(&mut repo, (repository, review_control), bus).await?;
         };
         async {
             localside::developer_wasi::run::<A_WASI>(a_guest, &mut a_wasi).await?;
@@ -124,7 +125,10 @@ async fn run_guests(
 pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
     let (bus, mut reader, terminals) = crate::shell::imp::bus::Bus::open(
         ["DEVELOPER_A", "DEVELOPER_B", "REVIEWER"],
-        [(SessionId::new(6), global::REPO_ENDPOINT)],
+        [
+            (SessionId::new(6), global::REPO_ENDPOINT),
+            (SessionId::new(6), global::REVIEW),
+        ],
     );
     let result = hibana_runtime::race(run_guests(module, &bus, terminals), reader.run(&bus)).await;
     match &result {

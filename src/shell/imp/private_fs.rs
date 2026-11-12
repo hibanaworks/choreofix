@@ -10,7 +10,7 @@ use hibana_wasip1_runtime::{
 };
 
 const READ: u64 = 1 << 1;
-pub(crate) const WRITE: u64 = 1 << 6;
+pub const WRITE: u64 = 1 << 6;
 const READDIR: u64 = 1 << 14;
 const READ_WRITE: FdBinding = FdBinding {
     read: Some(FdReadRow::Base),
@@ -26,18 +26,18 @@ const UNBOUND_PATHS: [&[u8]; 8] = [
 // File contents, offsets and flags are filesystem data, never task progress or
 // ownership authority. All file operations consume ChoreoFS operation results.
 pub struct PrivateFs<'a> {
-    pub(crate) input: Vec<u8>,
+    pub input: Vec<u8>,
     reply: Vec<u8>,
-    pub(crate) service_path: Vec<u8>,
-    pub(crate) service_bytes: Vec<u8>,
-    pub(crate) work: [Vec<u8>; 8],
-    pub(crate) paths: [Vec<u8>; 8],
+    pub service_path: Vec<u8>,
+    pub service_bytes: Vec<u8>,
+    pub work: [Vec<u8>; 8],
+    pub paths: [Vec<u8>; 8],
     listing: Vec<u8>,
-    pub(crate) offsets: [usize; 16],
-    pub(crate) fd_flags: [u16; 16],
+    pub offsets: [usize; 16],
+    pub fd_flags: [u16; 16],
     pub output: Vec<u8>,
     pub terminal: Terminal,
-    pub(crate) bus: &'a Bus,
+    pub bus: &'a Bus,
 }
 
 impl<'a> PrivateFs<'a> {
@@ -67,7 +67,7 @@ impl PrivateFs<'_> {
             &self.paths[index]
         }
     }
-    pub(crate) fn refresh_listing(&mut self) {
+    pub fn refresh_listing(&mut self) {
         self.listing.clear();
         for (index, path) in self.paths.iter().enumerate() {
             let Some(name) = path.strip_prefix(b"work/") else {
@@ -85,7 +85,7 @@ impl PrivateFs<'_> {
         }
     }
 
-    pub(crate) fn objects(&self) -> ChoreoFsObjectSet<'_, 16> {
+    pub fn objects(&self) -> ChoreoFsObjectSet<'_, 16> {
         ChoreoFsObjectSet::new([
             ChoreoFsObject::readable(
                 b"llm/stdin",
@@ -273,11 +273,18 @@ impl PrivateFs<'_> {
         if !operation.is_writable() {
             return Err(ShellError::message("result file is not writable"));
         }
-        if offset == 0 {
-            self.reply.clear();
-        }
-        let end = offset + operation.bytes().len();
-        self.reply.resize(self.reply.len().max(end), 0);
+        let end = offset
+            .checked_add(operation.bytes().len())
+            .ok_or_else(|| ShellError::message("result offset overflow"))?;
+        let len = if offset == 0 {
+            end
+        } else {
+            self.reply.len().max(end)
+        };
+        self.reply
+            .try_reserve(len.saturating_sub(self.reply.len()))
+            .map_err(|error| ShellError::message(format!("result allocation failed: {error}")))?;
+        self.reply.resize(len, 0);
         self.reply[offset..end].copy_from_slice(operation.bytes());
         let _completion = operation.written();
         Ok(())

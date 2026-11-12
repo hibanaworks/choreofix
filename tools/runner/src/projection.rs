@@ -19,15 +19,12 @@ const LOCAL: u64 = 0x0300;
 const SEND: u64 = 0x0301;
 const RECV: u64 = 0x0302;
 
-fn contracts(compiled: &Value) -> Result<BTreeMap<u16, [u8; 6]>> {
+pub(crate) fn contracts(compiled: &Value) -> Result<BTreeMap<u16, [u8; 6]>> {
     if compiled["type"] != "compiled_projection"
         || compiled["format_version"] != 1
-        || !matches!(
-            compiled["task"].as_str(),
-            Some(
-                "1E" | "1M" | "1H" | "2E" | "2M" | "2H" | "6E" | "8E" | "9E" | "9M" | "9H" | "16E"
-            )
-        )
+        || !choreofix_inputs::task_ids()
+            .iter()
+            .any(|task| compiled["task"] == *task)
     {
         return Err("unknown compiled projection format or task".into());
     }
@@ -122,7 +119,6 @@ fn contracts(compiled: &Value) -> Result<BTreeMap<u16, [u8; 6]>> {
         }
     }
     let expected = match compiled["task"].as_str() {
-        Some("6E") => BTreeSet::from([0, 1, 2, 5, 6, 7, 8, 9, 10, 13]),
         Some("1E" | "2E" | "9E") => (0..5)
             .flat_map(|group| (0..3).map(move |role| group * 7 + role))
             .collect(),
@@ -132,7 +128,18 @@ fn contracts(compiled: &Value) -> Result<BTreeMap<u16, [u8; 6]>> {
         Some("1H" | "2H" | "9H") => (0..35).collect(),
         Some("8E") => (0..17).collect(),
         Some("16E") => (0..=12).collect(),
-        _ => unreachable!(),
+        // Other accepted task formats publish the exact role inventory.
+        // Do not maintain a second task allow-list beside the format check.
+        _ => compiled["roles"]
+            .as_object()
+            .ok_or("compiled role names")?
+            .values()
+            .map(|role| {
+                role.as_u64()
+                    .filter(|role| *role <= 255)
+                    .ok_or_else(|| "compiled named role".into())
+            })
+            .collect::<Result<BTreeSet<_>>>()?,
     };
     if roles != expected
         || headers.is_empty()

@@ -1,4 +1,4 @@
-use crate::{Result, SOURCES, verify, verify_benchmark_source, verify_runtime_source};
+use crate::{Result, SOURCES, verify, verify_benchmark, verify_runtime_source};
 use serde_json::Value;
 use std::{
     fs,
@@ -102,6 +102,7 @@ pub(crate) fn extract(repository: &Path, revision: &str, destination: &Path) -> 
 
 /// Restore missing immutable archives only; never repair or overwrite a source.
 pub fn restore(root: &Path) -> Result<Value> {
+    verify_benchmark(root)?;
     let mut missing = Vec::new();
     for spec in &SOURCES {
         let path = root.join("vendor").join(spec.name);
@@ -111,9 +112,6 @@ pub fn restore(root: &Path) -> Result<Value> {
                     return Err("existing upstream destination is not a directory".into());
                 }
                 verify_runtime_source(root, &path, spec)?;
-                if spec.name == "tracefix" {
-                    verify_benchmark_source(root, &path)?;
-                }
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => missing.push(spec),
             Err(error) => return Err(error.into()),
@@ -137,9 +135,6 @@ pub fn restore(root: &Path) -> Result<Value> {
             let staged = scratch.0.join(spec.name);
             extract(&repository, spec.revision, &staged)?;
             verify_runtime_source(root, &staged, spec)?;
-            if spec.name == "tracefix" {
-                verify_benchmark_source(root, &staged)?;
-            }
             let destination = root.join("vendor").join(spec.name);
             match fs::symlink_metadata(&destination) {
                 Ok(_) => {

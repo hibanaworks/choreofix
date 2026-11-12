@@ -29,7 +29,9 @@ fn artifact() -> Value {
         programs.push(json!({"role":role,"rows":rows}));
     }
     json!({"format_version":1,"runtime_binary_sha256":"a".repeat(64),
-        "compiled":{"type":"compiled_projection","format_version":1,"task":"6E","programs":programs}})
+        "compiled":{"type":"compiled_projection","format_version":1,"task":"6E",
+        "roles":{"a":0,"b":1,"review":2,"review_a":5,"review_b":6,"repo":7,
+            "a_io":8,"b_io":9,"review_io":10,"repository":13},"programs":programs}})
 }
 
 fn rows(artifact: &Value) -> Vec<Value> {
@@ -64,6 +66,20 @@ fn matching_observations_cannot_hide_a_wrong_compiled_header() -> Result<()> {
         assert_eq!(send, receive, "the old identity-only condition still holds");
         assert!(frames(&artifact, &changed).is_err(), "accepted {field}");
     }
+    Ok(())
+}
+
+#[test]
+fn a_new_named_role_task_checks_its_published_inventory_without_another_allow_list() -> Result<()> {
+    let mut image = artifact();
+    for task in ["10M", "11E"] {
+        image["compiled"]["task"] = json!(task);
+        assert_eq!(contracts(&image["compiled"])?.len(), 2);
+    }
+    image["compiled"]["roles"]["extra_named_role"] = json!(42);
+    assert!(contracts(&image["compiled"]).is_err());
+    image["compiled"]["task"] = json!("unknown");
+    assert!(contracts(&image["compiled"]).is_err());
     Ok(())
 }
 

@@ -2,13 +2,13 @@
 use hibana::runtime::{program::RoleProgram, tap};
 use serde_json::{Value, json};
 
-pub(crate) fn rows<const ROLE: u8>(program: &RoleProgram<ROLE>) -> Value {
+pub fn rows<const ROLE: u8>(program: &RoleProgram<ROLE>) -> Value {
     json!({"role":ROLE,"rows":tap::projected(program)
         .map(record)
         .collect::<Vec<_>>()})
 }
 
-pub(crate) fn record(row: tap::TapEvent) -> [u32; 5] {
+pub fn record(row: tap::TapEvent) -> [u32; 5] {
     [
         row.ts(),
         u32::from(row.id()),

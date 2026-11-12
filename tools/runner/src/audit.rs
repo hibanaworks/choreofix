@@ -11,6 +11,84 @@ use std::{
     path::{Component, Path},
 };
 
+fn check_domain_operations(fixture: &Value, metadata: &Value, schemas: &Value) -> Result<()> {
+    if fixture["tool_schemas"] != *schemas || fixture["inputs"]["tool_schemas"] != *schemas {
+        return Err("recorded domain schemas differ from original inputs".into());
+    }
+    for actor in fixture["fixtures"].as_array().ok_or("fixture actors")? {
+        let name = actor["agent"].as_str().ok_or("scientist name")?;
+        let resources = metadata["agent_resources"][name]
+            .as_array()
+            .ok_or("original scientist resources")?;
+        let operations = schemas
+            .as_array()
+            .ok_or("original domain schemas")?
+            .iter()
+            .map(|tool| &tool["function"])
+            .filter(|tool| {
+                tool["agent_ids"]
+                    .as_array()
+                    .is_some_and(|ids| ids.contains(&actor["agent"]))
+            })
+            .collect::<Vec<_>>();
+        if operations.is_empty()
+            || actor["operations"] != json!(operations)
+            || actor["resources"] != json!(resources)
+            || actor.get("calls").is_some()
+        {
+            return Err("scientific operations or resources differ from original inputs".into());
+        }
+    }
+    Ok(())
+}
+
+fn check_resource_assignments(task: &str, fixture: &Value, metadata: &Value) -> Result<()> {
+    let field = if task.starts_with('9') {
+        "forks"
+    } else if matches!(task, "1E" | "1M" | "1H") {
+        "modules"
+    } else if matches!(task, "2E" | "2M" | "2H") {
+        "sections"
+    } else {
+        "resources"
+    };
+    for actor in fixture["fixtures"].as_array().ok_or("fixture actors")? {
+        let mut actual = actor[field]
+            .as_array()
+            .ok_or("physical resource assignments")?
+            .iter()
+            .map(|v| v.as_str().ok_or("resource name"))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut expected = if field == "resources" {
+            // The tools' physical resources are data, not a list of known task IDs.
+            let mut names = Vec::new();
+            for call in actor["calls"].as_array().ok_or("participant assignments")? {
+                names.extend(crate::oracle::resources_for_call(
+                    metadata,
+                    actor["agent"].as_str().ok_or("participant")?,
+                    call,
+                )?);
+            }
+            names.sort_unstable();
+            names.dedup();
+            names
+        } else {
+            metadata["agent_resources"][actor["agent"].as_str().ok_or("actor")?]
+                .as_array()
+                .ok_or("original participant resources")?
+                .iter()
+                .map(|v| v.as_str().ok_or("resource name"))
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        actual.sort_unstable();
+        expected.sort_unstable();
+        if actual != expected {
+            return Err("physical resource assignment changed".into());
+        }
+    }
+    Ok(())
+}
+
 fn load(path: &Path) -> Result<Value> {
     Ok(serde_json::from_slice(&fs::read(path)?)?)
 }
@@ -253,12 +331,12 @@ pub fn run(root: &Path) -> Result<Value> {
         if Path::new(name)
             .components()
             .any(|v| !matches!(v, Component::Normal(_)))
-            || json!(digest(&root.join("source").join(name))?) != *hash
+            || json!(digest(&root.join(name))?) != *hash
         {
             return Err(format!("source differs: {name}").into());
         }
     }
-    choreofix_inputs::verify_benchmark(&root.join("source"))?;
+    let benchmark = choreofix_inputs::verify_benchmark(&root.join("source"))?;
     let receipt = load(&root.join("build-receipt.json"))?;
     let original = load(&root.join("input-build-receipt.json"))?;
     let input_hash = digest(&root.join("input-build-receipt.json"))?;
@@ -266,24 +344,25 @@ pub fn run(root: &Path) -> Result<Value> {
     let mut normalized = original.clone();
     normalized["source_manifest"] = json!("build-source.sha256");
     normalized["input_receipt_sha256"] = json!(input_hash);
-    if versions["format_version"] != 4
+    if versions["format_version"] != 5
         || versions["runtime_build_receipt"] != receipt
         || versions["build_receipt_sha256"] != digest(&root.join("build-receipt.json"))?
         || versions["input_build_receipt_sha256"] != input_hash
         || versions["runtime_source_manifest_sha256"] != source_hash
         || original["source_manifest_sha256"] != source_hash
         || original["source_unchanged"] != true
+        || !original["source_git"].is_object()
         || versions["binaries"]["runtime"] != original["binary_sha256"]
         || receipt != normalized
     {
         return Err("runtime, source or build receipt differs".into());
     }
-    snapshot::runtime_sources(&root.join("source"), &root.join("build-source.sha256"))?;
+    snapshot::runtime_sources(root, &root.join("build-source.sha256"))?;
     let rows = records(&root.join("events.jsonl"))?;
     let fixture = &rows.first().ok_or("no runtime evidence")?["message"];
     let metadata = load(
         &root
-            .join("source/vendor/tracefix/benchmark/descriptions")
+            .join("source/benchmark/descriptions")
             .join(task)
             .join("metadata.json"),
     )?;
@@ -299,41 +378,18 @@ pub fn run(root: &Path) -> Result<Value> {
         || fixture["depth"] != result["depth"]
         || fixture["seed"] != config["python_hash_seed"]
         || fixture["delay_multiplier"] != config["domain_tool_delay_multiplier"]
+        || fixture["simulator_contract"] != benchmark["simulator_contract"]
     {
         return Err("task identity, depth or participant set differs from original inputs".into());
     }
-    for actor in fixture["fixtures"].as_array().ok_or("fixture actors")? {
-        let field = if task.starts_with('9') {
-            "forks"
-        } else if matches!(task, "1E" | "1M" | "1H") {
-            "modules"
-        } else if matches!(task, "6E" | "8E" | "16E") {
-            "resources"
-        } else {
-            "sections"
-        };
-        let mut actual: Vec<_> = actor[field]
-            .as_array()
-            .ok_or("resource pair")?
-            .iter()
-            .map(|v| v.as_str().ok_or("resource name"))
-            .collect::<std::result::Result<_, _>>()?;
-        let expected = if matches!(task, "6E" | "8E" | "16E") {
-            &metadata["tool_resource_map"][actor["calls"][0]["tool"].as_str().ok_or("tool")?]
-        } else {
-            &metadata["agent_resources"][actor["agent"].as_str().ok_or("actor")?]
-        };
-        let mut expected: Vec<_> = expected
-            .as_array()
-            .ok_or("original resource pair")?
-            .iter()
-            .map(|v| v.as_str().ok_or("resource name"))
-            .collect::<std::result::Result<_, _>>()?;
-        actual.sort();
-        expected.sort();
-        if actual != expected {
-            return Err("physical resource assignment changed".into());
-        }
+    if task == "14H" {
+        check_domain_operations(
+            fixture,
+            &metadata,
+            &load(&root.join("source/benchmark/descriptions/14H/tools.json"))?,
+        )?;
+    } else {
+        check_resource_assignments(task, fixture, &metadata)?;
     }
     if fixture["adapter"] != "rust_upstream_api"
         || fixture["test_delays"] != json!({})
@@ -400,7 +456,32 @@ pub fn run(root: &Path) -> Result<Value> {
     let protocol = match task {
         "1E" | "1M" | "1H" => crate::codebase_audit::audit(&root.join("events.jsonl"))?,
         "2E" | "2M" | "2H" => crate::writing_audit::audit(&root.join("events.jsonl"))?,
+        "3E" => crate::report_audit::audit(&root.join("events.jsonl"))?,
+        "4E" => crate::coordination_audit::audit(&root.join("events.jsonl"))?,
+        "4M" => crate::refactor_audit::audit(&root.join("events.jsonl"))?,
+        "14E" => crate::discovery_audit::audit(&root.join("events.jsonl"))?,
+        "14M" => crate::regulatory_discovery_audit::audit(&root.join("events.jsonl"))?,
+        "14H" => crate::multi_round_discovery_audit::audit(&root.join("events.jsonl"))?,
+        "13E" => crate::lab_audit::audit(&root.join("events.jsonl"))?,
+        "13M" => crate::lab_quality_audit::audit(&root.join("events.jsonl"))?,
+        "5E" => crate::medical_audit::audit(&root.join("events.jsonl"))?,
+        "5M" => crate::multi_specialty_audit::audit(&root.join("events.jsonl"))?,
+        "5H" => crate::critical_care_audit::audit(&root.join("events.jsonl"))?,
         "6E" => crate::review_audit::audit(&root.join("events.jsonl"))?,
+        "6M" => crate::feature_delivery_audit::audit(&root.join("events.jsonl"))?,
+        "7E" => crate::document_audit::audit(&root.join("events.jsonl"))?,
+        "10E" => crate::build_audit::audit(&root.join("events.jsonl"))?,
+        "11E" => crate::manufacturing_audit::audit(&root.join("events.jsonl"))?,
+        "12E" => crate::kitchen_audit::audit(&root.join("events.jsonl"))?,
+        "10M" => {
+            let path = root.join("events.jsonl");
+            let mut checked = crate::cascading_build_audit::audit(&path)?;
+            checked["dynamic_protocol"] = crate::projection::check_dynamic(
+                &crate::projection::load(&path)?,
+                &records(&path)?,
+            )?;
+            checked
+        }
         "8E" => crate::api_audit::audit(&root.join("events.jsonl"))?,
         "16E" => crate::cicd_audit::audit(&root.join("events.jsonl"))?,
         "9E" | "9M" | "9H" => crate::philosophers_audit::audit(&root.join("events.jsonl"))?,
@@ -443,12 +524,14 @@ pub fn run(root: &Path) -> Result<Value> {
         json!({"status":"passed","task":fixture["task"],"kind":"unscored_direct_wasi_model_preflight",
         "scored_benchmark":false,"participants":participants,"participant_turns":participants.len(),"max_simultaneous_model_turns":maximum,
         "inclusive_tokens":total,"protocol":protocol,"events_sha256":result["events_sha256"],
+        "simulator_contract":benchmark["simulator_contract"],
+        "simulator_manifest_sha256":digest(&root.join("source/benchmark/simulator-manifest.json"))?,
         "auditor_sha256":digest(&std::env::current_exe()?)?}),
     )
 }
 
 pub fn check_mutants(root: &Path, output: &Path) -> Result<Value> {
-    run(root)?;
+    let baseline = run(root)?;
     fs::create_dir(output)?;
     if output.canonicalize()?.starts_with(root.canonicalize()?) {
         return Err("mutant output must be outside original evidence".into());
@@ -481,6 +564,7 @@ pub fn check_mutants(root: &Path, output: &Path) -> Result<Value> {
         "unqualified_runtime",
         "missing_guest_artifact",
         "wrong_participant_set",
+        "simulator_contract_mismatch",
         "artificial_delay_in_model_fixture",
     ] {
         let case = output.join(kind);
@@ -532,7 +616,17 @@ pub fn check_mutants(root: &Path, output: &Path) -> Result<Value> {
                     .find(|r| r["message"]["method"] == "item/tool/call")
                     .ok_or("tool call")?["message"]["id"]
                     .clone();
-                rows.retain(|r| !(r["direction"] == "send" && r["message"]["id"] == id));
+                // Server call IDs and client request IDs may overlap. Remove
+                // only the tool response, preserving client requests with that ID.
+                let before = rows.len();
+                rows.retain(|r| {
+                    !(r["direction"] == "send"
+                        && r["message"]["id"] == id
+                        && r["message"].get("method").is_none())
+                });
+                if before - rows.len() != 1 {
+                    return Err("expected one actual tool response to remove".into());
+                }
             }
             "false_simulator_score" => {
                 let mut runtime = records(&case.join("events.jsonl"))?;
@@ -553,11 +647,12 @@ pub fn check_mutants(root: &Path, output: &Path) -> Result<Value> {
             "changed_upstream_source" => {
                 let mut manifest = load(&case.join("source-manifest.json"))?;
                 let relative = format!(
-                    "vendor/tracefix/benchmark/descriptions/{}/description.md",
+                    "benchmark/descriptions/{}/description.md",
                     result["task"].as_str().ok_or("task")?
                 );
                 fs::write(case.join("source").join(&relative), "changed input\n")?;
-                manifest[&relative] = json!(digest(&case.join("source").join(&relative))?);
+                manifest[format!("source/{relative}")] =
+                    json!(digest(&case.join("source").join(&relative))?);
                 crate::evidence::save(&case.join("source-manifest.json"), &manifest)?;
                 let mut versions = load(&case.join("versions.json"))?;
                 versions["source_manifest_sha256"] =
@@ -585,12 +680,16 @@ pub fn check_mutants(root: &Path, output: &Path) -> Result<Value> {
                 crate::evidence::save(&case.join("versions.json"), &versions)?;
                 result["versions"] = versions;
             }
-            "wrong_participant_set" => {
+            "wrong_participant_set" | "simulator_contract_mismatch" => {
                 let mut runtime = records(&case.join("events.jsonl"))?;
-                runtime[0]["message"]["fixtures"]
-                    .as_array_mut()
-                    .ok_or("actors")?
-                    .pop();
+                if kind == "wrong_participant_set" {
+                    runtime[0]["message"]["fixtures"]
+                        .as_array_mut()
+                        .ok_or("actors")?
+                        .pop();
+                } else {
+                    runtime[0]["message"]["simulator_contract"] = json!("unmatched-world-contract");
+                }
                 fs::write(
                     case.join("events.jsonl"),
                     runtime.iter().map(|r| format!("{r}\n")).collect::<String>(),
@@ -622,8 +721,9 @@ pub fn check_mutants(root: &Path, output: &Path) -> Result<Value> {
             .expect_err("altered evidence passed independent audit")
             .to_string();
         checked.push(json!({"mutation":kind,"status":"rejected","reason":error,"outer_hashes_recomputed":true}));
+        fs::remove_dir_all(case)?;
     }
-    let report = json!({"status":"passed","checked":checked,
+    let report = json!({"status":"passed","baseline":baseline,"checked":checked,
         "auditor_sha256":digest(&std::env::current_exe()?)?,
         "original_events_sha256":digest(&root.join("events.jsonl"))?});
     crate::evidence::save(&output.join("report.json"), &report)?;
@@ -633,6 +733,63 @@ pub fn check_mutants(root: &Path, output: &Path) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn variable_material_inputs_keep_original_schemas_and_resource_bindings() {
+        let metadata = json!({"agent_resources":{"FORMULATOR":["FORMULATION_SUITE"]}});
+        let schemas = json!([
+            {"function":{"name":"prepare_formulation","agent_ids":["FORMULATOR"],"parameters":{"compound":{"type":"string"}}}},
+            {"function":{"name":"run_cell_assay","agent_ids":["BIOLOGIST"],"parameters":{"assay":{"type":"string"}}}}
+        ]);
+        let fixture = json!({"tool_schemas":schemas,"inputs":{"tool_schemas":schemas},"fixtures":[{
+            "agent":"FORMULATOR","resources":["FORMULATION_SUITE"],"operations":[schemas[0]["function"]]
+        }]});
+        check_domain_operations(&fixture, &metadata, &schemas).unwrap();
+        let mut changed = fixture.clone();
+        changed["fixtures"][0]["resources"] = json!([]);
+        assert!(check_domain_operations(&changed, &metadata, &schemas).is_err());
+        changed = fixture.clone();
+        changed["fixtures"][0]["operations"] = json!([]);
+        assert!(check_domain_operations(&changed, &metadata, &schemas).is_err());
+        changed = fixture.clone();
+        changed["fixtures"][0]["operations"]
+            .as_array_mut()
+            .unwrap()
+            .push(schemas[1]["function"].clone());
+        assert!(check_domain_operations(&changed, &metadata, &schemas).is_err());
+        changed = fixture.clone();
+        changed["fixtures"][0]["calls"] = json!([]);
+        assert!(check_domain_operations(&changed, &metadata, &schemas).is_err());
+        changed = fixture;
+        changed["tool_schemas"][0]["function"]["parameters"] = json!({});
+        changed["inputs"]["tool_schemas"] = changed["tool_schemas"].clone();
+        changed["fixtures"][0]["operations"] = json!([changed["tool_schemas"][0]["function"]]);
+        assert!(check_domain_operations(&changed, &metadata, &schemas).is_err());
+    }
+
+    #[test]
+    fn physical_resources_come_from_all_assigned_tools_without_a_task_allowlist() {
+        let metadata: Value = serde_json::from_str(include_str!(
+            "../../../benchmark/descriptions/5M/metadata.json"
+        ))
+        .unwrap();
+        let fixture = json!({"fixtures":[
+            {"agent":"ER_DOCTOR","resources":["CONSULTATION_ROOM"],"calls":[
+                {"tool":"assess_patient"},{"tool":"order_tests"},{"tool":"conduct_case_conference"}]},
+            {"agent":"RADIOLOGIST","resources":["MRI","CT_SCANNER"],"calls":[
+                {"tool":"perform_imaging"},{"tool":"interpret_imaging"}]}
+        ]});
+        check_resource_assignments("5M", &fixture, &metadata).unwrap();
+        let mut missing = fixture.clone();
+        missing["fixtures"][1]["resources"] = json!(["CT_SCANNER"]);
+        assert!(check_resource_assignments("5M", &missing, &metadata).is_err());
+        let mut replaced = fixture.clone();
+        replaced["fixtures"][0]["resources"] = json!(["ICU_BEDS"]);
+        assert!(check_resource_assignments("5M", &replaced, &metadata).is_err());
+        let mut duplicated = fixture;
+        duplicated["fixtures"][1]["resources"] = json!(["CT_SCANNER", "MRI", "MRI"]);
+        assert!(check_resource_assignments("5M", &duplicated, &metadata).is_err());
+    }
 
     #[test]
     fn each_participant_uses_the_reply_to_its_own_thread_request() {

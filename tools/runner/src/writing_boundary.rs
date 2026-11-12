@@ -176,7 +176,7 @@ async fn all_writing_levels_use_actual_section_endpoints() -> Result<()> {
                 "oracle_source_sha256":digest(Path::new("tools/runner/src/oracle.rs"))?,"audit_source_sha256":digest(Path::new("tools/runner/src/writing_audit.rs"))?}),
             )?;
             let (guest, runtime_loop) =
-                process::guest(&runtime, wasm, task, &output, trace, simulator)?;
+                process::guest(&runtime, wasm, &[task], &output, trace, simulator)?;
             let actors = fixture["fixtures"].as_array().ok_or("actors")?.clone();
             let result = hibana_runtime::race(
                 async {

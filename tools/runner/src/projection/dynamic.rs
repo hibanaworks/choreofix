@@ -96,9 +96,15 @@ pub fn check(artifact: &Value, rows: &[Value]) -> Result<Value> {
     let protocol =
         Protocol::new(snapshot, &mut source_storage).map_err(|e| format!("EPF protocol: {e:?}"))?;
     let mut streams = BTreeMap::<u64, Vec<TapEvent>>::new();
+    let mut journal_positions = BTreeMap::<u64, Vec<usize>>::new();
     let mut checkpoints = BTreeMap::<u64, u32>::new();
+    let mut observations = Vec::new();
     let mut sessions = BTreeSet::new();
-    for row in rows.iter().filter(|r| r["direction"] == "runtime") {
+    for (journal_row, row) in rows
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r["direction"] == "runtime")
+    {
         let message = &row["message"];
         match message["type"].as_str() {
             Some("protocol_capture") => {
@@ -110,6 +116,11 @@ pub fn check(artifact: &Value, rows: &[Value]) -> Result<Value> {
                 let stream = streams.entry(producer).or_default();
                 for value in records {
                     stream.push(record(value)?);
+                    journal_positions
+                        .entry(producer)
+                        .or_default()
+                        .push(journal_row);
+                    observations.push(producer);
                 }
             }
             Some("protocol_checkpoint") => {
@@ -134,6 +145,15 @@ pub fn check(artifact: &Value, rows: &[Value]) -> Result<Value> {
     if streams.is_empty() || checkpoints.len() != streams.len() {
         return Err("incomplete protocol capture inventory".into());
     }
+    let producer_ids: Vec<_> = streams.keys().copied().collect();
+    let observed_producers: Vec<_> = observations
+        .into_iter()
+        .map(|producer| {
+            producer_ids
+                .binary_search(&producer)
+                .expect("captured producer")
+        })
+        .collect();
     let captures: Vec<_> = streams
         .iter()
         .map(|(producer, records)| {
@@ -240,6 +260,7 @@ pub fn check(artifact: &Value, rows: &[Value]) -> Result<Value> {
                     choices: &mut choices,
                     execution: ExecutionStorage {
                         session,
+                        observed_producers: &observed_producers,
                         order: &mut order,
                         occurrences: &mut occurrences,
                         acceptances: &mut acceptances,
@@ -253,6 +274,38 @@ pub fn check(artifact: &Value, rows: &[Value]) -> Result<Value> {
             json!({"producer":streams.keys().nth(id.producer),"ordinal":id.ordinal,"occurrence":occurrence,
                 "source_event":occurrence.and_then(|event| source.origin(event))})
         ).collect();
+        // These are provenance links from the checked EPF witness, not another
+        // execution model. A finite prefix may have an acceptance without a
+        // receive commit. An effect auditor must require its own requests'
+        // receive commits and the producer's ordered effect/capture contract.
+        let mut poll_occurrences = BTreeMap::new();
+        let mut receive_commits = BTreeMap::new();
+        for (id, occurrence) in audit
+            .execution()
+            .order
+            .iter()
+            .zip(audit.execution().occurrences)
+        {
+            let Some(occurrence) = occurrence else {
+                continue;
+            };
+            poll_occurrences.insert((id.producer, id.ordinal), *occurrence);
+            let event = captures[id.producer].records()[id.ordinal];
+            if event.id() == tap::ENDPOINT_RECV {
+                let producer = producer_ids[id.producer];
+                let journal_row = journal_positions
+                    .get(&producer)
+                    .and_then(|positions| positions.get(id.ordinal))
+                    .ok_or("receive commit has no original journal observation")?;
+                let receipt = json!({"producer":producer,"ordinal":id.ordinal,
+                    "journal_row":journal_row,"occurrence":occurrence,
+                    "source_event":source.origin(*occurrence),"actor":event.causal_key()>>8,
+                    "view":event.arg1()>>24});
+                if receive_commits.insert(*occurrence, receipt).is_some() {
+                    return Err("one source occurrence has multiple receive commits".into());
+                }
+            }
+        }
         let mut intervals = Vec::new();
         for acceptance in audit.execution().acceptances {
             let call =
@@ -262,8 +315,15 @@ pub fn check(artifact: &Value, rows: &[Value]) -> Result<Value> {
                 .get_mut(&(session, origin))
                 .and_then(VecDeque::pop_front)
                 .ok_or("accepted call has no unique corresponding journal frame")?;
+            let occurrence = poll_occurrences
+                .get(&(
+                    acceptance.first_poll.producer,
+                    acceptance.first_poll.ordinal,
+                ))
+                .ok_or("acceptance lacks a checked source occurrence")?;
             intervals.push(json!({"producer":streams.keys().nth(acceptance.first_poll.producer),
-                "first_poll":acceptance.first_poll.ordinal,"before":acceptance.before,"frame_id":frame}));
+                "first_poll":acceptance.first_poll.ordinal,"before":acceptance.before,"frame_id":frame,
+                "occurrence":occurrence,"receive_commit":receive_commits.get(occurrence)}));
         }
         reports.push(json!({"session":session,"expanded_events":source.event_count(),"order":correspondence,"acceptances":intervals}));
     }
@@ -315,6 +375,94 @@ mod tests {
         assert_eq!(report["sessions"][0]["order"][0]["producer"], 42);
         assert_eq!(report["sessions"][0]["order"][0]["source_event"], 0);
         assert_eq!(report["application_effects_certified"], false);
+        Ok(())
+    }
+
+    #[test]
+    fn acceptance_links_to_its_checked_receive_and_original_observation() -> Result<()> {
+        use hibana::{g, runtime::program::project};
+        let source = g::send::<7, 8, g::Msg<1, ()>>();
+        let snapshot = tap::projected(&project::<7>(&source))
+            .map(|r| {
+                [
+                    r.ts(),
+                    u32::from(r.id()),
+                    u32::from(r.causal_key()),
+                    r.arg0(),
+                    r.arg1(),
+                ]
+            })
+            .collect::<Vec<_>>();
+        let lane = (snapshot[2][3] >> 8) as u8;
+        let artifact = json!({"compiled":{"programs":[{"role":7,"rows":snapshot}]}});
+        let mut rows = vec![
+            json!({"direction":"runtime","message":{"type":"protocol_frame","action":"send",
+                "session":1,"frame_id":19,"frame_label":0,"lane":lane,"source":7,"target":8}}),
+            json!({"direction":"runtime","message":{"type":"protocol_capture","producer":42,
+                "records":[[0,tap::SEND_POLL,7u16<<8|7,1,0xffff0000u32]]}}),
+            json!({"direction":"runtime","message":{"type":"protocol_capture","producer":42,
+                "records":[[1,tap::ENDPOINT_SEND,7u16<<8|1,1,7u32<<24|u32::from(lane)<<16]]}}),
+            json!({"direction":"external","message":{"type":"unrelated_observation"}}),
+            json!({"direction":"runtime","message":{"type":"protocol_capture","producer":42,
+                "records":[[2,tap::ENDPOINT_RECV,8u16<<8|2,1,8u32<<24|u32::from(lane)<<16]]}}),
+            json!({"direction":"runtime","message":{"type":"protocol_checkpoint","producer":42,"session":1,"checkpoint":3}}),
+        ];
+        let report = check(&artifact, &rows)?;
+        let delivery = &report["sessions"][0]["acceptances"][0];
+        assert_eq!(delivery["frame_id"], 19);
+        assert_eq!(delivery["occurrence"], 0);
+        assert_eq!(
+            delivery["receive_commit"],
+            json!({"producer":42,"ordinal":2,"journal_row":4,
+            "occurrence":0,"source_event":0,"actor":8,"view":8})
+        );
+        rows.remove(4);
+        rows[4]["message"]["checkpoint"] = json!(2);
+        let prefix = check(&artifact, &rows)?;
+        assert!(
+            prefix["sessions"][0]["acceptances"][0]["receive_commit"].is_null(),
+            "a finite accepted prefix does not invent the receiver's commit"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn observation_arrival_order_survives_producer_grouping() -> Result<()> {
+        use hibana::{g, runtime::program::project};
+        let global = g::par(
+            g::send::<7, 7, g::Msg<1, ()>>(),
+            g::send::<8, 8, g::Msg<2, ()>>(),
+        );
+        let snapshot: Vec<_> = tap::projected(&project::<7>(&global))
+            .map(|r| {
+                [
+                    r.ts(),
+                    u32::from(r.id()),
+                    u32::from(r.causal_key()),
+                    r.arg0(),
+                    r.arg1(),
+                ]
+            })
+            .collect();
+        let lanes = [(snapshot[2][3] >> 8) as u8, (snapshot[3][3] >> 8) as u8];
+        let artifact = json!({"compiled":{"programs":[{"role":7,"rows":snapshot}]}});
+        let mut rows = vec![
+            json!({"direction":"runtime","message":{"type":"protocol_capture","producer":90,
+                "records":[[0,tap::ENDPOINT_SEND,7u16 << 8 | 1,1,7u32 << 24 | u32::from(lanes[0]) << 16]]}}),
+            json!({"direction":"runtime","message":{"type":"protocol_capture","producer":10,
+                "records":[[0,tap::ENDPOINT_SEND,8u16 << 8 | 1,1,8u32 << 24 | u32::from(lanes[1]) << 16 | 1]]}}),
+            json!({"direction":"runtime","message":{"type":"protocol_checkpoint","producer":90,"session":1,"checkpoint":1}}),
+            json!({"direction":"runtime","message":{"type":"protocol_checkpoint","producer":10,"session":1,"checkpoint":1}}),
+        ];
+        assert_eq!(
+            check(&artifact, &rows)?["sessions"][0]["order"][0]["producer"],
+            90
+        );
+        rows.swap(0, 1);
+        assert_eq!(
+            check(&artifact, &rows)?["sessions"][0]["order"][0]["producer"],
+            10
+        );
         Ok(())
     }
 

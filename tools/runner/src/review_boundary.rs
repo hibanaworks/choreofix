@@ -418,7 +418,7 @@ async fn run_cases(cases: Vec<ReviewCase>) -> Result<()> {
                 "harness_source_sha256":digest(Path::new("tools/runner/src/review_boundary.rs"))?,
                 "audit_source_sha256":digest(Path::new("tools/runner/src/review_audit.rs"))?,
                 "root_lock_sha256":digest(Path::new("Cargo.lock"))?,"runner_lock_sha256":digest(Path::new("tools/runner/Cargo.lock"))?,
-                "simulator_source_sha256":digest(Path::new("vendor/tracefix/benchmark/environments/6E/sim.py"))?}),
+                "simulator_source_sha256":digest(Path::new("benchmark/environments/6E/sim.py"))?}),
         )?;
         assert_eq!(
             projection["runtime_binary_sha256"],
@@ -427,7 +427,7 @@ async fn run_cases(cases: Vec<ReviewCase>) -> Result<()> {
         let trace = Trace::create(&case.join("events.jsonl"))?;
         let (simulator, _) = oracle::Simulator::new("6E", depth, delay, trace.clone(), &failures)?;
         let (guest, runtime_loop) =
-            process::guest(&runtime, module, "6E", &case, trace, simulator.clone())?;
+            process::guest(&runtime, module, &["6E"], &case, trace, simulator.clone())?;
         let (a, b, result) = hibana_runtime::race(
             async {
                 async {
@@ -539,7 +539,7 @@ async fn run_cases(cases: Vec<ReviewCase>) -> Result<()> {
         let mutants: Value =
             serde_json::from_slice(&fs::read(case.join("resource-mutants/summary.json"))?)?;
         assert_eq!(mutants["status"], "passed");
-        assert_eq!(mutants["count"], if rejected == 0 { 25 } else { 28 });
+        assert_eq!(mutants["count"], if rejected == 0 { 28 } else { 31 });
         let audit = &mutants["audit"];
         assert_eq!(audit["status"], "passed");
         assert_eq!(audit["dynamic_protocol"]["status"], "passed");

@@ -116,7 +116,7 @@ impl Simulator {
         }
         choreofix_inputs::verify_benchmark(Path::new("."))?;
         let interpreter = interpreter_identity()?;
-        let source = Path::new("vendor/tracefix").canonicalize()?;
+        let source = Path::new(".").canonicalize()?;
         let metadata: Value = serde_json::from_slice(&fs::read(
             source
                 .join("benchmark/descriptions")
@@ -190,7 +190,12 @@ impl Simulator {
             let mut inputs = serde_json::Map::new();
             for (key, value) in module.dict().iter() {
                 let key: String = key.extract()?;
-                if key.ends_with("_STEPS") {
+                if key.ends_with("_STEPS")
+                    || matches!(
+                        key.as_str(),
+                        "_ANALYSES" | "_SEPARATIONS" | "_TESTS" | "_DISHES" | "_INGREDIENTS"
+                    )
+                {
                     let entries: Result<Vec<_>> = value
                         .try_iter()?
                         .map(|entry| json_value(&dataclasses.call_method1("asdict", (entry?,))?))
@@ -200,10 +205,63 @@ impl Simulator {
                     inputs.insert(key, json_value(&value)?);
                 }
             }
+            if task == "7E" {
+                for (attribute, name) in [
+                    ("_write_steps", "_WRITE_STEPS"),
+                    ("_references_steps", "_REFERENCES_STEPS"),
+                    ("_review_steps", "_REVIEW_STEPS"),
+                    ("_combine_steps", "_COMBINE_STEPS"),
+                ] {
+                    let entries: Result<Vec<_>> = sim
+                        .getattr(attribute)?
+                        .try_iter()?
+                        .map(|entry| json_value(&dataclasses.call_method1("asdict", (entry?,))?))
+                        .collect();
+                    if inputs.insert(name.into(), json!(entries?)).is_some() {
+                        return Err("document assignment has two sources".into());
+                    }
+                }
+            }
             Ok((sim.unbind(), registry.unbind(), inputs))
         })?;
-        let mut fixture = fixture(task, &metadata, &json!(inputs))?;
+        let mut inputs = json!(inputs);
+        if task == "14H" {
+            inputs["tool_schemas"] = serde_json::from_slice(&fs::read(
+                source.join("benchmark/descriptions/14H/tools.json"),
+            )?)?;
+        }
+        let mut fixture = fixture(task, &metadata, &inputs)?;
+        if task == "14H" {
+            fixture["tool_schemas"] = inputs["tool_schemas"].clone();
+        } else if matches!(
+            task,
+            "3E" | "4E"
+                | "4M"
+                | "5E"
+                | "5M"
+                | "5H"
+                | "6M"
+                | "7E"
+                | "10E"
+                | "10M"
+                | "11E"
+                | "13E"
+                | "13M"
+                | "14E"
+                | "14M"
+        ) {
+            fixture["tool_schemas"] = serde_json::from_slice(&fs::read(
+                source.join(format!("benchmark/descriptions/{task}/tools.json")),
+            )?)?;
+        }
+        fixture["simulator_contract"] = json!(choreofix_inputs::SIMULATOR_CONTRACT);
+        fixture["simulator_manifest_sha256"] = json!(crate::evidence::digest(Path::new(
+            "benchmark/simulator-manifest.json"
+        ))?);
         fixture["delay_multiplier"] = json!(delay);
+        if let Some(profile) = metadata.get("tool_delays") {
+            fixture["tool_delay_profile"] = profile.clone();
+        }
         fixture["depth"] = json!(depth);
         fixture["seed"] = json!(0);
         fixture["interpreter"] = interpreter;
@@ -461,10 +519,74 @@ impl Environment {
     }
 }
 
+/// Immutable physical input data, including module-selected resource sets.
+/// This is fixture/auditor interpretation, never Endpoint authorization.
+pub(crate) fn resources_for_call<'a>(
+    metadata: &'a Value,
+    agent: &str,
+    call: &Value,
+) -> Result<Vec<&'a str>> {
+    let entry = &metadata["tool_resource_map"][call["tool"].as_str().ok_or("resource tool")?];
+    let names = match entry {
+        Value::Array(names) => names,
+        Value::String(value) if value == "@agent_resources" => metadata["agent_resources"][agent]
+            .as_array()
+            .ok_or("participant resource assignment")?,
+        Value::Object(_) => {
+            let argument = entry["argument"]
+                .as_str()
+                .ok_or("physical resource argument")?;
+            let value = call["arguments"][argument]
+                .as_str()
+                .ok_or("physical resource input")?
+                .trim()
+                .to_lowercase()
+                .replace(' ', "_");
+            entry["values"][value]
+                .as_array()
+                .ok_or("physical resource input binding")?
+        }
+        _ => return Err("unknown physical resource definition".into()),
+    };
+    names
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .ok_or_else(|| "physical resource name".into())
+        })
+        .collect()
+}
+
 fn fixture(task: &str, metadata: &Value, inputs: &Value) -> Result<Value> {
     let family = task.trim_end_matches(['E', 'M', 'H']).parse::<u8>()?;
     let mut actors = Vec::new();
     for agent in metadata["agents"].as_array().ok_or("original agent list")? {
+        if task == "14H" {
+            let name = agent.as_str().ok_or("scientist name")?;
+            let resources = metadata["agent_resources"][name]
+                .as_array()
+                .ok_or("scientist resource metadata")?;
+            let operations = inputs["tool_schemas"]
+                .as_array()
+                .ok_or("scientific domain schemas")?
+                .iter()
+                .map(|tool| &tool["function"])
+                .filter(|tool| {
+                    tool["agent_ids"]
+                        .as_array()
+                        .is_some_and(|ids| ids.contains(agent))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            if operations.is_empty() || resources.iter().any(|resource| !resource.is_string()) {
+                return Err("scientist lacks its original operations or resources".into());
+            }
+            // This world has dynamic materials and free operation choices, not
+            // a static _STEPS recipe. Record the original schemas unchanged.
+            actors.push(json!({"agent":agent,"resources":resources,"operations":operations}));
+            continue;
+        }
         let step = |table: &str, key: &str| -> Result<Value> {
             inputs[table]
                 .as_array()
@@ -475,7 +597,61 @@ fn fixture(task: &str, metadata: &Value, inputs: &Value) -> Result<Value> {
                 .filter(|v| !v.is_null())
                 .ok_or_else(|| format!("missing original input {table} {key}").into())
         };
-        let calls = if family == 9 {
+        let calls = if task == "12E" {
+            let dish = inputs["_DISHES"]
+                .as_array()
+                .ok_or("original kitchen dishes")?
+                .iter()
+                .find(|dish| dish["chef_id"] == *agent)
+                .ok_or("original chef dish")?;
+            let ingredient = inputs["_INGREDIENTS"]
+                .as_array()
+                .ok_or("original kitchen ingredients")?
+                .iter()
+                .find(|ingredient| ingredient["producer"] == *agent)
+                .ok_or("original chef ingredient")?;
+            json!([
+                {"tool":"prepare_base_dish","arguments":{"dish":dish["dish_name"]}},
+                {"tool":"prepare_ingredient","arguments":{"ingredient":ingredient["name"],"for_chef":ingredient["consumer"]}},
+                {"tool":"combine_dish","arguments":{"dish":dish["dish_name"],"ingredient":dish["receives_ingredient"]}}
+            ])
+        } else if task == "11E" {
+            if agent == "SUPERVISOR" {
+                if step("_COLLECT_REPORTS_STEPS", "scope")? != "all_jobs" {
+                    return Err("original manufacturing report scope differs".into());
+                }
+                json!([{"tool":"collect_reports","arguments":{}}])
+            } else {
+                json!(
+                    inputs["_JOB_STEPS"]
+                        .as_array()
+                        .ok_or("original manufacturing jobs")?
+                        .iter()
+                        .filter(|step| step["agent_id"] == *agent)
+                        .map(|step| json!({"tool":"do_job","arguments":{"job_id":step["job_id"]}}))
+                        .collect::<Vec<_>>()
+                )
+            }
+        } else if matches!(task, "10E" | "10M") {
+            if agent == "INTEGRATOR" {
+                let modules = step("_LINK_STEPS", "modules")?;
+                let names = modules
+                    .as_array()
+                    .ok_or("build link modules")?
+                    .iter()
+                    .map(|m| m.as_str().ok_or("build module name"))
+                    .collect::<std::result::Result<Vec<_>, _>>()?
+                    .join(",");
+                json!([{"tool":"link_modules","arguments":{"modules":names}}])
+            } else if agent == "TEST_RUNNER" {
+                json!(inputs["_BUILD_TEST_STEPS"].as_array().ok_or("build test inputs")?
+                    .iter().filter(|step| step["agent_id"] == *agent)
+                    .map(|step| json!({"tool":"run_build_tests","arguments":{"module_name":step["module"]}}))
+                    .collect::<Vec<_>>())
+            } else {
+                json!([{"tool":"compile_module","arguments":{"module_name":step("_COMPILE_STEPS", "module")?}}])
+            }
+        } else if family == 9 {
             json!([{"tool":"think","arguments":{"philosopher":agent}}, {"tool":"eat","arguments":{"philosopher":agent}}])
         } else if family == 1 {
             let feature = step("_DESIGN_STEPS", "feature")?;
@@ -503,6 +679,233 @@ fn fixture(task: &str, metadata: &Value, inputs: &Value) -> Result<Value> {
                 {"tool":"draft_content","arguments":{"section_name":section}},
                 {"tool":"write_to_document","arguments":{"sections":sections}},
                 {"tool":"review_own_work","arguments":{"section_name":section}}])
+        } else if task == "7E" {
+            if agent == "EDITOR" {
+                let mut calls = inputs["_REVIEW_STEPS"].as_array().ok_or("document reviews")?
+                    .iter().filter(|row| row["agent_id"] == *agent)
+                    .map(|row| json!({"tool":"review_sections","arguments":{"section_name":row["scope"]}}))
+                    .collect::<Vec<_>>();
+                let sections = step("_COMBINE_STEPS", "sections")?;
+                let sections = sections
+                    .as_array()
+                    .ok_or("document chapters")?
+                    .iter()
+                    .map(|s| s.as_str().ok_or("document chapter"))
+                    .collect::<std::result::Result<Vec<_>, _>>()?
+                    .join(",");
+                calls.push(json!({"tool":"combine_sections","arguments":{"sections":sections}}));
+                json!(calls)
+            } else {
+                json!([
+                    {"tool":"write_section","arguments":{"section_name":step("_WRITE_STEPS","section")?}},
+                    {"tool":"update_references","arguments":{"section_name":step("_REFERENCES_STEPS","scope")?}}
+                ])
+            }
+        } else if task == "3E" {
+            if agent == "EDITOR" {
+                let mut calls = inputs["_REVIEW_STEPS"].as_array().ok_or("original report reviews")?.iter()
+                    .filter(|row| row["agent_id"] == *agent)
+                    .map(|row| json!({"tool":"review_sections","arguments":{"section_name":row["scope"]}}))
+                    .collect::<Vec<_>>();
+                let sections = step("_COMBINE_STEPS", "sections")?;
+                let sections = sections
+                    .as_array()
+                    .ok_or("original report sections")?
+                    .iter()
+                    .map(|section| section.as_str().ok_or("report section name"))
+                    .collect::<std::result::Result<Vec<_>, _>>()?
+                    .join(",");
+                calls.push(json!({"tool":"combine_sections","arguments":{"sections":sections}}));
+                Value::Array(calls)
+            } else {
+                json!([
+                    {"tool":"research_topic","arguments":{"topic":step("_RESEARCH_STEPS","topic")?}},
+                    {"tool":"write_section","arguments":{"section_name":step("_WRITE_STEPS","section")?}},
+                    {"tool":"update_references","arguments":{"section_name":step("_REFERENCES_STEPS","scope")?}},
+                    {"tool":"revise_section","arguments":{"section_name":step("_REVISE_STEPS","section")?}}
+                ])
+            }
+        } else if task == "4E" {
+            match agent.as_str() {
+                Some("BACKEND_DEV") => json!([
+                    {"tool":"define_api","arguments":{"api_name":step("_DEFINE_API_STEPS","api_name")?}},
+                    {"tool":"implement_feature","arguments":{"feature_name":step("_IMPLEMENT_STEPS","feature")?}}
+                ]),
+                Some("FRONTEND_DEV") => {
+                    json!([{"tool":"implement_feature","arguments":{"feature_name":step("_IMPLEMENT_STEPS","feature")?}}])
+                }
+                Some("TESTER") => {
+                    json!([{"tool":"run_tests","arguments":{"suite":step("_RUN_TESTS_STEPS","suite")?}}])
+                }
+                _ => return Err("unknown original API coordination participant".into()),
+            }
+        } else if matches!(task, "5E" | "5M" | "5H") {
+            let mut calls = Vec::new();
+            for (tool, table) in [
+                ("assess_patient", "_ASSESS_STEPS"),
+                ("order_tests", "_ORDER_TESTS_STEPS"),
+                ("perform_imaging", "_IMAGING_STEPS"),
+                ("interpret_imaging", "_INTERPRET_IMAGING_STEPS"),
+                ("diagnose", "_DIAGNOSE_STEPS"),
+                ("review_prescriptions", "_PRESCRIPTION_REVIEW_STEPS"),
+                ("conduct_case_conference", "_CASE_CONFERENCE_STEPS"),
+                ("prepare_anesthesia", "_ANESTHESIA_STEPS"),
+                ("perform_surgery", "_SURGERY_STEPS"),
+                ("manage_icu", "_ICU_STEPS"),
+            ] {
+                if inputs[table].is_null() {
+                    if metadata["tool_resource_map"].get(tool).is_none() {
+                        continue;
+                    }
+                    return Err(
+                        format!("declared medical tool {tool} lacks its assigned inputs").into(),
+                    );
+                }
+                for row in inputs[table]
+                    .as_array()
+                    .ok_or("medical task inputs")?
+                    .iter()
+                    .filter(|row| row["agent_id"] == *agent)
+                {
+                    let mut arguments = json!({"patient_id":if tool == "conduct_case_conference" {
+                        &row["case_id"]
+                    } else { &row["patient_id"] }});
+                    if tool == "order_tests" {
+                        arguments["test_type"] = json!(
+                            row["tests"]
+                                .as_array()
+                                .ok_or("assigned tests")?
+                                .iter()
+                                .map(|test| test.as_str().ok_or("assigned test name"))
+                                .collect::<std::result::Result<Vec<_>, _>>()?
+                                .join(",")
+                        );
+                    }
+                    if matches!(tool, "perform_imaging" | "interpret_imaging") {
+                        arguments["modality"] = row["modality"].clone();
+                    }
+                    if tool == "perform_surgery" {
+                        arguments["procedure"] = row["procedure"].clone();
+                    }
+                    calls.push(json!({"tool":tool,"arguments":arguments}));
+                }
+            }
+            Value::Array(calls)
+        } else if matches!(task, "13E" | "13M") {
+            let mut calls = Vec::new();
+            for (tool, table, key) in [
+                ("run_analysis", "_ANALYSES", "sample"),
+                ("run_separation", "_SEPARATIONS", "material"),
+            ] {
+                for row in inputs[table]
+                    .as_array()
+                    .ok_or("laboratory assignments")?
+                    .iter()
+                    .filter(|s| s["scientist_id"] == *agent)
+                {
+                    calls.push(json!({"tool":tool,"arguments":{key:row[key]}}));
+                }
+            }
+            if agent == "BIOLOGIST" {
+                let separations = inputs["_SEPARATIONS"]
+                    .as_array()
+                    .ok_or("actual specimen names")?;
+                let compound = separations
+                    .iter()
+                    .find(|s| s["scientist_id"] == "CHEMIST")
+                    .ok_or("purified compound")?;
+                let culture = separations
+                    .iter()
+                    .find(|s| s["scientist_id"] == "BIOLOGIST")
+                    .ok_or("prepared culture")?;
+                let specimen = if task == "13M" {
+                    json!("synthesized_compound")
+                } else {
+                    compound["material"].clone()
+                };
+                calls.push(json!({"tool":"run_bioassay","arguments":{"compound":specimen,"cell_type":culture["material"]}}));
+            }
+            if task == "13M" && agent == "CHEMIST" {
+                calls.push(
+                    json!({"tool":"run_synthesis","arguments":{"compound":"synthesized_compound"}}),
+                );
+            }
+            if task == "13M" && agent == "QC_CONTROLLER" {
+                calls.push(json!({"tool":"verify_result","arguments":{"scientist":"CHEMIST","data_type":"purification"}}));
+                calls.push(json!({"tool":"verify_result","arguments":{"scientist":"BIOLOGIST","data_type":"bioassay"}}));
+            }
+            Value::Array(calls)
+        } else if matches!(task, "14E" | "14M") {
+            let mut calls = Vec::new();
+            for (tool, table, key) in [
+                ("run_hplc_analysis", "_HPLC_STEPS", "sample"),
+                ("run_mass_spec_analysis", "_MASS_SPEC_STEPS", "sample"),
+                ("run_cell_assay", "_CELL_ASSAY_STEPS", "assay_type"),
+            ] {
+                for step in inputs[table]
+                    .as_array()
+                    .ok_or("instrument task inputs")?
+                    .iter()
+                    .filter(|s| s["scientist_id"] == *agent)
+                {
+                    calls.push(json!({"tool":tool,"arguments":{key:step[key]}}));
+                }
+            }
+            if agent == "LEAD_SCIENTIST" {
+                calls.push(json!({"tool":"submit_decision","arguments":{"go":true}}));
+            }
+            if task == "14M" && agent == "REGULATORY_SPECIALIST" {
+                calls.push(json!({"tool":"verify_regulatory_compliance","arguments":{"decision":"go_no_go"}}));
+            }
+            Value::Array(calls)
+        } else if task == "4M" {
+            let mut calls = Vec::new();
+            for (tool, table, field, key) in [
+                (
+                    "design_proposal",
+                    "_DESIGN_PROPOSAL_STEPS",
+                    "proposal",
+                    "title",
+                ),
+                ("refactor_code", "_REFACTOR_STEPS", "target", "target"),
+                ("code_review", "_CODE_REVIEW_STEPS", "target", "pr_id"),
+                ("run_tests", "_RUN_TESTS_STEPS", "suite", "suite"),
+                ("merge_code", "_MERGE_STEPS", "branch", "branch"),
+            ] {
+                for step in inputs[table]
+                    .as_array()
+                    .ok_or("shared-refactor task data")?
+                    .iter()
+                    .filter(|step| step["agent_id"] == *agent)
+                {
+                    calls.push(json!({"tool":tool,"arguments":{key:step[field]}}));
+                }
+            }
+            Value::Array(calls)
+        } else if task == "6M" {
+            let mut calls = Vec::new();
+            for (tool, table, field, key) in [
+                (
+                    "implement_feature",
+                    "_IMPLEMENT_STEPS",
+                    "feature",
+                    "feature_name",
+                ),
+                ("write_tests", "_WRITE_TESTS_STEPS", "component", "target"),
+                ("code_review", "_CODE_REVIEW_STEPS", "target", "pr_id"),
+                ("run_tests", "_RUN_TESTS_STEPS", "suite", "suite"),
+                ("merge_code", "_MERGE_STEPS", "branch", "branch"),
+            ] {
+                for step in inputs[table]
+                    .as_array()
+                    .ok_or("feature-delivery assignments")?
+                    .iter()
+                    .filter(|step| step["agent_id"] == *agent)
+                {
+                    calls.push(json!({"tool":tool,"arguments":{key:step[field]}}));
+                }
+            }
+            Value::Array(calls)
         } else if task == "6E" {
             if agent == "REVIEWER" {
                 Value::Array(inputs["_CODE_REVIEW_STEPS"].as_array().ok_or("original review inputs")?.iter().filter(|step|step["agent_id"]==*agent).map(|step|json!({"tool":"code_review","arguments":{"pr_id":step["target"]}})).collect())
@@ -561,8 +964,36 @@ fn fixture(task: &str, metadata: &Value, inputs: &Value) -> Result<Value> {
         } else {
             json!([])
         };
+        let resources = if matches!(task, "10E" | "10M")
+            || matches!(
+                task,
+                "3E" | "4M"
+                    | "5E"
+                    | "5M"
+                    | "5H"
+                    | "6M"
+                    | "7E"
+                    | "11E"
+                    | "12E"
+                    | "13E"
+                    | "13M"
+                    | "14E"
+                    | "14M"
+            ) {
+            let mut names = std::collections::BTreeSet::new();
+            for call in calls.as_array().ok_or("report assignments")? {
+                names.extend(resources_for_call(
+                    metadata,
+                    agent.as_str().ok_or("participant")?,
+                    call,
+                )?);
+            }
+            json!(names)
+        } else {
+            metadata["tool_resource_map"][calls[0]["tool"].as_str().unwrap_or("")].clone()
+        };
         actors.push(json!({"agent":agent,"calls":calls,
-            "resources":metadata["tool_resource_map"][calls[0]["tool"].as_str().unwrap_or("")],
+            "resources":resources,
             "modules":metadata["agent_resources"][agent.as_str().ok_or("agent name")?],
             "sections":metadata["agent_resources"][agent.as_str().ok_or("agent name")?],
             "forks":inputs["_FORKS"][agent.as_str().ok_or("agent name")?]}));

@@ -1,5 +1,51 @@
 # Experiment rules
 
+## Application verification boundary
+
+ChoreoFix's acceptance boundary is the actual agent execution, not another
+proof of the libraries. Write the global choreography and its direct Endpoint
+localsides. Verify that a real agent can freely operate hibana-wash, with WASI
+requests passing through hibana-wasip1-runtime, projected Endpoints and ChoreoFS
+before any shared effect. The choreography is the only coordination authority.
+There is no alternate shared-effect path, app permission table, progress flag,
+second state machine or hidden protocol helper.
+
+Do not prescribe a command recipe or the agent's private reasoning. Within the
+choreography's capabilities, actual legal command choices, independent work,
+concurrency, revisions and reconsideration must remain possible. Invalid shell
+input should return a recoverable error where the real protocol permits retry.
+An unauthorized effect, missing resource or stale approval must be rejected
+before the effect, not merely detected by a later log audit.
+
+Qualify each task through the real model shell -> Wasm import -> Endpoint
+request -> ChoreoFS -> physical effect -> reply path. Use actual Wasm runs,
+real-model pilots, complete EPF captures and independent request/effect audits;
+score the real outcome in the method-neutral common simulator. Include legal
+alternative/retry/parallel executions and relevant illegal-effect probes.
+Scripted native participants, compilation or protocol completion alone do not
+establish this acceptance. Record finite coverage and unfinished work honestly.
+Bind the EPF-checked dynamic operation occurrences, their accepted requests and
+exact arguments, actual shared effects/replies, and common-simulator task scores
+to the same run, binary, source and complete capture. Do not combine audit and
+score successes from different executions or relabel old-source results as
+current. Check source conformance, request/effect agreement and business outcome
+separately: EPF acceptance or protocol completion alone is not task success.
+Do not make unrelated foundation reproofs or redundant application validation
+additional waiting conditions. Preserve the 48-task scope and remaining work.
+
+Do not run ChoreoFix tasks or application receivers under Miri. Application
+code remains safe Rust; the initial physical EndpointBinding construction is
+an integration assertion, not a reason to interpret each whole task. Memory
+safety of Hibana, hibana-runtime and hibana-wasip1-runtime is checked in those
+libraries. A library memory defect exposed by an application needs a focused
+regression in the owning library, not per-task Miri jobs in ChoreoFix.
+
+Use native actual-Endpoint tests, actual Wasm/ChoreoFS execution, EPF dynamic
+source checks and independent effect/scorer audits for application obligations.
+Do not add Miri toolchain installation, application Miri commands or interpreter
+clocks to the experiment critical path. Historical Miri evidence stays bound
+to its original source and is not a new completion requirement.
+
 ## Local validation memory budget
 
 GitHub Actions is available again. Run the required checks on the published
@@ -29,6 +75,16 @@ them into archives. Keep the artifacts and cache still used by the current
 work, reusable profilers, necessary raw experiment data and source hashes, and
 evidence for unresolved failures. Do not delete another task's files or an
 active build's storage.
+Check free disk space and active output paths before and after every build.
+Include this task's retired diagnostic directories, `/tmp` and macOS `TMPDIR`,
+not only the canonical target. Do not move unused verification output into a
+`retired` directory and retain the entire tree. Keep the latest reusable cache
+generation and required originals; remove obsolete profiles, generations and
+duplicate content. Preserve other tasks' data and required toolchains.
+Store required experiment raw, source/hash, stop evidence and profilers in the
+repository's fixed output area, outside Cargo targets and Codex scratch space.
+
+
 
 ## Mandatory design constraints
 
@@ -178,12 +234,28 @@ share the same binding. Moving or dropping an Endpoint and starting another
 session must not mint a new binding. This is the physical integration boundary,
 not another source of task permissions.
 
-The experiment covers all 48 TraceFix tasks. Keep the comparison implementations
-unchanged. In ChoreoFix, preserve the task goals, participants, resource safety
+The experiment covers all 48 TraceFix tasks. Keep comparison implementations
+unchanged. The user authorizes repairing a coarse simulator when a reproducible
+counterexample violates the stated task. The canonical common simulator is
+`benchmark/`, with one fixed source manifest used for every experimental arm.
+Do not tune a scorer to ChoreoFix's own procedure, assume misconduct, or infer
+superiority without matched evidence. Preserve original-source results and
+record simulator changes before runs; never pool incompatible scorer versions.
+The simulator must not execute, enforce or grade a preferred choreography or
+operation sequence. It models world data, effects and physical resource use.
+Outcome evaluation uses actual published artifacts and content-bound review/test
+results, equally for every method. Required data causality is part of the common
+score: inputs must exist before use, and exact-content review/test results must
+be complete before publication. Later evidence cannot authorize an earlier
+effect. Preserve freedom among independent legal orders and allow recovery from
+failed attempts; never erase an already-observed unsafe effect as recovery.
+Keep choreography conformance in EPF; do not copy it into the environment.
+Do not use `vendor/tracefix/benchmark` as a fallback or second active simulator. In ChoreoFix, preserve the task goals, participants, resource safety
 and necessary data dependencies, while improving the coordination procedure
 where the original procedure needlessly restricts independent work or recovery.
-Record each procedural change before scoring and report the unchanged upstream
-score separately from any additional ChoreoFix criterion. Do not turn a hard
+Record each procedural change before scoring and identify the shared simulator
+contract separately from any additional ChoreoFix criterion. Preserve earlier
+original-simulator results under their recorded version. Do not turn a hard
 task into a terminal single attempt merely to make its port pass.
 
 Give the model freedom to choose commands, private computations and ways to
@@ -215,6 +287,14 @@ functions in `src/tasks/<task>/localside/`. Keep transport, model access, and
 domain integration in `imp/`. The global protocol and each role's localside
 must be traceable like hibana-quic. Use the actual
 published Hibana API. Do not modify Hibana core to add agent-specific APIs.
+
+Each application binary includes its own canonical task module. The shared
+library contains host I/O and data codecs, not an unconditional registry of
+every task's projected global. Keep task-native Endpoint tests with that binary
+so another task's const projections do not accumulate in the same compiler
+evaluation. Shared codecs have one definition; do not import an unrelated task
+just to reuse a request data type. Preserve every native and effect-boundary
+test when changing compilation boundaries.
 
 Check API examples against the current method definitions. The localside uses
 `endpoint.send::<M>(...)`, `recv` and `offer`, and `RouteBranch::label`, `send`
@@ -261,8 +341,14 @@ dependencies of delegated operations, ordinary communication and related session
 in projection and progress verification. Do not serialize a Rust pointer, revive
 uncertain ownership on timeout, or replace this guarantee with an application
 owner table. The selected Hibana 0.10 development branch implements owned
-send/recv and concurrent endpoint fragments. Use the exact core and WASI runtime
-revisions recorded in Cargo.lock. Core examples and proofs do not establish that
+send/recv and concurrent endpoint fragments. During development, use the canonical
+sibling worktrees for core, EPF and WASI, including the latest core source currently
+undergoing validation. Keep application, runner, effect-boundary checks and both
+libraries on that one core; verify actual Cargo metadata and locks. Do not select
+an older Git pin as a fallback or create another checkout. Keep the core source
+frozen during its active validation. Record its Git base, dirty patch and source
+hashes, and distinguish development results from completed qualification of that
+source. Core examples and proofs do not establish that
 ChoreoFix has been ported or that its experiments have passed.
 
 For a shared operation requiring multiple resources, the effect service must
@@ -500,7 +586,7 @@ table. Do not expand completion into a proof of arbitrary Rust or all failures.
 After a core change, run the complete local gate set, including protocol fuzz,
 on the final source. A consumer-discovered core defect needs an actual Endpoint
 regression and coverage of its structure, repeated message contracts and schedule
-in generated tests. Check sensitivity by removing only that fix. Identify whether
+in generated tests. Do not restore old defects for a separate rebuild. Identify whether
 the formal model omitted the execution or the implementation correspondence was
 unchecked, and strengthen that boundary. Individual proofs or fixtures are not a
 successful complete gate.
@@ -520,9 +606,9 @@ from matched causal comparison. Count unsupported tasks separately from failed
 runs. Freeze precision, reserve allocation and rerun rules before scored results;
 do not repeat until the preferred result appears. Preserve negative evidence.
 
-The unchanged upstream simulator is an external environment and scorer. Its
+The canonical common simulator is an external environment and scorer. Its
 resource and artifact state must not authorize Hibana endpoint transitions.
-Upstream state tracking belongs only to the explicitly named baseline condition.
+Simulator state describes the external world, never Endpoint permissions.
 Static compilation data and append-only observations must not become a second
 runtime progress authority.
 Build qualification records may select and pin the measured executable before
@@ -538,11 +624,13 @@ All participant model calls use GPT-6 Luna with xhigh reasoning. Record the
 requested and returned model, reasoning effort, usage, raw tool events, source
 versions, and failures. Never silently substitute a model or a protocol.
 
-Use Rust for application code, tests, experiment tooling, runners, audits, and
-integration code. Python is permitted only for external QUIC interoperability
-tests. Do not add Python for source packaging, CI checks, fixtures, model access,
-WASI integration, profiling or experiment analysis. Do not embed Python snippets
-in Rust or shell commands to evade this rule.
+Use Rust for application code, experiment tooling, runners, audits, and
+integration code. The user's simulator-repair instruction permits maintaining
+the original Python simulator and its direct behavioral tests inside
+`benchmark/`. External QUIC interoperability tests may also use Python. Do not
+add Python adapters, source packaging, model access, WASI integration, profiling
+or experiment-analysis scripts. Do not embed Python snippets in Rust or shell
+commands to evade this rule.
 Existing self-authored Python is migration debt, not an exception. Replace it
 with Rust while retaining its behavioral coverage. Keep the original vendored
 TraceFix comparison implementation byte-for-byte unchanged. Its original

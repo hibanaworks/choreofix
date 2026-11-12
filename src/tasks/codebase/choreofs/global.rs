@@ -7,8 +7,6 @@ use hibana::{
 };
 
 pub const SERVICE_FD: u8 = 4;
-pub const SERVICE_PREFIX: &[u8] = b"service/";
-pub const RESULT_PATH: &[u8] = b"service/result";
 pub type DesignRequest<const TASK: u8, const ROLE: u8> = g::Msg<104, Close<TASK, ROLE, DESIGN>>;
 pub type DesignCompleted<'a> = g::Msg<107, &'a [u8]>;
 pub type ImplementRequest<const TASK: u8, const ROLE: u8> =

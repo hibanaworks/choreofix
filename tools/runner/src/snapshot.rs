@@ -1,27 +1,14 @@
-use crate::evidence::{Result, archive_build_receipt, digest, save};
+use crate::{
+    evidence::{Result, archive_build_receipt, digest, save},
+    sources,
+};
 use serde_json::{Map, Value, json};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     process::Command,
 };
-
-fn files(path: &Path, result: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        if ["target", "__pycache__", ".git"].contains(&entry.file_name().to_string_lossy().as_ref())
-        {
-            continue;
-        }
-        if entry.file_type()?.is_dir() {
-            files(&entry.path(), result)?;
-        } else if entry.file_type()?.is_file() {
-            result.push(entry.path());
-        }
-    }
-    Ok(())
-}
 
 fn command(program: &str, arguments: &[&str]) -> Result<String> {
     let result = Command::new(program).args(arguments).output()?;
@@ -35,39 +22,41 @@ fn command(program: &str, arguments: &[&str]) -> Result<String> {
     Ok(String::from_utf8(result.stdout)?.trim().to_owned())
 }
 
-/// Verify the actual runtime sources, including every source file and both manifests.
+/// Verify the archived application and local dependencies against the build inputs.
 /// A binary hash alone cannot identify which source a build receipt describes.
-pub fn runtime_sources(source: &Path, manifest: &Path) -> Result<BTreeMap<String, String>> {
-    let mut entries = BTreeMap::new();
-    for row in fs::read_to_string(manifest)?.lines() {
-        let (hash, name) = row.split_once("  ").ok_or("invalid build-source row")?;
-        if hash.len() != 64
-            || !hash.bytes().all(|c| c.is_ascii_hexdigit())
-            || name.is_empty()
-            || !Path::new(name)
-                .components()
-                .all(|c| matches!(c, Component::Normal(_)))
-            || entries.insert(name.to_owned(), hash.to_owned()).is_some()
-        {
-            return Err("invalid or duplicate build-source entry".into());
-        }
-        if digest(&source.join(name))? != hash {
-            return Err(format!("runtime source differs from its build: {name}").into());
+pub fn runtime_sources(source: &Path, manifest: &Path) -> Result<BTreeMap<PathBuf, String>> {
+    let entries = sources::manifest(manifest)?;
+    for (name, hash) in &entries {
+        if digest(&source.join(name))? != *hash {
+            return Err(
+                format!("runtime source differs from its build: {}", name.display()).into(),
+            );
         }
     }
     let mut required = Vec::new();
-    files(&source.join("src"), &mut required)?;
-    required.extend([source.join("Cargo.toml"), source.join("Cargo.lock")]);
-    for name in [".cargo/config", ".cargo/config.toml", "build.rs"] {
-        let path = source.join(name);
-        if path.exists() {
-            required.push(path);
+    let mut packages = BTreeSet::from([PathBuf::from("source")]);
+    for name in entries.keys() {
+        packages.insert(PathBuf::from(
+            name.components()
+                .next()
+                .ok_or("source package")?
+                .as_os_str(),
+        ));
+    }
+    for package in packages {
+        let directory = source.join(package);
+        sources::files(&directory.join("src"), &mut required)?;
+        required.extend([directory.join("Cargo.toml"), directory.join("Cargo.lock")]);
+        for name in [".cargo/config", ".cargo/config.toml", "build.rs"] {
+            let path = directory.join(name);
+            if path.exists() {
+                required.push(path);
+            }
         }
     }
     if required.iter().any(|path| {
         path.strip_prefix(source)
             .ok()
-            .and_then(Path::to_str)
             .is_none_or(|name| !entries.contains_key(name))
     }) {
         return Err("build-source manifest omits runtime source files".into());
@@ -82,7 +71,24 @@ pub fn freeze(task: &str, output: &Path) -> Result<Value> {
     let family = match task {
         "1E" | "1M" | "1H" => "CODEBASE",
         "2E" | "2M" | "2H" => "WRITING",
+        "3E" => "REPORT",
+        "7E" => "DOCUMENT",
+        "10E" => "BUILD",
+        "10M" => "CASCADING_BUILD",
+        "11E" => "MANUFACTURING",
+        "12E" => "KITCHEN",
+        "4E" => "COORDINATION",
+        "4M" => "REFACTOR",
+        "14E" => "DISCOVERY",
+        "14M" => "REGULATORY_DISCOVERY",
+        "14H" => "MULTI_ROUND_DISCOVERY",
+        "13E" => "LAB",
+        "13M" => "LAB_QUALITY",
+        "5E" => "MEDICAL",
+        "5M" => "MULTI_SPECIALTY",
+        "5H" => "CRITICAL_CARE",
         "6E" => "REVIEW",
+        "6M" => "FEATURE_DELIVERY",
         "8E" => "API",
         "9E" | "9M" | "9H" => "PHILOSOPHERS",
         "16E" => "CICD",
@@ -93,16 +99,20 @@ pub fn freeze(task: &str, output: &Path) -> Result<Value> {
     let runtime = PathBuf::from(std::env::var_os(&runtime_key).ok_or(runtime_key)?);
     let input_receipt = PathBuf::from(std::env::var_os(&receipt_key).ok_or(receipt_key)?);
     let receipt = archive_build_receipt(&runtime, &input_receipt, output)?;
-    let build_sources = runtime_sources(Path::new("."), &output.join("build-source.sha256"))?;
+    let root = std::env::current_dir()?.canonicalize()?;
+    let mut inputs = sources::inputs(&root)?;
+    if sources::manifest(&output.join("build-source.sha256"))? != sources::hashes(&inputs)? {
+        return Err("runtime or local dependency source differs from its build".into());
+    }
     let mut paths = Vec::new();
     for directory in [
         "src",
         "tools/runner",
         "tools/inputs",
         "vendor/hibana-wash/src",
-        "vendor/tracefix/benchmark",
+        "benchmark",
     ] {
-        files(Path::new(directory), &mut paths)?;
+        sources::files(Path::new(directory), &mut paths)?;
     }
     paths.extend(
         [
@@ -113,23 +123,24 @@ pub fn freeze(task: &str, output: &Path) -> Result<Value> {
             "AGENTS.md",
             "plan.md",
             "benchmark/upstream-manifest.json",
+            "benchmark/simulator-manifest.json",
             "benchmark/experiment-contract.json",
             "vendor/hibana-wash/Cargo.toml",
             "vendor/hibana-wash/Cargo.lock",
         ]
         .map(PathBuf::from),
     );
-    paths.extend(build_sources.keys().map(PathBuf::from));
-    paths.sort();
-    paths.dedup();
-    let mut manifest = Map::new();
     for path in paths {
-        let saved = output.join("source").join(&path);
+        inputs.insert(Path::new("source").join(&path), root.join(path));
+    }
+    let mut manifest = Map::new();
+    for (path, original) in inputs {
+        let saved = output.join(&path);
         fs::create_dir_all(saved.parent().ok_or("source parent")?)?;
-        fs::copy(&path, &saved)?;
+        fs::copy(original, &saved)?;
         manifest.insert(path.to_string_lossy().into_owned(), json!(digest(&saved)?));
     }
-    runtime_sources(&output.join("source"), &output.join("build-source.sha256"))?;
+    runtime_sources(output, &output.join("build-source.sha256"))?;
     save(&output.join("source-manifest.json"), &json!(manifest))?;
     let artifacts = [
         ("runtime", runtime),
@@ -154,7 +165,7 @@ pub fn freeze(task: &str, output: &Path) -> Result<Value> {
     }
     let projection = json!(digest(&output.join("projection.json"))?);
     let versions = json!({
-        "format_version":4,
+        "format_version":5,
         "checkout_head":command("git", &["rev-parse", "HEAD"])?,
         "host_toolchain":command("rustc", &["+stable", "-Vv"])?,
         "runtime_build_receipt":receipt,
@@ -190,17 +201,21 @@ mod tests {
                 .as_nanos()
         ));
         fs::create_dir(&root).unwrap();
-        fs::create_dir(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("source/src")).unwrap();
         for (name, bytes) in [
-            ("src/lib.rs", "pub fn execute() {}\n"),
-            ("Cargo.toml", "[package]\n"),
-            ("Cargo.lock", "version = 4\n"),
+            ("source/src/lib.rs", "pub fn execute() {}\n"),
+            ("source/Cargo.toml", "[package]\n"),
+            ("source/Cargo.lock", "version = 4\n"),
         ] {
             fs::write(root.join(name), bytes).unwrap();
         }
-        let entries: Vec<_> = ["src/lib.rs", "Cargo.toml", "Cargo.lock"]
-            .map(|name| format!("{}  {name}\n", digest(&root.join(name)).unwrap()))
-            .into();
+        let entries: Vec<_> = [
+            "source/src/lib.rs",
+            "source/Cargo.toml",
+            "source/Cargo.lock",
+        ]
+        .map(|name| format!("{}  {name}\n", digest(&root.join(name)).unwrap()))
+        .into();
         let manifest = root.join("build-source.sha256");
         let original = entries.concat();
         fs::write(&manifest, &original).unwrap();
@@ -216,25 +231,57 @@ mod tests {
             assert!(runtime_sources(&root, &manifest).is_err());
         }
         fs::write(&manifest, &original).unwrap();
-        fs::write(root.join("src/lib.rs"), "pub fn bypass() {}\n").unwrap();
+        fs::write(root.join("source/src/lib.rs"), "pub fn bypass() {}\n").unwrap();
         assert!(runtime_sources(&root, &manifest).is_err());
-        fs::write(root.join("src/lib.rs"), "pub fn execute() {}\n").unwrap();
-        fs::write(root.join("src/receiver.rs"), "pub fn effect() {}\n").unwrap();
+        fs::write(root.join("source/src/lib.rs"), "pub fn execute() {}\n").unwrap();
+        fs::write(root.join("source/src/receiver.rs"), "pub fn effect() {}\n").unwrap();
         assert!(runtime_sources(&root, &manifest).is_err());
-        fs::remove_file(root.join("src/receiver.rs")).unwrap();
-        fs::create_dir(root.join(".cargo")).unwrap();
-        let config = root.join(".cargo/config.toml");
+        fs::remove_file(root.join("source/src/receiver.rs")).unwrap();
+        fs::create_dir(root.join("source/.cargo")).unwrap();
+        let config = root.join("source/.cargo/config.toml");
         fs::write(&config, "[build]\njobs = 1\n").unwrap();
         assert!(runtime_sources(&root, &manifest).is_err());
         fs::write(
             &manifest,
             format!(
-                "{original}{}  .cargo/config.toml\n",
+                "{original}{}  source/.cargo/config.toml\n",
                 digest(&config).unwrap()
             ),
         )
         .unwrap();
         assert_eq!(runtime_sources(&root, &manifest).unwrap().len(), 4);
-        fs::remove_dir_all(root).unwrap();
+        fs::create_dir_all(root.join("hibana/src")).unwrap();
+        for (name, bytes) in [
+            ("hibana/Cargo.toml", "[package]\n"),
+            ("hibana/Cargo.lock", "version = 4\n"),
+            ("hibana/src/lib.rs", "pub fn current_core() {}\n"),
+        ] {
+            fs::write(root.join(name), bytes).unwrap();
+        }
+        let mut complete = fs::read_to_string(&manifest).unwrap();
+        for name in [
+            "hibana/Cargo.toml",
+            "hibana/Cargo.lock",
+            "hibana/src/lib.rs",
+        ] {
+            complete.push_str(&format!("{}  {name}\n", digest(&root.join(name)).unwrap()));
+        }
+        fs::write(&manifest, &complete).unwrap();
+        assert_eq!(runtime_sources(&root, &manifest).unwrap().len(), 7);
+        fs::write(root.join("hibana/src/lib.rs"), "pub fn other_core() {}\n").unwrap();
+        assert!(runtime_sources(&root, &manifest).is_err());
+        fs::write(root.join("hibana/src/lib.rs"), "pub fn current_core() {}\n").unwrap();
+        fs::write(root.join("hibana/src/added.rs"), "pub fn added() {}\n").unwrap();
+        assert!(runtime_sources(&root, &manifest).is_err());
+        fs::remove_file(root.join("hibana/src/added.rs")).unwrap();
+        let relocated = root.with_extension("relocated");
+        fs::rename(&root, &relocated).unwrap();
+        assert_eq!(
+            runtime_sources(&relocated, &relocated.join("build-source.sha256"))
+                .unwrap()
+                .len(),
+            7
+        );
+        fs::remove_dir_all(relocated).unwrap();
     }
 }

@@ -12,7 +12,11 @@ fn root() -> PathBuf {
 fn fixture() -> Result<Scratch> {
     let temp = Scratch::new()?;
     fs::create_dir(temp.0.join("benchmark"))?;
-    for name in ["upstream-manifest.json", "runtime-manifest.json"] {
+    for name in [
+        "upstream-manifest.json",
+        "simulator-manifest.json",
+        "runtime-manifest.json",
+    ] {
         fs::copy(
             root().join("benchmark").join(name),
             temp.0.join("benchmark").join(name),
@@ -26,27 +30,26 @@ fn fixture() -> Result<Scratch> {
         root().join("benchmark/experiment-contract.json"),
         temp.0.join("benchmark/experiment-contract.json"),
     )?;
-    let benchmark = read(&root().join("benchmark/upstream-manifest.json"))?;
+    let benchmark = read(&root().join("benchmark/simulator-manifest.json"))?;
     let runtime = read(&root().join("benchmark/runtime-manifest.json"))?;
-    for (source, mappings) in [
-        (
-            "tracefix",
-            benchmark["tasks"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|v| &v["files"])
-                .chain([&benchmark["simulator_files"], &runtime["tracefix"]["files"]])
-                .collect::<Vec<_>>(),
-        ),
-        ("tracefix-paper", vec![&runtime["tracefix-paper"]["files"]]),
-    ] {
-        for mapping in mappings {
-            for path in mapping.as_object().unwrap().keys() {
-                let destination = temp.0.join("vendor").join(source).join(path);
-                fs::create_dir_all(destination.parent().unwrap())?;
-                fs::copy(root().join("vendor").join(source).join(path), destination)?;
-            }
+    for mapping in benchmark["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| &v["files"])
+        .chain([&benchmark["simulator_files"]])
+    {
+        for path in mapping.as_object().unwrap().keys() {
+            let destination = temp.0.join(path);
+            fs::create_dir_all(destination.parent().unwrap())?;
+            fs::copy(root().join(path), destination)?;
+        }
+    }
+    for source in ["tracefix", "tracefix-paper"] {
+        for path in runtime[source]["files"].as_object().unwrap().keys() {
+            let destination = temp.0.join("vendor").join(source).join(path);
+            fs::create_dir_all(destination.parent().unwrap())?;
+            fs::copy(root().join("vendor").join(source).join(path), destination)?;
         }
     }
     Ok(temp)
@@ -111,33 +114,54 @@ fn baseline_selection_rejects_missing_sources_entrypoints_and_changed_model_cond
 fn changed_bytes_metadata_files_and_task_sets_are_rejected() -> Result<()> {
     let temp = fixture()?;
     verify(&temp.0)?;
-    let input = temp
-        .0
-        .join("vendor/tracefix/benchmark/descriptions/1E/description.md");
+    let input = temp.0.join("benchmark/descriptions/1E/description.md");
     let bytes = fs::read(&input)?;
     fs::write(&input, b"modified task")?;
     assert!(verify_benchmark(&temp.0).is_err());
     fs::write(input, bytes)?;
-    let extra = temp
-        .0
-        .join("vendor/tracefix/benchmark/environments/1E/new-policy.py");
+    let extra = temp.0.join("benchmark/environments/1E/new-policy.py");
     fs::write(&extra, b"different environment")?;
     assert!(verify_benchmark(&temp.0).is_err());
     fs::remove_file(extra)?;
-    let extra = temp.0.join("vendor/tracefix/benchmark/environments/17E");
+    let extra = temp.0.join("benchmark/environments/17E");
     fs::create_dir(&extra)?;
     assert!(verify_benchmark(&temp.0).is_err());
     fs::remove_dir(extra)?;
-    let extra = temp.0.join("vendor/tracefix/benchmark/tools/new-tool.py");
+    let extra = temp.0.join("benchmark/tools/new-tool.py");
     fs::write(&extra, b"new tool")?;
     assert!(verify_benchmark(&temp.0).is_err());
     fs::remove_file(extra)?;
     verify_benchmark(&temp.0)?;
-    let path = temp.0.join("benchmark/upstream-manifest.json");
+    let path = temp.0.join("benchmark/simulator-manifest.json");
     let mut manifest = read(&path)?;
     manifest["tasks"][0]["agents"] = json!(["REPLACED_PARTICIPANT"]);
     fs::write(path, serde_json::to_vec(&manifest)?)?;
     assert!(verify_benchmark(&temp.0).is_err());
+    Ok(())
+}
+
+#[test]
+fn a_saved_world_keeps_its_declared_contract_and_checks_its_actual_bytes() -> Result<()> {
+    let temp = fixture()?;
+    let contract = "archived-world-fixture";
+    let manifest = simulator_manifest(&temp.0, contract)?;
+    let path = temp.0.join("benchmark/simulator-manifest.json");
+    fs::write(&path, serde_json::to_vec(&manifest)?)?;
+    let verified = verify_benchmark(&temp.0)?;
+    assert_eq!(verified["simulator_contract"], contract);
+    assert_eq!(verified["tasks"], 48);
+    let source = temp.0.join("benchmark/tools/sim_document.py");
+    let bytes = fs::read(&source)?;
+    fs::write(&source, b"changed scientific world")?;
+    assert!(verify_benchmark(&temp.0).is_err());
+    fs::write(&source, bytes)?;
+    verify_benchmark(&temp.0)?;
+    for invalid in [Value::Null, json!(""), json!(9)] {
+        let mut changed = manifest.clone();
+        changed["simulator_contract"] = invalid;
+        fs::write(&path, serde_json::to_vec(&changed)?)?;
+        assert!(verify_benchmark(&temp.0).is_err());
+    }
     Ok(())
 }
 

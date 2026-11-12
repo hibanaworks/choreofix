@@ -1,0 +1,37 @@
+{
+  "agents": [
+    "BUILDER_A",
+    "BUILDER_B",
+    "INTEGRATOR"
+  ],
+  "resources": [
+    "CORE_LIB",
+    "SHARED_TYPES"
+  ],
+  "agent_resources": {
+    "BUILDER_A": [
+      "CORE_LIB",
+      "SHARED_TYPES"
+    ],
+    "BUILDER_B": [
+      "CORE_LIB",
+      "SHARED_TYPES"
+    ]
+  },
+  "tool_resource_map": {
+    "compile_module": {
+      "argument": "module_name",
+      "values": {
+        "module_a": [
+          "CORE_LIB",
+          "SHARED_TYPES"
+        ],
+        "module_b": [
+          "CORE_LIB",
+          "SHARED_TYPES"
+        ]
+      }
+    },
+    "link_modules": []
+  }
+}

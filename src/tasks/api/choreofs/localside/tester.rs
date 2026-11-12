@@ -11,7 +11,7 @@ pub async fn run<D: Domain>(
     endpoint: &mut Endpoint<TESTER>,
     domain: &D,
     validation: &Validation,
-    result_input: &crate::tasks::api::imp::TestInput,
+    result_input: &super::super::super::imp::TestInput,
 ) -> ShellResult<()> {
     endpoint.recv::<BackendReady>().await?;
     let mut file = File::new(b"service/run_integration_tests", SERVICE_FD);

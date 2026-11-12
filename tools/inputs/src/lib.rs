@@ -16,6 +16,7 @@ use std::{
 };
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+pub const SIMULATOR_CONTRACT: &str = "common-environment-v18";
 pub const LATEST: &str = "36b4bd108fcd74f7efb17613aebbe3fdf55499a9";
 pub const PAPER: &str = "87b01a2c0ae53c5045c9ce3d43cd0235b1831275";
 
@@ -115,7 +116,7 @@ fn hashes(source: &Path, mut paths: Vec<PathBuf>) -> Result<Value> {
     Ok(json!(result))
 }
 
-fn task_ids() -> Vec<String> {
+pub fn task_ids() -> Vec<String> {
     (1..=16)
         .flat_map(|number| ['E', 'M', 'H'].map(|level| format!("{number}{level}")))
         .collect()
@@ -141,7 +142,12 @@ fn directories(path: &Path) -> Result<BTreeSet<String>> {
     Ok(names)
 }
 
-fn benchmark_inventory(source: &Path) -> Result<Value> {
+/// Inventory the actual world bytes under their explicitly declared contract.
+/// A label identifies a source version; it does not certify its semantics.
+pub fn simulator_manifest(source: &Path, contract: &str) -> Result<Value> {
+    if contract.is_empty() {
+        return Err("missing simulator contract identity".into());
+    }
     let benchmark = source.join("benchmark");
     let ids = task_ids();
     let expected = ids.iter().cloned().collect::<BTreeSet<_>>();
@@ -182,21 +188,26 @@ fn benchmark_inventory(source: &Path) -> Result<Value> {
     let mut paths = Vec::new();
     files(&benchmark.join("tools"), &mut paths)?;
     paths.retain(|p| p.extension().is_some_and(|e| e == "py"));
-    Ok(json!({"upstream_revision":LATEST,"tasks":tasks,"simulator_files":hashes(source,paths)?}))
-}
-
-fn verify_benchmark_source(root: &Path, source: &Path) -> Result<Value> {
-    let actual = benchmark_inventory(source)?;
-    if actual != read(&root.join("benchmark/upstream-manifest.json"))? {
-        return Err("upstream benchmark bytes or metadata differ from the pinned manifest".into());
-    }
-    let tasks = actual["tasks"].as_array().ok_or("tasks")?;
-    Ok(json!({"tasks":tasks.len(),"scenarios":16,"unchanged":true,
-        "checklist_items":tasks.iter().map(|t|t["checklist_items"].as_u64().expect("generated count")).sum::<u64>()}))
+    paths.push(benchmark.join("__init__.py"));
+    Ok(
+        json!({"upstream_revision":LATEST,"simulator_contract":contract,"tasks":tasks,"simulator_files":hashes(source,paths)?}),
+    )
 }
 
 pub fn verify_benchmark(root: &Path) -> Result<Value> {
-    verify_benchmark_source(root, &root.join("vendor/tracefix"))
+    let recorded = read(&root.join("benchmark/simulator-manifest.json"))?;
+    let contract = recorded["simulator_contract"]
+        .as_str()
+        .ok_or("missing simulator contract identity")?;
+    let actual = simulator_manifest(root, contract)?;
+    if actual != recorded {
+        return Err("common simulator bytes or metadata differ from the fixed manifest".into());
+    }
+    let tasks = actual["tasks"].as_array().ok_or("tasks")?;
+    Ok(
+        json!({"tasks":tasks.len(),"scenarios":16,"unchanged":false,"simulator_contract":contract,
+        "checklist_items":tasks.iter().map(|t|t["checklist_items"].as_u64().expect("generated count")).sum::<u64>()}),
+    )
 }
 
 fn runtime_inventory(source: &Path, spec: &Source) -> Result<Value> {

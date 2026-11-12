@@ -78,7 +78,7 @@ impl Guest {
 pub fn guest(
     runtime: &Path,
     module: &Path,
-    task: &str,
+    arguments: &[&str],
     output: &Path,
     trace: Trace,
     simulator: Simulator,
@@ -86,7 +86,7 @@ pub fn guest(
     let mut child = Process::spawn(
         Command::new(runtime)
             .arg(module)
-            .arg(task)
+            .args(arguments)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(File::create_new(output.join("runtime-stderr.log"))?),
@@ -201,9 +201,23 @@ async fn runtime_loop(
             }
         }
     }.await;
+    // A model driver retains its shared reply producer. Dropping these
+    // per-command producers alone would leave their callers waiting forever.
+    for (id, reply) in pending.into_values().chain(
+        commands
+            .try_iter()
+            .map(|(mut command, reply)| (command["id"].take(), reply)),
+    ) {
+        if let Err(error) = wire::respond(
+            &reply,
+            id,
+            Err("guest runtime closed before command reply".into()),
+        ) {
+            backend_errors.push(error.to_string());
+        }
+    }
     drop(commands);
     drop(input);
-    drop(pending);
     if !verdict.as_ref().is_ok_and(|v| v["status"] == "complete") {
         child.terminate()?;
     }
@@ -234,6 +248,81 @@ async fn runtime_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[hibana_runtime::main]
+    #[test]
+    #[ignore = "isolated Python world and child stdio; explicitly run by ordinary CI"]
+    async fn runtime_shutdown_completes_pending_and_queued_shared_channel_replies() -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()?;
+        std::env::set_current_dir(&root)?;
+        let output = root.join("output/experiments").join(format!(
+            "runtime-close-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        std::fs::create_dir(&output)?;
+        for (name, response) in [
+            (
+                "verdict",
+                "printf '%s\\n' '{\"type\":\"run_result\",\"status\":\"failed\",\"error\":\"fixture closed before terminal reply\"}'\n",
+            ),
+            ("eof", ""),
+        ] {
+            let directory = output.join(name);
+            std::fs::create_dir(&directory)?;
+            let script = directory.join("runtime.sh");
+            std::fs::write(&script, format!("IFS= read -r request\n{response}exit 1\n"))?;
+            let trace = Trace::create(&directory.join("events.jsonl"))?;
+            let (world, _) = Simulator::new("9E", 0, 0.0, trace.clone(), &[])?;
+            let (guest, runtime) =
+                guest(Path::new("/bin/sh"), &script, &[], &directory, trace, world)?;
+            let (send, receive) = mpsc::channel();
+            let (notify, mut ready) = notification()?;
+            // The model driver keeps a shared response producer alive. Merely
+            // dropping one request's producer cannot complete its pending RPC.
+            for id in [41, 42] {
+                guest.send(
+                    json!({"id":id,"agent":"PHILOSOPHER_1","command":"exit 0"}),
+                    (send.clone(), notify.try_clone()?),
+                )?;
+            }
+            race(
+                async {
+                    let (result, mut ids) = async {
+                        async { runtime.await };
+                        async {
+                            let mut ids = Vec::new();
+                            for _ in 0..2 {
+                                let (id, result) = wire::receive(&receive, &mut ready)
+                                    .await?
+                                    .ok_or("shared response channel closed")?;
+                                ids.push(id.as_u64().ok_or("caller id")?);
+                                assert!(result.is_err(), "an interrupted command cannot succeed");
+                            }
+                            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(ids)
+                        };
+                    }
+                    .await?;
+                    ids.sort_unstable();
+                    assert_eq!(ids, [41, 42]);
+                    assert_eq!(result["runtime_exit_code"], 1);
+                    Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+                },
+                hibana_runtime::host::deadline(std::time::Duration::from_secs(2)),
+            )
+            .await?;
+            drop(send);
+            drop(notify);
+            drop(guest);
+        }
+        std::fs::remove_dir_all(output)?;
+        Ok(())
+    }
+
     #[hibana_runtime::main]
     #[test]
     #[ignore = "requires the built writing runtime, wash module and original simulator environment"]
@@ -269,7 +358,7 @@ mod tests {
         let (guest, guest_loop) = guest(
             &runtime,
             Path::new("vendor/hibana-wash/target/wasm32-wasip1/release/hibana-wash.wasm"),
-            "2M",
+            &["2M"],
             &output,
             trace,
             simulator,

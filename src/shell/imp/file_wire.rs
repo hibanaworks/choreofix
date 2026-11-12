@@ -21,6 +21,12 @@ pub struct ClosedFile {
     pub bytes: Vec<u8>,
 }
 
+impl hibana_wasip1_runtime::FileReply for ClosedFile {
+    fn completion(&self) -> protocol::FdClosedRet {
+        self.completion
+    }
+}
+
 impl ClosedFile {
     pub fn arguments(&self, expected_path: &[u8], key: &str) -> ShellResult<Value> {
         if self.completion.0.errno() != 0 || self.path != expected_path {
@@ -97,47 +103,51 @@ impl WirePayload for ClosedFile {
 
 /// One write to the guest's result file, at an explicit byte offset.
 pub struct ResultChunk {
-    offset: usize,
+    offset: u64,
     write: protocol::FdWrite,
 }
 impl ResultChunk {
     pub fn new(offset: usize, bytes: &[u8]) -> ShellResult<Self> {
-        if offset
+        offset
             .checked_add(bytes.len())
-            .is_none_or(|end| end > FILE_BYTES)
-        {
-            return Err(ShellError::message("result file exceeds its byte bound"));
-        }
+            .ok_or_else(|| ShellError::message("result offset overflow"))?;
         Ok(Self {
-            offset,
+            offset: u64::try_from(offset)
+                .map_err(|_| ShellError::message("result offset exceeds WASI filesize"))?,
             write: protocol::FdWrite::new(RESULT_FD, bytes)?,
         })
     }
     pub fn offset(input: &ReceivedPayload<'_, Self>) -> usize {
         let bytes = input.as_bytes();
-        u16::from_be_bytes([bytes[0], bytes[1]]) as usize
+        usize::try_from(u64::from_be_bytes(
+            bytes[..8].try_into().expect("validated result offset"),
+        ))
+        .expect("validated native result offset")
     }
 }
 impl WireEncode for ResultChunk {
     fn encode_into(&self, out: &mut [u8]) -> Result<usize, CodecError> {
-        let len = 2 + self.write.as_bytes().len();
+        let len = 8 + self.write.as_bytes().len();
         let out = out.get_mut(..len).ok_or(CodecError::Truncated)?;
-        out[..2].copy_from_slice(&(self.offset as u16).to_be_bytes());
-        out[2..].copy_from_slice(self.write.as_bytes());
+        out[..8].copy_from_slice(&self.offset.to_be_bytes());
+        out[8..].copy_from_slice(self.write.as_bytes());
         Ok(len)
     }
 }
 impl WirePayload for ResultChunk {
-    const SCHEMA_ID: u32 = 0xcf00_0002;
+    const SCHEMA_ID: u32 = 0xcf00_0003;
     type Decoded<'a> = ReceivedPayload<'a, Self>;
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
         let bytes = input.as_bytes();
-        if bytes.len() < 2 {
+        if bytes.len() < 8 {
             return Err(CodecError::Truncated);
         }
-        let offset = u16::from_be_bytes([bytes[0], bytes[1]]) as usize;
-        if bytes.len() - 2 > protocol::WASIP1_IO_CHUNK_CAPACITY
-            || offset + bytes.len() - 2 > FILE_BYTES
+        let offset = usize::try_from(u64::from_be_bytes(
+            bytes[..8].try_into().expect("checked result offset length"),
+        ))
+        .map_err(|_| CodecError::Malformed)?;
+        if bytes.len() - 8 > protocol::WASIP1_IO_CHUNK_CAPACITY
+            || offset.checked_add(bytes.len() - 8).is_none()
         {
             return Err(CodecError::Malformed);
         }
@@ -151,9 +161,42 @@ impl ChoreoFsRequest for ResultChunk {
     type Request = (protocol::FdWrite, protocol::FdWriteRow);
     fn request(input: &ReceivedPayload<'_, Self>) -> Self::Request {
         (
-            protocol::FdWrite::new(RESULT_FD, &input.as_bytes()[2..])
+            protocol::FdWrite::new(RESULT_FD, &input.as_bytes()[8..])
                 .expect("validated result chunk"),
             protocol::FdWriteRow::Base,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn result_chunks_keep_offsets_beyond_the_old_file_and_u16_limits() {
+        for offset in [8192, usize::from(u16::MAX) + 17] {
+            let chunk = ResultChunk::new(offset, b"result bytes").unwrap();
+            let mut out = [0; 8 + protocol::WASIP1_IO_CHUNK_CAPACITY];
+            let len = chunk.encode_into(&mut out).unwrap();
+            let bytes = &out[..len];
+            ResultChunk::validate_payload(Payload::new(bytes)).unwrap();
+            assert_eq!(
+                u64::from_be_bytes(bytes[..8].try_into().unwrap()),
+                offset as u64
+            );
+            assert_eq!(&bytes[8..], b"result bytes");
+        }
+    }
+
+    #[test]
+    fn result_chunks_reject_offset_overflow_and_oversized_packets() {
+        assert!(ResultChunk::new(usize::MAX, b"x").is_err());
+        let mut overflow = u64::MAX.to_be_bytes().to_vec();
+        overflow.push(b'x');
+        assert!(ResultChunk::validate_payload(Payload::new(&overflow)).is_err());
+        assert!(ResultChunk::new(0, &[0; protocol::WASIP1_IO_CHUNK_CAPACITY + 1]).is_err());
+        let too_long = [0; 8 + protocol::WASIP1_IO_CHUNK_CAPACITY + 1];
+        assert!(ResultChunk::validate_payload(Payload::new(&too_long)).is_err());
+        assert!(ResultChunk::validate_payload(Payload::new(&[0; 7])).is_err());
     }
 }

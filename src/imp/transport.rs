@@ -14,7 +14,7 @@ use hibana::runtime::{
     wire::Payload,
 };
 
-pub(crate) struct InMemoryTransport {
+pub struct InMemoryTransport {
     state: Cell<IoQueues>,
     bindings: Vec<InitialBinding>,
 }
@@ -26,9 +26,7 @@ struct InitialBinding {
 }
 
 impl InMemoryTransport {
-    pub(crate) fn new(
-        bindings: impl IntoIterator<Item = (SessionId, u8, EndpointBinding)>,
-    ) -> Self {
+    pub fn new(bindings: impl IntoIterator<Item = (SessionId, u8, EndpointBinding)>) -> Self {
         Self {
             state: Cell::new(IoQueues::default()),
             bindings: bindings
@@ -43,7 +41,7 @@ impl InMemoryTransport {
     }
 
     /// Append-only observations; no observer can authorize an operation.
-    pub(crate) fn take_observations(&self) -> Vec<serde_json::Value> {
+    pub fn take_observations(&self) -> Vec<serde_json::Value> {
         let mut state = self.state.take();
         let observations = std::mem::take(&mut state.observations);
         self.state.set(state);
@@ -116,13 +114,13 @@ impl Waiter {
     }
 }
 
-pub(crate) struct Tx {
+pub struct Tx {
     session: SessionId,
     lane: u8,
     local_role: u8,
 }
 
-pub(crate) struct Rx {
+pub struct Rx {
     session: SessionId,
     lane: u8,
     local_role: u8,

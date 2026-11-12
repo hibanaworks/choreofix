@@ -1,9 +1,9 @@
-use super::*;
-use crate::shell::imp::file_wire::{ClosedFile, ClosedFileMsg, ResultChunk, ResultChunkMsg};
-use crate::tasks::review::{
+use super::super::super::{
     choreofs::imp::ReviewTarget,
     imp::{ReviewInput, decide},
 };
+use super::*;
+use crate::shell::imp::file_wire::{ClosedFile, ClosedFileMsg, ResultChunk, ResultChunkMsg};
 use hibana_wasip1_runtime::protocol;
 use std::time::Duration;
 
@@ -28,7 +28,7 @@ async fn a_waiting_developer_does_not_repeat_work_during_the_other_review_loop()
 -> Result<(), crate::shell::ShellError> {
     let p = programs();
     let session = SessionId::new(6204);
-    let (bus, _, _) = Bus::open([], [(session, REPO_ENDPOINT)]);
+    let (bus, _, _) = Bus::open([], [(session, REPO_ENDPOINT), (session, REVIEW)]);
     let target = ReviewTarget::default();
     let input_a = ReviewInput::default();
     let input_b = ReviewInput::default();
@@ -39,7 +39,7 @@ async fn a_waiting_developer_does_not_repeat_work_during_the_other_review_loop()
         .rendezvous(&mut slab, &bus.transport)
         .unwrap();
     rv.set_resolver(
-        &p.review_wasi,
+        &p.review,
         ResolverRef::<SELECT_REVIEW>::decision_state(&target, ReviewTarget::decide),
     )
     .unwrap();
@@ -56,11 +56,12 @@ async fn a_waiting_developer_does_not_repeat_work_during_the_other_review_loop()
     let mut a = rv.enter(session, &p.a_wasi).unwrap();
     let mut b = rv.enter(session, &p.b_wasi).unwrap();
     let mut reviewer = rv.enter(session, &p.review_wasi).unwrap();
-    let mut review_a = rv.enter(session, &p.review_a).unwrap();
-    let mut review_b = rv.enter(session, &p.review_b).unwrap();
+    let review_a = rv.enter(session, &p.review_a).unwrap();
+    let review_b = rv.enter(session, &p.review_b).unwrap();
     let mut a_io = rv.enter(session, &p.a_io).unwrap();
     let mut repo = rv.enter(session, &p.repo).unwrap();
     let repository = rv.enter(session, &p.repo_endpoint).unwrap();
+    let review_control = rv.enter(session, &p.review).unwrap();
     let [mut a_task, mut a_private] = a.par().unwrap();
     let [mut b_task, _b_private] = b.par().unwrap();
     let [mut reviewer_task, _reviewer_private] = reviewer.par().unwrap();
@@ -166,19 +167,7 @@ async fn a_waiting_developer_does_not_repeat_work_during_the_other_review_loop()
                                         task.offer()
                                             .await
                                             .unwrap()
-                                            .recv::<AgainBBeforeAReview>()
-                                            .await
-                                            .unwrap();
-                                        task.offer()
-                                            .await
-                                            .unwrap()
                                             .recv::<RejectedB>()
-                                            .await
-                                            .unwrap();
-                                        task.offer()
-                                            .await
-                                            .unwrap()
-                                            .recv::<AgainBBeforeA>()
                                             .await
                                             .unwrap();
                                         task.offer()
@@ -295,21 +284,31 @@ async fn a_waiting_developer_does_not_repeat_work_during_the_other_review_loop()
                                     };
                                     async {
                                         let task = &mut reviewer_task;
+                                        let mut control =
+                                            task.recv::<ReviewControl>().await.unwrap();
                                         target.record(FEATURE_A);
-                                        task.offer()
+                                        control
+                                            .offer()
                                             .await
                                             .unwrap()
                                             .send::<FirstA>(&review_arguments_a)
                                             .await
                                             .unwrap();
-                                        for _ in 0..4 {
-                                            task.send::<FirstA>(&review_arguments_a).await.unwrap();
+                                        for _ in 0..3 {
+                                            control
+                                                .send::<FirstA>(&review_arguments_a)
+                                                .await
+                                                .unwrap();
                                         }
                                         task.recv::<ReadyA>().await.unwrap();
                                         {
                                             let [mut review, mut other] = task.par().unwrap();
                                             async {
                                                 async {
+                                                    review
+                                                        .send::<ReviewControl>(control)
+                                                        .await
+                                                        .unwrap();
                                                     review
                                                         .send::<ReviewA>(&review_arguments_a)
                                                         .await
@@ -333,15 +332,18 @@ async fn a_waiting_developer_does_not_repeat_work_during_the_other_review_loop()
                                             .recv::<RejectedA>()
                                             .await
                                             .unwrap();
+                                        control = task.recv::<ReviewControl>().await.unwrap();
                                         target.record(FEATURE_B);
-                                        task.offer()
+                                        control
+                                            .offer()
                                             .await
                                             .unwrap()
                                             .send::<BDuringARevision>(&review_arguments_b)
                                             .await
                                             .unwrap();
-                                        for _ in 0..4 {
-                                            task.send::<BDuringARevision>(&review_arguments_b)
+                                        for _ in 0..3 {
+                                            control
+                                                .send::<BDuringARevision>(&review_arguments_b)
                                                 .await
                                                 .unwrap();
                                         }
@@ -354,6 +356,10 @@ async fn a_waiting_developer_does_not_repeat_work_during_the_other_review_loop()
                                                     Ok(())
                                                 };
                                                 async {
+                                                    review
+                                                        .send::<ReviewControl>(control)
+                                                        .await
+                                                        .unwrap();
                                                     review
                                                         .send::<ReviewB>(&review_arguments_b)
                                                         .await
@@ -372,18 +378,22 @@ async fn a_waiting_developer_does_not_repeat_work_during_the_other_review_loop()
                                             .recv::<RejectedB>()
                                             .await
                                             .unwrap();
-                                        task.offer()
+                                        control = task.recv::<ReviewControl>().await.unwrap();
+                                        control
+                                            .offer()
                                             .await
                                             .unwrap()
                                             .send::<AgainBBeforeAReview>(&review_arguments_b)
                                             .await
                                             .unwrap();
-                                        for _ in 0..4 {
-                                            task.send::<AgainBBeforeAReview>(&review_arguments_b)
+                                        for _ in 0..2 {
+                                            control
+                                                .send::<AgainBBeforeAReview>(&review_arguments_b)
                                                 .await
                                                 .unwrap();
                                         }
                                         task.recv::<ReadyB>().await.unwrap();
+                                        task.send::<ReviewControl>(control).await.unwrap();
                                         task.send::<ReReviewB>(&review_arguments_b).await.unwrap();
                                         task.offer()
                                             .await
@@ -391,18 +401,22 @@ async fn a_waiting_developer_does_not_repeat_work_during_the_other_review_loop()
                                             .recv::<RejectedB>()
                                             .await
                                             .unwrap();
-                                        task.offer()
+                                        control = task.recv::<ReviewControl>().await.unwrap();
+                                        control
+                                            .offer()
                                             .await
                                             .unwrap()
                                             .send::<AgainBBeforeA>(&review_arguments_b)
                                             .await
                                             .unwrap();
-                                        for _ in 0..4 {
-                                            task.send::<AgainBBeforeA>(&review_arguments_b)
+                                        for _ in 0..2 {
+                                            control
+                                                .send::<AgainBBeforeA>(&review_arguments_b)
                                                 .await
                                                 .unwrap();
                                         }
                                         task.recv::<ReadyB>().await.unwrap();
+                                        task.send::<ReviewControl>(control).await.unwrap();
                                         task.send::<ReReviewB>(&review_arguments_b).await.unwrap();
                                         task.offer()
                                             .await
@@ -410,8 +424,9 @@ async fn a_waiting_developer_does_not_repeat_work_during_the_other_review_loop()
                                             .recv::<RejectedB>()
                                             .await
                                             .unwrap();
+                                        control = task.recv::<ReviewControl>().await.unwrap();
 
-                                        Ok(())
+                                        Ok(control)
                                     };
                                     async {
                                         {
@@ -451,8 +466,12 @@ async fn a_waiting_developer_does_not_repeat_work_during_the_other_review_loop()
                         },
                         hibana_runtime::race(
                             async {
-                                let result =
-                                    localside::repo::run(&mut repo, repository, &domain).await;
+                                let result = localside::repo::run(
+                                    &mut repo,
+                                    (repository, review_control),
+                                    &domain,
+                                )
+                                .await;
                                 Err::<(), crate::shell::ShellError>(
                                     crate::shell::ShellError::message(format!(
                                         "repo ended: {result:?}"
@@ -461,12 +480,9 @@ async fn a_waiting_developer_does_not_repeat_work_during_the_other_review_loop()
                             },
                             hibana_runtime::race(
                                 async {
-                                    let result = localside::reviewer_a::run(
-                                        &mut review_a,
-                                        &domain,
-                                        &input_a,
-                                    )
-                                    .await;
+                                    let result =
+                                        localside::reviewer_a::run(review_a, &domain, &input_a)
+                                            .await;
                                     Err::<(), crate::shell::ShellError>(
                                         crate::shell::ShellError::message(format!(
                                             "review A ended: {result:?}"
@@ -474,12 +490,9 @@ async fn a_waiting_developer_does_not_repeat_work_during_the_other_review_loop()
                                     )
                                 },
                                 async {
-                                    let result = localside::reviewer_b::run(
-                                        &mut review_b,
-                                        &domain,
-                                        &input_b,
-                                    )
-                                    .await;
+                                    let result =
+                                        localside::reviewer_b::run(review_b, &domain, &input_b)
+                                            .await;
                                     Err::<(), crate::shell::ShellError>(
                                         crate::shell::ShellError::message(format!(
                                             "review B ended: {result:?}"

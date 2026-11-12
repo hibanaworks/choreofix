@@ -1,0 +1,21 @@
+{
+  "agents": ["SUPERVISOR", "TECHNICIAN_A", "TECHNICIAN_B"],
+  "resources": ["LATHE", "MILL"],
+  "agent_resources": {
+    "SUPERVISOR": [],
+    "TECHNICIAN_A": ["LATHE", "MILL"],
+    "TECHNICIAN_B": ["LATHE", "MILL"]
+  },
+  "tool_resource_map": {
+    "collect_reports": [],
+    "do_job": {
+      "argument": "job_id",
+      "values": {
+        "lathe_job_a": ["LATHE"],
+        "mill_job_a": ["MILL"],
+        "lathe_job_b": ["LATHE"],
+        "mill_job_b": ["MILL"]
+      }
+    }
+  }
+}

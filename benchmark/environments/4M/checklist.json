@@ -1,0 +1,13 @@
+[
+  {"id":"R1","type":"resource","description":"Observe concurrent REPO modifications/publications; capacity is one."},
+  {"id":"R2","type":"resource","description":"Observe concurrent TEST_ENV use; capacity is one."},
+  {"id":"D1","type":"outcome","description":"Both actual design documents exist."},
+  {"id":"D2","type":"outcome","description":"Successful reviews refer to the actual published module/library contents."},
+  {"id":"D3","type":"outcome","description":"Successful dependent tests refer to the actual published module/library contents."},
+  {"id":"DEC1","type":"data","description":"Design operations create documents without authorizing another tool."},
+  {"id":"DEC2","type":"data","description":"Review outcomes come from executing the current code snapshot."},
+  {"id":"O1","type":"freedom","description":"Equivalent valid published outcomes receive equal scores regardless of operation order or recovery path."},
+  {"id":"RA1","type":"outcome","description":"Both developers perform their assigned module/shared-library refactors."},
+  {"id":"RA2","type":"outcome","description":"Both refactored modules are actually published and function correctly."},
+  {"id":"DL1","type":"freedom","description":"The environment adds no workflow waiting or hidden orchestration."}
+]

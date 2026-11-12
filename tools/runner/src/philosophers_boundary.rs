@@ -167,7 +167,7 @@ async fn all_dining_levels_use_both_resource_endpoints_through_wasi() -> Result<
         let (guest, runtime) = process::guest(
             &case.join("runtime").canonicalize()?,
             &case.join("wash.wasm").canonicalize()?,
-            task,
+            &[task],
             &case,
             trace,
             simulator.clone(),

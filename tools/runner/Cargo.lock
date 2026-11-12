@@ -25,6 +25,7 @@ dependencies = [
  "hibana",
  "hibana-epf",
  "hibana-runtime",
+ "hibana-wasip1-runtime",
  "pyo3",
  "serde_json",
  "sha2",
@@ -80,12 +81,10 @@ dependencies = [
 [[package]]
 name = "hibana"
 version = "0.10.0"
-source = "git+https://github.com/hibanaworks/hibana?rev=a4d48cdc4b4d42110d3d7a3fe9fe172efd91c3e0#a4d48cdc4b4d42110d3d7a3fe9fe172efd91c3e0"
 
 [[package]]
 name = "hibana-epf"
 version = "0.1.0"
-source = "git+https://github.com/hibanaworks/hibana-epf?rev=e0690aa120fd8a3e73bf24e5e68adeb29066e946#e0690aa120fd8a3e73bf24e5e68adeb29066e946"
 dependencies = [
  "hibana",
 ]
@@ -106,6 +105,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "hibana-wasip1-runtime"
+version = "0.1.0"
+dependencies = [
+ "hibana",
+ "hibana-runtime",
 ]
 
 [[package]]

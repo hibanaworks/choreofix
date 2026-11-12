@@ -9,51 +9,9 @@ use std::{
     path::Path,
 };
 
-struct Frame {
-    logical_label: u8,
-    identity: Value,
-    bytes: Vec<u8>,
-    sent: usize,
-    received: Option<usize>,
-    queued: bool,
-}
-impl Frame {
-    fn direction(&self, from: u64, to: u64) -> bool {
-        self.identity["source"] == from && self.identity["target"] == to
-    }
-    fn received(&self) -> Result<usize> {
-        self.received.ok_or_else(|| "unreceived frame".into())
-    }
-    fn value(&self) -> Result<Value> {
-        Ok(serde_json::from_slice(&self.bytes)?)
-    }
-}
-struct Call {
-    request: Value,
-    emitted: usize,
-    started: Option<(usize, f64)>,
-    result: Option<(usize, Value)>,
-    domain_result: Option<Value>,
-    ended: Option<(usize, f64)>,
-}
+use crate::journal::{Call, Frame, check_close_pairs, close_arguments, one, records};
+
 impl Call {
-    fn started(&self) -> Result<(usize, f64)> {
-        self.started.ok_or_else(|| "missing domain start".into())
-    }
-    fn ended(&self) -> Result<(usize, f64)> {
-        self.ended.ok_or_else(|| "missing domain end".into())
-    }
-    fn result(&self) -> Result<(usize, &Value)> {
-        self.result
-            .as_ref()
-            .map(|(at, value)| (*at, value))
-            .ok_or_else(|| "missing original result".into())
-    }
-    fn tool(&self) -> Result<&str> {
-        self.request["tool"]
-            .as_str()
-            .ok_or_else(|| "tool name".into())
-    }
     fn target(&self) -> Result<&str> {
         let key = match self.tool()? {
             "implement_feature" => "feature_name",
@@ -66,96 +24,13 @@ impl Call {
             .ok_or_else(|| "effect target".into())
     }
 }
-fn one<'a>(items: impl Iterator<Item = &'a Frame>) -> Result<&'a Frame> {
-    let mut items = items;
-    let frame = items.next().ok_or("missing matching frame")?;
-    if items.next().is_some() {
-        return Err("multiple matching frames".into());
-    }
-    Ok(frame)
-}
-fn records(path: &Path) -> Result<Vec<Value>> {
-    fs::read_to_string(path)?
-        .lines()
-        .map(|line| serde_json::from_str(line).map_err(Into::into))
-        .collect()
-}
-fn time(row: &Value) -> Result<f64> {
-    row["elapsed_seconds"]
-        .as_f64()
-        .filter(|t| t.is_finite() && *t >= 0.0)
-        .ok_or_else(|| "invalid observation time".into())
-}
-fn close_arguments(
-    frames: &BTreeMap<u64, Frame>,
-    used: &mut BTreeSet<usize>,
-    vm: u64,
-    io: u64,
-    before: usize,
-    path: &str,
-    arguments: &Value,
-) -> Result<()> {
-    let closed = frames
-        .values()
-        .filter(|f| {
-            f.direction(io, vm)
-                && f.bytes.first() == Some(&4)
-                && f.bytes.len() >= 4
-                && f.received.is_some_and(|at| at < before)
-        })
-        .max_by_key(|f| f.received)
-        .ok_or("missing actual WASI close result")?;
-    let length = usize::from(closed.bytes[3]);
-    if closed.bytes[1..3] != [0, 0]
-        || closed.bytes.get(4..4 + length) != Some(path.as_bytes())
-        || serde_json::from_slice::<Value>(closed.bytes.get(4 + length..).ok_or("close pathname")?)?
-            != *arguments
-    {
-        return Err("WASI close differs from actual business arguments".into());
-    }
-    if !frames.values().any(|f| {
-        f.direction(vm, io) && f.bytes == [4] && f.received.is_some_and(|at| at < closed.sent)
-    }) {
-        return Err("close result without projected WASI request".into());
-    }
-    if !used.insert(closed.sent) {
-        return Err("WASI close reused for another effect".into());
-    }
-    Ok(())
-}
-
-fn check_close_pairs(frames: &BTreeMap<u64, Frame>) -> Result<()> {
-    let mut used = BTreeSet::new();
-    for vm in [0, 1, 2] {
-        for reply in frames.values().filter(|f| {
-            f.direction(vm + 8, vm)
-                && f.bytes.first() == Some(&4)
-                && f.bytes.len() >= 4
-                && f.bytes
-                    .get(4..4 + usize::from(f.bytes[3]))
-                    .is_some_and(|path| path.starts_with(b"service/"))
-        }) {
-            let request = frames
-                .values()
-                .filter(|f| f.direction(vm, vm + 8) && f.sent < reply.sent)
-                .max_by_key(|f| f.sent)
-                .ok_or("business close without WASI request")?;
-            if request.bytes != [4]
-                || request.received()? >= reply.sent
-                || !used.insert(request.sent)
-            {
-                return Err("business close request reused or out of order".into());
-            }
-        }
-    }
-    Ok(())
-}
 
 fn check(rows: &[Value], projection: &Value) -> Result<Value> {
     if projection["compiled"]["task"] != "6E" {
         return Err("review compiled protocol task".into());
     }
     let labels = crate::projection::frames(projection, rows)?;
+    let communication = crate::projection::contracts(&projection["compiled"])?;
     let fixture = &rows.first().ok_or("empty evidence")?["message"];
     if fixture["type"] != "fixtures"
         || fixture["task"] != "6E"
@@ -173,159 +48,56 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
     {
         return Err("6E participants".into());
     }
-    let mut frames = BTreeMap::<u64, Frame>::new();
-    let mut calls = BTreeMap::<u64, Call>::new();
-    let mut exits = BTreeSet::new();
-    let mut verdict = None;
-    let mut score = None;
-    for (index, row) in rows.iter().enumerate() {
-        let m = &row["message"];
-        match (row["direction"].as_str(), m["type"].as_str()) {
-            (Some("runtime"), Some("protocol_frame")) => {
-                if m["session"] != 6 {
-                    return Err("wrong session".into());
-                }
-                let id = m["frame_id"].as_u64().ok_or("frame ID")?;
-                let mut identity = m.clone();
-                identity
-                    .as_object_mut()
-                    .ok_or("frame object")?
-                    .remove("action");
-                match m["action"].as_str() {
-                    Some("send") => {
-                        let bytes = m["payload"]
-                            .as_array()
-                            .ok_or("frame payload")?
-                            .iter()
-                            .map(|v| {
-                                v.as_u64()
-                                    .and_then(|v| u8::try_from(v).ok())
-                                    .ok_or("frame byte")
-                            })
-                            .collect::<std::result::Result<Vec<_>, _>>()?;
-                        if frames
-                            .insert(
-                                id,
-                                Frame {
-                                    logical_label: *labels.get(&id).ok_or("unmapped frame")?,
-                                    identity,
-                                    bytes,
-                                    sent: index,
-                                    received: None,
-                                    queued: true,
-                                },
-                            )
-                            .is_some()
-                        {
-                            return Err("duplicate frame send".into());
-                        }
-                    }
-                    Some("receive" | "requeue") => {
-                        let frame = frames.get_mut(&id).ok_or("frame without send")?;
-                        if frame.identity != identity {
-                            return Err("altered frame identity".into());
-                        }
-                        if m["action"] == "receive" && frame.queued {
-                            frame.received = Some(index);
-                            frame.queued = false;
-                        } else if m["action"] == "requeue"
-                            && !frame.queued
-                            && frame.received.is_some()
-                        {
-                            frame.queued = true;
-                        } else {
-                            return Err("invalid frame observation".into());
-                        }
-                    }
-                    _ => return Err("unknown frame action".into()),
-                }
-            }
-            (Some("runtime"), Some("execute")) => {
-                let id = m["id"].as_u64().ok_or("effect ID")?;
-                let actor = actors
-                    .iter()
-                    .find(|a| a["agent"] == m["agent"])
-                    .ok_or("unknown effect actor")?;
-                if !actor["calls"]
-                    .as_array()
-                    .ok_or("original assignments")?
-                    .iter()
-                    .any(|a| a["tool"] == m["tool"] && a["arguments"] == m["arguments"])
-                {
-                    return Err("effect differs from original assignment".into());
-                }
-                if calls
-                    .insert(
-                        id,
-                        Call {
-                            request: m.clone(),
-                            emitted: index,
-                            started: None,
-                            result: None,
-                            domain_result: None,
-                            ended: None,
-                        },
-                    )
-                    .is_some()
-                {
-                    return Err("duplicate effect ID".into());
-                }
-            }
-            (Some("domain_start"), Some("execute")) => {
-                let call = calls
-                    .get_mut(&m["id"].as_u64().ok_or("domain ID")?)
-                    .ok_or("domain start without runtime request")?;
-                if *m != call.request || call.started.replace((index, time(row)?)).is_some() {
-                    return Err("altered domain request".into());
-                }
-            }
-            (Some("simulator"), Some("simulator_result")) => {
-                let call = calls
-                    .get_mut(&m["id"].as_u64().ok_or("result ID")?)
-                    .ok_or("result without request")?;
-                if call.domain_result.as_ref() != Some(&m["result"])
-                    || call.result.replace((index, m["result"].clone())).is_some()
-                {
-                    return Err("duplicate original result".into());
-                }
-            }
-            (Some("domain_end"), _) => {
-                let call = calls
-                    .get_mut(&m["id"].as_u64().ok_or("domain end ID")?)
-                    .ok_or("domain end without request")?;
-                if call.request["agent"] != m["agent"]
-                    || call.request["tool"] != m["tool"]
-                    || call.ended.replace((index, time(row)?)).is_some()
-                {
-                    return Err("altered domain result".into());
-                }
-                call.domain_result = Some(m["result"].clone());
-            }
-            (Some("runtime"), Some("exit")) => {
-                let agent = m["agent"].as_str().ok_or("exit agent")?;
-                if !actors.iter().any(|a| a["agent"] == agent)
-                    || m["status"] != 0
-                    || !exits.insert(agent.to_owned())
-                {
-                    return Err("invalid guest exit".into());
-                }
-            }
-            (Some("runtime"), Some("run_result")) => {
-                if m["status"] != "complete" || verdict.replace(index).is_some() {
-                    return Err("incomplete runtime verdict".into());
-                }
-            }
-            (Some("simulator"), Some("score")) if score.replace(m).is_some() => {
-                return Err("duplicate original score".into());
-            }
-            _ => {}
+    let crate::journal::Journal {
+        frames,
+        calls,
+        score,
+    } = crate::journal::read(rows, &labels, actors)?;
+    if frames.values().any(|frame| frame.identity["session"] != 6) {
+        return Err("wrong session".into());
+    }
+    let carries_control = |frame: &&Frame| frame.bytes.len() == 3 && frame.bytes[0] == 11;
+    let issued = one(frames
+        .values()
+        .filter(|f| f.direction(7, 2))
+        .filter(carries_control))?;
+    let closing_a = one(frames
+        .values()
+        .filter(|f| f.direction(2, 0))
+        .filter(carries_control))?;
+    let closing_b = one(frames
+        .values()
+        .filter(|f| f.direction(0, 1))
+        .filter(carries_control))?;
+    let closed = one(frames
+        .values()
+        .filter(|f| f.direction(1, 7))
+        .filter(carries_control))?;
+    if !(issued.received()? < closing_a.sent
+        && closing_a.received()? < closing_b.sent
+        && closing_b.received()? < closed.sent)
+    {
+        return Err("control continuation issuance or closing chain".into());
+    }
+    for frame in frames.values().filter(|f| f.identity["source"] == 11) {
+        if !(issued.received()? < frame.sent && frame.sent < closing_a.sent) {
+            return Err("control operation outside actual custody".into());
         }
     }
-    if frames.values().any(|f| f.queued || f.received.is_none())
-        || exits.len() != 3
-        || verdict.is_none()
-    {
-        return Err("incomplete observed execution".into());
+    for call in calls.values() {
+        let m = &call.request;
+        let actor = actors
+            .iter()
+            .find(|a| a["agent"] == m["agent"])
+            .ok_or("unknown effect actor")?;
+        if !actor["calls"]
+            .as_array()
+            .ok_or("original assignments")?
+            .iter()
+            .any(|a| a["tool"] == m["tool"] && a["arguments"] == m["arguments"])
+        {
+            return Err("effect differs from original assignment".into());
+        }
     }
     let depth = fixture["depth"].as_u64().ok_or("depth")? as usize;
     let overrides = fixture["failure_overrides"]
@@ -343,7 +115,6 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
         return Err("review overrides must extend the original failure prefix".into());
     }
     let expected = 6 + 2 * rejections;
-    let score = score.ok_or("missing original score")?;
     if score["complete"] != true || score["violations"] != json!([]) || calls.len() != expected {
         return Err("original completion or call count".into());
     }
@@ -355,18 +126,7 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
         return Err("original event count".into());
     }
     for call in calls.values() {
-        let (start, started) = call.started()?;
-        let (end, finished) = call.ended()?;
-        let (result_at, result) = call.result()?;
-        if !(call.emitted < start
-            && start < end
-            && end < result_at
-            && result_at < verdict.unwrap()
-            && started <= finished)
-            || result["tool_name"] != call.request["tool"]
-        {
-            return Err("invalid effect/result interval".into());
-        }
+        let (_, result) = call.result()?;
         let target = call.target()?;
         let args = match call.tool()? {
             "implement_feature" => json!({"feature":target}),
@@ -401,7 +161,7 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
     let mut previous_return = 0;
     let mut used = BTreeSet::new();
     let mut used_closes = BTreeSet::new();
-    check_close_pairs(&frames)?;
+    check_close_pairs(&frames, &[(0, 8), (1, 9), (2, 10)])?;
     for (number, loan) in loans.iter().enumerate() {
         let vm = loan.identity["target"].as_u64().ok_or("loan target")?;
         let next = loans.get(number + 1).map_or(rows.len(), |f| f.sent);
@@ -528,6 +288,7 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
     let mut reviews = 0;
     let mut used_review_requests = BTreeSet::new();
     let mut used_review_results = BTreeSet::new();
+    let mut used_control_transfers = BTreeSet::new();
     let mut review_calls: Vec<_> = calls
         .values()
         .filter(|c| c.tool().is_ok_and(|s| s == "code_review"))
@@ -564,7 +325,7 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
         let mut submitted: Vec<_> = frames
             .values()
             .filter(|f| {
-                f.identity["source"] == 2
+                (f.identity["source"] == 11 || f.identity["source"] == 2)
                     && matches!(f.identity["target"].as_u64(), Some(0 | 1 | 5 | 6 | 7))
                     && previous_review < f.sent
                     && f.sent < call.emitted
@@ -572,23 +333,37 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
             })
             .collect();
         submitted.sort_by_key(|f| f.sent);
-        if submitted.len() != 6 {
-            return Err("review requires five intent deliveries and one distinct request".into());
+        let (request, deliveries) = submitted
+            .split_last()
+            .ok_or("missing actual review request")?;
+        let intent_label = deliveries
+            .first()
+            .ok_or("missing actual review intent")?
+            .logical_label;
+        let expected = communication
+            .values()
+            .filter(|header| {
+                header[1] == 11 && header[3] == intent_label && [0, 1, 5, 6, 7].contains(&header[2])
+            })
+            .map(|header| u64::from(header[2]))
+            .collect::<BTreeSet<_>>();
+        let observed = deliveries
+            .iter()
+            .map(|frame| frame.identity["target"].as_u64().ok_or("intent recipient"))
+            .collect::<std::result::Result<BTreeSet<_>, _>>()?;
+        let author = if service == 5 { 0 } else { 1 };
+        if !BTreeSet::from([7, service, author]).is_subset(&expected)
+            || observed != expected
+            || deliveries.len() != expected.len()
+            || !request.direction(2, service)
+            || submitted
+                .iter()
+                .any(|frame| !used_review_requests.insert(frame.sent))
+        {
+            return Err("review intent/request recipients or reused occurrence".into());
         }
-        let mut after = previous_review;
-        for (frame, target) in submitted.iter().zip([7, 5, 6, 0, 1, service]) {
-            if !frame.direction(2, target)
-                || frame.sent <= after
-                || !used_review_requests.insert(frame.sent)
-            {
-                return Err("review intent/request order or reused occurrence".into());
-            }
-            after = frame.sent;
-        }
-        let request = submitted[5];
-        let intent_label = submitted[0].logical_label;
         if !matches!(intent_label, 80..=89 | 92..=95)
-            || submitted[..5]
+            || deliveries
                 .iter()
                 .any(|frame| frame.logical_label != intent_label)
             || !(if service == 5 { [71, 77] } else { [171, 177] }).contains(&request.logical_label)
@@ -597,6 +372,15 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
         }
         if request.received()? >= call.emitted {
             return Err("review effect before request receipt".into());
+        }
+        let loan = one(frames.values().filter(|f| {
+            f.direction(2, service)
+                && carries_control(f)
+                && previous_review < f.sent
+                && f.sent < request.sent
+        }))?;
+        if loan.received()? >= request.received()? || !used_control_transfers.insert(loan.sent) {
+            return Err("review without its unique control continuation".into());
         }
         close_arguments(
             &frames,
@@ -619,7 +403,35 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
             .unwrap_or(rows.len());
         let (result_at, result) = call.result()?;
         previous_review = result_at;
-        for target in [0, 1, 2, if service == 5 { 6 } else { 5 }, 7] {
+        let other_approved = review_calls.iter().any(|prior| {
+            prior.target().ok() != call.target().ok()
+                && prior
+                    .result()
+                    .is_ok_and(|(at, result)| at < call.emitted && result["success"] == true)
+        });
+        let recipients = if other_approved {
+            vec![author, 2, 7]
+        } else {
+            vec![0, 1, 2, if service == 5 { 6 } else { 5 }, 7]
+        };
+        let returned = one(frames.values().filter(|f| {
+            f.direction(service, 2) && carries_control(f) && result_at < f.sent && f.sent < next
+        }))?;
+        let control_received = returned.received()?;
+        if returned.logical_label
+            != if other_approved && result["success"] == true {
+                235
+            } else {
+                11
+            }
+            || !used_control_transfers.insert(returned.sent)
+            || frames.values().any(|f| {
+                f.identity["source"] == 11 && loan.sent < f.sent && f.sent < control_received
+            })
+        {
+            return Err("review control return or use during its loan".into());
+        }
+        for target in recipients {
             let reply = one(frames.values().filter(|f| {
                 f.direction(service, target)
                     && f.sent > result_at
@@ -633,7 +445,7 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
                 (6, Some(false)) => 41,
                 _ => return Err("review result has no boolean success".into()),
             };
-            if reply.logical_label != label {
+            if reply.logical_label != label || reply.sent >= returned.sent {
                 return Err("compiled review reply differs from actual result".into());
             }
             if !used_review_results.insert(reply.sent) {
@@ -646,7 +458,7 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
         || frames
             .values()
             .filter(|f| {
-                f.identity["source"] == 2
+                (f.identity["source"] == 11 || f.identity["source"] == 2)
                     && matches!(f.identity["target"].as_u64(), Some(0 | 1 | 5 | 6 | 7))
                     && f.bytes.first() == Some(&b'{')
             })
@@ -655,10 +467,26 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
         || frames
             .values()
             .filter(|f| f.identity["source"] == 5 || f.identity["source"] == 6)
+            .filter(|f| f.bytes.first() == Some(&b'{'))
             .count()
-            != reviews * 5
+            != used_review_results.len()
     {
         return Err("missing or extra review result".into());
+    }
+    if frames.values().filter(carries_control).count() != 4 + 2 * reviews
+        || used_control_transfers.len() != 2 * reviews
+    {
+        return Err("extra or missing control continuation transfer".into());
+    }
+    for (vm, closing) in [(0, closing_a), (1, closing_b)] {
+        let last_return = frames
+            .values()
+            .filter(|f| f.direction(vm, 7) && is_loan(f))
+            .max_by_key(|f| f.sent)
+            .ok_or("closing without a repository return")?;
+        if last_return.sent >= closing.received()? {
+            return Err("closing continuation before the participant's repository return".into());
+        }
     }
     let effects: Vec<_> = calls.values().collect();
     let mut overlap = BTreeMap::<String, usize>::new();
@@ -684,8 +512,9 @@ fn check(rows: &[Value], projection: &Value) -> Result<Value> {
     Ok(
         json!({"status":"passed","task":"6E","kind":"completed_actual_wasi_review_trace","scored_benchmark":false,
         "depth":fixture["depth"],"carrier_frames":frames.len(),"domain_calls":calls.len(),"actual_resource_endpoint_requests":loans.len(),
-        "actual_resource_endpoint_returns":returns,"actual_review_requests":reviews,"guest_exits":exits.len(),"simulator_complete":true,
-        "violations":0,"overlapping_effect_pairs":overlap,"review_targets":targets}),
+        "actual_resource_endpoint_returns":returns,"actual_review_requests":reviews,"guest_exits":actors.len(),"simulator_complete":true,
+        "violations":0,"overlapping_effect_pairs":overlap,"review_targets":targets,
+        "control_continuation_transfers":4+2*reviews}),
     )
 }
 pub fn audit(path: &Path) -> Result<Value> {
@@ -807,6 +636,9 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let projection = crate::projection::load(path)?;
     let mut verdicts = Vec::new();
     let mut kinds = vec![
+        "missing_control_loan",
+        "missing_control_return",
+        "missing_control_close",
         "missing_loan",
         "wrong_resource",
         "wrong_frame_label",
@@ -850,6 +682,15 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
             let source = m["source"].as_u64();
             let target = m["target"].as_u64();
             match kind {
+                "missing_control_loan" => {
+                    source == Some(2) && matches!(target, Some(5 | 6)) && m["payload"][0] == 11
+                }
+                "missing_control_return" => {
+                    matches!(source, Some(5 | 6)) && target == Some(2) && m["payload"][0] == 11
+                }
+                "missing_control_close" => {
+                    source == Some(1) && target == Some(7) && m["payload"][0] == 11
+                }
                 "missing_loan" | "wrong_resource" | "overlapping_loans" => {
                     source == Some(7) && matches!(target, Some(0 | 1))
                 }
@@ -868,16 +709,24 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         };
         match kind {
             "wrong_review_message" => {
-                let (request, _, _) = review_occurrence_frames(&changed, false)?;
                 let message = &changed
                     .iter()
                     .find(|row| {
-                        row["message"]["type"] == "protocol_frame"
-                            && row["message"]["frame_id"] == request
+                        let message = &row["message"];
+                        message["type"] == "protocol_frame"
+                            && message["action"] == "send"
+                            && message["source"] == 11
+                            && matches!(message["target"].as_u64(), Some(5 | 6))
                     })
-                    .ok_or("review request to mutate")?["message"];
-                let source = message["source"].as_u64().ok_or("review source")?;
-                let target = message["target"].as_u64().ok_or("review target")?;
+                    .ok_or("review intent to mutate")?["message"];
+                let frame_id = message["frame_id"].clone();
+                let source = message["source"].as_u64().ok_or("intent source")?;
+                let target = message["target"].as_u64().ok_or("intent target")?;
+                let wire =
+                    u16::try_from(message["frame_label"].as_u64().ok_or("intent wire label")?)?;
+                let headers = crate::projection::contracts(&projection["compiled"])?;
+                let original_label =
+                    u64::from(headers.get(&wire).ok_or("original intent header")?[3]);
                 let replacement = projection["compiled"]["programs"]
                     .as_array()
                     .ok_or("projection programs")?
@@ -885,23 +734,24 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                     .flat_map(|program| program["rows"].as_array().into_iter().flatten())
                     .filter(|row| row[1] == 0x0301)
                     .find(|row| {
-                        let peers = row[4].as_u64().unwrap_or(0);
-                        let packed = row[3].as_u64().unwrap_or(0);
+                        let peers = row[4].as_u64().expect("validated compiled peers");
+                        let packed = row[3].as_u64().expect("validated compiled fields");
                         peers >> 24 == source
                             && (peers >> 16) & 0xff == target
                             && matches!(packed & 0xff, 80..=89 | 92..=95)
+                            && packed & 0xff != original_label
                     })
-                    .ok_or("compiled intent sharing the review request's peers")?;
-                let packed = replacement[3].as_u64().ok_or("compiled intent fields")?;
+                    .ok_or("another compiled intent with the same peers")?;
+                let packed = replacement[3].as_u64().ok_or("replacement intent fields")?;
                 for row in changed.iter_mut().filter(|row| {
                     row["message"]["type"] == "protocol_frame"
-                        && row["message"]["frame_id"] == request
+                        && row["message"]["frame_id"] == frame_id
                 }) {
                     row["message"]["frame_label"] = json!(packed >> 16);
                     row["message"]["lane"] = json!((packed >> 8) & 0xff);
                 }
-                // The replacement is a real static wire contract with matching
-                // peers and payload. Business-message checks must still reject it.
+                // Both headers are real static contracts; the mixed intent must
+                // still be rejected by its business-message correspondence.
                 crate::projection::frames(&projection, &changed)?;
             }
             "wrong_frame_label" | "wrong_lane" => {

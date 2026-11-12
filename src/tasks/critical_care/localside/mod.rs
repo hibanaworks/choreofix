@@ -1,0 +1,10 @@
+pub mod anesthesiologist;
+pub mod care;
+pub mod er_doctor_a;
+pub mod er_doctor_b;
+pub mod icu_coordinator;
+pub mod imaging;
+pub mod patients;
+pub mod pharmacist;
+pub mod radiologist;
+pub mod surgeon;

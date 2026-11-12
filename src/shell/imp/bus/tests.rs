@@ -1,5 +1,82 @@
 use super::*;
 
+#[cfg(miri)]
+#[path = "../../../tasks/handoff/tests/clock.rs"]
+mod clock;
+
+#[test]
+fn an_unpolled_effect_creates_no_rpc_or_correlation() {
+    let (bus, _, _) = Bus::open([], []);
+    drop(bus.execute("A", "inspect", json!({"target":7})));
+    assert!(bus.connection(|c| c.outgoing.is_empty() && c.responses.is_empty() && c.sequence == 0));
+}
+
+#[cfg_attr(not(miri), hibana_runtime::main)]
+#[cfg_attr(miri, hibana_runtime::main(clock::Clock))]
+#[test]
+async fn losing_a_borrowed_effect_race_preserves_the_original_rpc() -> ShellResult<()> {
+    let (bus, _, _) = Bus::open([], []);
+    let mut effect = bus.execute("A", "inspect", json!({"target":7}));
+    let result = hibana_runtime::race(
+        async { (&mut effect).await.map(Some).map_err(ShellError::message) },
+        async { Ok(None) },
+    )
+    .await?;
+    assert!(result.is_none());
+    let requests = bus.connection(|c| c.outgoing.drain(..).collect::<Vec<_>>());
+    assert_eq!(requests.len(), 1);
+    let id = requests[0].0.last().unwrap()["id"].as_u64().unwrap();
+    bus.respond(id, json!({"actual":"original result"}))?;
+    assert_eq!(
+        effect.await.map_err(ShellError::message)?,
+        json!({"actual":"original result"})
+    );
+    assert!(bus.connection(|c| c.responses.is_empty() && c.sequence == 1));
+    Ok(())
+}
+
+#[cfg_attr(not(miri), hibana_runtime::main)]
+#[cfg_attr(miri, hibana_runtime::main(clock::Clock))]
+#[test]
+async fn native_world_peer_uses_the_actual_rpc_queue_and_receipts() -> ShellResult<()> {
+    struct Echo;
+    impl Domain for Echo {
+        async fn execute(
+            &self,
+            agent: &'static str,
+            tool: &'static str,
+            arguments: Value,
+        ) -> Result<Value, String> {
+            Ok(json!({"agent":agent,"tool":tool,"arguments":arguments}))
+        }
+    }
+    let (bus, _, _) = Bus::open(["A", "B"], []);
+    async {
+        let value = bus
+            .execute("A", "inspect", json!({"input":1}))
+            .await
+            .map_err(ShellError::message)?;
+        assert_eq!(
+            value,
+            json!({"agent":"A","tool":"inspect","arguments":{"input":1}})
+        );
+    };
+    async {
+        let value = bus
+            .execute("B", "inspect", json!({"input":2}))
+            .await
+            .map_err(ShellError::message)?;
+        assert_eq!(
+            value,
+            json!({"agent":"B","tool":"inspect","arguments":{"input":2}})
+        );
+    };
+    async {
+        bus.fixture_peer::<2>(&Echo, &["inspect"]).await?;
+    };
+    Ok(())
+}
+
 #[hibana_runtime::main]
 #[test]
 async fn cancelled_emit_still_flushes_capture_checkpoint_and_final_receipt() -> ShellResult<()> {

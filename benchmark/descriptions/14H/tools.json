@@ -1,0 +1,178 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "run_hplc_analysis",
+      "description": "Run an HPLC analysis on a sample. Can fail.",
+      "agent_ids": [
+        "CHEMIST",
+        "BIOLOGIST",
+        "TOXICOLOGIST",
+        "REGULATORY_SPECIALIST"
+      ],
+      "can_fail": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sample": {
+            "type": "string",
+            "description": "What to analyze"
+          }
+        },
+        "required": [
+          "sample"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "run_mass_spec_analysis",
+      "description": "Run a mass spectrometry analysis on a sample.",
+      "agent_ids": [
+        "CHEMIST",
+        "TOXICOLOGIST",
+        "CLINICAL_LEAD",
+        "REGULATORY_SPECIALIST"
+      ],
+      "can_fail": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sample": {
+            "type": "string",
+            "description": "What to analyze"
+          }
+        },
+        "required": [
+          "sample"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "run_cell_assay",
+      "description": "Run culture_prep, bioassay or cytotoxicity. A valid bioassay/cytotoxicity attempt consumes one of three total samples even if it fails; culture preparation consumes none. Exhausted stock returns a negative outcome without a refill.",
+      "agent_ids": [
+        "BIOLOGIST",
+        "TOXICOLOGIST"
+      ],
+      "can_fail": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "assay_type": {
+            "type": "string",
+            "description": "Type of assay (e.g., 'culture_prep', 'bioassay', 'cytotoxicity')"
+          }
+        },
+        "required": [
+          "assay_type"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "prepare_formulation",
+      "description": "Prepare the actual named compound from the molecular identity result. Returns a formulation bound to that material; can fail without consuming a biological sample.",
+      "agent_ids": [
+        "FORMULATION_SCIENTIST"
+      ],
+      "can_fail": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "compound": {
+            "type": "string",
+            "description": "Compound to formulate"
+          }
+        },
+        "required": [
+          "compound"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "verify_regulatory_compliance",
+      "description": "Review actual current clinical data. A clinical hold on unchanged evidence requires hold_review, which uses HPLC and MASS_SPEC together. Replacing the scientific evidence invalidates the old regulatory decision.",
+      "agent_ids": [
+        "REGULATORY_SPECIALIST"
+      ],
+      "can_fail": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "review_type": {
+            "type": "string",
+            "description": "Type of review (e.g., 'initial_review', 'hold_review')",
+            "enum": [
+              "initial_review",
+              "hold_review"
+            ]
+          }
+        },
+        "required": [
+          "review_type"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "review_clinical_data",
+      "description": "Assess actual completed bio/tox attempts and current formulation. Reports supported or insufficient_data; failed/exhausted assays cannot support continuation.",
+      "agent_ids": [
+        "CLINICAL_LEAD"
+      ],
+      "can_fail": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "data_type": {
+            "type": "string",
+            "description": "Type of review (e.g., 'combined_review')"
+          }
+        },
+        "required": [
+          "data_type"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "submit_project_decision",
+      "description": "Record the director actual continue, retry or abort outcome against the current clinical and regulatory results. Continue needs positive approval; retry never replenishes samples. Final documentation needs a terminal outcome.",
+      "agent_ids": [
+        "PROJECT_DIRECTOR"
+      ],
+      "can_fail": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "continue",
+              "retry",
+              "abort"
+            ]
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      }
+    }
+  }
+]

@@ -109,7 +109,7 @@ async fn real_wasi_outcome_metadata_preserves_all_original_results() -> Result<(
         let (guest, runtime_loop) = process::guest(
             &output.join("runtime").canonicalize()?,
             &output.join("wash.wasm").canonicalize()?,
-            "8E",
+            &["8E"],
             &output,
             trace.clone(),
             simulator.clone(),
