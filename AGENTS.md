@@ -40,6 +40,14 @@ safety of Hibana, hibana-runtime and hibana-wasip1-runtime is checked in those
 libraries. A library memory defect exposed by an application needs a focused
 regression in the owning library, not per-task Miri jobs in ChoreoFix.
 
+Offline task audits must not replay a second choreography, current-holder table,
+or transfer-in-flight state machine. EPF checks source execution. Use its checked
+receive occurrences with the shared transport/effect journal for independent
+request-argument, effect, reply and simulator-score correspondence. A transport
+preview is not a committed request. Missing capture or receive evidence is not
+permission to fall back to the former auditor, and a valid finite source prefix
+alone does not establish a complete application effect.
+
 Use native actual-Endpoint tests, actual Wasm/ChoreoFS execution, EPF dynamic
 source checks and independent effect/scorer audits for application obligations.
 Do not add Miri toolchain installation, application Miri commands or interpreter

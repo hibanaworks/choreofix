@@ -1,4 +1,4 @@
-//! Offline reconstruction of section ownership, requests and original outcomes.
+//! EPF source conformance and independent section-effect/result correspondence.
 use crate::evidence::Result;
 use serde_json::{Value, json};
 use std::{
@@ -6,11 +6,6 @@ use std::{
     fs,
     path::Path,
 };
-struct Frame {
-    identity: Value,
-    queued: bool,
-    receives: usize,
-}
 fn bytes(message: &Value) -> Result<Vec<u8>> {
     message["payload"]
         .as_array()
@@ -47,13 +42,12 @@ pub fn audit(path: &Path) -> Result<Value> {
             .join("projection.json"),
     )?);
     result["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
-    result["wire_validation"] =
-        json!("static compiled header membership; dynamic eligibility is not replayed");
     Ok(result)
 }
 
 fn check(records: &[Value], projection: &Value) -> Result<Value> {
-    crate::projection::frames(projection, records)?;
+    let labels = crate::projection::frames(projection, records)?;
+    let dynamic = crate::projection::check_dynamic(projection, records)?;
     if projection["compiled"]["task"] != records.first().ok_or("empty evidence")?["message"]["task"]
     {
         return Err("compiled projection belongs to a different task".into());
@@ -98,14 +92,9 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
         .enumerate()
         .map(|(i, &n)| (n, (7 + i as u64, 28 + i as u64)))
         .collect();
-    let mut held: BTreeMap<_, _> = sections.values().map(|&(o, r)| (r, Some(o))).collect();
-    let mut flight = BTreeMap::<u64, u64>::new();
-    let mut frames = BTreeMap::<u64, Frame>::new();
     let mut closes = BTreeSet::new();
     let mut admissions = BTreeMap::<u64, Value>::new();
     let mut requests = BTreeMap::<u64, Vec<(u64, Value)>>::new();
-    let mut returned = BTreeSet::new();
-    let mut replies = BTreeSet::new();
     let mut loan_counts = BTreeMap::<u64, usize>::new();
     let mut return_counts = BTreeMap::<u64, usize>::new();
     let mut calls = BTreeMap::<&str, usize>::new();
@@ -114,57 +103,44 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
     let mut delivered = BTreeMap::<(u64, String), Vec<Value>>::new();
     let mut active = BTreeMap::<u64, BTreeSet<String>>::new();
     let mut maximum_writes = 0;
-    let mut exits = BTreeSet::new();
-    let mut verdict = false;
-    let mut score = None;
-    for row in records {
+    let journal = crate::journal::read(records, &labels, actors)?;
+    let receipts = journal.receipts(&dynamic)?;
+    let mut frame_rows = BTreeMap::<usize, Vec<(u32, &crate::journal::Frame, bool)>>::new();
+    for (&id, frame) in &journal.frames {
+        frame_rows
+            .entry(frame.sent)
+            .or_default()
+            .push((0, frame, false));
+        let committed = usize::try_from(
+            receipts[&id]["receive_commit"]["journal_row"]
+                .as_u64()
+                .ok_or("receive commit observation")?,
+        )?;
+        let ordinal = u32::try_from(
+            receipts[&id]["receive_commit"]["ordinal"]
+                .as_u64()
+                .ok_or("receive commit ordinal")?,
+        )?;
+        frame_rows
+            .entry(committed)
+            .or_default()
+            .push((ordinal, frame, true));
+    }
+    // One capture row can contain several commits. Preserve producer order,
+    // rather than ordering them by the transport's unrelated frame IDs.
+    for observed in frame_rows.values_mut() {
+        observed.sort_by_key(|&(ordinal, _, _)| ordinal);
+    }
+    for (index, row) in records.iter().enumerate() {
         let m = &row["message"];
-        match (row["direction"].as_str(), m["type"].as_str()) {
-            (Some("runtime"), Some("protocol_frame")) => {
-                if m["session"] != 18 {
+        if let Some(observed) = frame_rows.get(&index) {
+            for &(_, frame, received) in observed {
+                if frame.identity["session"] != 18 {
                     return Err("wrong session".into());
                 }
-                let id = m["frame_id"].as_u64().ok_or("frame ID")?;
-                let from = m["source"].as_u64().ok_or("source")?;
-                let to = m["target"].as_u64().ok_or("target")?;
-                let data = bytes(m)?;
-                let mut identity = m.clone();
-                identity.as_object_mut().ok_or("frame")?.remove("action");
-                let first = match m["action"].as_str() {
-                    Some("send") => {
-                        if frames
-                            .insert(
-                                id,
-                                Frame {
-                                    identity: identity.clone(),
-                                    queued: true,
-                                    receives: 0,
-                                },
-                            )
-                            .is_some()
-                        {
-                            return Err("duplicate send".into());
-                        }
-                        false
-                    }
-                    Some("receive" | "requeue") => {
-                        let frame = frames.get_mut(&id).ok_or("frame without send")?;
-                        if frame.identity != identity {
-                            return Err("altered frame identity".into());
-                        }
-                        if m["action"] == "receive" && frame.queued {
-                            frame.queued = false;
-                            frame.receives += 1;
-                            frame.receives == 1
-                        } else if m["action"] == "requeue" && !frame.queued && frame.receives > 0 {
-                            frame.queued = true;
-                            false
-                        } else {
-                            return Err("invalid carrier transition".into());
-                        }
-                    }
-                    _ => return Err("unknown carrier action".into()),
-                };
+                let from = frame.identity["source"].as_u64().ok_or("source")?;
+                let to = frame.identity["target"].as_u64().ok_or("target")?;
+                let data = &frame.bytes;
                 let owner = sections
                     .values()
                     .find(|&&(owner, _)| from == owner || to == owner)
@@ -185,37 +161,22 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                     }) {
                         return Err("loan to unassigned writer".into());
                     }
-                    if m["action"] == "send" {
-                        if held.insert(resource, None) != Some(Some(from))
-                            || flight.insert(resource, id).is_some()
-                        {
-                            return Err("duplicated or unheld resource".into());
-                        }
+                    if !received {
                         if to == owner {
-                            if !replies.remove(&(resource, vm - 14))
-                                || !returned.insert((vm, resource))
-                            {
-                                return Err("return before original write result".into());
-                            }
                             *return_counts.entry(resource).or_default() += 1;
                         } else {
-                            returned.remove(&(vm, resource));
                             *loan_counts.entry(resource).or_default() += 1;
                         }
-                    } else if first
-                        && (flight.remove(&resource) != Some(id)
-                            || held.insert(resource, Some(to)) != Some(None))
-                    {
-                        return Err("receipt without transfer".into());
                     }
                 }
-                if first && to < actors.len() as u64 && from == to + 14 && data == [4] {
+                if received && to < actors.len() as u64 && from == to + 14 && data.as_slice() == [4]
+                {
                     closes.insert(to);
                 }
-                if first
+                if received
                     && from < actors.len() as u64
                     && to == from + 14
-                    && let Ok(value) = serde_json::from_slice::<Value>(&data)
+                    && let Ok(value) = serde_json::from_slice::<Value>(data)
                 {
                     if let Some(tool) = value["tool_name"].as_str() {
                         delivered
@@ -228,23 +189,23 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                         return Err("duplicate admitted write".into());
                     }
                 }
-                if first && to < actors.len() as u64 && held.contains_key(&from) {
-                    let arguments: Value = serde_json::from_slice(&data)?;
-                    if held[&from] != Some(to + 14) || admissions.get(&to) != Some(&arguments) {
-                        return Err(
-                            "section request without held Endpoint and actual admitted arguments"
-                                .into(),
-                        );
+                if received
+                    && to < actors.len() as u64
+                    && sections.values().any(|&(_, resource)| resource == from)
+                {
+                    let arguments: Value = serde_json::from_slice(data)?;
+                    if admissions.get(&to) != Some(&arguments) {
+                        return Err("section request differs from actual admitted arguments".into());
                     }
                     requests.entry(to).or_default().push((from, arguments));
                 }
-                if first && from < actors.len() as u64 && held.contains_key(&to) {
-                    let result: Value = serde_json::from_slice(&data)?;
-                    if held[&to] != Some(from + 14)
-                        || result["tool_name"] != "write_to_document"
-                        || !replies.insert((to, from))
-                    {
-                        return Err("section result without its holder".into());
+                if received
+                    && from < actors.len() as u64
+                    && sections.values().any(|&(_, resource)| resource == to)
+                {
+                    let result: Value = serde_json::from_slice(data)?;
+                    if result["tool_name"] != "write_to_document" {
+                        return Err("unexpected section result tool".into());
                     }
                     delivered
                         .entry((from, "write_to_document".into()))
@@ -252,6 +213,8 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                         .push(result);
                 }
             }
+        }
+        match (row["direction"].as_str(), m["type"].as_str()) {
             (Some("runtime"), Some("execute")) => {
                 let agent = m["agent"].as_str().ok_or("effect agent")?;
                 let &(role, actor) = assignments.get(agent).ok_or("unknown agent")?;
@@ -299,11 +262,12 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                         .ok_or("write without resource requests")?;
                     if seen.len() != 2
                         || seen.iter().map(|&(r, _)| r).collect::<BTreeSet<_>>() != required
-                        || seen
-                            .iter()
-                            .any(|(r, args)| held[r] != Some(role + 14) || args != &m["arguments"])
+                        || seen.iter().any(|(_, args)| args != &m["arguments"])
                     {
-                        return Err("write lacks both actual requests and unique Endpoints".into());
+                        return Err(
+                            "write lacks both actual section requests with matching arguments"
+                                .into(),
+                        );
                     }
                     let names = actor["sections"]
                         .as_array()
@@ -316,15 +280,6 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                     }
                     active.insert(m["id"].as_u64().ok_or("effect ID")?, names);
                     maximum_writes = maximum_writes.max(active.len());
-                }
-                if tool == "review_own_work"
-                    && actor["sections"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .any(|n| !returned.contains(&(role + 14, sections[n.as_str().unwrap()].1)))
-                {
-                    return Err("review before section return".into());
                 }
                 *count += 1;
                 if outstanding
@@ -349,25 +304,10 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 }
                 active.remove(&id);
             }
-            (Some("runtime"), Some("exit")) => {
-                let agent = m["agent"].as_str().ok_or("exit")?;
-                if !assignments.contains_key(agent) || m["status"] != 0 || !exits.insert(agent) {
-                    return Err("bad guest exit".into());
-                }
-            }
-            (Some("runtime"), Some("run_result")) => {
-                if verdict || m["status"] != "complete" {
-                    return Err("bad verdict".into());
-                }
-                verdict = true;
-            }
-            (Some("simulator"), Some("score")) if score.replace(m).is_some() => {
-                return Err("duplicate score".into());
-            }
             _ => {}
         }
     }
-    let score = score.ok_or("missing score")?;
+    let score = &journal.score;
     for (&agent, &(role, actor)) in &assignments {
         if calls.get(agent) != Some(&4) || actor["calls"].as_array().ok_or("calls")?.len() != 4 {
             return Err("incomplete original work".into());
@@ -422,20 +362,13 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
             }
         }
     }
-    if !verdict
-        || exits.len() != actors.len()
-        || !outstanding.is_empty()
+    if !outstanding.is_empty()
         || !requests.is_empty()
         || !delivered.is_empty()
-        || !flight.is_empty()
-        || !replies.is_empty()
         || !active.is_empty()
-        || frames.values().any(|f| f.queued || f.receives == 0)
-        || sections.values().any(|&(o, r)| {
-            held[&r] != Some(o)
-                || loan_counts.get(&r) != Some(&2)
-                || return_counts.get(&r) != Some(&2)
-        })
+        || sections
+            .values()
+            .any(|&(_, r)| loan_counts.get(&r) != Some(&2) || return_counts.get(&r) != Some(&2))
         || score["complete"] != !terminal
         || score["violations"] != json!([])
         || score["events"].as_array().ok_or("events")?.len() != 4 * actors.len()
@@ -447,7 +380,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
     Ok(
         json!({"task":fixture["task"],"depth":fixture["depth"],"kind":"actual_wasi_section_delegation","status":"passed","scored_benchmark":false,"model_calls":null,
         "participants":actors.len(),"domain_calls":4*actors.len(),"actual_resource_endpoint_requests":2*actors.len(),"actual_resource_endpoint_returns":2*actors.len(),
-        "carrier_frames":frames.len(),"max_disjoint_writes":maximum_writes,"simulator_complete":score["complete"],"violations":0,"guest_exits":exits.len(),"expected_terminal_review_failure":terminal}),
+        "carrier_frames":journal.frames.len(),"max_disjoint_writes":maximum_writes,"simulator_complete":score["complete"],"violations":0,"guest_exits":actors.len(),"expected_terminal_review_failure":terminal,"dynamic_protocol":dynamic}),
     )
 }
 

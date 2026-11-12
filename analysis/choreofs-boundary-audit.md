@@ -342,3 +342,31 @@ passed on unchanged source: 91 native tests, 8 example tests, 89 Miri library
 tests and 8 Miri example tests; Lean, Pico 2 link and packaging also passed.
 The new reproducer fails, so those earlier successes are not a claim that the
 current library or the six application conditions are fully qualified.
+
+
+## Remove duplicate offline protocol reconstruction
+
+The codebase and writing effect checks no longer maintain current-holder or
+transfer-in-flight tables, or their own transport frame transition machines.
+They require EPF's checked source execution and complete committed receives.
+Their task-specific work is data/effect/result/scorer correspondence and actual
+physical effect overlap. The shared journal now binds the EPF receive receipts
+for these checks and dining, with one-use and frame/run/view/source agreement.
+It does not infer protocol order from when the transport owner flushes a log.
+Source-capture commits within one journal row retain their producer ordinal.
+
+The fixed runner source passed 53 native tests (98 integration/model tests
+remain ignored), all-target Clippy and its normal build. A new real-EPF unit
+case distinguishes complete receive evidence from a valid send-only prefix,
+and covers capture arrival before the transport journal. The same saved normal
+9E/9M/9H Wasm traces passed the revised check. All 19 dining record mutations
+were rejected; the five value/effect mutations retained EPF-valid execution.
+This is re-audit of existing executions, not new Wasm, model or scored runs.
+Checks, source hashes, raw-input hashes, the audit executable and mutation
+verdicts are retained in `output/experiments/epf-audit-cleanup-v1/`.
+
+Codebase and writing still need their new ChoreoFS/Endpoint boundary ports and
+actual Wasm/model qualification. Static-only historical captures do not qualify
+these revised checks, and there is no fallback to their deleted reconstruction.
+The early dining request's serial-guest self-wait remains unresolved; this
+cleanup does not certify the full six-condition dining boundary or all tasks.

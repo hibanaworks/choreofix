@@ -153,26 +153,14 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
         return Err("dining participant identities".into());
     }
     let journal = journal::read(records, &labels, actors)?;
-    let mut receipts = BTreeMap::new();
-    for session in dynamic["sessions"].as_array().ok_or("EPF sessions")? {
-        if session["session"] != crate::philosopher_identity::SESSION {
-            return Err("different dining session".into());
-        }
-        for acceptance in session["acceptances"].as_array().ok_or("EPF acceptances")? {
-            let id = acceptance["frame_id"].as_u64().ok_or("accepted frame")?;
-            let received = &acceptance["receive_commit"];
-            let frame = journal.frames.get(&id).ok_or("missing accepted frame")?;
-            if received["source_event"] != frame.identity["frame_label"]
-                || received["view"] != frame.identity["target"]
-                || acceptance["send_view"] != frame.identity["source"]
-                || receipts.insert(id, acceptance).is_some()
-            {
-                return Err("missing or reused committed receive occurrence".into());
-            }
-        }
-    }
-    if receipts.len() != journal.frames.len() {
-        return Err("frame without a checked committed receive".into());
+    let receipts = journal.receipts(&dynamic)?;
+    if dynamic["sessions"]
+        .as_array()
+        .ok_or("EPF sessions")?
+        .iter()
+        .any(|session| session["session"] != crate::philosopher_identity::SESSION)
+    {
+        return Err("different dining session".into());
     }
     let committed = |id: u64| -> Result<usize> {
         usize::try_from(

@@ -234,6 +234,35 @@ pub(crate) struct Journal {
     pub(crate) score: Value,
 }
 
+impl Journal {
+    /// Bind complete, EPF-checked receives to physical frames. These are
+    /// immutable evidence references, not another source-execution replay.
+    /// Transport observations can be queued after the commit capture; their
+    /// journal arrival order is not the protocol's causal order.
+    pub(crate) fn receipts<'a>(&self, dynamic: &'a Value) -> Result<BTreeMap<u64, &'a Value>> {
+        let mut receipts = BTreeMap::new();
+        for session in dynamic["sessions"].as_array().ok_or("EPF sessions")? {
+            for acceptance in session["acceptances"].as_array().ok_or("EPF acceptances")? {
+                let id = acceptance["frame_id"].as_u64().ok_or("accepted frame")?;
+                let received = &acceptance["receive_commit"];
+                let frame = self.frames.get(&id).ok_or("missing accepted frame")?;
+                if session["session"] != frame.identity["session"]
+                    || received["source_event"] != frame.identity["frame_label"]
+                    || received["view"] != frame.identity["target"]
+                    || acceptance["send_view"] != frame.identity["source"]
+                    || receipts.insert(id, acceptance).is_some()
+                {
+                    return Err("missing or reused committed receive occurrence".into());
+                }
+            }
+        }
+        if receipts.len() != self.frames.len() {
+            return Err("frame without a checked committed receive".into());
+        }
+        Ok(receipts)
+    }
+}
+
 pub(crate) fn read(
     rows: &[Value],
     labels: &BTreeMap<u64, u8>,
@@ -412,6 +441,105 @@ pub(crate) fn read(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn complete_effect_evidence_requires_the_epf_receive_commit_not_a_transport_preview()
+    -> Result<()> {
+        use hibana::{
+            g,
+            runtime::{program::project, tap},
+        };
+        let global = g::send::<7, 8, g::Msg<1, ()>>();
+        let programs = [
+            tap::projected(&project::<7>(&global)).collect::<Vec<_>>(),
+            tap::projected(&project::<8>(&global)).collect::<Vec<_>>(),
+        ];
+        let compiled: Vec<_> = programs
+            .iter()
+            .zip([7, 8])
+            .map(|(program, role)| {
+                let rows: Vec<_> = program
+                    .iter()
+                    .map(|r| {
+                        [
+                            r.ts(),
+                            u32::from(r.id()),
+                            u32::from(r.causal_key()),
+                            r.arg0(),
+                            r.arg1(),
+                        ]
+                    })
+                    .collect();
+                json!({"role":role,"rows":rows})
+            })
+            .collect();
+        let lane = compiled[0]["rows"][2][3].as_u64().ok_or("source lane")? >> 8 & 255;
+        let artifact = json!({"compiled":{"type":"compiled_projection","format_version":1,
+            "task":"1E","programs":compiled}});
+        let frame = json!({"type":"protocol_frame","action":"send","session":1,
+            "frame_id":19,"frame_label":0,"lane":lane,"source":7,"target":8,"payload":[]});
+        let mut received = frame.clone();
+        received["action"] = json!("receive");
+        let mut rows = vec![
+            json!({"direction":"runtime","message":artifact["compiled"]}),
+            json!({"direction":"runtime","message":{"type":"protocol_capture","producer":42,
+                "records":[[0,tap::SEND_POLL,7u16<<8|7,1,0xffff0000u32]]}}),
+            json!({"direction":"runtime","message":frame}),
+            json!({"direction":"runtime","message":{"type":"protocol_capture","producer":42,
+                "records":[[1,tap::ENDPOINT_SEND,7u16<<8|1,1,7u64<<24|lane<<16]]}}),
+            json!({"direction":"runtime","message":received}),
+            json!({"direction":"runtime","message":{"type":"protocol_capture","producer":42,
+                "records":[[2,tap::ENDPOINT_RECV,8u16<<8|2,1,8u64<<24|lane<<16]]}}),
+            json!({"direction":"runtime","message":{"type":"protocol_checkpoint","producer":42,"session":1,"checkpoint":3}}),
+            json!({"direction":"runtime","message":{"type":"exit","agent":"A","status":0}}),
+            json!({"direction":"runtime","message":{"type":"exit","agent":"B","status":0}}),
+            json!({"direction":"runtime","message":{"type":"run_result","status":"complete"}}),
+            json!({"direction":"simulator","message":{"type":"score","complete":true,"events":[],"violations":[]}}),
+        ];
+        let labels = crate::projection::frames(&artifact, &rows)?;
+        let actors = [json!({"agent":"A"}), json!({"agent":"B"})];
+        let journal = read(&rows, &labels, &actors)?;
+        let checked = crate::projection::check_dynamic(&artifact, &rows)?;
+        let receipts = journal.receipts(&checked)?;
+        assert_eq!(receipts[&19]["receive_commit"]["journal_row"], 5);
+        assert_eq!(journal.frames[&19].received, Some(4));
+        let mut duplicate = checked.clone();
+        duplicate["sessions"][0]["acceptances"]
+            .as_array_mut()
+            .unwrap()
+            .push(receipts[&19].clone());
+        assert!(journal.receipts(&duplicate).is_err());
+        for (field, value) in [("source_event", 1), ("view", 7)] {
+            let mut altered = checked.clone();
+            altered["sessions"][0]["acceptances"][0]["receive_commit"][field] = json!(value);
+            assert!(journal.receipts(&altered).is_err(), "accepted {field}");
+        }
+        // The transport owner can flush its observations after the capture
+        // owner has already recorded a successful receive commit.
+        let mut late = rows.clone();
+        let transport: Vec<_> = late
+            .iter()
+            .filter(|row| row["message"]["type"] == "protocol_frame")
+            .cloned()
+            .collect();
+        late.retain(|row| row["message"]["type"] != "protocol_frame");
+        late.splice(4..4, transport);
+        let checked_late = crate::projection::check_dynamic(&artifact, &late)?;
+        let journal_late = read(&late, &labels, &actors)?;
+        assert!(journal_late.frames[&19].sent > 3);
+        assert_eq!(
+            journal_late.receipts(&checked_late)?[&19]["receive_commit"]["journal_row"],
+            3
+        );
+        // EPF correctly permits a finite source prefix with an accepted send.
+        // Complete application effect evidence must additionally have its receive.
+        rows.remove(5);
+        rows[5]["message"]["checkpoint"] = json!(2);
+        let prefix = crate::projection::check_dynamic(&artifact, &rows)?;
+        assert_eq!(prefix["status"], "passed");
+        assert!(read(&rows, &labels, &actors)?.receipts(&prefix).is_err());
+        Ok(())
+    }
 
     #[test]
     fn actual_effect_lifecycle_requires_its_request_and_matching_ordered_result() {

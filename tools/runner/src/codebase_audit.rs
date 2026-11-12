@@ -1,39 +1,13 @@
-//! Offline reconstruction of endpoint transfers, requests and original effects.
+//! EPF source conformance and independent request/effect/result correspondence.
 //! These records never authorize an operation in the running experiment.
 use crate::evidence::Result;
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File},
-    io::{BufRead, BufReader, Write},
+    io::Write,
     path::Path,
 };
-
-struct Frame {
-    identity: Value,
-    queued: bool,
-    received: usize,
-}
-
-fn read(path: &Path) -> Result<Vec<Value>> {
-    BufReader::new(File::open(path)?)
-        .lines()
-        .map(|line| Ok(serde_json::from_str(&line?)?))
-        .collect()
-}
-
-fn payload(message: &Value) -> Result<Vec<u8>> {
-    message["payload"]
-        .as_array()
-        .ok_or("payload bytes")?
-        .iter()
-        .map(|v| {
-            v.as_u64()
-                .and_then(|n| u8::try_from(n).ok())
-                .ok_or_else(|| "payload byte".into())
-        })
-        .collect()
-}
 
 fn pair(arguments: &Value) -> Option<Vec<&str>> {
     let mut modules: Vec<_> = arguments["modules"]
@@ -57,7 +31,7 @@ fn original_call(assignment: &Value, count: usize, revising: bool) -> Result<&Va
 }
 
 pub fn audit(path: &Path) -> Result<Value> {
-    let records = read(path)?;
+    let records = crate::journal::records(path)?;
     let projection = crate::projection::load(path)?;
     let mut result = check(&records, &projection)?;
     result["source_events_sha256"] = json!(crate::evidence::digest(path)?);
@@ -68,13 +42,12 @@ pub fn audit(path: &Path) -> Result<Value> {
             .join("projection.json"),
     )?);
     result["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
-    result["wire_validation"] =
-        json!("static compiled header membership; dynamic eligibility is not replayed");
     Ok(result)
 }
 
 fn check(records: &[Value], projection: &Value) -> Result<Value> {
-    crate::projection::frames(projection, records)?;
+    let labels = crate::projection::frames(projection, records)?;
+    let dynamic = crate::projection::check_dynamic(projection, records)?;
     if projection["compiled"]["task"] != records.first().ok_or("empty evidence")?["message"]["task"]
     {
         return Err("compiled projection belongs to a different task".into());
@@ -121,81 +94,56 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
         .enumerate()
         .map(|(i, a)| Ok((a["agent"].as_str().ok_or("agent name")?, (i as u64, a))))
         .collect::<Result<_>>()?;
-    let mut held: BTreeMap<_, _> = rows.iter().map(|&(_, o, r)| (r, Some(o))).collect();
-    let mut in_flight = BTreeMap::new();
     let mut loans = BTreeMap::<u64, usize>::new();
     let mut returns = BTreeMap::<u64, usize>::new();
-    let mut returned = BTreeSet::new();
-    let mut frames = BTreeMap::<u64, Frame>::new();
     let mut requests = BTreeMap::<(u64, String), Vec<(u64, Value)>>::new();
     let mut delivered = BTreeMap::<(u64, String), Vec<Value>>::new();
-    let mut commit_replies = BTreeSet::new();
     let mut calls = BTreeMap::<&str, usize>::new();
     let mut outstanding = BTreeMap::<u64, Value>::new();
     let mut responses = BTreeMap::<(u64, String), Vec<(Value, Value)>>::new();
     let mut test_notifications = BTreeMap::<(u64, u64), Vec<Value>>::new();
     let mut active = BTreeMap::<u64, BTreeSet<String>>::new();
     let mut maximum_writes = 0;
-    let mut exits = BTreeSet::new();
-    let mut verdict = false;
-    let mut score = None;
-    for record in records {
+    let journal = crate::journal::read(records, &labels, actors)?;
+    let receipts = journal.receipts(&dynamic)?;
+    let mut frame_rows = BTreeMap::<usize, Vec<(u32, &crate::journal::Frame, bool)>>::new();
+    for (&id, frame) in &journal.frames {
+        frame_rows
+            .entry(frame.sent)
+            .or_default()
+            .push((0, frame, false));
+        let committed = usize::try_from(
+            receipts[&id]["receive_commit"]["journal_row"]
+                .as_u64()
+                .ok_or("receive commit observation")?,
+        )?;
+        let ordinal = u32::try_from(
+            receipts[&id]["receive_commit"]["ordinal"]
+                .as_u64()
+                .ok_or("receive commit ordinal")?,
+        )?;
+        frame_rows
+            .entry(committed)
+            .or_default()
+            .push((ordinal, frame, true));
+    }
+    // One capture row can contain several commits. Preserve producer order,
+    // rather than ordering them by the transport's unrelated frame IDs.
+    for observed in frame_rows.values_mut() {
+        observed.sort_by_key(|&(ordinal, _, _)| ordinal);
+    }
+    for (index, record) in records.iter().enumerate() {
         let message = &record["message"];
-        match (record["direction"].as_str(), message["type"].as_str()) {
-            (Some("runtime"), Some("protocol_frame")) => {
-                let id = message["frame_id"].as_u64().ok_or("frame id")?;
-                let source = message["source"].as_u64().ok_or("source")?;
-                let target = message["target"].as_u64().ok_or("target")?;
-                let bytes = payload(message)?;
-                let mut identity = message.clone();
-                identity
-                    .as_object_mut()
-                    .ok_or("frame object")?
-                    .remove("action");
-                let first_receive = match message["action"].as_str() {
-                    Some("send") => {
-                        if frames
-                            .insert(
-                                id,
-                                Frame {
-                                    identity: identity.clone(),
-                                    queued: true,
-                                    received: 0,
-                                },
-                            )
-                            .is_some()
-                        {
-                            return Err("duplicate frame send".into());
-                        }
-                        false
-                    }
-                    Some("receive" | "requeue") => {
-                        let frame = frames.get_mut(&id).ok_or("frame has no send")?;
-                        if frame.identity != identity {
-                            return Err("altered frame identity".into());
-                        }
-                        if message["action"] == "receive" {
-                            if !frame.queued {
-                                return Err("duplicate receive".into());
-                            }
-                            frame.queued = false;
-                            frame.received += 1;
-                            frame.received == 1
-                        } else {
-                            if frame.queued || frame.received == 0 {
-                                return Err("invalid requeue".into());
-                            }
-                            frame.queued = true;
-                            false
-                        }
-                    }
-                    _ => return Err("unknown frame action".into()),
-                };
+        if let Some(observed) = frame_rows.get(&index) {
+            for &(_, frame, received) in observed {
+                let source = frame.identity["source"].as_u64().ok_or("source")?;
+                let target = frame.identity["target"].as_u64().ok_or("target")?;
+                let bytes = &frame.bytes;
                 let owner_traffic = rows
                     .iter()
                     .any(|&(_, owner, _)| source == owner || target == owner);
                 if owner_traffic && bytes.len() != 3 {
-                    let result: Value = serde_json::from_slice(&bytes)?;
+                    let result: Value = serde_json::from_slice(bytes)?;
                     let actor = actors.get(source as usize).ok_or("test result sender")?;
                     if !revising
                         || result["tool_name"] != "run_local_tests"
@@ -211,7 +159,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                     {
                         return Err("unexpected module notification".into());
                     }
-                    if first_receive {
+                    if received {
                         test_notifications
                             .entry((source, target))
                             .or_default()
@@ -246,31 +194,15 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                     {
                         return Err("Endpoint delivered to unassigned developer".into());
                     }
-                    if message["action"] == "send" {
-                        if held.insert(resource, None) != Some(Some(source))
-                            || in_flight.insert(resource, id).is_some()
-                        {
-                            return Err("duplicate or unheld Endpoint transfer".into());
-                        }
+                    if !received {
                         if target == owner {
-                            if !commit_replies.remove(&(resource, vm - 14))
-                                || !returned.insert((vm, resource))
-                            {
-                                return Err("return precedes actual commit reply".into());
-                            }
                             *returns.entry(resource).or_default() += 1;
                         } else {
-                            returned.remove(&(vm, resource));
                             *loans.entry(resource).or_default() += 1;
                         }
-                    } else if first_receive
-                        && (in_flight.remove(&resource) != Some(id)
-                            || held.insert(resource, Some(target)) != Some(None))
-                    {
-                        return Err("Endpoint receive has no matching transfer".into());
                     }
                 }
-                if first_receive
+                if received
                     && target < actors.len() as u64
                     && bytes.first() == Some(&4)
                     && bytes.len() > 1
@@ -287,9 +219,9 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                         if tool == "commit_changes" {
                             return Err("commit bypassed resource Endpoints".into());
                         }
-                    } else if held.contains_key(&source) {
-                        if tool != "commit_changes" || held[&source] != Some(target + 14) {
-                            return Err("request without held module".into());
+                    } else if rows.iter().any(|&(_, _, resource)| resource == source) {
+                        if tool != "commit_changes" {
+                            return Err("unexpected module request tool".into());
                         }
                     } else {
                         return Err("unexpected request sender".into());
@@ -299,21 +231,19 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                         .or_default()
                         .push((source, arguments));
                 }
-                if first_receive
+                if received
                     && source < actors.len() as u64
-                    && (target == source + 14 || held.contains_key(&target))
+                    && (target == source + 14
+                        || rows.iter().any(|&(_, _, resource)| resource == target))
                 {
-                    let result: Value = serde_json::from_slice(&bytes)?;
+                    let result: Value = serde_json::from_slice(bytes)?;
                     let tool = result["tool_name"]
                         .as_str()
                         .ok_or("result tool")?
                         .to_owned();
-                    if held.contains_key(&target) {
-                        if tool != "commit_changes"
-                            || held[&target] != Some(source + 14)
-                            || !commit_replies.insert((target, source))
-                        {
-                            return Err("commit reply without its unique module".into());
+                    if rows.iter().any(|&(_, _, resource)| resource == target) {
+                        if tool != "commit_changes" {
+                            return Err("unexpected module result tool".into());
                         }
                     } else if tool == "commit_changes" {
                         return Err("result bypassed resource Endpoint".into());
@@ -321,6 +251,8 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                     delivered.entry((source, tool)).or_default().push(result);
                 }
             }
+        }
+        match (record["direction"].as_str(), message["type"].as_str()) {
             (Some("runtime"), Some("execute")) => {
                 let agent = message["agent"].as_str().ok_or("effect agent")?;
                 let &(role, assignment) = assignments.get(agent).ok_or("unknown effect agent")?;
@@ -373,14 +305,13 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                         .collect::<Result<BTreeSet<_>>>()?;
                     if observed.len() != 2
                         || observed.iter().map(|&(r, _)| r).collect::<BTreeSet<_>>() != required
-                        || required.iter().any(|r| held[r] != Some(role + 14))
                         || delivered
                             .get(&(role, "implement_code".into()))
                             .map(Vec::len)
                             != Some(if revising { (*count - 2) / 3 + 1 } else { 1 })
                     {
                         return Err(
-                            "effect without both unique Endpoints and completed implementation"
+                            "effect without both actual module requests and completed implementation"
                                 .into(),
                         );
                     }
@@ -398,18 +329,6 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 } else {
                     if observed.len() != 1 || observed[0].0 != role + 14 {
                         return Err("local request count".into());
-                    }
-                    if tool == "run_local_tests"
-                        && assignment["modules"]
-                            .as_array()
-                            .unwrap()
-                            .iter()
-                            .any(|name| {
-                                let resource = modules[name.as_str().unwrap()].1;
-                                !returned.contains(&(role + 14, resource))
-                            })
-                    {
-                        return Err("tests precede module return".into());
                     }
                 }
                 *count += 1;
@@ -443,26 +362,10 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 previous.push((call, message["result"].clone()));
                 active.remove(&id);
             }
-            (Some("runtime"), Some("exit")) => {
-                if message["status"] != 0
-                    || !exits.insert(message["agent"].as_str().ok_or("exit agent")?.to_owned())
-                {
-                    return Err("failed or duplicate guest exit".into());
-                }
-            }
-            (Some("runtime"), Some("run_result")) => {
-                if message["status"] != "complete" || verdict {
-                    return Err("failed or duplicate verdict".into());
-                }
-                verdict = true;
-            }
-            (Some("simulator"), Some("score")) if score.replace(message.clone()).is_some() => {
-                return Err("duplicate score".into());
-            }
             _ => {}
         }
     }
-    let score = score.ok_or("missing score")?;
+    let score = &journal.score;
     let mut attempts = BTreeMap::new();
     for (&agent, &(role, assignment)) in &assignments {
         let tests = responses
@@ -554,18 +457,13 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
             return Err("original task changed".into());
         }
     }
-    if !verdict
-        || exits.len() != actors.len()
-        || calls.len() != actors.len()
+    if calls.len() != actors.len()
         || !test_notifications.is_empty()
         || !outstanding.is_empty()
         || !requests.is_empty()
         || !delivered.is_empty()
-        || !commit_replies.is_empty()
-        || !in_flight.is_empty()
         || !active.is_empty()
-        || frames.values().any(|f| f.queued || f.received == 0)
-        || rows.iter().any(|&(name, o, r)| {
+        || rows.iter().any(|&(name, _, r)| {
             let expected: usize = assignments
                 .iter()
                 .filter(|(_, (_, assignment))| {
@@ -576,9 +474,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 })
                 .map(|(agent, _)| attempts[agent])
                 .sum();
-            held[&r] != Some(o)
-                || loans.get(&r) != Some(&expected)
-                || returns.get(&r) != Some(&expected)
+            loans.get(&r) != Some(&expected) || returns.get(&r) != Some(&expected)
         })
         || score["complete"] != (revising || !terminal_test_failure)
         || score["violations"] != json!([])
@@ -590,9 +486,9 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
     }
     Ok(
         json!({"task":fixture["task"],"kind":"persisted_direct_wasi_delegation_audit","model_calls":Value::Null,"scored_benchmark":false,"status":"passed",
-        "participants":actors.len(),"domain_calls":calls.values().sum::<usize>(),"carrier_frames":frames.len(),"max_disjoint_commits":maximum_writes,
-        "simulator_complete":score["complete"],"expected_terminal_test_failure":terminal_test_failure,"violations":0,"guest_exits":exits.len(),
-        "attempts":attempts,"actual_resource_endpoint_requests":2*attempts.values().sum::<usize>(),"actual_resource_endpoint_returns":2*attempts.values().sum::<usize>(),"original_test_delays":fixture["test_delays"]}),
+        "participants":actors.len(),"domain_calls":calls.values().sum::<usize>(),"carrier_frames":journal.frames.len(),"max_disjoint_commits":maximum_writes,
+        "simulator_complete":score["complete"],"expected_terminal_test_failure":terminal_test_failure,"violations":0,"guest_exits":actors.len(),
+        "attempts":attempts,"actual_resource_endpoint_requests":2*attempts.values().sum::<usize>(),"actual_resource_endpoint_returns":2*attempts.values().sum::<usize>(),"original_test_delays":fixture["test_delays"],"dynamic_protocol":dynamic}),
     )
 }
 
@@ -600,7 +496,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     audit(path)?;
     let projection = crate::projection::load(path)?;
     fs::create_dir(output)?;
-    let records = read(path)?;
+    let records = crate::journal::records(path)?;
     let mut checked = Vec::new();
     for mutation in [
         "wrong_frame_label",

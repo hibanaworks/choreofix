@@ -287,6 +287,15 @@ cargo +stable test --locked --manifest-path tools/runner/Cargo.toml \
   philosophers_boundary:: -- --ignored --test-threads=1 --nocapture
 ```
 
+The codebase and writing effect checks also require EPF source conformance and
+bind requests to its committed receives. Their duplicate holder/transfer tables
+and transport transition implementations have been removed; they share the
+journal reader used by dining. Complete captures are required, with no old-audit
+fallback. Earlier static-only records are historical evidence and do not qualify
+these revised checks. The tasks still require their new ChoreoFS boundary ports
+and actual Wasm/model qualification. An EPF-valid finite prefix is insufficient
+when a request's committed receive is absent.
+
 The CI/CD record auditor runs without starting a model or guest:
 
 ```sh
