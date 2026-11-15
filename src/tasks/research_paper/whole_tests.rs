@@ -529,7 +529,7 @@ async fn exercise(
         include_str!("whole_tests.rs"),
     )?;
     let report = json!({"compiled":compiled.into_iter().map(record).collect::<Vec<_>>(),"records":captured,"checkpoint":checkpoint,
-        "frames":bus.transport.take_observations(),"model_calls":0,"wasm_conditions":0,"whole_task_application_qualified":false,
+        "frames":bus.transport.take_observations().collect::<Vec<_>>(),"model_calls":0,"wasm_conditions":0,"whole_task_application_qualified":false,
         "evidence_directory":directory,"error":run.as_ref().err().map(ToString::to_string)});
     std::fs::write(directory.join("protocol.json"), imp::encode(&report)?)?;
     Ok((run, report))

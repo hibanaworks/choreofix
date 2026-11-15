@@ -65,13 +65,11 @@ fn rows(artifact: &Value) -> Vec<Value> {
         json!({"direction":"runtime","message":artifact["compiled"]}),
         json!({"direction":"runtime","message":{"type":"protocol_frame","action":"send","frame_id":8,
             "session":6,"frame_label":0,"lane":2,"source":0,"target":1,"payload":[1,2,3]}}),
-        json!({"direction":"runtime","message":{"type":"protocol_frame","action":"receive","frame_id":8,
-            "session":6,"frame_label":0,"lane":2,"source":0,"target":1,"payload":[1,2,3]}}),
     ]
 }
 
 #[test]
-fn matching_observations_cannot_hide_a_wrong_compiled_header() -> Result<()> {
+fn accepted_frame_must_match_its_compiled_header() -> Result<()> {
     let artifact = artifact();
     let original = rows(&artifact);
     assert_eq!(frames(&artifact, &original)?, BTreeMap::from([(8, 7)]));
@@ -85,11 +83,6 @@ fn matching_observations_cannot_hide_a_wrong_compiled_header() -> Result<()> {
         for row in &mut changed[1..] {
             row["message"][field] = json!(value);
         }
-        let mut send = changed[1]["message"].clone();
-        let mut receive = changed[2]["message"].clone();
-        send.as_object_mut().unwrap().remove("action");
-        receive.as_object_mut().unwrap().remove("action");
-        assert_eq!(send, receive, "the old identity-only condition still holds");
         assert!(frames(&artifact, &changed).is_err(), "accepted {field}");
     }
     Ok(())

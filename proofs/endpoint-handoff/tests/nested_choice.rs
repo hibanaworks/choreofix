@@ -78,7 +78,7 @@ async fn preceding_visible_receive_is_not_skipped_for_nested_choice()
     let label = branch.label();
     eprintln!(
         "nested first label: {label}, frames={}",
-        serde_json::json!(wire.take_observations())
+        serde_json::json!(wire.take_observations().collect::<Vec<_>>())
     );
     assert_eq!(
         label, 4,
@@ -158,7 +158,7 @@ async fn later_choice_preview_cannot_commit_before_its_predecessor()
     let label = branch.label();
     eprintln!(
         "nested first label: {label}, frames={}",
-        serde_json::json!(wire.take_observations())
+        serde_json::json!(wire.take_observations().collect::<Vec<_>>())
     );
     if label == 6 {
         let result = branch.recv::<BeginCombine>().await;

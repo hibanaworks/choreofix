@@ -64,6 +64,10 @@ effect before its request. Negative effect-order tests must cross the actual
 receive commit. Keep record-counterexample checks on the production auditor;
 release each search workspace between inputs without restoring or rebuilding
 another implementation.
+Record each actual transport acceptance once, retaining its exact header and
+payload. Repeated receive previews or requeues are not new accepted frames or
+Endpoint receive commits. Bind successful receives from complete EPF capture;
+do not add a second preview/requeue replay state machine to the auditor.
 
 Use native actual-Endpoint tests, actual Wasm/ChoreoFS execution, EPF dynamic
 source checks and independent effect/scorer audits for application obligations.

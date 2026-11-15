@@ -586,7 +586,7 @@ busy.send::<Closed>(&()).await?;
                 "session":session.raw(),"observed_producers":observed_order,"checkpoints":checkpoints,
                 "records":records.iter().map(|producer|producer.iter().map(|event|<[u8;16]>::from(*event)).collect::<Vec<_>>()).collect::<Vec<_>>(),
                 "snapshot":snapshot.iter().map(|event|<[u8;16]>::from(*event)).collect::<Vec<_>>(),
-                "frames":bus.transport.take_observations(),"full_11M_qualified":false,"domain_or_models_executed":false});
+                "frames":bus.transport.take_observations().collect::<Vec<_>>(),"full_11M_qualified":false,"domain_or_models_executed":false});
                 if let Some(directory) = std::env::var_os("CHOREOFIX_POOL_OUTPUT") {
                     std::fs::write(
                         std::path::PathBuf::from(directory)

@@ -40,12 +40,17 @@ impl InMemoryTransport {
         }
     }
 
-    /// Append-only observations; no observer can authorize an operation.
-    pub fn take_observations(&self) -> Vec<serde_json::Value> {
+    /// One immutable record per actual transport acceptance, including its payload.
+    /// Endpoint receive commits belong to the complete EPF producer capture.
+    pub fn take_observations(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = serde_json::Value> + ExactSizeIterator {
         let mut state = self.state.take();
         let observations = std::mem::take(&mut state.observations);
         self.state.set(state);
-        observations
+        observations.into_iter().map(|bytes| {
+            serde_json::from_slice(&bytes).expect("transport serialized this complete JSON record")
+        })
     }
 }
 
@@ -54,7 +59,9 @@ struct IoQueues {
     frames: VecDeque<Frame>,
     waiters: Vec<Waiter>,
     next_frame: u64,
-    observations: Vec<serde_json::Value>,
+    // Retain each immutable record as bytes, not one heap Value per payload byte.
+    // Draining parses one record at a time and preserves every observation.
+    observations: Vec<Vec<u8>>,
 }
 
 struct Frame {
@@ -68,11 +75,14 @@ struct Frame {
 }
 
 impl Frame {
-    fn observation(&self, action: &str) -> serde_json::Value {
-        serde_json::json!({"type":"protocol_frame", "action":action,
+    fn observation(&self) -> Vec<u8> {
+        serde_json::to_vec(
+            &serde_json::json!({"type":"protocol_frame", "action":"send",
             "frame_id":self.id, "session":self.session.raw(), "lane":self.lane,
             "source":self.source, "target":self.target, "frame_label":self.label,
-            "payload":self.payload})
+            "payload":self.payload}),
+        )
+        .expect("a transport observation is serializable JSON")
     }
 
     fn received(&self) -> ReceivedFrame<'_> {
@@ -185,7 +195,7 @@ impl Transport for &InMemoryTransport {
             let mut state = self.state.take();
             frame.id = state.next_frame;
             state.next_frame += 1;
-            state.observations.push(frame.observation("send"));
+            state.observations.push(frame.observation());
             let wake = state
                 .waiters
                 .iter()
@@ -219,9 +229,6 @@ impl Transport for &InMemoryTransport {
                 .iter()
                 .position(|frame| frame.is_for(rx))
                 .and_then(|index| state.frames.remove(index));
-            if let Some(frame) = &frame {
-                state.observations.push(frame.observation("receive"));
-            }
             let replaced_waker = if frame.is_none() {
                 if let Some(waiter) = state.waiters.iter_mut().find(|waiter| waiter.is_for_rx(rx)) {
                     Some(std::mem::replace(&mut waiter.waker, next_waker))
@@ -253,7 +260,6 @@ impl Transport for &InMemoryTransport {
     fn requeue(&self, rx: &mut Rx) -> Result<(), TransportError> {
         let frame = rx.current.take().ok_or(TransportError::Failed)?;
         let mut state = self.state.take();
-        state.observations.push(frame.observation("requeue"));
         let wake = state
             .waiters
             .iter()
@@ -265,5 +271,128 @@ impl Transport for &InMemoryTransport {
             waker.wake();
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hibana::{
+        g,
+        runtime::{SessionKitStorage, program::project},
+    };
+
+    #[hibana_runtime::main]
+    #[test]
+    async fn endpoint_commit_remains_distinct_from_repeated_offers() {
+        use hibana::runtime::tap;
+        type Message = g::Msg<1, u32>;
+        let source = g::send::<1, 2, Message>();
+        let sender_program = project::<1>(&source);
+        let receiver_program = project::<2>(&source);
+        let transport = InMemoryTransport::new([]);
+        let observed = Cell::new(Vec::new());
+        let capture = |event: tap::TapEvent| {
+            let mut events = observed.take();
+            events.push(event);
+            observed.set(events);
+        };
+        let mut slab = [0; 16 * 1024];
+        let mut storage = SessionKitStorage::uninit();
+        let rv = storage.init().rendezvous(&mut slab, &transport).unwrap();
+        rv.observe(&capture);
+        let session = SessionId::new(12);
+        let mut sender = rv.enter(session, &sender_program).unwrap();
+        let mut receiver = rv.enter(session, &receiver_program).unwrap();
+        sender.send::<Message>(&42).await.unwrap();
+        for _ in 0..64 {
+            drop(receiver.offer().await.unwrap());
+        }
+        let before = observed.take();
+        assert!(before.iter().all(|event| event.id() != tap::ENDPOINT_RECV));
+        observed.set(before);
+        assert_eq!(receiver.recv::<Message>().await.unwrap(), 42);
+        let events = observed.take();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.id() == tap::ENDPOINT_SEND)
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.id() == tap::ENDPOINT_RECV)
+                .count(),
+            1
+        );
+        let mut accepted = transport.take_observations();
+        assert_eq!(accepted.len(), 1);
+        assert_eq!(
+            accepted.next().unwrap()["payload"],
+            serde_json::json!(42u32.to_be_bytes())
+        );
+    }
+
+    #[hibana_runtime::main]
+    #[test]
+    async fn repeated_previews_preserve_the_one_actual_transport_acceptance() {
+        type Message<'a> = g::Msg<1, &'a [u8]>;
+        let source = g::send::<1, 2, Message>();
+        let program = project::<1>(&source);
+        let transport = InMemoryTransport::new([]);
+        let session = SessionId::new(11);
+        let mut slab = [0; 16 * 1024];
+        let mut storage = SessionKitStorage::uninit();
+        let rv = storage.init().rendezvous(&mut slab, &transport).unwrap();
+        let mut sender = rv.enter(session, &program).unwrap();
+        let payload = vec![90u8; 4096];
+        sender.send::<Message>(&payload.as_slice()).await.unwrap();
+        let state = transport.state.take();
+        let sent = state.frames.front().unwrap();
+        let mut rx = Rx {
+            session,
+            lane: sent.lane,
+            local_role: sent.target,
+            current: None,
+        };
+        transport.state.set(state);
+        let mut context = Context::from_waker(Waker::noop());
+        for _ in 0..64 {
+            assert!(matches!(
+                (&transport).poll_recv(&mut rx, &mut context),
+                Poll::Ready(Ok(_))
+            ));
+            (&transport).requeue(&mut rx).unwrap();
+        }
+        let state = transport.state.take();
+        assert_eq!(
+            state.frames.len(),
+            1,
+            "previewing never duplicates the frame"
+        );
+        assert_eq!(state.observations.len(), 1);
+        let retained: usize = state.observations.iter().map(Vec::capacity).sum();
+        let expanded_payloads =
+            state.observations.len() * payload.len() * core::mem::size_of::<serde_json::Value>();
+        eprintln!(
+            "one complete acceptance after 64 previews: retained_bytes={retained}, expanded_payload_bytes={expanded_payloads}"
+        );
+        assert!(
+            retained < expanded_payloads / 4,
+            "retained={retained}, expanded payload arrays alone={expanded_payloads}"
+        );
+        transport.state.set(state);
+        let mut records = transport.take_observations();
+        assert_eq!(records.len(), 1);
+        let expected = serde_json::json!(payload);
+        for record in records.by_ref() {
+            assert_eq!(record["frame_id"], 0);
+            assert_eq!(record["payload"], expected);
+            assert_eq!(record["action"], "send");
+        }
+        assert!(records.next().is_none());
+        assert!(transport.take_observations().next().is_none());
     }
 }

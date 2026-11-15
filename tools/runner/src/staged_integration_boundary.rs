@@ -82,8 +82,21 @@ async fn seven_actual_wasm_guests_complete_staged_publication() -> Result<()> {
                     let early=guest.command(agent,format!("echo '{}' > /service/merge_code",json!({"branch":feature}))).await?;
                     assert!(early["stdout"].as_str().is_some_and(|text|text.contains("Permission denied")),"premature merge was not rejected: {early}");
                 }
+                if own == 2 {
+                    let review=guest.command(agent,format!("cat /service/review/{feature}")).await?;
+                    assert_eq!(response(&review)?["success"],true,"{agent}: {review}");
+                    // The live agent read only its own approval, leaving the peer
+                    // outcomes and preceding CI unread. Neither request may skip
+                    // those actual incoming operations. The same guest recovers.
+                    for command in [format!("echo '{}' > /service/merge_code",json!({"branch":feature})),
+                                    "cat /service/release/user_authentication".into()] {
+                        let early=guest.command(agent,command).await?;
+                        assert!(early["stdout"].as_str().is_some_and(|text|text.contains("Permission denied")),"unread prerequisites were skipped: {early}");
+                    }
+                }
                 let initial_reviews=if own == 0 {&FEATURES[..1]} else {&FEATURES[..]};
                 for target in initial_reviews {
+                        if own == 2 && *target == feature {continue;}
                         let review=guest.command(agent,format!("cat /service/review/{target}")).await?;
                         assert_eq!(response(&review)?["success"],true,"{agent}: {review}");
                 }
@@ -174,7 +187,9 @@ async fn seven_actual_wasm_guests_complete_staged_publication() -> Result<()> {
     save(
         &directory.join("boundary.json"),
         &json!({"task":"6H","conditions":1,"model_calls":0,
-        "late_edit_rejected":true,"premature_merge_rejected_then_retried":true,"scored_benchmark":false,"audit":audit}),
+        "late_edit_rejected":true,"premature_merge_rejected_then_retried":true,
+        "own_review_does_not_replace_peer_outcomes":true,"unread_ci_prevents_later_stage_read":true,
+        "rejected_probes":4,"scored_benchmark":false,"audit":audit}),
     )?;
     println!("{}", directory.display());
     Ok(())

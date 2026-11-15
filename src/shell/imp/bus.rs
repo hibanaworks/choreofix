@@ -116,7 +116,7 @@ impl Bus {
         Ok(Reply { bus: self, id })
     }
 
-    fn enqueue(&self, values: Vec<Value>, flushed: Option<u64>) {
+    fn enqueue(&self, values: impl IntoIterator<Item = Value>, flushed: Option<u64>) {
         let mut bytes = Vec::new();
         for value in values {
             serde_json::to_writer(&mut bytes, &value)
@@ -136,8 +136,7 @@ impl Bus {
 
     /// Queue an immutable diagnostic observation with the I/O owner.
     pub fn observe(&self, value: Value) {
-        let mut values = self.transport.take_observations();
-        values.push(value);
+        let values = self.transport.take_observations().chain([value]);
         self.enqueue(values, None);
     }
 
@@ -160,8 +159,7 @@ impl Bus {
     }
 
     pub async fn emit(&self, value: Value) -> ShellResult<()> {
-        let mut values = self.transport.take_observations();
-        values.push(value);
+        let values = self.transport.take_observations().chain([value]);
         let reply = self.reply()?;
         self.enqueue(values, Some(reply.id));
         self.wake_output();
@@ -248,8 +246,7 @@ impl ExternalIo {
             .as_ref()
             .ok_or_else(|| ShellError::message("external output is closed"))?;
         let mut output = Io::new(stdout.as_fd().try_clone_to_owned()?)?;
-        let mut values = bus.transport.take_observations();
-        values.push(value);
+        let values = bus.transport.take_observations().chain([value]);
         bus.enqueue(values, None);
         self.flush_output(bus, &mut output).await
     }
@@ -400,8 +397,7 @@ impl Domain for Bus {
                     Err(error) => return Poll::Ready(Err(error.to_string())),
                 };
                 request["id"] = json!(reply.id);
-                let mut values = self.transport.take_observations();
-                values.push(request);
+                let values = self.transport.take_observations().chain([request]);
                 self.enqueue(values, None);
                 self.wake_output();
                 receipt = Some(reply);

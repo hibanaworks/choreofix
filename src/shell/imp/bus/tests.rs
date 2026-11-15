@@ -46,7 +46,7 @@ async fn observations_deliver_transport_evidence_without_waiting_for_an_rpc() ->
     let mut sender = rv.enter(SessionId::new(17), &program)?;
     sender.send::<Message>(&42).await?;
     bus.observe(json!({"type":"observation"}));
-    assert!(bus.transport.take_observations().is_empty());
+    assert!(bus.transport.take_observations().next().is_none());
     let pending = bus
         .connection(|connection| connection.outgoing.pop_front())
         .unwrap();

@@ -119,7 +119,6 @@ async fn a_failed_candidate_moves_to_b_and_both_resources_guard_the_actual_commi
         for frame in bus
             .transport
             .take_observations()
-            .iter()
             .rev()
             .take(24)
             .rev()
@@ -177,7 +176,7 @@ async fn a_failed_candidate_moves_to_b_and_both_resources_guard_the_actual_commi
         let protocol = Protocol::new(&snapshot, &mut source_storage).unwrap();
         let count: usize = captures.iter().map(|capture| capture.records().len()).sum();
         let capacity = count.checked_mul(2).and_then(|n| n.checked_add(1)).unwrap();
-        let frames = bus.transport.take_observations();
+        let frames: Vec<_> = bus.transport.take_observations().collect();
         if let Some(directory) = std::env::var_os("CHOREOFIX_HANDOFF_EVIDENCE") {
             let directory = std::path::PathBuf::from(directory);
             std::fs::create_dir(&directory).unwrap();
@@ -1009,10 +1008,10 @@ async fn candidate_ready_seals_rework_before_the_publication_requests() {
     assert!(
         result.is_err(),
         "CandidateReady did not seal rework: {result:?}; carrier tail: {}",
-        serde_json::json!(prefix.into_iter().rev().take(6).collect::<Vec<_>>())
+        serde_json::json!(prefix.rev().take(6).collect::<Vec<_>>())
     );
     assert!(
-        bus.transport.take_observations().is_empty(),
+        bus.transport.take_observations().next().is_none(),
         "rejected rework reached the transport"
     );
 }

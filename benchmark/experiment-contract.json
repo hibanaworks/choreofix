@@ -802,7 +802,7 @@
       "real_model_participants_started": 7,
       "real_model_trials_completed": 0,
       "task_qualified": false,
-      "scope": "The corrected seven-Wasm depth-0 baseline passes with 21 effects, 15186 complete capture records, EPF/effect/world checks and rejected early merge/late edit followed by recovery. The first seven-participant live depth-2 attempt hit the unchanged memory guard; a second stayed within it but exposed an application review-result/reply-type mismatch after 203.794633333 seconds. Reviewer/CI now select typed replies directly from actual effect results. The production preparation/reviewer Endpoint regression covers immediate approval and rejection/rejection/approval without core changes. Corrected-source live-model recovery and scored experiments remain unfinished."
+      "scope": "The accepted-frame-only observer records each transport acceptance once and binds actual receives from complete EPF commits, without a second preview/requeue replay state machine or core changes. Seven-Wasm depth-0 baselines pass with 21 effects and EPF/effect/world checks; wasi-v74 rejects four requests, including own-review-only merge and a stage read before its CI input, then recovers in the same guests. mutants-v69 rejects 443 record counterexamples. Fixed 600-second model trials live-v70 (depth 2) and live-v73 (depth 0) time out; maximum guarded memory is 1389854720 and 1410449408 bytes. Their raw evidence and negative outcomes are retained. The file contract now explicitly explains consuming all addressed results without prescribing commands. Real-model qualification on that prompt, full final-source family certification and scored experiments remain unfinished."
     },
     "removed_legacy_adapters": {
       "date": "2026-11-16",

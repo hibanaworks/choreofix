@@ -15,7 +15,6 @@ pub(crate) struct Frame {
     pub(crate) bytes: Vec<u8>,
     pub(crate) sent: usize,
     pub(crate) received: Option<usize>,
-    queued: bool,
 }
 impl Frame {
     pub(crate) fn direction(&self, from: u64, to: u64) -> bool {
@@ -225,7 +224,7 @@ pub(crate) struct Journal {
 
 impl Journal {
     /// Use EPF's successful Endpoint receives for effect correspondence. The
-    /// transport journal also contains previews and can be delivered later.
+    /// transport acceptance alone does not establish a successful receive.
     pub(crate) fn bind_receives<'a>(
         &mut self,
         dynamic: &'a Value,
@@ -311,29 +310,11 @@ pub(crate) fn read(
                                     bytes,
                                     sent: index,
                                     received: None,
-                                    queued: true,
                                 },
                             )
                             .is_some()
                         {
                             return Err("duplicate frame send".into());
-                        }
-                    }
-                    Some("receive" | "requeue") => {
-                        let frame = frames.get_mut(&id).ok_or("frame without send")?;
-                        if frame.identity != identity {
-                            return Err("altered frame identity".into());
-                        }
-                        if m["action"] == "receive" && frame.queued {
-                            frame.received = Some(index);
-                            frame.queued = false;
-                        } else if m["action"] == "requeue"
-                            && !frame.queued
-                            && frame.received.is_some()
-                        {
-                            frame.queued = true;
-                        } else {
-                            return Err("invalid frame observation".into());
                         }
                     }
                     _ => return Err("unknown frame action".into()),
@@ -411,10 +392,7 @@ pub(crate) fn read(
             _ => {}
         }
     }
-    if frames.values().any(|f| f.queued || f.received.is_none())
-        || exits.len() != actors.len()
-        || verdict.is_none()
-    {
+    if exits.len() != actors.len() || verdict.is_none() {
         return Err("incomplete observed execution".into());
     }
     let verdict = verdict.ok_or("missing runtime verdict")?;
@@ -485,8 +463,6 @@ mod tests {
             "task":"1E","programs":compiled}});
         let frame = json!({"type":"protocol_frame","action":"send","session":1,
             "frame_id":19,"frame_label":0,"lane":lane,"source":7,"target":8,"payload":[]});
-        let mut received = frame.clone();
-        received["action"] = json!("receive");
         let mut rows = vec![
             json!({"direction":"runtime","message":artifact["compiled"]}),
             json!({"direction":"runtime","message":{"type":"protocol_capture","producer":42,
@@ -494,7 +470,6 @@ mod tests {
             json!({"direction":"runtime","message":frame}),
             json!({"direction":"runtime","message":{"type":"protocol_capture","producer":42,
                 "records":[[1,tap::ENDPOINT_SEND,7u16<<8|1,1,7u64<<24|lane<<16]]}}),
-            json!({"direction":"runtime","message":received}),
             json!({"direction":"runtime","message":{"type":"protocol_capture","producer":42,
                 "records":[[2,tap::ENDPOINT_RECV,8u16<<8|2,1,8u64<<24|lane<<16]]}}),
             json!({"direction":"runtime","message":{"type":"protocol_checkpoint","producer":42,"session":1,"checkpoint":3}}),
@@ -508,10 +483,10 @@ mod tests {
         let mut journal = read(&rows, &labels, &actors)?;
         let checked = crate::projection::check_dynamic(&artifact, &rows)?;
         let receipts = journal.receipts(&checked)?;
-        assert_eq!(receipts[&19]["receive_commit"]["journal_row"], 5);
-        assert_eq!(journal.frames[&19].received, Some(4));
+        assert_eq!(receipts[&19]["receive_commit"]["journal_row"], 4);
+        assert_eq!(journal.frames[&19].received, None);
         journal.bind_receives(&checked)?;
-        assert_eq!(journal.frames[&19].received, Some(5));
+        assert_eq!(journal.frames[&19].received, Some(4));
         let mut duplicate = checked.clone();
         duplicate["sessions"][0]["acceptances"]
             .as_array_mut()
@@ -544,8 +519,8 @@ mod tests {
         assert_eq!(journal_late.frames[&19].received, Some(3));
         // EPF correctly permits a finite source prefix with an accepted send.
         // Complete application effect evidence must additionally have its receive.
-        rows.remove(5);
-        rows[5]["message"]["checkpoint"] = json!(2);
+        rows.remove(4);
+        rows[4]["message"]["checkpoint"] = json!(2);
         let prefix = crate::projection::check_dynamic(&artifact, &rows)?;
         assert_eq!(prefix["status"], "passed");
         assert!(read(&rows, &labels, &actors)?.receipts(&prefix).is_err());
@@ -601,7 +576,6 @@ mod tests {
             bytes: vec![6],
             sent: 0,
             received: Some(1),
-            queued: false,
         };
         let reply = Frame {
             logical_label: protocol::LABEL_WASI_FD_CLOSE_RET,
@@ -609,7 +583,6 @@ mod tests {
             bytes: vec![6, 0, 0],
             sent: 2,
             received: Some(3),
-            queued: false,
         };
         let mut frames = BTreeMap::from([(1, request), (2, reply)]);
         assert!(check_close_pairs(&frames, &[(0, 8)]).is_ok());
@@ -634,7 +607,6 @@ mod tests {
                 bytes: vec![6, 0, 0],
                 sent: 4,
                 received: Some(5),
-                queued: false,
             },
         );
         assert!(check_close_pairs(&frames, &[(0, 8)]).is_err());

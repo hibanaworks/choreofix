@@ -585,7 +585,7 @@ async fn the_frozen_document_cannot_reopen_editing_before_or_after_publication_r
                 service.send::<Combined>(&material).await?;
                 document.recv::<Combined>().await?;
             }
-            bus.transport.take_observations();
+            drop(bus.transport.take_observations());
             eprintln!(
                 "editing probe: failed_visits={failed_visits} after_reply={after_reply} operation={operation}"
             );
@@ -613,7 +613,7 @@ async fn the_frozen_document_cannot_reopen_editing_before_or_after_publication_r
                 ),
                 Err(error) => panic!("probe infrastructure failed: {error}"),
             }
-            assert!(bus.transport.take_observations().is_empty());
+            assert!(bus.transport.take_observations().next().is_none());
             // An illegal protocol call may fault its run. Every attempted call
             // gets a fresh trial; do not resume one to perform another probe.
         }

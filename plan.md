@@ -19,6 +19,17 @@ reviewerとCIを実結果に対応した型を直接送る形へ直した。本�
 本番のprepare sourceとreviewerによる「初回承認」「拒否→拒否→承認」の実Endpoint試験、
 Clippyと修正後の7人実Wasm深さ0（21効果・15,186 capture記録・EPF/効果/共通採点）を
 確認した。修正後の実AI認定は残り、23/48課題・残り25課題は変えない。
+その後、受信候補の再試行ごとに同じpayloadを観測へ再追加するフィードバックを除去した。
+実transport受理は一度だけ記録し、実受信は完全EPF記録のcommitへ対応付ける。
+二重のpreview/requeue再生状態機械を監査器から外した。本体の進行検査は変更していない。
+共有native19件、runnerとClippy、7人実Wasm（`wasi-v68`）、記録反例443件を確認した。
+固定600秒の実AIは深さ2（`live-v70`）と深さ0（`live-v73`）で時間切れとなった。
+最大メモリは各1,389,854,720／1,410,449,408 bytesに収まり、失敗原本を保持している。
+後者ではCが他featureのreviewを読まないままmergeを再試行していた。
+`wasi-v74`はその未読入力による拒否を再現し、同じguestで入力を消費すると完走した。
+既存2件を含む拒否4件の後に21実効果・EPF・共通採点・違反0を確認した。
+コマンド列は固定せず、ファイルのreadが各通知を消費するという説明を明確にした。
+この説明変更後の実AI認定と全familyの最終source再認定は未完であり、課題数は増やさない。
 公開CIに残ったEPF旧引数はhandoff・tool-cabinet・research-paper・pool fixtureから除去し、
 native handoff 6件と現行APIでのClippyを確認した。アプリ用Miri時計と実行分岐も削除した。
 

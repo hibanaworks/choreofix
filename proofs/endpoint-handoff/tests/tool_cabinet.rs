@@ -377,7 +377,7 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
     // The terminal probe runs after every legitimate participant has finished.
     // An undeclared operation on this retired actor/view may end the closed run;
     // it must not remain Pending or produce another work frame/effect.
-    let mut frames = bus.transport.take_observations();
+    let mut frames: Vec<_> = bus.transport.take_observations().collect();
     let denied = hibana_runtime::race(
         async {
             retired
@@ -396,7 +396,7 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
             )));
         }
     };
-    let after = bus.transport.take_observations();
+    let after: Vec<_> = bus.transport.take_observations().collect();
     assert!(
         !after.iter().any(|row| row["action"] == "send"),
         "denied work emitted a frame"
@@ -676,7 +676,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                         order[0], order[1], order[2]
                     )),
                     data::encode(&json!({"order":order,"profile":profile,"events":events,
-                        "inputs":observed_inputs,"frames":bus.transport.take_observations(),
+                        "inputs":observed_inputs,"frames":bus.transport.take_observations().collect::<Vec<_>>(),
                         "error":execution.as_ref().err().map(ToString::to_string),
                         "controlled_native_fixture":true,"model_calls":0}))?,
                 )?;

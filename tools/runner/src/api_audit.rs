@@ -557,19 +557,17 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                     match kind {
                         "missing_close" => {
                             m["type"] == "protocol_frame"
-                                && m["action"] == "receive"
+                                && m["action"] == "send"
                                 && m["source"] == 17
                                 && m["target"] == 20
                                 && m["payload"] == json!([4])
                         }
-                        "altered_frame" => {
-                            m["type"] == "protocol_frame" && m["action"] == "receive"
-                        }
+                        "altered_frame" => m["type"] == "protocol_frame" && m["action"] == "send",
                         "forged_arguments" => m["type"] == "execute",
                         "forged_result" => m["type"] == "simulator_result",
                         "missing_notification" => {
                             m["type"] == "protocol_frame"
-                                && m["action"] == "receive"
+                                && m["action"] == "send"
                                 && m["source"] == 22
                                 && m["target"] == 11
                         }

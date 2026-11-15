@@ -262,6 +262,9 @@ pub fn frames(artifact: &Value, rows: &[Value]) -> Result<BTreeMap<u64, u8>> {
                 return Err("effect before compiled projection observation".into());
             }
             Some("protocol_frame") => {
+                if message["action"] != "send" {
+                    return Err("transport journal requires an actual acceptance".into());
+                }
                 if !observed {
                     return Err("frame before compiled projection observation".into());
                 }

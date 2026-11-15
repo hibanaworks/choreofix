@@ -6,7 +6,10 @@ The direct-WASI command currently produces unscored qualification records.
 
 The common WASI qualification includes 6H's seven-guest depth-0 baseline under
 `staged_integration_boundary::`. It checks 21 real effects, complete EPF capture,
-effect/world correspondence and two rejected requests followed by recovery.
+effect/world correspondence and four rejected requests followed by recovery.
+The additional probes leave peer reviews or earlier CI unread, then verify
+that the same guest recovers by consuming its actual inputs. The shell chooses
+its commands; the runner does not drain those messages on its behalf.
 This finite mechanism condition does not qualify the unfinished depth-2 live
 model trial or add 6H to the 23 qualified tasks. The normal runner accepts 6H;
 saved executions use `--audit-staged-integration EVENTS`, with record

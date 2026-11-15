@@ -690,9 +690,9 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
                     .iter_mut()
                     .find(|row| {
                         row["message"]["type"] == "protocol_frame"
-                            && row["message"]["action"] == "receive"
+                            && row["message"]["action"] == "send"
                     })
-                    .ok_or("receive observation")?;
+                    .ok_or("transport acceptance")?;
                 row["message"]["source"] = json!(254);
             }
             "forged_arguments" => {

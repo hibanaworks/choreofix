@@ -39,7 +39,7 @@ fn snapshot(calls: &[&Call], before: usize) -> Result<Value> {
     Ok(material)
 }
 
-fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
+fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty document evidence")?["message"];
     if compiled["task"] != "7E" || fixture["task"] != "7E" || fixture["type"] != "fixtures" {
@@ -70,11 +70,13 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
     let editor_file = name("roles", "ALLOCATION_FILE")?;
     let session = compiled["session"].as_u64().ok_or("document session")?;
     let labels = crate::projection::frames(artifact, rows)?;
+    let mut journal = crate::journal::read(rows, &labels, actors)?;
+    journal.bind_receives(dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
         score,
-    } = crate::journal::read(rows, &labels, actors)?;
+    } = journal;
     if frames.values().any(|f| f.identity["session"] != session)
         || calls.is_empty()
         || score["complete"] != true
@@ -551,8 +553,9 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
 pub fn audit(path: &Path) -> Result<Value> {
     let artifact = crate::projection::load(path)?;
     let rows = records(path)?;
-    let mut result = check(&rows, &artifact)?;
-    result["dynamic_protocol"] = crate::projection::check_dynamic(&artifact, &rows)?;
+    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
+    let mut result = check(&rows, &artifact, &dynamic)?;
+    result["dynamic_protocol"] = dynamic;
     result["source_events_sha256"] = json!(digest(path)?);
     result["compiled_projection_sha256"] = json!(digest(
         &path
@@ -567,7 +570,8 @@ pub fn audit(path: &Path) -> Result<Value> {
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let artifact = crate::projection::load(path)?;
     let rows = records(path)?;
-    let baseline = check(&rows, &artifact)?;
+    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
+    let baseline = check(&rows, &artifact, &dynamic)?;
     let ids = baseline["matched_effect_frame_ids"]
         .as_array()
         .ok_or("effect frame IDs")?
@@ -575,7 +579,8 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .map(|id| id.as_u64().ok_or("effect frame ID"))
         .collect::<std::result::Result<Vec<_>, _>>()?;
     fs::create_dir(output)?;
-    let mut verdicts = json_frame_mutants(&rows, &ids, |changed| check(changed, &artifact))?;
+    let mut verdicts =
+        json_frame_mutants(&rows, &ids, |changed| check(changed, &artifact, &dynamic))?;
     for field in ["frame_label", "lane"] {
         let mut changed = rows.clone();
         for row in &mut changed {
@@ -583,7 +588,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 row["message"][field] = json!(if field == "lane" { 255 } else { 65535 });
             }
         }
-        let error = check(&changed, &artifact)
+        let error = check(&changed, &artifact, &dynamic)
             .err()
             .ok_or("coherent invalid wire header accepted")?;
         verdicts.push(json!({"kind":format!("coherent_wrong_{field}"),"rejected":true,"error":error.to_string()}));
