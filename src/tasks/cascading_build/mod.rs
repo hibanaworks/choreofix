@@ -4,32 +4,19 @@ pub(crate) mod imp;
 pub mod localside;
 #[cfg(test)]
 mod tests;
+mod wire;
 
 use crate::shell::{ShellError, ShellResult};
-use hibana::runtime::{
-    SessionKitStorage,
-    ids::SessionId,
-    resolver::{DecisionArm, ResolverRef},
-};
+use hibana::runtime::{SessionKitStorage, ids::SessionId, resolver::ResolverRef};
 
 #[hibana_runtime::scope]
-pub async fn run_stdio(module: &[u8], order: [u8; 3]) -> ShellResult<()> {
+pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
     use crate::shell::{
-        imp::{
-            bus::Bus,
-            private_fs::{PrivateFs, bindings},
-        },
-        localside::private_io,
+        imp::{bus::Bus, private_fs::PrivateFs},
+        localside::{file_metadata, private_io},
     };
     use global::*;
-    use hibana_wasip1_runtime::{GuestMemory, HibanaWasiGuestStorage};
-    let mut members = order;
-    members.sort_unstable();
-    if members != [A, B, C] {
-        return Err(ShellError::message(
-            "initial build order must contain A, B and C once",
-        ));
-    }
+    use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasiGuestStorage};
     let (
         bus,
         mut io,
@@ -52,6 +39,11 @@ pub async fn run_stdio(module: &[u8], order: [u8; 3]) -> ShellResult<()> {
             (SessionId::new(SESSION), CORE),
             (SessionId::new(SESSION), CONFIG),
             (SessionId::new(SESSION), MODELS),
+            (SessionId::new(SESSION), A_FILE),
+            (SessionId::new(SESSION), B_FILE),
+            (SessionId::new(SESSION), C_FILE),
+            (SessionId::new(SESSION), INTEGRATOR_FILE),
+            (SessionId::new(SESSION), TESTER_FILE),
         ],
     );
     let result = hibana_runtime::race(
@@ -63,7 +55,8 @@ pub async fn run_stdio(module: &[u8], order: [u8; 3]) -> ShellResult<()> {
                 "records":[crate::imp::projection::record(row)]}))
             };
             let input = core::cell::Cell::new(serde_json::Value::Null);
-            let mut slab = vec![0; 1024 * 1024];
+            let mut slab = vec![0; 2 * 1024 * 1024];
+            let incoming_capacity = slab.len();
             let mut storage = SessionKitStorage::uninit();
             let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
             rv.observe(&capture);
@@ -85,61 +78,21 @@ pub async fn run_stdio(module: &[u8], order: [u8; 3]) -> ShellResult<()> {
                 let mut c_io = rv.enter(session, &p.c_io)?;
                 let mut integrator_io = rv.enter(session, &p.integrator_io)?;
                 let mut tester_io = rv.enter(session, &p.tester_io)?;
-                rv.set_resolver(
-                    &p.compiler,
-                    ResolverRef::<FIRST_A>::decision_state(&order, |order| {
-                        Ok(if order[0] == A {
-                            DecisionArm::Left
-                        } else {
-                            DecisionArm::Right
-                        })
-                    }),
-                )
-                .map_err(|_| ShellError::message("could not bind first A allocation"))?;
-                rv.set_resolver(
-                    &p.compiler,
-                    ResolverRef::<FIRST_B>::decision_state(&order, |order| {
-                        Ok(if order[0] == B {
-                            DecisionArm::Left
-                        } else {
-                            DecisionArm::Right
-                        })
-                    }),
-                )
-                .map_err(|_| ShellError::message("could not bind first B allocation"))?;
-                rv.set_resolver(
-                    &p.compiler,
-                    ResolverRef::<SECOND_A>::decision_state(&order, |order| {
-                        Ok(if order[1] == B {
-                            DecisionArm::Left
-                        } else {
-                            DecisionArm::Right
-                        })
-                    }),
-                )
-                .map_err(|_| ShellError::message("could not bind A's following allocation"))?;
-                rv.set_resolver(
-                    &p.compiler,
-                    ResolverRef::<SECOND_B>::decision_state(&order, |order| {
-                        Ok(if order[1] == A {
-                            DecisionArm::Left
-                        } else {
-                            DecisionArm::Right
-                        })
-                    }),
-                )
-                .map_err(|_| ShellError::message("could not bind B's following allocation"))?;
-                rv.set_resolver(
-                    &p.compiler,
-                    ResolverRef::<SECOND_C>::decision_state(&order, |order| {
-                        Ok(if order[1] == A {
-                            DecisionArm::Left
-                        } else {
-                            DecisionArm::Right
-                        })
-                    }),
-                )
-                .map_err(|_| ShellError::message("could not bind C's following allocation"))?;
+                let mut a_data = rv.enter(session, &p.a_data)?;
+                let a_file = rv.enter(session, &p.a_file)?;
+                let a_vm = rv.enter(session, &p.a_vm)?;
+                let mut b_data = rv.enter(session, &p.b_data)?;
+                let b_file = rv.enter(session, &p.b_file)?;
+                let b_vm = rv.enter(session, &p.b_vm)?;
+                let mut c_data = rv.enter(session, &p.c_data)?;
+                let c_file = rv.enter(session, &p.c_file)?;
+                let c_vm = rv.enter(session, &p.c_vm)?;
+                let mut integrator_data = rv.enter(session, &p.integrator_data)?;
+                let integrator_file = rv.enter(session, &p.integrator_file)?;
+                let integrator_vm = rv.enter(session, &p.integrator_vm)?;
+                let mut tester_data = rv.enter(session, &p.tester_data)?;
+                let tester_file = rv.enter(session, &p.tester_file)?;
+                let tester_vm = rv.enter(session, &p.tester_vm)?;
                 rv.set_resolver(
                     &p.integrator,
                     ResolverRef::<REBUILD_A>::decision_state(&input, imp::selected::<0>),
@@ -150,37 +103,40 @@ pub async fn run_stdio(module: &[u8], order: [u8; 3]) -> ShellResult<()> {
                     ResolverRef::<REBUILD_B>::decision_state(&input, imp::selected::<1>),
                 )
                 .map_err(|_| ShellError::message("could not bind actual B candidate input"))?;
-                let a_fs = PrivateFs::new(a_terminal, &bus);
-                let b_fs = PrivateFs::new(b_terminal, &bus);
-                let c_fs = PrivateFs::new(c_terminal, &bus);
-                let integrator_fs = PrivateFs::new(integrator_terminal, &bus);
-                let tester_fs = PrivateFs::new(tester_terminal, &bus);
-                let mut a_memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-                let mut b_memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-                let mut c_memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-                let mut integrator_memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-                let mut tester_memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-                let mut a_storage = HibanaWasiGuestStorage::uninit();
-                let mut b_storage = HibanaWasiGuestStorage::uninit();
-                let mut c_storage = HibanaWasiGuestStorage::uninit();
-                let mut integrator_storage = HibanaWasiGuestStorage::uninit();
-                let mut tester_storage = HibanaWasiGuestStorage::uninit();
-                let a_guest =
-                    a_storage.init(module, GuestMemory::new(&mut a_memory), bindings())?;
-                let b_guest =
-                    b_storage.init(module, GuestMemory::new(&mut b_memory), bindings())?;
-                let c_guest =
-                    c_storage.init(module, GuestMemory::new(&mut c_memory), bindings())?;
-                let integrator_guest = integrator_storage.init(
-                    module,
-                    GuestMemory::new(&mut integrator_memory),
-                    bindings(),
-                )?;
-                let tester_guest = tester_storage.init(
-                    module,
-                    GuestMemory::new(&mut tester_memory),
-                    bindings(),
-                )?;
+                async {
+                    file_metadata::run(&mut a_data, a_file, BUILDER_FILES).await?;
+                };
+                async {
+                    file_metadata::run(&mut b_data, b_file, BUILDER_FILES).await?;
+                };
+                async {
+                    file_metadata::run(&mut c_data, c_file, BUILDER_FILES).await?;
+                };
+                async {
+                    file_metadata::run(&mut integrator_data, integrator_file, INTEGRATOR_FILES)
+                        .await?;
+                };
+                async {
+                    file_metadata::run(&mut tester_data, tester_file, TESTER_FILES).await?;
+                };
+                let (a_file, b_file, c_file, integrator_file, tester_file) = async {
+                    let [mut a, mut b, mut c, mut integrator, mut tester] = compiler.par()?;
+                    async { a.recv::<Loan<A_FILE>>().await };
+                    async { b.recv::<Loan<B_FILE>>().await };
+                    async { c.recv::<Loan<C_FILE>>().await };
+                    async { integrator.recv::<Loan<INTEGRATOR_FILE>>().await };
+                    async { tester.recv::<Loan<TESTER_FILE>>().await };
+                }
+                .await?;
+                async {
+                    localside::builder::run(&mut a).await?;
+                };
+                async {
+                    localside::builder::run(&mut b).await?;
+                };
+                async {
+                    localside::builder::run(&mut c).await?;
+                };
                 async {
                     localside::compiler::run(&mut compiler, (core, config, models), &bus).await?;
                 };
@@ -188,34 +144,188 @@ pub async fn run_stdio(module: &[u8], order: [u8; 3]) -> ShellResult<()> {
                     localside::testing::run(&mut testing, &bus).await?;
                 };
                 async {
-                    localside::builder::run(a_guest, &mut a).await?;
+                    localside::integrator::run(&mut integrator, &input).await?;
                 };
                 async {
-                    localside::builder::run(b_guest, &mut b).await?;
+                    localside::tester::run(&mut tester).await?;
                 };
                 async {
-                    localside::builder::run(c_guest, &mut c).await?;
+                    private_io::run(&mut a_io, PrivateFs::new(a_terminal, &bus, &BUILDER_FILES))
+                        .await?;
                 };
                 async {
-                    localside::integrator::run(integrator_guest, &mut integrator, &input).await?;
+                    let file = a_file;
+                    let mut request = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+                    let mut result = vec![0; incoming_capacity];
+                    let (mut updates, mut feedback, mut reconsideration, mut outcome) = (
+                        vec![0; incoming_capacity],
+                        vec![0; incoming_capacity],
+                        vec![0; incoming_capacity],
+                        vec![0; incoming_capacity],
+                    );
+                    let files = ChoreoFsFiles::new(a_vm).file(
+                        ChoreoFsFile::new(BUILDER_FILES[0], file)
+                            .write_as::<CompileFileA>(&mut request)
+                            .read_as::<FileCompiled>(&mut result)
+                            .file(BUILDER_FILES[1])?
+                            .read_as::<FileUpdated>(&mut updates)
+                            .file(BUILDER_FILES[2])?
+                            .read_as::<FileFeedback>(&mut feedback)
+                            .file(BUILDER_FILES[3])?
+                            .read_as::<FileReconsidered>(&mut reconsideration)
+                            .file(BUILDER_FILES[4])?
+                            .read_as::<FileFinished>(&mut outcome),
+                    )?;
+                    let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+                    let mut guest_storage = HibanaWasiGuestStorage::uninit();
+                    let guest = guest_storage.init(module, GuestMemory::new(&mut memory), files)?;
+                    let (exit, files) = guest.run().await?;
+                    let status = exit.status() as i32;
+                    let (mut root, (file, ())) = files.into_parts();
+                    file.into_endpoint().send::<FileExit>(&status).await?;
+                    root.send::<crate::shell::global::Exit>(&status).await?;
                 };
                 async {
-                    localside::tester::run(tester_guest, &mut tester).await?;
+                    private_io::run(&mut b_io, PrivateFs::new(b_terminal, &bus, &BUILDER_FILES))
+                        .await?;
                 };
                 async {
-                    private_io::run(&mut a_io, a_fs).await?;
+                    let file = b_file;
+                    let mut request = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+                    let mut result = vec![0; incoming_capacity];
+                    let (mut updates, mut feedback, mut reconsideration, mut outcome) = (
+                        vec![0; incoming_capacity],
+                        vec![0; incoming_capacity],
+                        vec![0; incoming_capacity],
+                        vec![0; incoming_capacity],
+                    );
+                    let files = ChoreoFsFiles::new(b_vm).file(
+                        ChoreoFsFile::new(BUILDER_FILES[0], file)
+                            .write_as::<CompileFileB>(&mut request)
+                            .read_as::<FileCompiled>(&mut result)
+                            .file(BUILDER_FILES[1])?
+                            .read_as::<FileUpdated>(&mut updates)
+                            .file(BUILDER_FILES[2])?
+                            .read_as::<FileFeedback>(&mut feedback)
+                            .file(BUILDER_FILES[3])?
+                            .read_as::<FileReconsidered>(&mut reconsideration)
+                            .file(BUILDER_FILES[4])?
+                            .read_as::<FileFinished>(&mut outcome),
+                    )?;
+                    let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+                    let mut guest_storage = HibanaWasiGuestStorage::uninit();
+                    let guest = guest_storage.init(module, GuestMemory::new(&mut memory), files)?;
+                    let (exit, files) = guest.run().await?;
+                    let status = exit.status() as i32;
+                    let (mut root, (file, ())) = files.into_parts();
+                    file.into_endpoint().send::<FileExit>(&status).await?;
+                    root.send::<crate::shell::global::Exit>(&status).await?;
                 };
                 async {
-                    private_io::run(&mut b_io, b_fs).await?;
+                    private_io::run(&mut c_io, PrivateFs::new(c_terminal, &bus, &BUILDER_FILES))
+                        .await?;
                 };
                 async {
-                    private_io::run(&mut c_io, c_fs).await?;
+                    let file = c_file;
+                    let mut request = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+                    let mut result = vec![0; incoming_capacity];
+                    let (mut updates, mut feedback, mut reconsideration, mut outcome) = (
+                        vec![0; incoming_capacity],
+                        vec![0; incoming_capacity],
+                        vec![0; incoming_capacity],
+                        vec![0; incoming_capacity],
+                    );
+                    let files = ChoreoFsFiles::new(c_vm).file(
+                        ChoreoFsFile::new(BUILDER_FILES[0], file)
+                            .write_as::<CompileFileC>(&mut request)
+                            .read_as::<FileCompiled>(&mut result)
+                            .file(BUILDER_FILES[1])?
+                            .read_as::<FileUpdated>(&mut updates)
+                            .file(BUILDER_FILES[2])?
+                            .read_as::<FileFeedback>(&mut feedback)
+                            .file(BUILDER_FILES[3])?
+                            .read_as::<FileReconsidered>(&mut reconsideration)
+                            .file(BUILDER_FILES[4])?
+                            .read_as::<FileFinished>(&mut outcome),
+                    )?;
+                    let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+                    let mut guest_storage = HibanaWasiGuestStorage::uninit();
+                    let guest = guest_storage.init(module, GuestMemory::new(&mut memory), files)?;
+                    let (exit, files) = guest.run().await?;
+                    let status = exit.status() as i32;
+                    let (mut root, (file, ())) = files.into_parts();
+                    file.into_endpoint().send::<FileExit>(&status).await?;
+                    root.send::<crate::shell::global::Exit>(&status).await?;
                 };
                 async {
-                    private_io::run(&mut integrator_io, integrator_fs).await?;
+                    private_io::run(
+                        &mut integrator_io,
+                        PrivateFs::new(integrator_terminal, &bus, &INTEGRATOR_FILES),
+                    )
+                    .await?;
                 };
                 async {
-                    private_io::run(&mut tester_io, tester_fs).await?;
+                    let file = integrator_file;
+                    let mut request = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+                    let mut result = vec![0; incoming_capacity];
+                    let mut candidate = vec![0; incoming_capacity];
+                    let files = ChoreoFsFiles::new(integrator_vm).file(
+                        ChoreoFsFile::new(INTEGRATOR_FILES[0], file)
+                            .write_as::<LinkFile>(&mut request)
+                            .read_as::<FileLinked>(&mut result)
+                            .file(INTEGRATOR_FILES[1])?
+                            .read_as::<FileReady>(&mut candidate),
+                    )?;
+                    let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+                    let mut guest_storage = HibanaWasiGuestStorage::uninit();
+                    let guest = guest_storage.init(module, GuestMemory::new(&mut memory), files)?;
+                    let (exit, files) = guest.run().await?;
+                    let status = exit.status() as i32;
+                    let (mut root, (file, ())) = files.into_parts();
+                    file.into_endpoint().send::<FileExit>(&status).await?;
+                    root.send::<crate::shell::global::Exit>(&status).await?;
+                };
+                async {
+                    private_io::run(
+                        &mut tester_io,
+                        PrivateFs::new(tester_terminal, &bus, &TESTER_FILES),
+                    )
+                    .await?;
+                };
+                async {
+                    let file = tester_file;
+                    let (mut a, mut b, mut c) = (
+                        vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                        vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                        vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                    );
+                    let (mut ar, mut br, mut cr, mut object) = (
+                        vec![0; incoming_capacity],
+                        vec![0; incoming_capacity],
+                        vec![0; incoming_capacity],
+                        vec![0; incoming_capacity],
+                    );
+                    let files = ChoreoFsFiles::new(tester_vm).file(
+                        ChoreoFsFile::new(TESTER_FILES[0], file)
+                            .write_as::<TestFileA>(&mut a)
+                            .read_as::<FileTested>(&mut ar)
+                            .file(TESTER_FILES[1])?
+                            .write_as::<TestFileB>(&mut b)
+                            .read_as::<FileTested>(&mut br)
+                            .file(TESTER_FILES[2])?
+                            .write_as::<TestFileC>(&mut c)
+                            .read_as::<FileTested>(&mut cr)
+                            .file(TESTER_FILES[3])?
+                            .read_as::<ObjectForTesting>(&mut object),
+                    )?;
+                    let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+                    let mut guest_storage = HibanaWasiGuestStorage::uninit();
+                    let guest = guest_storage.init(module, GuestMemory::new(&mut memory), files)?;
+                    let (exit, files) = guest.run().await?;
+                    let status = exit.status() as i32;
+                    let (mut root, (file, ())) = files.into_parts();
+                    file.into_endpoint().send::<FileExit>(&status).await?;
+                    root.send::<crate::shell::global::Exit>(&status).await?;
                 };
                 Ok::<(), ShellError>(())
             }

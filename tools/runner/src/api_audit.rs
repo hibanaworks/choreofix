@@ -1,4 +1,7 @@
-//! Actual API effects and outcome-file bytes; EPF checks source execution.
+//! Match EPF-checked file bytes and resource receives to actual effects and replies.
+use crate::{evidence::Result, journal};
+use hibana::runtime::wire::{Payload, WirePayload};
+use hibana_wasip1_runtime::protocol;
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -6,8 +9,7 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::Path,
 };
-pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-const OUTCOME_FD: u8 = 16;
+
 fn send(output: &mut impl Write, value: &Value) -> Result<()> {
     serde_json::to_writer(&mut *output, value)?;
     writeln!(output)?;
@@ -25,11 +27,12 @@ fn payload(message: &Value) -> Result<Vec<u8>> {
         })
         .collect()
 }
+fn validate<P: WirePayload>(frame: &journal::Frame) -> Result<()> {
+    P::validate_payload(Payload::new(&frame.bytes))
+        .map_err(|error| format!("WASI payload: {error:?}").into())
+}
 pub fn audit(path: &Path) -> Result<Value> {
-    let records = BufReader::new(File::open(path)?)
-        .lines()
-        .map(|l| Ok(serde_json::from_str::<Value>(&l?)?))
-        .collect::<Result<Vec<_>>>()?;
+    let records = journal::records(path)?;
     let projection = crate::projection::load(path)?;
     let mut result = check(&records, &projection)?;
     result["source_events_sha256"] = json!(crate::evidence::digest(path)?);
@@ -37,227 +40,463 @@ pub fn audit(path: &Path) -> Result<Value> {
         &path
             .parent()
             .ok_or("event directory")?
-            .join("projection.json"),
+            .join("projection.json")
     )?);
     result["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
     Ok(result)
 }
-
 fn check(records: &[Value], projection: &Value) -> Result<Value> {
+    let compiled = &projection["compiled"];
     let labels = crate::projection::frames(projection, records)?;
     let fixture = &records.first().ok_or("empty evidence")?["message"];
     let actors = fixture["fixtures"].as_array().ok_or("API actors")?;
-    if projection["compiled"]["task"] != "8E" || fixture["task"] != "8E" || actors.len() != 3 {
+    if compiled["task"] != "8E" || fixture["task"] != "8E" || actors.len() != 3 {
         return Err("unexpected API task".into());
     }
     let depth = fixture["depth"]
         .as_u64()
         .filter(|n| *n <= 2)
         .ok_or("API depth")?;
-    let passes = depth == 0;
-    let binding = |agent: &str| -> Result<(u64, u64)> {
-        match agent {
-            "DB_ADMIN" => Ok((0, 5)),
-            "BACKEND_DEV" => Ok((1, 6)),
-            "TESTER" => Ok((2, 7)),
-            _ => Err("unknown API participant".into()),
-        }
+    let role = |name: &str| -> Result<u64> {
+        compiled["roles"][name]
+            .as_u64()
+            .filter(|n| *n <= 255)
+            .ok_or_else(|| format!("compiled role {name}").into())
     };
-    let mut journal = crate::journal::read(records, &labels, actors)?;
+    let service_fd = u8::try_from(compiled["service_fd"].as_u64().ok_or("operation fd")?)?;
+    let outcome_fd = u8::try_from(compiled["outcome_fd"].as_u64().ok_or("outcome fd")?)?;
     let dynamic = crate::projection::check_dynamic(projection, records)?;
+    let mut journal = journal::read(records, &labels, actors)?;
     let receipts = journal.bind_receives(&dynamic)?;
-    let crate::journal::Journal {
-        frames,
-        calls,
-        score,
-    } = journal;
-    if frames.values().any(|frame| frame.identity["session"] != 28)
-        || calls.len() != 3
-        || score["complete"] != passes
-        || score["violations"] != json!([])
-        || score["events"].as_array().ok_or("score events")?.len() != 3
-    {
-        return Err("incomplete API effect or score evidence".into());
-    }
-    let mut observed = Vec::new();
-    for (&id, frame) in &frames {
-        observed.push((frame.sent, 0, false, frame));
-        observed.push((
-            frame.received()?,
-            receipts[&id]["receive_commit"]["ordinal"]
-                .as_u64()
-                .ok_or("receive ordinal")?,
-            true,
-            frame,
-        ));
-    }
-    observed.sort_by_key(|(at, ordinal, _, _)| (*at, *ordinal));
-    let mut notification = BTreeMap::<u64, (usize, Value)>::new();
-    let mut delivered = BTreeMap::new();
-    let mut open_sent = BTreeMap::new();
-    let mut first_reply = BTreeMap::new();
-    let mut pending_read = BTreeSet::new();
-    let mut read_bytes = BTreeMap::<u64, Vec<u8>>::new();
-    let mut complete_reads = BTreeMap::<u64, usize>::new();
-    for (at, _, received, frame) in observed {
-        let source = frame.identity["source"].as_u64().ok_or("source")?;
-        let target = frame.identity["target"].as_u64().ok_or("target")?;
-        let bytes = &frame.bytes;
-        if !received {
-            if matches!((source, target), (13, 11) | (14, 12)) {
-                open_sent.entry(target).or_insert(at);
+    let frames = &journal.frames;
+    let mut effects = BTreeMap::new();
+    let mut closes = BTreeSet::new();
+    let mut returned = BTreeSet::new();
+    let mut resource_requests = 0;
+    let mut resource_returns = 0;
+    let mut result_reads = 0;
+    let mut rejections = 0;
+    for (agent, file_name, controller_name, vm_name, resource) in [
+        (
+            "DB_ADMIN",
+            "ADMIN_FILE",
+            "ADMIN_CLOSE",
+            "ADMIN_VM",
+            Some(("DATABASE", "DATABASE_RESOURCE", 18, 20, 21)),
+        ),
+        (
+            "BACKEND_DEV",
+            "BACKEND_FILE",
+            "BACKEND_CLOSE",
+            "BACKEND_VM",
+            None,
+        ),
+        (
+            "TESTER",
+            "TESTER_FILE",
+            "TESTER_CLOSE",
+            "TESTER_VM",
+            Some(("TEST_ENV", "TEST_RESOURCE", 19, 22, 23)),
+        ),
+    ] {
+        let owner = role(agent)?;
+        let file = role(file_name)?;
+        let controller = role(controller_name)?;
+        let vm = role(vm_name)?;
+        let actor = journal::one(actors.iter().filter(|actor| actor["agent"] == agent))?;
+        let original = journal::one(actor["calls"].as_array().ok_or("original calls")?.iter())?;
+        let tool = original["tool"].as_str().ok_or("original tool")?;
+        let (&call_id, call) = journal::one(
+            journal
+                .calls
+                .iter()
+                .filter(|(_, call)| call.request["agent"] == agent),
+        )?;
+        let (result_at, result) = call.result()?;
+        if call.tool()? != tool
+            || call.request["arguments"] != original["arguments"]
+            || result["tool_name"] != tool
+            || result["success"] != (agent != "TESTER" || depth == 0)
+        {
+            return Err("actual API call differs from the original assignment".into());
+        }
+        let (&authority_id, _) = journal::one(
+            frames
+                .iter()
+                .filter(|(_, frame)| frame.direction(owner, file) && frame.logical_label == 165),
+        )?;
+        if receipts[&authority_id]["receive_commit"]["actor"] != vm {
+            return Err("actual close authority did not reach its guest".into());
+        }
+        let exit = journal::one(
+            frames
+                .values()
+                .filter(|f| f.direction(file, owner) && f.logical_label == 241),
+        )?;
+        if exit.bytes != 0i32.to_be_bytes() {
+            return Err("file owner received failed exit".into());
+        }
+        journal::one(frames.values().filter(|f| {
+            f.direction(vm, owner)
+                && f.logical_label == 10
+                && f.bytes.first().copied().map(u64::from) == Some(file)
+        }))?
+        .received()?;
+        returned.insert(file);
+
+        let mut requests = frames
+            .iter()
+            .filter(|(_, frame)| {
+                (frame.direction(file, owner)
+                    && matches!(
+                        frame.logical_label,
+                        protocol::LABEL_WASI_PATH_OPEN
+                            | protocol::LABEL_WASI_FD_WRITE_OBJECT
+                            | protocol::LABEL_WASI_FD_READ
+                            | protocol::LABEL_WASI_FD_CLOSE
+                    ))
+                    || (frame.direction(file, controller)
+                        && frame.logical_label == protocol::LABEL_WASI_FD_CLOSE_OBJECT)
+            })
+            .map(|(&id, frame)| (frame.received, id, frame))
+            .collect::<Vec<_>>();
+        let mut replies = frames
+            .iter()
+            .filter(|(_, frame)| {
+                (frame.direction(owner, file)
+                    && matches!(
+                        frame.logical_label,
+                        protocol::LABEL_WASI_PATH_OPEN_RET
+                            | protocol::LABEL_WASI_FD_WRITE_OBJECT_RET
+                            | protocol::LABEL_WASI_FD_READ_RET
+                            | protocol::LABEL_WASI_FD_CLOSE_RET
+                    ))
+                    || (frame.direction(controller, file)
+                        && matches!(
+                            frame.logical_label,
+                            protocol::LABEL_WASI_FD_CLOSE_OBJECT_RET
+                                | protocol::LABEL_WASI_FD_CLOSE_REJECTED
+                        ))
+            })
+            .map(|(&id, frame)| (frame.received, id, frame))
+            .collect::<Vec<_>>();
+        requests.sort_by_key(|&(at, _, _)| at);
+        replies.sort_by_key(|&(at, _, _)| at);
+        if requests.len() != replies.len() {
+            return Err("unpaired operation-file requests and replies".into());
+        }
+        let mut bytes = Vec::new();
+        let mut offset = 0usize;
+        let mut flags = 0u16;
+        for ((_, request_id, request), (_, reply_id, reply)) in requests.into_iter().zip(replies) {
+            if receipts[&request_id]["send_actor"] != vm
+                || receipts[&request_id]["receive_commit"]["actor"] != owner
+                || receipts[&reply_id]["send_actor"] != owner
+                || receipts[&reply_id]["receive_commit"]["actor"] != vm
+            {
+                return Err("operation file crossed a physical participant boundary".into());
             }
-            if matches!((source, target), (11, 13) | (12, 14)) {
-                first_reply.entry(source).or_insert(at);
-                if pending_read.remove(&source) {
-                    if bytes.len() < 4
-                        || usize::from(bytes[3]) != bytes.len() - 4
-                        || bytes[0] != OUTCOME_FD
-                        || bytes[1..3] != [0, 0]
-                    {
-                        return Err("invalid actual outcome read".into());
-                    }
-                    let expected = &notification.get(&source).ok_or("read without outcome")?.1;
-                    let canonical = serde_json::to_vec(expected)?;
-                    let current = read_bytes.entry(source).or_default();
-                    current.extend_from_slice(&bytes[4..]);
-                    if !canonical.starts_with(current) {
-                        return Err("outcome bytes differ from actual notification".into());
-                    }
-                    if *current == canonical {
-                        *complete_reads.entry(source).or_default() += 1;
-                        current.clear();
+            match (request.logical_label, reply.logical_label) {
+                (protocol::LABEL_WASI_PATH_OPEN, protocol::LABEL_WASI_PATH_OPEN_RET) => {
+                    validate::<protocol::PathOpenReq>(request)?;
+                    validate::<protocol::PathOpenedRet>(reply)?;
+                    if reply.bytes[1..3] == [0, 0] {
+                        if reply.bytes[0] != service_fd
+                            || request.bytes[0] != 3
+                            || request.bytes[14..] != *format!("service/{tool}").as_bytes()
+                        {
+                            return Err("operation open names another object".into());
+                        }
+                        if u16::from_be_bytes(request.bytes[9..11].try_into()?) & 8 != 0 {
+                            bytes.clear();
+                        }
+                        flags = u16::from_be_bytes(request.bytes[11..13].try_into()?);
+                        offset = 0;
                     }
                 }
+                (
+                    protocol::LABEL_WASI_FD_WRITE_OBJECT,
+                    protocol::LABEL_WASI_FD_WRITE_OBJECT_RET,
+                ) => {
+                    validate::<protocol::FdWriteObjectReq>(request)?;
+                    validate::<protocol::FdWriteDoneRet>(reply)?;
+                    let count = usize::from(reply.bytes[1]);
+                    let errno = u16::from_be_bytes(reply.bytes[2..4].try_into()?);
+                    if request.bytes[0] != service_fd
+                        || reply.bytes[0] != service_fd
+                        || count > request.bytes.len() - 2
+                        || (errno != 0 && count != 0)
+                    {
+                        return Err("operation write fd or accepted prefix differs".into());
+                    }
+                    if errno == 0 {
+                        let start = if flags & 1 != 0 { bytes.len() } else { offset };
+                        let end = start.checked_add(count).ok_or("file offset overflow")?;
+                        bytes.resize(bytes.len().max(end), 0);
+                        bytes[start..end].copy_from_slice(&request.bytes[2..2 + count]);
+                        offset = end;
+                    }
+                }
+                (protocol::LABEL_WASI_FD_READ, protocol::LABEL_WASI_FD_READ_RET) => {
+                    validate::<protocol::FdReadReq>(request)?;
+                    validate::<protocol::FdReadDoneRet>(reply)?;
+                    let end = offset
+                        .saturating_add(usize::from(request.bytes[1]))
+                        .min(bytes.len());
+                    if request.bytes[0] != service_fd
+                        || reply.bytes[0] != service_fd
+                        || reply.bytes[1..3] != [0, 0]
+                        || bytes.get(offset..end) != Some(&reply.bytes[4..])
+                    {
+                        return Err("operation read differs from actual file data".into());
+                    }
+                    if bytes == serde_json::to_vec(result)? {
+                        result_reads += 1;
+                    }
+                    offset = end;
+                }
+                (protocol::LABEL_WASI_FD_CLOSE, protocol::LABEL_WASI_FD_CLOSE_RET) => {
+                    validate::<protocol::FdCloseReq>(request)?;
+                    validate::<protocol::FdClosedRet>(reply)?;
+                    if request.bytes != [service_fd] || reply.bytes != [service_fd, 0, 0] {
+                        return Err("ordinary close fd/result mismatch".into());
+                    }
+                }
+                (protocol::LABEL_WASI_FD_CLOSE_OBJECT, protocol::LABEL_WASI_FD_CLOSE_REJECTED) => {
+                    validate::<protocol::FdCloseObjectReq>(request)?;
+                    validate::<protocol::FdCloseRejectedRet>(reply)?;
+                    if request.bytes != [service_fd]
+                        || reply.bytes != [service_fd, 0, 28]
+                        || serde_json::from_slice::<Value>(&bytes)
+                            .is_ok_and(|v| v == original["arguments"])
+                        || request.received()? < call.emitted && call.emitted < reply.received()?
+                    {
+                        return Err(
+                            "rejected close admitted an effect or rejected valid input".into()
+                        );
+                    }
+                    rejections += 1;
+                }
+                (
+                    protocol::LABEL_WASI_FD_CLOSE_OBJECT,
+                    protocol::LABEL_WASI_FD_CLOSE_OBJECT_RET,
+                ) => {
+                    validate::<protocol::FdCloseObjectReq>(request)?;
+                    validate::<protocol::FdClosedRet>(reply)?;
+                    if request.bytes != [service_fd]
+                        || reply.bytes != [service_fd, 0, 0]
+                        || serde_json::from_slice::<Value>(&bytes)? != call.request["arguments"]
+                        || request.received()? >= call.emitted
+                        || result_at >= reply.sent
+                        || effects
+                            .insert(call_id, (request_id, authority_id))
+                            .is_some()
+                    {
+                        return Err("accepted file bytes, effect or actual reply differ".into());
+                    }
+                    closes.insert(request_id);
+                    bytes = serde_json::to_vec(result)?;
+                    offset = 0;
+                }
+                _ => return Err("operation file request/reply types differ".into()),
             }
-        } else {
-            if matches!((source, target), (0, 15) | (1, 6) | (2, 16))
-                && let Ok(value) = serde_json::from_slice::<Value>(bytes)
-                && value["tool_name"].is_string()
-                && delivered.insert(source, value).is_some()
+        }
+        if let Some((resource_owner, resource_name, intent_label, request_label, reply_label)) =
+            resource
+        {
+            let resource_owner = role(resource_owner)?;
+            let resource = role(resource_name)?;
+            let intent = journal::one(frames.values().filter(|f| {
+                f.direction(controller, resource_owner) && f.logical_label == intent_label
+            }))?;
+            let (&request_id, request) = journal::one(frames.iter().filter(|(_, f)| {
+                f.direction(resource, controller) && f.logical_label == request_label
+            }))?;
+            let (&reply_id, reply) = journal::one(frames.iter().filter(|(_, f)| {
+                f.direction(resource, resource_owner) && f.logical_label == reply_label
+            }))?;
+            if intent.value()? != call.request["arguments"]
+                || request.value()? != call.request["arguments"]
+                || request.received()? >= call.emitted
+                || reply.value()? != *result
+                || reply.sent <= result_at
+                || receipts[&request_id]["send_actor"] != resource_owner
+                || receipts[&request_id]["receive_commit"]["actor"] != owner
+                || receipts[&reply_id]["send_actor"] != owner
+                || receipts[&reply_id]["receive_commit"]["actor"] != resource_owner
             {
-                return Err("duplicate delivered API result".into());
+                return Err("physical resource request/effect/result differs".into());
             }
-            if source == 2
-                && [11, 12].contains(&target)
-                && notification.insert(target, (at, frame.value()?)).is_some()
-            {
-                return Err("duplicate outcome notification".into());
-            }
-            if matches!((source, target), (13, 11) | (14, 12))
-                && bytes.len() == 2
-                && (bytes[0] != OUTCOME_FD || !pending_read.insert(target))
-            {
-                return Err("overlapping or invalid outcome read".into());
-            }
+            journal::one(frames.values().filter(|f| {
+                f.direction(controller, resource_owner)
+                    && f.logical_label == 10
+                    && f.bytes.first().copied().map(u64::from) == Some(resource)
+            }))?
+            .received()?;
+            resource_requests += 1;
+            resource_returns += 1;
         }
     }
-    let mut effects = BTreeMap::new();
-    let mut completed = BTreeMap::new();
-    let mut used_closes = BTreeSet::new();
-    let mut responses = BTreeMap::new();
-    for call in calls.values() {
-        let agent = call.request["agent"].as_str().ok_or("effect actor")?;
-        let (role, vm) = binding(agent)?;
-        let original = crate::journal::one(actors.iter().filter(|actor| actor["agent"] == agent))?;
-        let tool = call.tool()?;
-        if original["calls"][0]["tool"] != tool
-            || original["calls"][0]["arguments"] != call.request["arguments"]
-            || effects.insert(tool, call.emitted).is_some()
+    if effects.len() != 3
+        || effects.len() != journal.calls.len()
+        || closes.len() != 3
+        || returned.len() != 3
+    {
+        return Err("missing or unmatched API effect/close/return".into());
+    }
+    let (_, test) = journal::one(
+        journal
+            .calls
+            .iter()
+            .filter(|(_, call)| call.request["agent"] == "TESTER"),
+    )?;
+    let (finished, test_result) = test.result()?;
+    let mut complete_reads = BTreeMap::new();
+    let mut early_reads = 0;
+    let tester_controller = role("TESTER_CLOSE")?;
+    for (owner_name, file_name, read_name, vm_name, labels) in [
+        (
+            "ADMIN_OUTCOME",
+            "ADMIN_OUTCOME_FILE",
+            "ADMIN_OUTCOME_READ",
+            "ADMIN_VM",
+            [50, 60],
+        ),
+        (
+            "BACKEND_OUTCOME",
+            "BACKEND_OUTCOME_FILE",
+            "BACKEND_OUTCOME_READ",
+            "BACKEND_VM",
+            [51, 61],
+        ),
+    ] {
+        let owner = role(owner_name)?;
+        let file = role(file_name)?;
+        let read = role(read_name)?;
+        let vm = role(vm_name)?;
+        let notice = journal::one(frames.values().filter(|f| {
+            f.direction(tester_controller, owner) && labels.contains(&f.logical_label)
+        }))?;
+        if notice.value()? != *test_result
+            || notice.sent <= finished
+            || notice.logical_label != labels[usize::from(depth != 0)]
         {
-            return Err("API effect differs from assignment".into());
+            return Err("outcome notification differs from the actual test result".into());
         }
-        let close = frames
+        let mut requests = frames
             .values()
             .filter(|f| {
-                f.direction(vm, role)
-                    && f.bytes == [4]
-                    && f.received.is_some_and(|at| at < call.emitted)
+                (f.direction(file, owner) && f.logical_label == protocol::LABEL_WASI_PATH_OPEN)
+                    || (f.direction(file, read) && f.logical_label == protocol::LABEL_WASI_FD_READ)
             })
-            .max_by_key(|f| f.received)
-            .ok_or("effect without committed close")?;
-        if !used_closes.insert(close.sent) {
-            return Err("close reused for another API effect".into());
+            .collect::<Vec<_>>();
+        let mut replies = frames
+            .values()
+            .filter(|f| {
+                (f.direction(owner, file) && f.logical_label == protocol::LABEL_WASI_PATH_OPEN_RET)
+                    || (f.direction(read, file)
+                        && f.logical_label == protocol::LABEL_WASI_FD_READ_RET)
+            })
+            .collect::<Vec<_>>();
+        requests.sort_by_key(|f| f.received);
+        replies.sort_by_key(|f| f.received);
+        if requests.len() != replies.len() {
+            return Err("unpaired outcome file I/O".into());
         }
-        let (at, result) = call.result()?;
-        if result["success"] != (tool != "run_integration_tests" || passes)
-            || delivered.remove(&role).as_ref() != Some(result)
-            || responses.insert(agent, (call, result)).is_some()
-        {
-            return Err("actual API result mismatch".into());
+        let canonical = serde_json::to_vec(test_result)?;
+        let mut offset = 0usize;
+        let mut complete = 0;
+        for (request, reply) in requests.into_iter().zip(replies) {
+            if request.logical_label == protocol::LABEL_WASI_PATH_OPEN {
+                validate::<protocol::PathOpenReq>(request)?;
+                validate::<protocol::PathOpenedRet>(reply)?;
+                if reply.bytes[1..3] != [0, 0]
+                    || reply.bytes[0] != outcome_fd
+                    || request.bytes[14..] != *b"service/outcome"
+                {
+                    return Err("outcome open fd/path mismatch".into());
+                }
+                offset = 0;
+            } else {
+                validate::<protocol::FdReadReq>(request)?;
+                validate::<protocol::FdReadDoneRet>(reply)?;
+                let end = offset
+                    .saturating_add(usize::from(request.bytes[1]))
+                    .min(canonical.len());
+                if request.bytes[0] != outcome_fd
+                    || reply.bytes[0] != outcome_fd
+                    || reply.bytes[1..3] != [0, 0]
+                    || reply.sent <= finished
+                    || canonical.get(offset..end) != Some(&reply.bytes[4..])
+                {
+                    return Err("outcome bytes differ from actual test result".into());
+                }
+                if request.sent < finished {
+                    early_reads += 1;
+                }
+                if offset < canonical.len() && end == canonical.len() {
+                    complete += 1;
+                }
+                offset = end;
+            }
         }
-        completed.insert(tool, at);
-        let event = crate::journal::one(
-            score["events"]
-                .as_array()
-                .ok_or("score events")?
-                .iter()
-                .filter(|event| event["agent"] == agent && event["tool"] == tool),
-        )?;
+        if complete == 0 {
+            return Err("actual outcome was never completely read".into());
+        }
+        complete_reads.insert(owner, complete);
+        journal::one(frames.values().filter(|f| {
+            f.direction(vm, owner)
+                && f.logical_label == 10
+                && f.bytes.first().copied().map(u64::from) == Some(file)
+        }))?
+        .received()?;
+    }
+    let events = journal.score["events"]
+        .as_array()
+        .ok_or("actual API score events")?;
+    if events.len() != 3
+        || journal.score["complete"] != (depth == 0)
+        || journal.score["violations"] != json!([])
+    {
+        return Err("API task score differs from actual terminal result".into());
+    }
+    for call in journal.calls.values() {
+        let (_, result) = call.result()?;
+        let event = journal::one(events.iter().filter(|event| {
+            event["agent"] == call.request["agent"] && event["tool"] == call.request["tool"]
+        }))?;
         if event["args"] != call.request["arguments"]
             || event["success"] != result["success"]
             || event["result"] != result["data"]
         {
-            return Err("API score differs from actual effect".into());
+            return Err("API task score differs from the actual effect".into());
         }
     }
-    let effect = |tool: &str| effects.get(tool).copied().ok_or("missing effect");
-    let done = |tool: &str| completed.get(tool).copied().ok_or("missing completion");
-    if done("migrate_schema")? >= effect("implement_backend")?
-        || done("implement_backend")? >= effect("run_integration_tests")?
+    let mut ordered = journal.calls.values().collect::<Vec<_>>();
+    ordered.sort_by_key(|call| call.emitted);
+    if ordered
+        .iter()
+        .map(|call| call.tool())
+        .collect::<Result<Vec<_>>>()?
+        != [
+            "migrate_schema",
+            "implement_backend",
+            "run_integration_tests",
+        ]
+        || ordered
+            .windows(2)
+            .any(|pair| pair[0].result().is_ok_and(|(at, _)| at >= pair[1].emitted))
     {
-        return Err("actual API data dependency differs".into());
-    }
-    for (resource, agent, service) in [(15, "DB_ADMIN", 0), (16, "TESTER", 2)] {
-        let (call, result) = responses.get(agent).ok_or("missing API operation")?;
-        let request =
-            crate::journal::one(frames.values().filter(|f| f.direction(resource, service)))?;
-        let reply =
-            crate::journal::one(frames.values().filter(|f| f.direction(service, resource)))?;
-        if request.value()? != call.request["arguments"]
-            || reply.value()? != **result
-            || request.received()? >= call.emitted
-            || call.result()?.0 >= reply.sent
-        {
-            return Err("actual resource request/effect/result differs".into());
-        }
-    }
-    let test_result = responses.get("TESTER").ok_or("tester result")?.1;
-    let finished = done("run_integration_tests")?;
-    for owner in [11, 12] {
-        let (notified, value) = notification
-            .get(&owner)
-            .ok_or("missing outcome notification")?;
-        if value != test_result
-            || *notified <= finished
-            || first_reply.get(&owner).is_none_or(|at| at <= notified)
-            || complete_reads.get(&owner).is_none_or(|n| *n < 1)
-        {
-            return Err("outcome file differs from actual test result".into());
-        }
-        if fixture["require_early_result_open"] == true
-            && open_sent.get(&owner).is_none_or(|at| *at >= finished)
-        {
-            return Err("early-read stimulus was not exercised".into());
-        }
-    }
-    if responses.len() != 3
-        || !delivered.is_empty()
-        || !pending_read.is_empty()
-        || read_bytes.values().any(|v| !v.is_empty())
-    {
-        return Err("incomplete API result delivery".into());
+        return Err("actual schema/backend/test data causality differs".into());
     }
     Ok(
-        json!({"task":"8E","depth":depth,"kind":"actual_wasi_resource_delegation","model_calls":null,
-        "scored_benchmark":false,"status":"passed","participants":3,"domain_calls":calls.len(),
-        "actual_resource_endpoint_requests":2,
-        "actual_resource_endpoint_returns":frames.values().filter(|f|matches!((f.identity["source"].as_u64(),f.identity["target"].as_u64()),(Some(5),Some(3))|(Some(7),Some(4)))&&f.bytes.len()==3).count(),
-        "simulator_complete":score["complete"],"expected_terminal_test_failure":!passes,
-        "carrier_frames":frames.len(),"result_receipts":2,"read_dependency_observed":true,
-        "result_opens":open_sent.len(),"early_result_opens":open_sent.values().filter(|at|**at<finished).count(),
-        "complete_result_reads":complete_reads,"violations":0,"guest_exits":actors.len(),
-        "original_test_delays":fixture["test_delays"],"dynamic_protocol":dynamic}),
+        json!({"task":"8E","depth":depth,"status":"passed","participants":3,
+        "domain_calls":journal.calls.len(),"actual_resource_endpoint_requests":resource_requests,
+        "actual_resource_endpoint_returns":resource_returns,"complete_result_reads":complete_reads,
+        "early_result_reads":early_reads,"observed_operation_result_reads":result_reads,
+        "rejected_object_closes":rejections,"effect_receipts":effects,"violations":0,
+        "simulator_complete":journal.score["complete"],"expected_terminal_test_failure":depth!=0,
+        "dynamic_protocol":dynamic}),
     )
 }
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
@@ -319,8 +558,8 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                         "missing_close" => {
                             m["type"] == "protocol_frame"
                                 && m["action"] == "receive"
-                                && m["source"] == 5
-                                && m["target"] == 0
+                                && m["source"] == 17
+                                && m["target"] == 20
                                 && m["payload"] == json!([4])
                         }
                         "altered_frame" => {
@@ -331,13 +570,13 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                         "missing_notification" => {
                             m["type"] == "protocol_frame"
                                 && m["action"] == "receive"
-                                && m["source"] == 2
+                                && m["source"] == 22
                                 && m["target"] == 11
                         }
                         "missing_read" => {
                             m["type"] == "protocol_frame"
                                 && m["action"] == "send"
-                                && m["source"] == 11
+                                && m["source"] == 23
                                 && m["target"] == 13
                                 && m["payload"].as_array().is_some_and(|b| b.len() > 5)
                         }
@@ -347,24 +586,24 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                             m["type"] == "protocol_frame"
                                 && m["action"] == "send"
                                 && m["source"] == 3
-                                && m["target"] == 5
+                                && m["target"] == 20
                         }
                         "missing_resource_request" | "forged_resource_request" => {
                             m["type"] == "protocol_frame"
                                 && m["action"] == "send"
                                 && m["source"] == 15
-                                && m["target"] == 0
+                                && m["target"] == 20
                         }
                         "forged_resource_result" => {
                             m["type"] == "protocol_frame"
                                 && m["action"] == "send"
-                                && m["source"] == 0
-                                && m["target"] == 15
+                                && m["source"] == 15
+                                && m["target"] == 3
                         }
                         "missing_resource_return" => {
                             m["type"] == "protocol_frame"
                                 && m["action"] == "send"
-                                && m["source"] == 5
+                                && m["source"] == 20
                                 && m["target"] == 3
                         }
                         _ => false,

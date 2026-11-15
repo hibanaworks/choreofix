@@ -1,12 +1,7 @@
-//! Actual recipe input bytes and result data, never a progress/owner table.
+//! Exact recipe inputs and actual results; no protocol decisions or progress data.
 use crate::shell::{ShellError, ShellResult};
-use hibana::runtime::{
-    resolver::{DecisionArm, ResolverError},
-    wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload},
-};
+use hibana::runtime::wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload};
 use serde_json::{Value, json};
-use std::cell::Cell;
-
 pub const CHEFS: [&str; 3] = ["CHEF_A", "CHEF_B", "CHEF_C"];
 pub const DISHES: [&str; 3] = ["appetizer", "main_course", "dessert"];
 pub const INGREDIENTS: [&str; 3] = ["sauce", "garnish", "glaze"];
@@ -24,21 +19,10 @@ pub fn expected(index: u8) -> Option<Value> {
 #[derive(Debug)]
 pub struct Arguments<const INDEX: u8>(Vec<u8>);
 impl<const INDEX: u8> Arguments<INDEX> {
-    pub fn from_close(
-        file: &crate::shell::imp::file_wire::ClosedFile,
-        path: &[u8],
-    ) -> ShellResult<Self> {
-        if file.completion.0.errno() != 0 || file.path != path {
-            return Err(ShellError::message(
-                "service file differs from the recipe request",
-            ));
-        }
-        Self::from_bytes(&file.bytes)
-    }
+    #[cfg(test)]
     pub fn from_bytes(bytes: &[u8]) -> ShellResult<Self> {
-        Self::validate_payload(Payload::new(bytes)).map_err(|_| {
-            ShellError::message("request differs from the assigned recipe operation")
-        })?;
+        Self::validate_payload(Payload::new(bytes))
+            .map_err(|_| ShellError::message("request differs from the assigned recipe"))?;
         Ok(Self(bytes.to_vec()))
     }
     pub fn value(&self) -> Value {
@@ -75,23 +59,6 @@ pub fn encode(value: &Value) -> ShellResult<Vec<u8>> {
 pub fn decode(bytes: &[u8]) -> ShellResult<Value> {
     serde_json::from_slice(bytes).map_err(|e| ShellError::message(e.to_string()))
 }
-pub fn admitted<const INDEX: u8>(arguments: &Arguments<INDEX>) -> Value {
-    json!({"chef":CHEFS[usize::from(INDEX % 3)],"arguments":arguments.value()})
-}
-pub fn chef(input: &Value) -> ShellResult<&'static str> {
-    CHEFS
-        .into_iter()
-        .find(|chef| input["chef"] == *chef)
-        .ok_or_else(|| ShellError::message("actual chef missing"))
-}
-pub fn arguments(admitted: &Value, received: Value) -> ShellResult<Value> {
-    if received != admitted["arguments"] {
-        return Err(ShellError::message(
-            "resource request differs from the actual admitted request",
-        ));
-    }
-    Ok(received)
-}
 pub fn completed(tool: &str, chef: &str, arguments: &Value, result: &Value) -> ShellResult<()> {
     let status = match tool {
         "prepare_base_dish" => "base dish prepared",
@@ -117,40 +84,4 @@ pub fn completed(tool: &str, chef: &str, arguments: &Value, result: &Value) -> S
         ));
     }
     Ok(())
-}
-pub fn first_a(input: &Cell<Value>) -> Result<DecisionArm, ResolverError> {
-    let value = input.take();
-    let arm = match value["chef"].as_str() {
-        Some("CHEF_A") => Ok(DecisionArm::Left),
-        Some("CHEF_B" | "CHEF_C") => Ok(DecisionArm::Right),
-        _ => Err(ResolverError::reject()),
-    };
-    input.set(value);
-    arm
-}
-pub fn first_b(input: &Cell<Value>) -> Result<DecisionArm, ResolverError> {
-    let value = input.take();
-    let arm = match value["chef"].as_str() {
-        Some("CHEF_B") => Ok(DecisionArm::Left),
-        Some("CHEF_C") => Ok(DecisionArm::Right),
-        _ => Err(ResolverError::reject()),
-    };
-    input.set(value);
-    arm
-}
-pub fn next(input: &(&Cell<Value>, &Cell<Value>)) -> Result<DecisionArm, ResolverError> {
-    let first = input.0.take();
-    let second = input.1.take();
-    let arm = match (first["chef"].as_str(), second["chef"].as_str()) {
-        (Some("CHEF_A"), Some("CHEF_B"))
-        | (Some("CHEF_B"), Some("CHEF_A"))
-        | (Some("CHEF_C"), Some("CHEF_A")) => Ok(DecisionArm::Left),
-        (Some("CHEF_A" | "CHEF_B"), Some("CHEF_C")) | (Some("CHEF_C"), Some("CHEF_B")) => {
-            Ok(DecisionArm::Right)
-        }
-        _ => Err(ResolverError::reject()),
-    };
-    input.0.set(first);
-    input.1.set(second);
-    arm
 }

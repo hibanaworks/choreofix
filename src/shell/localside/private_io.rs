@@ -46,14 +46,15 @@ pub async fn run<const ROLE: u8>(
                         io.input.extend_from_slice(command.as_bytes());
                         io.offsets[0] = 0;
                     }
-                    let index = read.fd() as usize;
-                    let offset = io.offsets.get(index).copied().unwrap_or(0);
-                    let (response, next) = io
-                        .objects()
-                        .choreofs()
-                        .fd_read(received)
-                        .read_from(offset)?;
-                    if let Some(offset) = io.offsets.get_mut(index) {
+                    let objects = io.objects();
+                    let operation = objects.choreofs().fd_read(received);
+                    let index = operation.object().map(|ObjectId(index)| index as usize);
+                    let offset = index
+                        .and_then(|index| io.offsets.get(index))
+                        .copied()
+                        .unwrap_or(0);
+                    let (response, next) = operation.read_from(offset)?;
+                    if let Some(offset) = index.and_then(|index| io.offsets.get_mut(index)) {
                         *offset = next;
                     }
                     response
@@ -99,11 +100,12 @@ pub async fn run<const ROLE: u8>(
                         None
                     };
                     let open = io.objects().choreofs().path_open(received);
-                    if let Some(fd) = open.fd() {
-                        let fd = fd as usize;
+                    if open.is_open() {
+                        let ObjectId(object) = open.object().expect("opened private object");
+                        let index = object as usize;
                         if request.open_flags() & 8 != 0 {
                             match open.object() {
-                                Some(ObjectId(6..=13)) => io.work[fd - 6].clear(),
+                                Some(ObjectId(6..=13)) => io.work[index - 6].clear(),
                                 _ => {
                                     return Err(ShellError::message(
                                         "truncate is only supported on work files",
@@ -111,8 +113,8 @@ pub async fn run<const ROLE: u8>(
                                 }
                             }
                         }
-                        io.offsets[fd] = 0;
-                        io.fd_flags[fd] = request.fd_flags();
+                        io.offsets[index] = 0;
+                        io.fd_flags[index] = request.fd_flags();
                     }
                     if let Some(index) = created {
                         if !open.is_open() {

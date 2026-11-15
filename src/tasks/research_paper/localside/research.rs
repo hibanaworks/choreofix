@@ -1,11 +1,11 @@
 //! One research participant; independent authors use disjoint projected fragments.
 use super::super::{global::*, imp};
 use crate::shell::{ShellError, ShellResult, imp::service::Domain};
-use hibana::ParallelEndpoint;
+use hibana::EndpointBorrow;
 
 #[hibana_runtime::scope]
-pub async fn run<const AUTHOR: u8, C: ChapterMessages<AUTHOR>>(
-    endpoint: &mut ParallelEndpoint<RESEARCH_SERVICE>,
+pub async fn run<'borrow, 'run, const AUTHOR: u8, C: ChapterMessages<AUTHOR>>(
+    endpoint: &mut EndpointBorrow<'borrow, 'run, RESEARCH_SERVICE>,
     domain: &impl Domain,
 ) -> ShellResult<()> {
     let arguments = endpoint.recv::<C::Research>().await?.into_value();

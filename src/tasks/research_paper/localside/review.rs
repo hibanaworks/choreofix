@@ -1,12 +1,12 @@
 //! Receive a real chapter authority before each actual factual/editorial effect.
 use super::super::{global::*, imp};
 use crate::shell::{ShellError, ShellResult, imp::service::Domain};
-use hibana::{ParallelEndpoint, g::Message};
+use hibana::{EndpointBorrow, g::Message};
 use serde_json::Value;
 
 #[hibana_runtime::scope]
-pub async fn run<const AUTHOR: u8, const SECTION: u8, C: ChapterMessages<AUTHOR>>(
-    endpoint: &mut ParallelEndpoint<REVIEW_SERVICE>,
+pub async fn run<'borrow, 'run, const AUTHOR: u8, const SECTION: u8, C: ChapterMessages<AUTHOR>>(
+    endpoint: &mut EndpointBorrow<'borrow, 'run, REVIEW_SERVICE>,
     domain: &impl Domain,
 ) -> ShellResult<(Value, Value)> {
     // This owns the actual latest fact-check reply, not a separate phase flag.

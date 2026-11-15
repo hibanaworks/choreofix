@@ -1,6 +1,8 @@
 //! WASI private I/O shared by the task-specific global protocols.
-use hibana::{g, runtime::program::Projectable};
+use hibana::{Endpoint, g, runtime::program::Projectable};
 use hibana_wasip1_runtime::protocol;
+pub type Loan<'run, const ROLE: u8> = g::Msg<47, Endpoint<'run, ROLE>>;
+pub type FileExit = g::Msg<241, i32>;
 pub type Exit = g::Msg<240, i32>;
 
 pub fn private_io<const VM: u8, const ANSWER: u8>() -> impl Projectable {
@@ -71,4 +73,53 @@ pub fn private_io<const VM: u8, const ANSWER: u8>() -> impl Projectable {
         ),
     );
     io.roll()
+}
+
+pub fn file_metadata<const FILE: u8, const DATA: u8>() -> impl Projectable + Copy {
+    g::route(
+        g::seq(
+            g::send::<FILE, DATA, protocol::FdPrestatGetReqMsg>(),
+            g::send::<DATA, FILE, protocol::FdPrestatGetRetMsg>(),
+        ),
+        g::route(
+            g::seq(
+                g::send::<FILE, DATA, protocol::FdPrestatDirNameReqMsg>(),
+                g::send::<DATA, FILE, protocol::FdPrestatDirNameRetMsg>(),
+            ),
+            g::route(
+                g::seq(
+                    g::send::<FILE, DATA, protocol::PathOpenReqMsg>(),
+                    g::send::<DATA, FILE, protocol::PathOpenRetMsg>(),
+                ),
+                g::route(
+                    g::seq(
+                        g::send::<FILE, DATA, protocol::FdWriteObjectReqMsg>(),
+                        g::send::<DATA, FILE, protocol::FdWriteObjectRetMsg>(),
+                    ),
+                    g::route(
+                        g::seq(
+                            g::send::<FILE, DATA, protocol::FdFdstatGetReqMsg>(),
+                            g::send::<DATA, FILE, protocol::FdFdstatGetRetMsg>(),
+                        ),
+                        g::route(
+                            g::seq(
+                                g::send::<FILE, DATA, protocol::FdFilestatGetReqMsg>(),
+                                g::send::<DATA, FILE, protocol::FdFilestatGetRetMsg>(),
+                            ),
+                            g::route(
+                                g::seq(
+                                    g::send::<FILE, DATA, protocol::PathFilestatGetReqMsg>(),
+                                    g::send::<DATA, FILE, protocol::PathFilestatGetRetMsg>(),
+                                ),
+                                g::seq(
+                                    g::send::<FILE, DATA, protocol::FdCloseReqMsg>(),
+                                    g::send::<DATA, FILE, protocol::FdCloseRetMsg>(),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
 }

@@ -1,9 +1,7 @@
 //! Decode evidence and delegate source interpretation to hibana-epf.
 use crate::evidence::Result;
 use hibana::runtime::tap::{self, TapEvent};
-use hibana_epf::{
-    Acceptance, AuditStorage, Capture, ExecutionStorage, Protocol, RecordId, RouteChoice, Unfold,
-};
+use hibana_epf::{Acceptance, AuditStorage, Capture, ExecutionStorage, Protocol, RecordId, Unfold};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -244,15 +242,6 @@ pub fn check(artifact: &Value, rows: &[Value]) -> Result<Value> {
     let mut reports = Vec::new();
     for session in sessions {
         let mut derivation = vec![Unfold::Source; capacity];
-        let mut choices = vec![
-            RouteChoice {
-                span: [0, 0],
-                right: false
-            };
-            protocol
-                .audit_choice_capacity(capacity)
-                .map_err(|e| format!("EPF choices: {e:?}"))?
-        ];
         let mut order = vec![
             RecordId {
                 producer: 0,
@@ -282,7 +271,6 @@ pub fn check(artifact: &Value, rows: &[Value]) -> Result<Value> {
                 &captures,
                 AuditStorage {
                     unfolding: &mut derivation,
-                    choices: &mut choices,
                     execution: ExecutionStorage {
                         session,
                         observed_producers: &observed_producers,

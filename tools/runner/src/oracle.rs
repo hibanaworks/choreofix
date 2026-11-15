@@ -201,7 +201,10 @@ impl Simulator {
                         .map(|entry| json_value(&dataclasses.call_method1("asdict", (entry?,))?))
                         .collect();
                     inputs.insert(key, json!(entries?));
-                } else if key == "_FORKS" {
+                } else if key == "_FORKS"
+                    || (task == "4E"
+                        && matches!(key.as_str(), "_API" | "_FEATURES" | "_TEST_SUITE"))
+                {
                     inputs.insert(key, json_value(&value)?);
                 }
             }
@@ -283,96 +286,7 @@ impl Simulator {
         std::thread::Builder::new()
             .name("original-environment".into())
             .spawn(move || {
-                // Test-only I/O withholding: requests have already crossed the
-                // real guest and Endpoint path. The gate cannot grant a step.
-                #[cfg(test)]
-                let mut commit_gate: Option<(
-                    std::collections::BTreeSet<String>,
-                    Vec<Request>,
-                )> = None;
                 while let Ok((message, reply)) = receive.recv() {
-                    #[cfg(test)]
-                    {
-                        if message["type"] == "hold_disjoint_commits" {
-                            let agents: Option<std::collections::BTreeSet<String>> =
-                                message["agents"].as_array().and_then(|values| {
-                                    values
-                                        .iter()
-                                        .map(|value| value.as_str().map(str::to_owned))
-                                        .collect()
-                                });
-                            let configured = match agents {
-                                Some(agents)
-                                    if commit_gate.is_none()
-                                        && agents.len() > 1
-                                        && message["agents"].as_array().map(Vec::len)
-                                            == Some(agents.len()) =>
-                                {
-                                    environment
-                                        .trace
-                                        .record("test_control", &message)
-                                        .map(|()| {
-                                            commit_gate = Some((agents, Vec::new()));
-                                            json!({"status":"configured"})
-                                        })
-                                }
-                                _ => Err("invalid or duplicate test commit gate".into()),
-                            };
-                            wire::respond(&reply, message["id"].clone(), configured)
-                                .expect("notify configured test I/O");
-                            continue;
-                        }
-                        if message["type"] == "execute"
-                            && message["tool"] == "commit_changes"
-                            && let Some((agents, held)) = &mut commit_gate
-                            && message["agent"]
-                                .as_str()
-                                .is_some_and(|a| agents.contains(a))
-                        {
-                            if held
-                                .iter()
-                                .any(|(prior, _)| prior["agent"] == message["agent"])
-                            {
-                                wire::respond(
-                                    &reply,
-                                    message["id"].clone(),
-                                    Err("duplicate held commit".into()),
-                                )
-                                .expect("notify duplicate test I/O");
-                                continue;
-                            }
-                            if let Err(error) = environment.trace.record(
-                                "test_control",
-                                &json!({"type":"commit_held","request":message}),
-                            ) {
-                                wire::respond(&reply, message["id"].clone(), Err(error))
-                                    .expect("notify failed test I/O");
-                                continue;
-                            }
-                            held.push((message, reply));
-                            if held.len() == agents.len() {
-                                let (agents, held) = commit_gate.take().expect("live test gate");
-                                if let Err(error) = environment.trace.record(
-                                    "test_control",
-                                    &json!({"type":"commits_released","agents":agents}),
-                                ) {
-                                    for (message, reply) in held {
-                                        wire::respond(
-                                            &reply,
-                                            message["id"].clone(),
-                                            Err(error.to_string().into()),
-                                        )
-                                        .expect("notify failed held I/O");
-                                    }
-                                    continue;
-                                }
-                                for (message, reply) in held {
-                                    environment.serve(message, reply);
-                                }
-                            }
-                            continue;
-                        }
-                    }
                     environment.serve(message, reply);
                 }
             })?;
@@ -404,9 +318,58 @@ impl Simulator {
         let result = self.call(json!({"type":"observed_events"})).await?;
         Ok(result.as_array().ok_or("upstream event list")?.clone())
     }
+
+    /// Explicit, unscored fixture timing. Production model trials cannot call
+    /// this API; it changes no arguments, resource requirements or scoring.
+    #[cfg(test)]
+    pub async fn set_test_delays(&self, profile: Value) -> Result<()> {
+        self.call(json!({"type":"test_delays","profile":profile}))
+            .await?;
+        Ok(())
+    }
 }
 
 impl Environment {
+    #[cfg(test)]
+    fn test_delays(&self, profile: &Value) -> Result<Value> {
+        let delays: std::collections::BTreeMap<String, [f64; 2]> =
+            serde_json::from_value(profile.clone())?;
+        if delays.is_empty()
+            || delays.values().any(|[low, high]| {
+                !low.is_finite() || !high.is_finite() || *low < 0.0 || high < low
+            })
+        {
+            return Err("invalid test delay profile".into());
+        }
+        if !self.observed_events()?.is_empty() {
+            return Err("fixture timing must be set before effects".into());
+        }
+        Python::attach(|py| -> Result<()> {
+            let callback = PyCFunction::new_closure(
+                py,
+                None,
+                None,
+                move |args, _kwargs| -> PyResult<(f64, f64)> {
+                    let tool: String = args.get_item(0)?.extract()?;
+                    let [low, high] = delays.get(&tool).ok_or_else(|| {
+                        pyo3::exceptions::PyValueError::new_err(
+                            "tool absent from explicit test profile",
+                        )
+                    })?;
+                    Ok((*low, *high))
+                },
+            )?;
+            self.simulator.bind(py).setattr("tool_delay", callback)?;
+            Ok(())
+        })?;
+        self.trace.record(
+            "simulator",
+            &json!({"type":"test_delays","profile":profile,
+            "scope":"unscored fixture timing; actual common-world effects and scoring unchanged"}),
+        )?;
+        Ok(json!({"configured":true}))
+    }
+
     fn serve(&self, message: Value, reply: Reply) {
         let id = message["id"].clone();
         let result = match message["type"].as_str() {
@@ -420,6 +383,8 @@ impl Environment {
             Some("score") => self.score(),
             #[cfg(test)]
             Some("observed_events") => self.observed_events().map(Value::Array),
+            #[cfg(test)]
+            Some("test_delays") => self.test_delays(&message["profile"]),
             _ => Err("unknown upstream request".into()),
         };
         wire::respond(&reply, id, result).expect("notify upstream result");
@@ -722,20 +687,32 @@ fn fixture(task: &str, metadata: &Value, inputs: &Value) -> Result<Value> {
                     {"tool":"research_topic","arguments":{"topic":step("_RESEARCH_STEPS","topic")?}},
                     {"tool":"write_section","arguments":{"section_name":step("_WRITE_STEPS","section")?}},
                     {"tool":"update_references","arguments":{"section_name":step("_REFERENCES_STEPS","scope")?}},
-                    {"tool":"revise_section","arguments":{"section_name":step("_REVISE_STEPS","section")?}}
+                    {"tool":"revise_section","arguments":{"section_name":step("_WRITE_STEPS","section")?}}
                 ])
             }
         } else if task == "4E" {
+            let feature = || -> Result<&str> {
+                let mut owned = inputs["_FEATURES"]
+                    .as_object()
+                    .ok_or("actual feature targets")?
+                    .iter()
+                    .filter(|(_, target)| target[0] == *agent);
+                let (name, _) = owned.next().ok_or("missing participant feature")?;
+                if owned.next().is_some() {
+                    return Err("ambiguous participant feature".into());
+                }
+                Ok(name.as_str())
+            };
             match agent.as_str() {
                 Some("BACKEND_DEV") => json!([
-                    {"tool":"define_api","arguments":{"api_name":step("_DEFINE_API_STEPS","api_name")?}},
-                    {"tool":"implement_feature","arguments":{"feature_name":step("_IMPLEMENT_STEPS","feature")?}}
+                    {"tool":"define_api","arguments":{"api_name":inputs["_API"]["api_name"].as_str().ok_or("actual API name")?}},
+                    {"tool":"implement_feature","arguments":{"feature_name":feature()?}}
                 ]),
                 Some("FRONTEND_DEV") => {
-                    json!([{"tool":"implement_feature","arguments":{"feature_name":step("_IMPLEMENT_STEPS","feature")?}}])
+                    json!([{"tool":"implement_feature","arguments":{"feature_name":feature()?}}])
                 }
                 Some("TESTER") => {
-                    json!([{"tool":"run_tests","arguments":{"suite":step("_RUN_TESTS_STEPS","suite")?}}])
+                    json!([{"tool":"run_tests","arguments":{"suite":inputs["_TEST_SUITE"].as_str().ok_or("actual test suite")?}}])
                 }
                 _ => return Err("unknown original API coordination participant".into()),
             }

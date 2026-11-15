@@ -8,8 +8,8 @@ use hibana_wasip1_runtime::{
 const READ: u64 = 1 << 1;
 pub const WRITE: u64 = 1 << 6;
 const READDIR: u64 = 1 << 14;
-const ROOT_DIRECTORY_FD: usize = 16;
-const ROOT_FD_SLOTS: usize = ROOT_DIRECTORY_FD + 1;
+const SERVICE_DIRECTORY_OBJECT: usize = 16;
+const PRIVATE_OBJECT_SLOTS: usize = SERVICE_DIRECTORY_OBJECT + 1;
 const READ_WRITE: FdBinding = FdBinding {
     read: Some(FdReadRow::Base),
     write: Some(FdWriteRow::Base),
@@ -27,11 +27,14 @@ pub struct PrivateFs<'a> {
     pub input: Vec<u8>,
     pub work: [Vec<u8>; 8],
     pub paths: [Vec<u8>; 8],
+    // Guest descriptors are distinct from the stable private object indices.
+    // Allocate them around the actual projected files, not a fixed fd range.
+    object_fds: [u8; PRIVATE_OBJECT_SLOTS - 6],
     listing: Vec<u8>,
     service_listing: Vec<u8>,
     root_listing: Vec<u8>,
-    pub offsets: [usize; ROOT_FD_SLOTS],
-    pub fd_flags: [u16; ROOT_FD_SLOTS],
+    pub offsets: [usize; PRIVATE_OBJECT_SLOTS],
+    pub fd_flags: [u16; PRIVATE_OBJECT_SLOTS],
     pub output: Vec<u8>,
     pub terminal: Terminal,
     pub bus: &'a Bus,
@@ -39,6 +42,13 @@ pub struct PrivateFs<'a> {
 
 impl<'a> PrivateFs<'a> {
     pub fn new(terminal: Terminal, bus: &'a Bus, files: &[ChoreoFsObject<'static>]) -> Self {
+        let mut available =
+            (4..=u8::MAX).filter(|fd| files.iter().all(|file| file.fd().fd() != *fd));
+        let object_fds = std::array::from_fn(|_| {
+            available
+                .next()
+                .expect("private and projected files exceed the guest descriptor domain")
+        });
         let mut service_listing = Vec::new();
         for file in files {
             let name = file
@@ -66,11 +76,12 @@ impl<'a> PrivateFs<'a> {
             input: Vec::new(),
             work: std::array::from_fn(|_| Vec::new()),
             paths: std::array::from_fn(|_| Vec::new()),
+            object_fds,
             listing: Vec::new(),
             service_listing,
             root_listing,
-            offsets: [0; ROOT_FD_SLOTS],
-            fd_flags: [0; ROOT_FD_SLOTS],
+            offsets: [0; PRIVATE_OBJECT_SLOTS],
+            fd_flags: [0; PRIVATE_OBJECT_SLOTS],
             output: Vec::new(),
             terminal,
             bus,
@@ -135,63 +146,63 @@ impl PrivateFs<'_> {
             ChoreoFsObject::read_write(
                 self.work_path(0),
                 ObjectId(6),
-                FdSpec::new(6, READ | WRITE, 1),
+                FdSpec::new(self.object_fds[0], READ | WRITE, 1),
                 &self.work[0],
                 READ_WRITE,
             ),
             ChoreoFsObject::read_write(
                 self.work_path(1),
                 ObjectId(7),
-                FdSpec::new(7, READ | WRITE, 1),
+                FdSpec::new(self.object_fds[1], READ | WRITE, 1),
                 &self.work[1],
                 READ_WRITE,
             ),
             ChoreoFsObject::read_write(
                 self.work_path(2),
                 ObjectId(8),
-                FdSpec::new(8, READ | WRITE, 1),
+                FdSpec::new(self.object_fds[2], READ | WRITE, 1),
                 &self.work[2],
                 READ_WRITE,
             ),
             ChoreoFsObject::read_write(
                 self.work_path(3),
                 ObjectId(9),
-                FdSpec::new(9, READ | WRITE, 1),
+                FdSpec::new(self.object_fds[3], READ | WRITE, 1),
                 &self.work[3],
                 READ_WRITE,
             ),
             ChoreoFsObject::read_write(
                 self.work_path(4),
                 ObjectId(10),
-                FdSpec::new(10, READ | WRITE, 1),
+                FdSpec::new(self.object_fds[4], READ | WRITE, 1),
                 &self.work[4],
                 READ_WRITE,
             ),
             ChoreoFsObject::read_write(
                 self.work_path(5),
                 ObjectId(11),
-                FdSpec::new(11, READ | WRITE, 1),
+                FdSpec::new(self.object_fds[5], READ | WRITE, 1),
                 &self.work[5],
                 READ_WRITE,
             ),
             ChoreoFsObject::read_write(
                 self.work_path(6),
                 ObjectId(12),
-                FdSpec::new(12, READ | WRITE, 1),
+                FdSpec::new(self.object_fds[6], READ | WRITE, 1),
                 &self.work[6],
                 READ_WRITE,
             ),
             ChoreoFsObject::read_write(
                 self.work_path(7),
                 ObjectId(13),
-                FdSpec::new(13, READ | WRITE, 1),
+                FdSpec::new(self.object_fds[7], READ | WRITE, 1),
                 &self.work[7],
                 READ_WRITE,
             ),
             ChoreoFsObject::readdir(
                 b"work",
                 ObjectId(14),
-                FdSpec::new(14, READDIR, 1),
+                FdSpec::new(self.object_fds[8], READDIR, 1),
                 &self.listing,
                 FdBinding::readdir(FdReaddirRow::Base),
             ),
@@ -200,14 +211,14 @@ impl PrivateFs<'_> {
             ChoreoFsObject::readdir(
                 b"",
                 ObjectId(15),
-                FdSpec::new(15, READDIR, 1),
+                FdSpec::new(self.object_fds[9], READDIR, 1),
                 &self.root_listing,
                 FdBinding::readdir(FdReaddirRow::Base),
             ),
             ChoreoFsObject::readdir(
                 b"service",
-                ObjectId(16),
-                FdSpec::new(16, READDIR, 1),
+                ObjectId(SERVICE_DIRECTORY_OBJECT as u32),
+                FdSpec::new(self.object_fds[10], READDIR, 1),
                 &self.service_listing,
                 FdBinding::readdir(FdReaddirRow::Base),
             ),
@@ -221,17 +232,17 @@ impl PrivateFs<'_> {
         }
         match operation.object() {
             Some(ObjectId(1 | 2)) => self.output.extend_from_slice(operation.bytes()),
-            Some(ObjectId(fd @ 6..=13)) => {
-                let fd = fd as usize;
-                let file = &mut self.work[fd - 6];
-                let start = if self.fd_flags[fd] & 1 != 0 {
+            Some(ObjectId(object @ 6..=13)) => {
+                let index = object as usize;
+                let file = &mut self.work[index - 6];
+                let start = if self.fd_flags[index] & 1 != 0 {
                     file.len()
                 } else {
-                    self.offsets[fd]
+                    self.offsets[index]
                 };
                 let Some(end) = start
                     .checked_add(operation.bytes().len())
-                    .filter(|end| *end <= 8192)
+                    .filter(|end| *end <= crate::shell::GUEST_MEMORY_BYTES)
                 else {
                     return Ok(protocol::FdWriteDoneRet(
                         protocol::FdWriteDone::new_with_errno(write.fd(), 0, 22),
@@ -241,7 +252,7 @@ impl PrivateFs<'_> {
                     file.resize(end, 0);
                 }
                 file[start..end].copy_from_slice(operation.bytes());
-                self.offsets[fd] = end;
+                self.offsets[index] = end;
             }
             _ => {
                 return Err(ShellError::message(
@@ -260,4 +271,50 @@ fn directory_entry(bytes: &mut Vec<u8>, name: &[u8], inode: u64, kind: u8) {
     bytes.extend_from_slice(&(name.len() as u32).to_le_bytes());
     bytes.extend_from_slice(&[kind, 0, 0, 0]);
     bytes.extend_from_slice(name);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn private_descriptors_exclude_every_possible_projected_descriptor() {
+        for reserved in 4..=u8::MAX {
+            let files = [ChoreoFsObject::readable(
+                b"service/input",
+                ObjectId(99),
+                FdSpec::new(reserved, READ, 1),
+                b"",
+                FdBinding::read(FdReadRow::Base),
+            )];
+            let (bus, _, [terminal]) = Bus::open(["TEST"], []);
+            let io = PrivateFs::new(terminal, &bus, &files);
+            let descriptors: std::collections::BTreeSet<_> = io.object_fds.into_iter().collect();
+            assert_eq!(descriptors.len(), PRIVATE_OBJECT_SLOTS - 6);
+            assert!(descriptors.iter().all(|fd| *fd >= 4 && *fd != reserved));
+        }
+    }
+
+    #[test]
+    fn multiple_projected_files_leave_work_and_directory_descriptors_distinct() {
+        let files = [4, 5, 6, 7, 8, 255].map(|fd| {
+            ChoreoFsObject::readable(
+                b"service/input",
+                ObjectId(u32::from(fd)),
+                FdSpec::new(fd, READ, 1),
+                b"",
+                FdBinding::read(FdReadRow::Base),
+            )
+        });
+        let (bus, _, [terminal]) = Bus::open(["TEST"], []);
+        let io = PrivateFs::new(terminal, &bus, &files);
+        let descriptors: std::collections::BTreeSet<_> = io.object_fds.into_iter().collect();
+        assert_eq!(descriptors.len(), PRIVATE_OBJECT_SLOTS - 6);
+        assert!(descriptors.iter().all(|fd| *fd >= 4));
+        assert!(
+            files
+                .iter()
+                .all(|file| !descriptors.contains(&file.fd().fd()))
+        );
+    }
 }

@@ -5,10 +5,6 @@ pub struct Assignment {
     pub modules: [&'static str; 2],
 }
 
-pub const EASY: u8 = 1;
-pub const MEDIUM: u8 = 2;
-pub const HARD: u8 = 3;
-
 pub const EASY_INPUT: [Assignment; 3] = [
     Assignment {
         agent: "DEVELOPER_A",
@@ -91,18 +87,13 @@ pub const HARD_INPUT: [Assignment; 7] = [
     },
 ];
 
-pub const fn assignment<const TASK: u8, const ROLE: u8>() -> &'static Assignment {
-    let inputs: &[Assignment] = match TASK {
-        EASY => &EASY_INPUT,
-        MEDIUM => &MEDIUM_INPUT,
-        HARD => &HARD_INPUT,
-        _ => panic!("unknown codebase benchmark task"),
-    };
-    assert!(
-        (ROLE as usize) < inputs.len(),
-        "unknown benchmark participant"
-    );
-    &inputs[ROLE as usize]
+pub const fn assignment(role: u8) -> &'static Assignment {
+    match role {
+        0..=2 => &EASY_INPUT[role as usize],
+        3..=7 => &MEDIUM_INPUT[(role - 3) as usize],
+        8..=14 => &HARD_INPUT[(role - 8) as usize],
+        _ => panic!("unknown codebase participant"),
+    }
 }
 
 /// The latest unmodified test response is the resolver's input data.

@@ -1,147 +1,182 @@
-//! Projected request/reply connects each WASI role to its service owner.
+//! Free shell calls use their Endpoint-bound ChoreoFS projections directly.
 pub mod global;
 mod imp;
 pub(crate) mod localside;
-
 use crate::{
     imp::transport::InMemoryTransport,
-    shell::{ShellError, ShellResult, imp::service::Validation},
+    shell::{
+        ShellResult,
+        imp::{
+            bus::{Bus, Terminal},
+            private_fs::PrivateFs,
+        },
+        localside::private_io,
+    },
 };
-use hibana::runtime::{SessionKitStorage, ids::SessionId, resolver::ResolverRef};
+use hibana::runtime::{SessionKitStorage, ids::SessionId};
+use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasiGuestStorage};
 
 #[hibana_runtime::scope]
-async fn run_guests(
-    module: &[u8],
-    bus: &crate::shell::imp::bus::Bus,
-    terminals: [crate::shell::imp::bus::Terminal; 3],
-) -> ShellResult<()> {
-    use crate::shell::{
-        imp::private_fs::{PrivateFs, bindings},
-        localside::private_io,
-    };
+async fn run_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> ShellResult<()> {
     use global::*;
-    use hibana_wasip1_runtime::{GuestMemory, HibanaWasiGuestStorage};
-    let programs = programs();
-    bus.observe(programs.observation());
-    let compile = Validation::new();
-    let test = Validation::new();
-    let deploy = Validation::new();
+    let p = programs();
+    bus.observe(p.observation());
     let capture = |event| {
-        bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,
-            "records":[crate::imp::projection::record(event)]}));
+        bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,"records":[crate::imp::projection::record(event)]}))
     };
-    let mut slab = vec![0; 1024 * 1024];
+    let mut slab = vec![0; 2 * 1024 * 1024];
+    let incoming_capacity = slab.len();
     let mut storage = SessionKitStorage::<&InMemoryTransport>::uninit();
-    let kit = storage.init();
-    let rv = kit.rendezvous(&mut slab, &bus.transport)?;
+    let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
     rv.observe(&capture);
     let observations = rv.tap();
-    let session = SessionId::new(16);
+    let session = SessionId::new(SESSION);
     let result = async {
-        rv.set_resolver(
-            &programs.developer,
-            ResolverRef::<COMPILE_CLOSE>::decision_state(&compile, Validation::decide),
-        )
-        .map_err(|e| ShellError::message(format!("{e:?}")))?;
-        rv.set_resolver(
-            &programs.tester,
-            ResolverRef::<TEST_CLOSE>::decision_state(&test, Validation::decide),
-        )
-        .map_err(|e| ShellError::message(format!("{e:?}")))?;
-        rv.set_resolver(
-            &programs.deployer,
-            ResolverRef::<DEPLOY_CLOSE>::decision_state(&deploy, Validation::decide),
-        )
-        .map_err(|e| ShellError::message(format!("{e:?}")))?;
-        let mut avm = rv.enter(session, &programs.dev_wasi)?;
-        let mut bvm = rv.enter(session, &programs.test_wasi)?;
-        let mut cvm = rv.enter(session, &programs.deploy_wasi)?;
-        let mut developer = rv.enter(session, &programs.developer)?;
-        let mut tester = rv.enter(session, &programs.tester)?;
-        let mut deployer = rv.enter(session, &programs.deployer)?;
-        let mut build_owner = rv.enter(session, &programs.build_owner)?;
-        let mut deploy_owner = rv.enter(session, &programs.deploy_owner)?;
-        let build = rv.enter(session, &programs.build_server)?;
-        let env = rv.enter(session, &programs.deploy_env)?;
-        let mut aio = rv.enter(session, &programs.dev_io)?;
-        let mut bio = rv.enter(session, &programs.test_io)?;
-        let mut cio = rv.enter(session, &programs.deploy_io)?;
-        let [aterm, bterm, cterm] = terminals;
-        let afs = PrivateFs::new(aterm, bus);
-        let bfs = PrivateFs::new(bterm, bus);
-        let cfs = PrivateFs::new(cterm, bus);
-        let mut amemory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-        let mut bmemory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-        let mut cmemory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-        let mut astore = HibanaWasiGuestStorage::uninit();
-        let mut bstore = HibanaWasiGuestStorage::uninit();
-        let mut cstore = HibanaWasiGuestStorage::uninit();
-        let aguest = astore.init(module, GuestMemory::new(&mut amemory), bindings())?;
-        let bguest = bstore.init(module, GuestMemory::new(&mut bmemory), bindings())?;
-        let cguest = cstore.init(module, GuestMemory::new(&mut cmemory), bindings())?;
+        let mut build_owner = rv.enter(session, &p.build_owner)?;
+        let mut deploy_owner = rv.enter(session, &p.deploy_owner)?;
+        let resource = rv.enter(session, &p.build_server)?;
+        let environment = rv.enter(session, &p.deploy_env)?;
+        let mut developer = rv.enter(session, &p.developer)?;
+        let developer_close = rv.enter(session, &p.dev_close)?;
+        let developer_file = rv.enter(session, &p.dev_file)?;
+        let developer_vm = rv.enter(session, &p.dev_wasi)?;
+        let mut developer_io = rv.enter(session, &p.dev_io)?;
+        let mut tester = rv.enter(session, &p.tester)?;
+        let tester_close = rv.enter(session, &p.test_close)?;
+        let tester_file = rv.enter(session, &p.test_file)?;
+        let tester_vm = rv.enter(session, &p.test_wasi)?;
+        let mut tester_io = rv.enter(session, &p.test_io)?;
+        let mut deployer = rv.enter(session, &p.deployer)?;
+        let deployer_close = rv.enter(session, &p.deploy_close)?;
+        let deployer_file = rv.enter(session, &p.deploy_file)?;
+        let deployer_vm = rv.enter(session, &p.deploy_wasi)?;
+        let mut deployer_io = rv.enter(session, &p.deploy_io)?;
+        let [developer_terminal, tester_terminal, deployer_terminal] = terminals;
         async {
-            localside::developer::run(&mut developer, bus, &compile).await?;
+            localside::developer::run(&mut developer, developer_file).await?;
         };
         async {
-            localside::tester::run(&mut tester, bus, &test).await?;
+            localside::tester::run(&mut tester, tester_file).await?;
         };
         async {
-            localside::deployer::run(&mut deployer, bus, &deploy).await?;
+            localside::deployer::run(&mut deployer, deployer_file).await?;
         };
         async {
-            localside::infrastructure::build_server(&mut build_owner, build).await?;
+            localside::infrastructure::build_server(
+                &mut build_owner,
+                (resource, developer_close, tester_close),
+                bus,
+            )
+            .await?;
         };
         async {
-            localside::infrastructure::deploy_env(&mut deploy_owner, env).await?;
+            localside::infrastructure::deploy_env(
+                &mut deploy_owner,
+                (environment, deployer_close),
+                bus,
+            )
+            .await?;
         };
         async {
-            localside::wasi::developer(aguest, &mut avm).await?;
+            let mut endpoint = developer_vm;
+            let file = endpoint.recv::<Loan<DEV_FILE>>().await?;
+            let mut incoming = vec![0; incoming_capacity];
+            let files = ChoreoFsFiles::new(endpoint)
+                .file(ChoreoFsFile::new(COMPILE_OBJECT, file).read_as::<Notice>(&mut incoming))?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut endpoint, (file, ())) = files.into_parts();
+            let mut file = file.into_endpoint();
+            file.send::<FileExit>(&status).await?;
+            endpoint.send::<crate::shell::global::Exit>(&status).await?;
         };
         async {
-            private_io::run(&mut aio, afs).await?;
+            private_io::run(
+                &mut developer_io,
+                PrivateFs::new(developer_terminal, bus, &[COMPILE_OBJECT]),
+            )
+            .await?;
         };
         async {
-            localside::wasi::tester(bguest, &mut bvm).await?;
+            let mut endpoint = tester_vm;
+            let file = endpoint.recv::<Loan<TEST_FILE>>().await?;
+            let mut incoming = vec![0; incoming_capacity];
+            let files = ChoreoFsFiles::new(endpoint)
+                .file(ChoreoFsFile::new(TEST_OBJECT, file).read_as::<Notice>(&mut incoming))?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut endpoint, (file, ())) = files.into_parts();
+            let mut file = file.into_endpoint();
+            file.send::<FileExit>(&status).await?;
+            endpoint.send::<crate::shell::global::Exit>(&status).await?;
         };
         async {
-            private_io::run(&mut bio, bfs).await?;
+            private_io::run(
+                &mut tester_io,
+                PrivateFs::new(tester_terminal, bus, &[TEST_OBJECT]),
+            )
+            .await?;
         };
         async {
-            localside::wasi::deployer(cguest, &mut cvm).await?;
+            let mut endpoint = deployer_vm;
+            let file = endpoint.recv::<Loan<DEPLOY_FILE>>().await?;
+            let mut incoming = vec![0; incoming_capacity];
+            let files = ChoreoFsFiles::new(endpoint)
+                .file(ChoreoFsFile::new(DEPLOY_OBJECT, file).read_as::<Notice>(&mut incoming))?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut endpoint, (file, ())) = files.into_parts();
+            let mut file = file.into_endpoint();
+            file.send::<FileExit>(&status).await?;
+            endpoint.send::<crate::shell::global::Exit>(&status).await?;
         };
         async {
-            private_io::run(&mut cio, cfs).await?;
+            private_io::run(
+                &mut deployer_io,
+                PrivateFs::new(deployer_terminal, bus, &[DEPLOY_OBJECT]),
+            )
+            .await?;
         };
         Ok(())
     }
     .await;
-    bus.observe(
-        serde_json::json!({"type":"protocol_checkpoint","producer":0,
-        "session":session.raw(),"checkpoint":observations.checkpoint()}),
-    );
+    bus.observe(serde_json::json!({"type":"protocol_checkpoint","producer":0,"session":session.raw(),"checkpoint":observations.checkpoint()}));
     result
 }
-
 pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
-    let (bus, mut reader, terminals) = crate::shell::imp::bus::Bus::open(
+    use global::*;
+    let session = SessionId::new(SESSION);
+    let (bus, mut reader, terminals) = Bus::open(
         ["DEVELOPER", "TESTER", "DEPLOYER"],
         [
-            (SessionId::new(16), global::BUILD_SERVER),
-            (SessionId::new(16), global::DEPLOY_ENV),
+            (session, BUILD_SERVER),
+            (session, DEPLOY_ENV),
+            (session, DEV_FILE),
+            (session, DEV_CLOSE),
+            (session, TEST_FILE),
+            (session, TEST_CLOSE),
+            (session, DEPLOY_FILE),
+            (session, DEPLOY_CLOSE),
         ],
     );
     let result = hibana_runtime::race(run_guests(module, &bus, terminals), reader.run(&bus)).await;
     match &result {
-        Ok(()) => reader.emit(&bus,serde_json::json!({"type":"run_result", "status":"complete"})).await?,
-        Err(error) => reader.emit(&bus,serde_json::json!({"type":"run_result", "status":"failed", "error":error.to_string()})).await?,
-    }
+  Ok(())=>reader.emit(&bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
+  Err(error)=>reader.emit(&bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
+ }
     result
 }
-
-/// Static observations of the programs that the CI/CD runtime attaches.
 pub fn projection() -> serde_json::Value {
     global::programs().observation()
 }
-
 #[cfg(test)]
 mod tests;

@@ -1,228 +1,150 @@
-//! Each actual wash close sends its own admitted and delegated resource requests.
+//! Direct file admission, actual resource requests, effect and object handoff.
 use super::super::{global::*, imp};
-use crate::shell::{
-    ShellError, ShellResult,
-    global::Exit as IoExit,
-    imp::file_wire::{ClosedFile, ResultChunk, ResultChunkMsg, SERVICE_FD},
-};
+use crate::shell::{ShellError, ShellResult, imp::service::Domain};
 use hibana::{Endpoint, g::Message};
-use hibana_wasip1_runtime::{FileBoundary, HibanaWasiGuest, WasiImportCompletion, protocol};
-use serde_json::json;
-
 #[hibana_runtime::scope]
 pub async fn run<const ROLE: u8>(
-    mut guest: &mut HibanaWasiGuest,
     endpoint: &mut Endpoint<ROLE>,
-) -> ShellResult<i32> {
-    if ROLE != BUILDER_A && ROLE != BUILDER_B {
-        return Err(ShellError::message("shared build has two builder roles"));
-    }
-    let module = if ROLE == BUILDER_A {
-        "module_a"
-    } else {
-        "module_b"
+    domain: &impl Domain,
+) -> ShellResult<()> {
+    let (agent, module) = match ROLE {
+        BUILDER_A => ("BUILDER_A", "module_a"),
+        BUILDER_B => ("BUILDER_B", "module_b"),
+        _ => return Err(ShellError::message("unknown builder")),
     };
-    let agent = if ROLE == BUILDER_A {
-        "BUILDER_A"
-    } else {
-        "BUILDER_B"
-    };
-    let [mut task, mut private] = endpoint.par()?;
     loop {
-        match guest
-            .next_file::<ClosedFile, ROLE>(&mut private, SERVICE_FD)
-            .await?
-        {
-            FileBoundary::Exit(_) => {
-                return Err(ShellError::message(
-                    "builder exited before its current build",
-                ));
+        let incoming = endpoint.offer().await?;
+        let admitted = match incoming.label() {
+            CompileA::LOGICAL_LABEL if ROLE == BUILDER_A => {
+                incoming.recv::<CompileA>().await?.into_value()
             }
-            FileBoundary::Closed { pending, file } => {
-                let arguments = file
-                    .arguments(b"service/compile_module", "module_name")
-                    .and_then(|value| imp::compile_arguments(value, module));
-                let arguments = match arguments {
-                    Ok(value) => value,
-                    Err(error) => {
-                        let bytes = imp::encode(
-                            &json!({"status":"invalid_arguments","error":error.to_string()}),
-                        )?;
-                        for (index, chunk) in
-                            bytes.chunks(protocol::WASIP1_IO_CHUNK_CAPACITY).enumerate()
-                        {
-                            private
-                                .send::<ResultChunkMsg>(&ResultChunk::new(
-                                    index * protocol::WASIP1_IO_CHUNK_CAPACITY,
-                                    chunk,
-                                )?)
-                                .await?;
-                        }
-                        guest = pending.complete(WasiImportCompletion::FdClose(
-                            protocol::FdClosedRet(protocol::FdClosed::new_with_errno(
-                                SERVICE_FD, 28,
-                            )),
-                        ))?;
-                        continue;
-                    }
+            CompileB::LOGICAL_LABEL if ROLE == BUILDER_B => {
+                incoming.recv::<CompileB>().await?.into_value()
+            }
+            _ => return Err(ShellError::message("unexpected builder request")),
+        };
+        let (mut core, mut types) = async {
+            let [mut library, mut definitions] = endpoint.par()?;
+            async { library.recv::<CoreLoan>().await };
+            async { definitions.recv::<TypesLoan>().await };
+        }
+        .await?;
+        let bytes = imp::encode(&admitted)?;
+        let (library, definitions) = async {
+            let [mut a, mut b] = endpoint.par()?;
+            async {
+                async {
+                    core.send::<CompileCore>(&bytes.as_slice()).await?;
                 };
-                let incoming = task.offer().await?;
-                if ROLE == BUILDER_B && incoming.label() == TypesUpdated::LOGICAL_LABEL {
-                    let update = imp::decode(incoming.recv::<TypesUpdated>().await?)?;
-                    imp::compiled(&update, "BUILDER_A", "module_a")?;
-                } else {
-                    drop(incoming);
-                }
-                let (mut core, mut types) = async {
-                    let [mut library, mut definitions] = task.par()?;
-                    async { Ok::<_, ShellError>(library.recv::<CoreLoan>().await?) };
-                    async { Ok::<_, ShellError>(definitions.recv::<TypesLoan>().await?) };
-                }
-                .await?;
-                let bytes = imp::encode(&arguments)?;
-                if ROLE == BUILDER_A {
-                    task.send::<CompileA>(&bytes.as_slice()).await?;
-                } else {
-                    task.send::<CompileB>(&bytes.as_slice()).await?;
-                }
-                let (result, other) = async {
-                    async {
-                        core.send::<CompileCore>(&bytes.as_slice()).await?;
-                        imp::decode(core.recv::<CoreCompiled>().await?)
-                    };
-                    async {
-                        types.send::<CompileTypes>(&bytes.as_slice()).await?;
-                        imp::decode(types.recv::<TypesCompiled>().await?)
-                    };
-                }
-                .await?;
-                if result != other {
+                imp::decode(a.recv::<CompileCore>().await?)
+            };
+            async {
+                async {
+                    types.send::<CompileTypes>(&bytes.as_slice()).await?;
+                };
+                imp::decode(b.recv::<CompileTypes>().await?)
+            };
+        }
+        .await?;
+        if library != admitted || definitions != admitted {
+            return Err(ShellError::message(
+                "compile resources differ from admitted arguments",
+            ));
+        }
+        let result = domain
+            .execute(agent, "compile_module", admitted)
+            .await
+            .map_err(ShellError::message)?;
+        imp::compiled(&result, agent, module)?;
+        let bytes = imp::encode(&result)?;
+        async {
+            let [mut a, mut b] = endpoint.par()?;
+            async {
+                async {
+                    a.send::<CoreCompiled>(&bytes.as_slice()).await?;
+                };
+                let result = core.recv::<CoreCompiled>().await?;
+                if result[..] != bytes {
                     return Err(ShellError::message(
-                        "build resources returned different actual results",
+                        "core result differs from the actual compile",
                     ));
                 }
-                imp::compiled(&result, agent, module)?;
-                let bytes = imp::encode(&result)?;
-                if ROLE == BUILDER_A {
+                Ok(())
+            };
+            async {
+                async {
+                    b.send::<TypesCompiled>(&bytes.as_slice()).await?;
+                };
+                let result = types.recv::<TypesCompiled>().await?;
+                if result[..] != bytes {
+                    return Err(ShellError::message(
+                        "types result differs from the actual compile",
+                    ));
+                }
+                Ok(())
+            };
+            Ok(())
+        }
+        .await?;
+        endpoint.send::<Compiled>(&bytes.as_slice()).await?;
+        if ROLE == BUILDER_A {
+            async {
+                let [mut notification, mut handoff] = endpoint.par()?;
+                async {
+                    notification.send::<BuiltA>(&bytes.as_slice()).await?;
+                };
+                async {
+                    handoff.send::<TypesUpdated>(&bytes.as_slice()).await?;
+                    let [mut library, mut definitions] = handoff.par()?;
                     async {
-                        let [mut notification, mut handoff] = task.par()?;
-                        async {
-                            notification.send::<BuiltA>(&bytes.as_slice()).await?;
-                        };
-                        async {
-                            handoff.send::<TypesUpdated>(&bytes.as_slice()).await?;
-                            let [mut library, mut definitions] = handoff.par()?;
-                            async {
-                                library.send::<CoreLoan>(core).await?;
-                            };
-                            async {
-                                definitions.send::<TypesLoan>(types).await?;
-                            };
-                            Ok::<(), ShellError>(())
-                        };
-                        Ok(())
-                    }
-                    .await?;
-                } else {
-                    let next = task.offer().await?;
-                    match next.label() {
-                        CoreLoan::LOGICAL_LABEL | TypesLoan::LOGICAL_LABEL => {
-                            drop(next);
-                            async {
-                                let [mut library, mut definitions] = task.par()?;
-                                async {
-                                    library.send::<CoreLoan>(core).await?;
-                                };
-                                async {
-                                    definitions.send::<TypesLoan>(types).await?;
-                                };
-                                Ok::<(), ShellError>(())
-                            }
-                            .await?;
-                            for (index, chunk) in
-                                bytes.chunks(protocol::WASIP1_IO_CHUNK_CAPACITY).enumerate()
-                            {
-                                private
-                                    .send::<ResultChunkMsg>(&ResultChunk::new(
-                                        index * protocol::WASIP1_IO_CHUNK_CAPACITY,
-                                        chunk,
-                                    )?)
-                                    .await?;
-                            }
-                            guest = pending.complete(WasiImportCompletion::FdClose(
-                                protocol::FdClosedRet(protocol::FdClosed::new_with_errno(
-                                    SERVICE_FD, 0,
-                                )),
-                            ))?;
-                            // The global requires another actual build after A's
-                            // type update. No local retry/done flag authorizes it.
-                            continue;
-                        }
-                        BuiltB::LOGICAL_LABEL
-                        | ReturnCore::LOGICAL_LABEL
-                        | ReturnTypes::LOGICAL_LABEL => {
-                            drop(next);
-                            async {
-                                let [mut notification, mut core_return, mut types_return] =
-                                    task.par()?;
-                                async {
-                                    notification.send::<BuiltB>(&bytes.as_slice()).await?;
-                                };
-                                async {
-                                    core_return.send::<ReturnCore>(core).await?;
-                                };
-                                async {
-                                    types_return.send::<ReturnTypes>(types).await?;
-                                };
-                                Ok::<(), ShellError>(())
-                            }
-                            .await?;
-                        }
-                        _ => return Err(ShellError::message("unexpected builder continuation")),
-                    }
+                        library.send::<CoreLoan>(core).await?;
+                    };
+                    async {
+                        definitions.send::<TypesLoan>(types).await?;
+                    };
+                    Ok(())
+                };
+                Ok(())
+            }
+            .await?;
+            break;
+        }
+        let next = endpoint.offer().await?;
+        match next.label() {
+            CoreLoan::LOGICAL_LABEL | TypesLoan::LOGICAL_LABEL => {
+                drop(next);
+                async {
+                    let [mut library, mut definitions] = endpoint.par()?;
+                    async {
+                        library.send::<CoreLoan>(core).await?;
+                    };
+                    async {
+                        definitions.send::<TypesLoan>(types).await?;
+                    };
+                    Ok(())
                 }
-                for (index, chunk) in bytes.chunks(protocol::WASIP1_IO_CHUNK_CAPACITY).enumerate() {
-                    private
-                        .send::<ResultChunkMsg>(&ResultChunk::new(
-                            index * protocol::WASIP1_IO_CHUNK_CAPACITY,
-                            chunk,
-                        )?)
-                        .await?;
+                .await?;
+            }
+            BuiltB::LOGICAL_LABEL | ReturnCore::LOGICAL_LABEL | ReturnTypes::LOGICAL_LABEL => {
+                drop(next);
+                async {
+                    let [mut notification, mut library, mut definitions] = endpoint.par()?;
+                    async {
+                        notification.send::<BuiltB>(&bytes.as_slice()).await?;
+                    };
+                    async {
+                        library.send::<ReturnCore>(core).await?;
+                    };
+                    async {
+                        definitions.send::<ReturnTypes>(types).await?;
+                    };
+                    Ok(())
                 }
-                guest = pending.complete(WasiImportCompletion::FdClose(protocol::FdClosedRet(
-                    protocol::FdClosed::new_with_errno(SERVICE_FD, 0),
-                )))?;
+                .await?;
                 break;
             }
+            _ => return Err(ShellError::message("unexpected builder continuation")),
         }
     }
-    drop(task);
-    loop {
-        match guest
-            .next_file::<ClosedFile, ROLE>(&mut private, SERVICE_FD)
-            .await?
-        {
-            FileBoundary::Exit(exit) => {
-                let status = exit.status() as i32;
-                private.send::<IoExit>(&status).await?;
-                return Ok(status);
-            }
-            FileBoundary::Closed { pending, .. } => {
-                let bytes = imp::encode(
-                    &json!({"status":"out_of_order","error":"this builder has completed its current object"}),
-                )?;
-                for (index, chunk) in bytes.chunks(protocol::WASIP1_IO_CHUNK_CAPACITY).enumerate() {
-                    private
-                        .send::<ResultChunkMsg>(&ResultChunk::new(
-                            index * protocol::WASIP1_IO_CHUNK_CAPACITY,
-                            chunk,
-                        )?)
-                        .await?;
-                }
-                guest = pending.complete(WasiImportCompletion::FdClose(protocol::FdClosedRet(
-                    protocol::FdClosed::new_with_errno(SERVICE_FD, 8),
-                )))?;
-            }
-        }
-    }
+    Ok(())
 }

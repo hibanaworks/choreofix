@@ -453,6 +453,10 @@ pub fn run(root: &Path) -> Result<Value> {
         active += change;
         maximum = maximum.max(active);
     }
+    let fixture_task = fixture["task"].clone();
+    // Participant checks have consumed this parsed history. The protocol
+    // auditor owns its own parse; do not retain both copies during EPF search.
+    drop(rows);
     let protocol = match task {
         "1E" | "1M" | "1H" => crate::codebase_audit::audit(&root.join("events.jsonl"))?,
         "2E" | "2M" | "2H" => crate::writing_audit::audit(&root.join("events.jsonl"))?,
@@ -473,15 +477,7 @@ pub fn run(root: &Path) -> Result<Value> {
         "10E" => crate::build_audit::audit(&root.join("events.jsonl"))?,
         "11E" => crate::manufacturing_audit::audit(&root.join("events.jsonl"))?,
         "12E" => crate::kitchen_audit::audit(&root.join("events.jsonl"))?,
-        "10M" => {
-            let path = root.join("events.jsonl");
-            let mut checked = crate::cascading_build_audit::audit(&path)?;
-            checked["dynamic_protocol"] = crate::projection::check_dynamic(
-                &crate::projection::load(&path)?,
-                &records(&path)?,
-            )?;
-            checked
-        }
+        "10M" => crate::cascading_build_audit::audit(&root.join("events.jsonl"))?,
         "8E" => crate::api_audit::audit(&root.join("events.jsonl"))?,
         "16E" => crate::cicd_audit::audit(&root.join("events.jsonl"))?,
         "9E" | "9M" | "9H" => crate::philosophers_audit::audit(&root.join("events.jsonl"))?,
@@ -503,7 +499,7 @@ pub fn run(root: &Path) -> Result<Value> {
     }
     let runtime = &runtime[0]["result"];
     if protocol["status"] != "passed"
-        || protocol["task"] != fixture["task"]
+        || protocol["task"] != fixture_task
         || protocol["simulator_complete"] != runtime["score"]["complete"]
         || runtime["score"]["complete"].as_bool().is_none()
         || protocol["violations"] != 0
@@ -521,7 +517,7 @@ pub fn run(root: &Path) -> Result<Value> {
         })
         .ok_or("inclusive usage overflow or missing usage")?;
     Ok(
-        json!({"status":"passed","task":fixture["task"],"kind":"unscored_direct_wasi_model_preflight",
+        json!({"status":"passed","task":fixture_task,"kind":"unscored_direct_wasi_model_preflight",
         "scored_benchmark":false,"participants":participants,"participant_turns":participants.len(),"max_simultaneous_model_turns":maximum,
         "inclusive_tokens":total,"protocol":protocol,"events_sha256":result["events_sha256"],
         "simulator_contract":benchmark["simulator_contract"],

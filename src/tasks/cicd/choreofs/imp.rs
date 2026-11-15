@@ -13,6 +13,13 @@ impl<const OPERATION: u8> Arguments<OPERATION> {
         _ => panic!("unknown CI/CD operation"),
     };
 
+    const TARGET: &'static str = match OPERATION {
+        1 => "application",
+        2 => "integration",
+        3 => "production",
+        _ => panic!("unknown CI/CD operation"),
+    };
+
     pub fn from_bytes(bytes: &[u8]) -> ShellResult<Self> {
         Self::validate_payload(Payload::new(bytes))
             .map_err(|error| ShellError::message(format!("{error:?}")))?;
@@ -42,7 +49,8 @@ impl<const OPERATION: u8> WirePayload for Arguments<OPERATION> {
         let value: Value =
             serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
         let object = value.as_object().ok_or(CodecError::Malformed)?;
-        if object.len() != 1 || !object.get(Self::KEY).is_some_and(Value::is_string) {
+        if object.len() != 1 || object.get(Self::KEY).and_then(Value::as_str) != Some(Self::TARGET)
+        {
             return Err(CodecError::Malformed);
         }
         Ok(())

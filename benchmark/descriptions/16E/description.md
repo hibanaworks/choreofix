@@ -33,3 +33,20 @@ The **DEPLOYER** receives the tests-passed notification from the **TESTER**. The
 
 ## Goal
 All three engineers complete their work: the **DEVELOPER** has built and tested the code, the **TESTER** has validated with integration tests, and the **DEPLOYER** has deployed the application and notified everyone.
+
+## Observable Results
+
+The common environment compiles the application's source into an actual code
+artifact, executes unit and integration checks, and copies the observed artifact
+to production. Each test and deployment records the source and artifact hashes.
+Completion requires a finished deployment of the current artifact with matching,
+completed integration evidence already available when deployment began.
+
+All tools remain callable in any order. Deploying before integration testing
+still changes production when an artifact exists, but a later passing test does
+not validate that earlier deployment. Identical rebuilds preserve equal-content
+evidence. The scorer reads actual artifacts and completed observations, never
+Hibana state, a choreography or one method's command sequence. Physical resource
+conflicts are reported independently of functional completion.
+An actual deployment without matching completed integration evidence remains
+an unvalidated-publication violation even after a later correct deployment.

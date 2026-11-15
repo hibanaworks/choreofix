@@ -1,6 +1,63 @@
 use super::*;
 use std::collections::BTreeSet;
 
+#[hibana_runtime::main]
+#[test]
+async fn coordination_inputs_come_from_the_actual_world_data() -> Result<()> {
+    std::env::set_current_dir(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()?,
+    )?;
+    let directory = std::env::temp_dir().join(format!(
+        "coordination-world-inputs-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+    ));
+    fs::create_dir(&directory)?;
+    let trace = Trace::create(&directory.join("events.jsonl"))?;
+    let (world, actual) = Simulator::new("4E", 0, 0.0, trace, &[])?;
+    let actors = actual["fixtures"].as_array().ok_or("actual participants")?;
+    assert_eq!(actors.len(), 3);
+    let backend = actors
+        .iter()
+        .find(|p| p["agent"] == "BACKEND_DEV")
+        .ok_or("backend")?;
+    let frontend = actors
+        .iter()
+        .find(|p| p["agent"] == "FRONTEND_DEV")
+        .ok_or("frontend")?;
+    let tester = actors
+        .iter()
+        .find(|p| p["agent"] == "TESTER")
+        .ok_or("tester")?;
+    assert_eq!(
+        backend["calls"][0],
+        json!({"tool":"define_api","arguments":{"api_name":"feature_api_spec"}})
+    );
+    assert_eq!(
+        backend["calls"][1],
+        json!({"tool":"implement_feature","arguments":{"feature_name":"backend_endpoint"}})
+    );
+    assert_eq!(
+        frontend["calls"][0],
+        json!({"tool":"implement_feature","arguments":{"feature_name":"frontend_component"}})
+    );
+    assert_eq!(
+        tester["calls"][0],
+        json!({"tool":"run_tests","arguments":{"suite":"integration_tests"}})
+    );
+    assert!(
+        world.observed_events().await?.is_empty(),
+        "reading inputs must not run an operation"
+    );
+    drop(world);
+    fs::remove_dir_all(directory)?;
+    Ok(())
+}
+
 #[test]
 fn multi_round_inputs_preserve_public_operations_without_inventing_a_call_recipe() {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../benchmark/descriptions/14H");

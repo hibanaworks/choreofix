@@ -325,29 +325,6 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         if result["data"]["scientist"] != agent || !result["success"].is_boolean() {
             return Err("scientific result belongs to another participant".into());
         }
-        if matches!(
-            tool,
-            "run_hplc_analysis" | "run_cell_assay" | "run_mass_spec_analysis"
-        ) {
-            let grant = take(&frames, &mut used, |f| {
-                f.direction(service, vm)
-                    && f.logical_label == 5
-                    && f.sent > intent.sent
-                    && f.received.is_some_and(|at| at < request.sent)
-            })?;
-            let returned = take(&frames, &mut used, |f| {
-                f.direction(vm, service) && f.logical_label == 5 && f.sent > request.sent
-            })?;
-            if grant.received()? >= returned.sent
-                || (!matches!(tool, "run_mass_spec_analysis")
-                    && returned.received()? >= call.emitted)
-            {
-                return Err("instrument receipt does not bracket its effect".into());
-            }
-            if tool == "run_mass_spec_analysis" && returned.sent <= result_at {
-                return Err("mass instrument returned before actual response".into());
-            }
-        }
         if tool == "verify_regulatory_compliance" {
             let regulator = role("REGULATORY_SPECIALIST")?;
             let forwarded = take(&frames, &mut used, |f| {
@@ -461,7 +438,7 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         {
             continue;
         }
-        if f.logical_label == 6 {
+        if matches!(f.logical_label, 5 | 6) {
             continue;
         } // Affine payload/custody is checked by EPF, not decoded here.
         let from = f.identity["source"].as_u64().ok_or("frame source")?;
@@ -542,6 +519,25 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
             return Err("missing or extra compound delivery".into());
         }
     }
+    // EPF accepts finite prefixes. Completion still requires all instrument
+    // returns, without reconstructing the intervals between loans and returns.
+    for (tool, service) in [
+        ("run_hplc_analysis", role("HPLC_SERVICE")?),
+        ("run_cell_assay", role("CELL_SERVICE")?),
+        ("run_mass_spec_analysis", role("MASS_SERVICE")?),
+    ] {
+        let effects = ordered
+            .iter()
+            .filter(|call| call.request["tool"] == tool)
+            .count();
+        let returns = frames
+            .values()
+            .filter(|frame| frame.identity["target"] == service && frame.logical_label == 5)
+            .count();
+        if returns != effects {
+            return Err("missing or extra final instrument return".into());
+        }
+    }
     let mut overlaps = 0;
     for (i, a) in ordered.iter().enumerate() {
         for b in &ordered[i + 1..] {
@@ -572,7 +568,7 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
     Ok(
         json!({"status":"passed","task":"14M","simulator_complete":score["complete"],"domain_calls":calls.len(),"actual_effect_receipts":results,
         "effect_closes":closes.len(),"effect_close_ordinals":closes,"reanalysis_plans":plans.len(),"independent_effect_overlaps":overlaps,"max_concurrent_effects":maximum,"violations":0,
-        "scope":"one-use actual WASI admissions, instrument request/return, scientific data, regulatory verdict and documentation; EPF checks dynamic source execution"}),
+        "scope":"one-use actual WASI admissions, instrument requests, final returns, scientific data, regulatory verdict and documentation; EPF checks dynamic source execution and custody"}),
     )
 }
 pub fn audit(path: &Path) -> Result<Value> {

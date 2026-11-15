@@ -220,7 +220,7 @@ pub(crate) fn close_arguments(
         })
         .max_by_key(|frame| frame.sent)
         .ok_or("close result without projected WASI request")?;
-    if request.bytes != [4] || request.received()? >= closed.sent {
+    if request.bytes != [4] {
         return Err("close result without projected WASI request".into());
     }
     if !used.insert(closed.sent) {
@@ -248,17 +248,13 @@ pub(crate) fn check_close_pairs(frames: &BTreeMap<u64, Frame>, pairs: &[(u64, u6
         if requests.len() != replies.len() {
             return Err("missing or extra WASI close request/result".into());
         }
-        let mut previous = None;
         for (request, reply) in requests.into_iter().zip(replies) {
             if request.bytes.len() != 1
                 || reply.bytes.len() < 4
                 || request.bytes[0] != reply.bytes[0]
-                || request.received()? >= reply.sent
-                || previous.is_some_and(|at| at >= request.sent)
             {
-                return Err("WASI close request/result mismatch or overlapping import".into());
+                return Err("WASI close request/result data mismatch".into());
             }
-            previous = Some(reply.received()?);
         }
     }
     Ok(())

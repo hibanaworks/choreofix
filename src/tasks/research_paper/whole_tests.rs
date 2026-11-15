@@ -5,7 +5,7 @@ use crate::shell::{
     imp::{bus::Bus, report_arguments::ReportArguments, service::Domain},
 };
 use hibana::{
-    Endpoint, ParallelEndpoint,
+    Endpoint, EndpointBorrow,
     g::Message,
     runtime::{SessionKitStorage, ids::SessionId, program::project, tap},
 };
@@ -238,8 +238,8 @@ async fn author<'r, const AUTHOR: u8, const SECTION: u8, C: ChapterMessages<AUTH
 }
 
 #[hibana_runtime::scope]
-async fn fact<const AUTHOR: u8, const SECTION: u8, C: ChapterMessages<AUTHOR>>(
-    endpoint: &mut ParallelEndpoint<FACT_CHECKER>,
+async fn fact<'borrow, 'run, const AUTHOR: u8, const SECTION: u8, C: ChapterMessages<AUTHOR>>(
+    endpoint: &mut EndpointBorrow<'borrow, 'run, FACT_CHECKER>,
     early_archive: bool,
 ) -> ShellResult<()> {
     let (mut written, references) = async {
@@ -318,8 +318,8 @@ async fn fact<const AUTHOR: u8, const SECTION: u8, C: ChapterMessages<AUTHOR>>(
 }
 
 #[hibana_runtime::scope]
-async fn editor_chapter<const AUTHOR: u8, const SECTION: u8, C: ChapterMessages<AUTHOR>>(
-    endpoint: &mut ParallelEndpoint<EDITOR>,
+async fn editor_chapter<'borrow, 'run, const AUTHOR: u8, const SECTION: u8, C: ChapterMessages<AUTHOR>>(
+    endpoint: &mut EndpointBorrow<'borrow, 'run, EDITOR>,
 ) -> ShellResult<()> {
     loop {
         let branch = endpoint.offer().await?;

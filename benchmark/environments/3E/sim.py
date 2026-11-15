@@ -3,13 +3,12 @@
 import json
 from pathlib import Path
 
-from benchmark.tools.sim_research import (
+from benchmark.tools.sim_document import (
     CombineStep,
     ReferencesStep,
-    ResearchSim,
+    DocumentSim,
     ResearchStep,
     ReviewStep,
-    ReviseStep,
     WriteSectionStep,
 )
 
@@ -18,21 +17,14 @@ _METADATA = json.loads(
      / "descriptions" / "3E" / "metadata.json").read_text()
 )
 
-_RESOURCES = ["DATABASE", "DOCUMENT"]
-
 _RESEARCH_STEPS = [
-    ResearchStep(agent_id="RESEARCHER_A", topic="subtopic_a"),
-    ResearchStep(agent_id="RESEARCHER_B", topic="subtopic_b"),
+    ResearchStep(agent_id="RESEARCHER_A", topic="subtopic_a", section="section_a"),
+    ResearchStep(agent_id="RESEARCHER_B", topic="subtopic_b", section="section_b"),
 ]
 
 _WRITE_STEPS = [
     WriteSectionStep(agent_id="RESEARCHER_A", section="section_a"),
     WriteSectionStep(agent_id="RESEARCHER_B", section="section_b"),
-]
-
-_REVISE_STEPS = [
-    ReviseStep(agent_id="RESEARCHER_A", section="section_a"),
-    ReviseStep(agent_id="RESEARCHER_B", section="section_b"),
 ]
 
 _REFERENCES_STEPS = [
@@ -50,17 +42,15 @@ _COMBINE_STEPS = [
 ]
 
 
-class TwoAuthorReportSim(ResearchSim):
+class TwoAuthorReportSim(DocumentSim):
     """3E: Two researchers and an editor collaborating on a report."""
 
     def __init__(self) -> None:
         super().__init__(
             research_steps=_RESEARCH_STEPS,
             write_steps=_WRITE_STEPS,
-            revise_steps=_REVISE_STEPS,
             references_steps=_REFERENCES_STEPS,
             review_steps=_REVIEW_STEPS,
             combine_steps=_COMBINE_STEPS,
-            resources=_RESOURCES,
+            metadata=_METADATA,
         )
-        self.load_from_metadata(_METADATA)

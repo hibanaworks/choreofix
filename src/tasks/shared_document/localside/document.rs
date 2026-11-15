@@ -1,103 +1,140 @@
 //! The data owner receives admitted arguments and actual resource requests.
 use super::super::{global::*, imp};
 use crate::shell::{ShellError, ShellResult, imp::service::Domain};
-use hibana::{Endpoint, g::Message, runtime::resolver::DecisionArm};
+use hibana::{Endpoint, g::Message};
 use serde_json::json;
 
 #[hibana_runtime::scope]
 pub async fn run<'r, D: Domain>(
     endpoint: &mut Endpoint<'r, DOCUMENT_SERVICE>,
-    (document, first): (Endpoint<'r, DOCUMENT>, DecisionArm),
+    document: Endpoint<'r, DOCUMENT>,
     domain: &D,
 ) -> ShellResult<Endpoint<'r, DOCUMENT>> {
     let (sections, references_a, references_b) = async {
         let [mut writing, mut references_a, mut references_b] = endpoint.par()?;
         async {
-            // The same immutable allocation input is registered with
-            // FIRST_WRITER. It is not an application progress/owner flag.
-            writing.send::<InitialDocument>(document).await?;
-            match first {
-                DecisionArm::Left => {
-                    let admitted = writing.recv::<WriteA>().await?.into_value();
-                    if imp::chapter(&admitted)? != CHAPTER_A {
-                        return Err(ShellError::message("initial chapter A differs"));
-                    }
-                    let arguments = writing.recv::<WriteOnDocument>().await?.into_value();
-                    imp::same(&admitted, &arguments)?;
-                    let result_a = domain
-                        .execute("WRITER_A", "write_section", arguments.clone())
+            let first = writing.recv::<Allocate>().await?.into_value();
+            let accepted_bytes = imp::encode(&first)?;
+            async {
+                let [mut accepted, mut writing] = writing.par()?;
+                async {
+                    accepted
+                        .send::<AllocationAccepted>(&accepted_bytes.as_slice())
                         .await
-                        .map_err(ShellError::message)?;
-                    let material_a =
-                        imp::material(&result_a, &arguments, ("WRITER_A", "write_section"))?;
-                    let bytes_a = imp::encode(&result_a)?;
-                    writing.send::<Written>(&bytes_a.as_slice()).await?;
-                    let material_b = async {
-                        let [mut notification, mut continuation] = writing.par()?;
-                        async {
-                            notification.send::<MaterialA>(&bytes_a.as_slice()).await?;
-                        };
-                        let admitted = continuation.recv::<WriteB>().await?.into_value();
-                        if imp::chapter(&admitted)? != CHAPTER_B {
-                            return Err(ShellError::message("initial chapter B differs"));
+                        .map_err(ShellError::from)
+                };
+                async {
+                    match first["first_writer"].as_str() {
+                        Some("WRITER_A") => {
+                            writing.send::<InitialDocument>(document).await?;
+                            let admitted = writing.recv::<WriteA>().await?;
+                            writing.send::<WriteArgumentsA>(&admitted).await?;
+                            let admitted = admitted.into_value();
+                            if imp::chapter(&admitted)? != CHAPTER_A {
+                                return Err(ShellError::message("initial chapter A differs"));
+                            }
+                            let arguments = writing.recv::<WriteOnDocument>().await?.into_value();
+                            imp::same(&admitted, &arguments)?;
+                            let result_a = domain
+                                .execute("WRITER_A", "write_section", arguments.clone())
+                                .await
+                                .map_err(ShellError::message)?;
+                            let material_a = imp::material(
+                                &result_a,
+                                &arguments,
+                                ("WRITER_A", "write_section"),
+                            )?;
+                            let bytes_a = imp::encode(&result_a)?;
+                            writing.send::<Written>(&bytes_a.as_slice()).await?;
+                            let material_b = async {
+                                let [mut notification, mut continuation] = writing.par()?;
+                                async {
+                                    notification.send::<MaterialA>(&bytes_a.as_slice()).await?;
+                                };
+                                let admitted = continuation.recv::<WriteB>().await?;
+                                continuation.send::<WriteArgumentsB>(&admitted).await?;
+                                let admitted = admitted.into_value();
+                                if imp::chapter(&admitted)? != CHAPTER_B {
+                                    return Err(ShellError::message("initial chapter B differs"));
+                                }
+                                let arguments =
+                                    continuation.recv::<WriteOnDocument>().await?.into_value();
+                                imp::same(&admitted, &arguments)?;
+                                let result = domain
+                                    .execute("WRITER_B", "write_section", arguments.clone())
+                                    .await
+                                    .map_err(ShellError::message)?;
+                                let material = imp::material(
+                                    &result,
+                                    &arguments,
+                                    ("WRITER_B", "write_section"),
+                                )?;
+                                let bytes = imp::encode(&result)?;
+                                continuation.send::<Written>(&bytes.as_slice()).await?;
+                                continuation.send::<MaterialB>(&bytes.as_slice()).await?;
+                                Ok(material)
+                            }
+                            .await?;
+                            Ok([material_a, material_b])
                         }
-                        let arguments = continuation.recv::<WriteOnDocument>().await?.into_value();
-                        imp::same(&admitted, &arguments)?;
-                        let result = domain
-                            .execute("WRITER_B", "write_section", arguments.clone())
-                            .await
-                            .map_err(ShellError::message)?;
-                        let material =
-                            imp::material(&result, &arguments, ("WRITER_B", "write_section"))?;
-                        let bytes = imp::encode(&result)?;
-                        continuation.send::<Written>(&bytes.as_slice()).await?;
-                        continuation.send::<MaterialB>(&bytes.as_slice()).await?;
-                        Ok(material)
-                    }
-                    .await?;
-                    Ok([material_a, material_b])
-                }
-                DecisionArm::Right => {
-                    let admitted = writing.recv::<WriteB>().await?.into_value();
-                    if imp::chapter(&admitted)? != CHAPTER_B {
-                        return Err(ShellError::message("initial chapter B differs"));
-                    }
-                    let arguments = writing.recv::<WriteOnDocument>().await?.into_value();
-                    imp::same(&admitted, &arguments)?;
-                    let result_b = domain
-                        .execute("WRITER_B", "write_section", arguments.clone())
-                        .await
-                        .map_err(ShellError::message)?;
-                    let material_b =
-                        imp::material(&result_b, &arguments, ("WRITER_B", "write_section"))?;
-                    let bytes_b = imp::encode(&result_b)?;
-                    writing.send::<Written>(&bytes_b.as_slice()).await?;
-                    let material_a = async {
-                        let [mut notification, mut continuation] = writing.par()?;
-                        async {
-                            notification.send::<MaterialB>(&bytes_b.as_slice()).await?;
-                        };
-                        let admitted = continuation.recv::<WriteA>().await?.into_value();
-                        if imp::chapter(&admitted)? != CHAPTER_A {
-                            return Err(ShellError::message("initial chapter A differs"));
+                        Some("WRITER_B") => {
+                            writing.send::<InitialDocumentB>(document).await?;
+                            let admitted = writing.recv::<WriteB>().await?;
+                            writing.send::<WriteArgumentsB>(&admitted).await?;
+                            let admitted = admitted.into_value();
+                            if imp::chapter(&admitted)? != CHAPTER_B {
+                                return Err(ShellError::message("initial chapter B differs"));
+                            }
+                            let arguments = writing.recv::<WriteOnDocument>().await?.into_value();
+                            imp::same(&admitted, &arguments)?;
+                            let result_b = domain
+                                .execute("WRITER_B", "write_section", arguments.clone())
+                                .await
+                                .map_err(ShellError::message)?;
+                            let material_b = imp::material(
+                                &result_b,
+                                &arguments,
+                                ("WRITER_B", "write_section"),
+                            )?;
+                            let bytes_b = imp::encode(&result_b)?;
+                            writing.send::<Written>(&bytes_b.as_slice()).await?;
+                            let material_a = async {
+                                let [mut notification, mut continuation] = writing.par()?;
+                                async {
+                                    notification.send::<MaterialB>(&bytes_b.as_slice()).await?;
+                                };
+                                let admitted = continuation.recv::<WriteA>().await?;
+                                continuation.send::<WriteArgumentsA>(&admitted).await?;
+                                let admitted = admitted.into_value();
+                                if imp::chapter(&admitted)? != CHAPTER_A {
+                                    return Err(ShellError::message("initial chapter A differs"));
+                                }
+                                let arguments =
+                                    continuation.recv::<WriteOnDocument>().await?.into_value();
+                                imp::same(&admitted, &arguments)?;
+                                let result = domain
+                                    .execute("WRITER_A", "write_section", arguments.clone())
+                                    .await
+                                    .map_err(ShellError::message)?;
+                                let material = imp::material(
+                                    &result,
+                                    &arguments,
+                                    ("WRITER_A", "write_section"),
+                                )?;
+                                let bytes = imp::encode(&result)?;
+                                continuation.send::<Written>(&bytes.as_slice()).await?;
+                                continuation.send::<MaterialA>(&bytes.as_slice()).await?;
+                                Ok(material)
+                            }
+                            .await?;
+                            Ok([material_a, material_b])
                         }
-                        let arguments = continuation.recv::<WriteOnDocument>().await?.into_value();
-                        imp::same(&admitted, &arguments)?;
-                        let result = domain
-                            .execute("WRITER_A", "write_section", arguments.clone())
-                            .await
-                            .map_err(ShellError::message)?;
-                        let material =
-                            imp::material(&result, &arguments, ("WRITER_A", "write_section"))?;
-                        let bytes = imp::encode(&result)?;
-                        continuation.send::<Written>(&bytes.as_slice()).await?;
-                        continuation.send::<MaterialA>(&bytes.as_slice()).await?;
-                        Ok(material)
+                        _ => unreachable!("validated first writer"),
                     }
-                    .await?;
-                    Ok([material_a, material_b])
-                }
+                };
             }
+            .await
+            .map(|(_, sections)| sections)
         };
         async {
             let arguments = references_a.recv::<ReferencesA>().await?.into_value();
@@ -152,7 +189,17 @@ pub async fn run<'r, D: Domain>(
                     .map_err(ShellError::message)?;
                 imp::reviewed(&result, &snapshot, CHAPTER_A)?;
                 let bytes = imp::encode(&result)?;
-                a.send::<ReviewedA>(&bytes.as_slice()).await?;
+                async {
+                    let [mut response, mut evidence] = a.par()?;
+                    async {
+                        response.send::<ReviewedA>(&bytes.as_slice()).await?;
+                    };
+                    async {
+                        evidence.send::<ReviewEvidenceA>(&bytes.as_slice()).await?;
+                    };
+                    Ok::<(), ShellError>(())
+                }
+                .await?;
                 Ok(result)
             };
             async {
@@ -166,7 +213,17 @@ pub async fn run<'r, D: Domain>(
                     .map_err(ShellError::message)?;
                 imp::reviewed(&result, &snapshot, CHAPTER_B)?;
                 let bytes = imp::encode(&result)?;
-                b.send::<ReviewedB>(&bytes.as_slice()).await?;
+                async {
+                    let [mut response, mut evidence] = b.par()?;
+                    async {
+                        response.send::<ReviewedB>(&bytes.as_slice()).await?;
+                    };
+                    async {
+                        evidence.send::<ReviewEvidenceB>(&bytes.as_slice()).await?;
+                    };
+                    Ok::<(), ShellError>(())
+                }
+                .await?;
                 Ok(result)
             };
         }
@@ -179,16 +236,24 @@ pub async fn run<'r, D: Domain>(
                 break [a, b];
             }
             ReconsiderA::LOGICAL_LABEL => {
-                imp::same(&imp::decode(branch.recv::<ReconsiderA>().await?)?, &a)?;
-                (endpoint.recv::<ReviseA>().await?.into_value(), "WRITER_A")
+                imp::same(&branch.recv::<ReconsiderA>().await?.into_value(), &a)?;
+                {
+                    let admitted = endpoint.recv::<ReviseA>().await?;
+                    endpoint.send::<RevisionArgumentsA>(&admitted).await?;
+                    (admitted.into_value(), "WRITER_A")
+                }
             }
             ReconsiderB::LOGICAL_LABEL => {
-                imp::same(&imp::decode(branch.recv::<ReconsiderB>().await?)?, &b)?;
-                (endpoint.recv::<ReviseB>().await?.into_value(), "WRITER_B")
+                imp::same(&branch.recv::<ReconsiderB>().await?.into_value(), &b)?;
+                {
+                    let admitted = endpoint.recv::<ReviseB>().await?;
+                    endpoint.send::<RevisionArgumentsB>(&admitted).await?;
+                    (admitted.into_value(), "WRITER_B")
+                }
             }
             _ => {
                 return Err(ShellError::message(
-                    "expected an actual rejected review or both final approvals",
+                    "expected an actual reconsideration request or both final approvals",
                 ));
             }
         };

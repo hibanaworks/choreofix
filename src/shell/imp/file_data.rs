@@ -69,7 +69,7 @@ impl FileData {
         };
         let Some(end) = start
             .checked_add(write.bytes().len())
-            .filter(|n| *n <= 8192)
+            .filter(|n| *n <= crate::shell::GUEST_MEMORY_BYTES)
         else {
             return Ok(protocol::FdWriteDoneRet(
                 protocol::FdWriteDone::new_with_errno(write.request().fd(), 0, 22),

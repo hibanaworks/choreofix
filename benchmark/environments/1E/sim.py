@@ -51,8 +51,8 @@ class SharedCodebaseSim(CodingSim):
     """
 
     # No retry loop in this task: test outcome is terminal regardless.
-    # Overriding to empty prevents --scenario/--difficulty from injecting
-    # failures that would leave _test_done permanently False.
+    # Explicit external fault probes remain possible; ordinary difficulty does
+    # not turn this terminal task into the retrying 1H task.
     _DECISION_TOOLS: dict = {}
 
     def __init__(self) -> None:

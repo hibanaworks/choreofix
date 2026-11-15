@@ -11,6 +11,7 @@ pub mod imp {
     pub mod service;
 }
 pub mod localside {
+    pub mod file_metadata;
     pub mod private_io;
 }
 pub use imp::error::{ShellError, ShellResult};

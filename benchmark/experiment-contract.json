@@ -17,7 +17,7 @@
     "first_technical_gate": "T3/T4: compose unique resource ownership and its remaining protocol with actual effects; define the adapter trust boundary and test old owners, duplicate transfers and argument substitution before scored comparisons",
     "theorem_scope_and_milestones": "plan.md",
     "effect_boundary_contract_and_inventory": "benchmark/effect-boundaries.md",
-    "effect_boundary_status": "Minimum T3/T4 composition is proved under the consuming receiver contract; concrete handoff binds two actual resource receives and publication to one checked EPF execution. Twenty-eight tasks across twenty-two families have source-bound real-Wasm qualifications, leaving twenty ports. Live-model pilots retain their own recorded source and coverage. Latest 14M adds twelve Wasm conditions and one five-Luna/xhigh pilot on its frozen v15 common world. Compiled wire contracts, complete capture, dynamic EPF source interpretation and separate actual-effect audits are connected for the qualified ports. Their results certify only their recorded sources and finite inputs. They do not establish general Rust refinement, every effect entry, final-source all-family certification or scored comparative superiority. Development resolves core, EPF and WASI through the canonical current sibling worktrees, including the core under validation. Remaining port migration, exact generated coverage for the latest observer defect and the unfinished core contract remain explicit; comparison connection development stays deferred.",
+    "effect_boundary_status": "Minimum T3/T4 composition is proved under the consuming receiver contract; concrete handoff binds actual resource receives and publication to one checked EPF execution. Historical generic-close ports do not qualify the direct-file boundary. Eighteen source-bound tasks now have direct-file mechanism and live-model evidence; 30 remain, with the exact list in migration_status. The latest 12E direct-file implementation passes 51 actual-Wasm conditions and one three-Luna/xhigh pilot with EPF, exact effects/replies and neutral common scoring on each same run. The live pilot completes in 23.9857885 seconds with 332800 inclusive tokens and zero violations. The original kitchen tools have zero delay; controlled-delay concurrency fixtures are labeled separately and are not performance results. This is not general Rust refinement, final-source all-family certification, a success-rate estimate or comparative superiority. Canonical sibling worktrees remain the development dependencies. Foreign-tail parallel borrowing has focused native, Miri, generated and Lean evidence. The repaired current core also passes all native targets and generated assignments 31 through 36, but the full normal gate remains unfinished. New assignment 37 was stopped for intermediate-record disk growth and 38 is unstarted; neither counts as passed. Comparison-connection development stays deferred.",
     "minimum_handoff_case": {
       "source": "src/tasks/handoff",
       "scope": "Native hibana-runtime mechanism fixture with two independent runtimes and the application's actual Endpoint transport; not a remote-network, Wasm or model experiment",
@@ -183,38 +183,65 @@
       "1E",
       "1M"
     ],
-    "original_items": "RA1 through RA3 or RA5 respectively describe sequential acquisition",
-    "hibana_execution": "The guest receives both actual module Endpoints in parallel, sends the actual commit arguments through each, receives both actual results, then returns both Endpoints in parallel before testing",
-    "preserved": [
-      "Original developers, assigned features and module pairs",
-      "Design and implementation before acquisition",
-      "Exclusive module ownership during commit",
-      "Both grants before commit",
-      "Return before local tests",
-      "Terminal test outcome, including failure"
-    ],
-    "interface": "The projected owner supplies agent_id. Feature strings must name the assigned feature; module strings must contain exactly the assigned pair. Pair order and comma spacing do not matter. Unlike the unchanged simulator's permissive argument matching, malformed or wrong-target requests are returned before any effect",
-    "parallelism": "All guests, private computation and preparation progress independently; disjoint commits run concurrently. A delayed local test must not hold shared modules or block another developer's commit",
-    "scope": "1H requires its own result-driven reconsideration path and is not qualified by these terminal 1E/1M protocols",
-    "qualification": "Requires persisted direct-WASI evidence and task fidelity review before scored comparisons"
+    "historical_pre_direct_files": {
+      "tasks": [
+        "1E",
+        "1M"
+      ],
+      "original_items": "RA1 through RA3 or RA5 respectively describe sequential acquisition",
+      "hibana_execution": "The guest receives both actual module Endpoints in parallel, sends the actual commit arguments through each, receives both actual results, then returns both Endpoints in parallel before testing",
+      "preserved": [
+        "Original developers, assigned features and module pairs",
+        "Design and implementation before acquisition",
+        "Exclusive module ownership during commit",
+        "Both grants before commit",
+        "Return before local tests",
+        "Terminal test outcome, including failure"
+      ],
+      "interface": "The projected owner supplies agent_id. Feature strings must name the assigned feature; module strings must contain exactly the assigned pair. Pair order and comma spacing do not matter. Unlike the unchanged simulator's permissive argument matching, malformed or wrong-target requests are returned before any effect",
+      "parallelism": "All guests, private computation and preparation progress independently; disjoint commits run concurrently. A delayed local test must not hold shared modules or block another developer's commit",
+      "scope": "1H requires its own result-driven reconsideration path and is not qualified by these terminal 1E/1M protocols",
+      "qualification": "Requires persisted direct-WASI evidence and task fidelity review before scored comparisons"
+    },
+    "current_boundary": "Actual operation files own their Endpoints. The request is the ordinary projected message, both module requests precede the effect, actual results return before the Endpoints, and the same operation object receives the actual result. No generic close envelope, validation stage, request mailbox or host dispatcher remains.",
+    "qualification_current": {
+      "status": "implementation_preparing_qualification",
+      "world_contract": "common-environment-v23",
+      "world_tests": 258,
+      "model_calls": 0,
+      "scored_runs": 0
+    }
   },
   "coding_reconsideration": {
     "tasks": [
       "1H"
     ],
-    "preserved": [
-      "Original seven developers, assigned features and module pairs",
-      "Design before implementation",
-      "Both actual module Endpoints held during commit",
-      "Original implementation, commit and test effects",
-      "Failed tests lead to reconsideration and another implementation attempt",
-      "All developers eventually pass their tests for domain completion"
-    ],
-    "hibana_execution": "Each guest receives both module Endpoints in parallel, commits through both, receives both actual replies and returns both Endpoints before testing. A result-driven route informs the guest and both module owners. A failed result leads to another implementation, commit and test through roll. The successful branch contains guest completion. Disjoint commits and private work execute concurrently",
-    "procedural_change": "Module owners may serve another assigned developer only after receiving the current developer's successful test result. Modules themselves are returned before tests. The global groups disjoint developers without an application lock, owner table or progress flag",
-    "unscored_recovery_preflight": "Scripted actual-WASI trials cover the original scenario depths 0, 1 and 2, an extra FailureSpec control with two failed tests, and original normal delays. The seven-model pilot uses the original depth 2 without extra failures or barriers. These are unscored trials. Scored runs must use only the original matched scenario settings",
-    "concurrency_qualification": "Initial attempts return shared Endpoints before observing test outcomes. Module owners offer the actual result branches; failure permits another loan while success leaves the other developer active. With ordinary pinned Git dependencies, the revised source passes native Endpoint checks and five actual-WASI cases: original depths 0/1/2, two additional failed tests and original normal delays. The normal-delay case reaches three simultaneous disjoint commits with zero violations. Direct calls to the unchanged simulator confirm independent work and test/commit overlap and detect overlapping commits to the same database. At source 252b821, a separate seven-Luna-xhigh pilot with the same ordinary Git pins completed in 79.57 seconds at original depth 2, with zero violations and two simultaneous disjoint commits. Inclusive usage was 1,820,465 tokens. These are unscored pilot observations, not matched comparative performance.",
-    "qualification": "Native and real-WASI/wash trials pass for seven developers. The unchanged simulator's depth 2 produces two failed tests per developer before success. The scripted original-delay case reaches three disjoint commits in parallel. Five persisted WASI cases pass the delegation audit and reject ten altered records each. A separate seven-Luna-xhigh trial at original depth 2 completes through actual WASI/wash, with no extra failures or barriers, no resource violations, 42 actual Endpoint requests and returns, and two overlapping disjoint commits. Its independent audit passes and rejects ten altered records. These trials are unscored; full-task acceptance and matched scored comparisons remain pending"
+    "historical_pre_direct_files": {
+      "tasks": [
+        "1H"
+      ],
+      "preserved": [
+        "Original seven developers, assigned features and module pairs",
+        "Design before implementation",
+        "Both actual module Endpoints held during commit",
+        "Original implementation, commit and test effects",
+        "Failed tests lead to reconsideration and another implementation attempt",
+        "All developers eventually pass their tests for domain completion"
+      ],
+      "hibana_execution": "Each guest receives both module Endpoints in parallel, commits through both, receives both actual replies and returns both Endpoints before testing. A result-driven route informs the guest and both module owners. A failed result leads to another implementation, commit and test through roll. The successful branch contains guest completion. Disjoint commits and private work execute concurrently",
+      "procedural_change": "Module owners may serve another assigned developer only after receiving the current developer's successful test result. Modules themselves are returned before tests. The global groups disjoint developers without an application lock, owner table or progress flag",
+      "unscored_recovery_preflight": "Scripted actual-WASI trials cover the original scenario depths 0, 1 and 2, an extra FailureSpec control with two failed tests, and original normal delays. The seven-model pilot uses the original depth 2 without extra failures or barriers. These are unscored trials. Scored runs must use only the original matched scenario settings",
+      "concurrency_qualification": "Initial attempts return shared Endpoints before observing test outcomes. Module owners offer the actual result branches; failure permits another loan while success leaves the other developer active. With ordinary pinned Git dependencies, the revised source passes native Endpoint checks and five actual-WASI cases: original depths 0/1/2, two additional failed tests and original normal delays. The normal-delay case reaches three simultaneous disjoint commits with zero violations. Direct calls to the unchanged simulator confirm independent work and test/commit overlap and detect overlapping commits to the same database. At source 252b821, a separate seven-Luna-xhigh pilot with the same ordinary Git pins completed in 79.57 seconds at original depth 2, with zero violations and two simultaneous disjoint commits. Inclusive usage was 1,820,465 tokens. These are unscored pilot observations, not matched comparative performance.",
+      "qualification": "Native and real-WASI/wash trials pass for seven developers. The unchanged simulator's depth 2 produces two failed tests per developer before success. The scripted original-delay case reaches three disjoint commits in parallel. Five persisted WASI cases pass the delegation audit and reject ten altered records each. A separate seven-Luna-xhigh trial at original depth 2 completes through actual WASI/wash, with no extra failures or barriers, no resource violations, 42 actual Endpoint requests and returns, and two overlapping disjoint commits. Its independent audit passes and rejects ten altered records. These trials are unscored; full-task acceptance and matched scored comparisons remain pending"
+    },
+    "current_boundary": "Actual operation files own their Endpoints. The request is the ordinary projected message, both module requests precede the effect, actual results return before the Endpoints, and the same operation object receives the actual result. No generic close envelope, validation stage, request mailbox or host dispatcher remains.",
+    "qualification_current": {
+      "status": "implementation_preparing_qualification",
+      "world_contract": "common-environment-v23",
+      "world_tests": 258,
+      "model_calls": 0,
+      "scored_runs": 0
+    }
   },
   "writing_departure": {
     "tasks": [
@@ -223,7 +250,7 @@
       "2H"
     ],
     "original_items": "RA1 through RA3, RA5 or RA7 respectively describe sequential acquisition",
-    "hibana_execution": "After the actual WASI write arguments are validated, the guest receives both assigned section Endpoints in parallel. It sends the same actual write arguments through both Endpoints, receives the original simulator result through both and returns both Endpoints before review. The effect service receives both resource requests before executing the write. Independent preparations, disjoint writes and reviews run concurrently, with ownership and dependencies expressed only in the global",
+    "hibana_execution": "Each operation file owns its projected Endpoint from construction. Close sends the actual typed read, draft, write or review request and read receives its actual result from that same file. The researcher localside directly receives it, drives both real section Endpoints for writing, matches both requests to the admitted arguments, executes the actual effect and returns both results and Endpoints. No generic result mailbox, host-selected next operation, validation/progress flag or owner table remains.",
     "preserved": [
       "Read and draft precede acquisition",
       "Exclusive section ownership",
@@ -231,9 +258,40 @@
       "Both actual resource replies delivered before return",
       "Terminal review outcome, including failure"
     ],
-    "procedure": "The global groups disjoint resource pairs into parallel waves. It permits each participant's preparation and post-return review to progress independently. This replaces the original sequential acquisition checklist; it does not introduce a lock table, task flags or a second progress cursor",
+    "procedure": "The global contains parallel preparations, parallel waves of disjoint section pairs and parallel terminal reviews. Original operations and actual resource exclusions are preserved; the shell freely chooses its commands and receives recoverable errors for unadmitted input. The common world checks actual material/result causality without reading this choreography.",
     "interface": "Topic, section name and resource pair must match the original assignment. Either order of the two section names and ordinary surrounding whitespace are accepted. Malformed, duplicate, wrong-target and out-of-order operations do not reach the original effect. The projected service supplies agent_id",
-    "qualification": "Fifteen actual-WASI trials cover 3/5/7 participants, each original depth 0/1/2, explicit terminal review failure and original normal delays. All preserve original outcomes, have zero resource violations and pass the section Endpoint audit; fourteen record mutants per trial are rejected. Original-delay scripted cases observe one, two and three simultaneous disjoint writes respectively. Separate 3/5/7-Luna-xhigh actual-WASI trials complete through the existing ChatGPT subscription with matching model/effort, recorded inclusive usage, original completion, zero violations and six/ten/fourteen actual resource requests and returns. Observed simultaneous writes in those model trials are one/one/three. These are unscored qualifications; full-task acceptance and matched comparisons remain pending"
+    "qualification_historical_pre_direct_files": "Fifteen actual-WASI trials cover 3/5/7 participants, each original depth 0/1/2, explicit terminal review failure and original normal delays. All preserve original outcomes, have zero resource violations and pass the section Endpoint audit; fourteen record mutants per trial are rejected. Original-delay scripted cases observe one, two and three simultaneous disjoint writes respectively. Separate 3/5/7-Luna-xhigh actual-WASI trials complete through the existing ChatGPT subscription with matching model/effort, recorded inclusive usage, original completion, zero violations and six/ten/fourteen actual resource requests and returns. Observed simultaneous writes in those model trials are one/one/three. These are unscored qualifications; full-task acceptance and matched comparisons remain pending",
+    "qualification_current": {
+      "status": "passed_finite_unscored_qualification",
+      "simulator_contract": "common-environment-v22",
+      "actual_wasm_conditions": 15,
+      "record_mutations_rejected": 2730,
+      "model_pilots": [
+        {
+          "task": "2E",
+          "participants": 3,
+          "elapsed_seconds": 31.01519625,
+          "inclusive_tokens": 367675,
+          "max_simultaneous_actual_writes": 1
+        },
+        {
+          "task": "2M",
+          "participants": 5,
+          "elapsed_seconds": 33.482359,
+          "inclusive_tokens": 636160,
+          "max_simultaneous_actual_writes": 2
+        },
+        {
+          "task": "2H",
+          "participants": 7,
+          "elapsed_seconds": 30.908882667,
+          "inclusive_tokens": 930270,
+          "max_simultaneous_actual_writes": 2
+        }
+      ],
+      "evidence": "output/experiments/writing-direct-files-20261114/qualification-v16.json",
+      "scope": "Finite real-Wasm and real-model qualifications with complete EPF and actual effect/score audits on the same binary. Not scored comparisons or final core certification."
+    }
   },
   "review_procedure": {
     "tasks": [
@@ -256,7 +314,7 @@
     "tasks": [
       "3E"
     ],
-    "status": "Migrated with 27 scripted Wasm conditions and one source-bound live-model pilot on the current checking core; thirteen of forty-eight task implementations are migrated, while final release qualification and scored experiments remain separate",
+    "status": "Direct Endpoint-bound ChoreoFS qualified on one recorded checking-core source by 27 real-Wasm conditions and one three-person live-model pilot. Eight of forty-eight tasks are requalified under this boundary; final core/all-family release certification and scored comparisons remain unfinished.",
     "preserved": [
       "Original two researchers, editor, single DOCUMENT and single DATABASE",
       "Assigned topics and sections; optional content_notes and feedback retain their original bytes",
@@ -264,13 +322,14 @@
       "Exclusive DOCUMENT access during writing, revision and combination, and DATABASE access during reference updates",
       "Rejected reviews require actual revision before another review of that section",
       "Both actual positive reviews before final combination",
-      "Original simulator, injected failures, results and scoring"
+      "Method-neutral common-environment-v21 with original operations, injected failures and content-bound scoring"
     ],
-    "procedure": "The guest uses research_topic, write_section, update_references, revise_section, review_sections and combine_sections objects through ChoreoFS. Business messages carry actual arguments. The sole DOCUMENT and DATABASE Endpoints move to the guest, carry the actual request and result and return. Physical owners compare admitted and resource arguments and assigned targets before Domain::execute. The editor chooses its first reviewed section and can switch after rejection. Where projected independently, one section's revision and the other's review run concurrently. Final combination is outside the repeatable review workflow and requires both positive replies forwarded from the editor's actual received results; the DOCUMENT receiver compares them with the review services' actual replies",
+    "procedure": "Each shell file owns its real Endpoint and directly sends its typed request or receives its actual result through ChoreoFS. Localsides visibly receive exact arguments, use and return the unique DOCUMENT/DATABASE Endpoints, and execute the actual effects. Either review target and repeated/alternating rejection routes are supported. Publication requires both current positive results and actual resource requests outside the review rolls. Researchers may exit after their own positive review; native localsides retain the publication notices, without final shell reads, host completion flags or a draining adapter.",
     "departures": "Replace the legacy unit grants, opaque native Domain::request path and fixed A-first review procedure. Independent research and A's database update/B's document write are parallel. Preserve the original both-submissions-before-review constraint even though the prose also discusses sections as they arrive",
     "input_checks": "The guest and resource receiver reject wrong assigned topics or sections. Report request schemas retain the original optional content_notes and feedback, rejecting malformed or unrelated fields. Combine names exactly section_a and section_b, allowing comma spacing and order differences",
-    "qualification_current": "The current runtime passes eighteen ordinary and eight extended-rejection real-WASI conditions with original scoring, EPF and effect audits. A dedicated invalid-input condition rejects early combination, malformed/wrong-target requests, all four researcher operations after approval and revision after the actual combine result, then completes without extra effects. Completed business Endpoint fragments are retired while private WASI I/O remains live; no progress flag or workflow message is added and the compiled protocol is unchanged. Five native receiver/data tests and application Clippy pass. The 27 scripted conditions and one three-gpt-6-luna-xhigh ChatGPT-subscription pilot have source-bound original, EPF and effect audits. The pilot at original depth 2 completed in 57.12359775 seconds, with four reviews including two rejections, two revisions, seven actual resource requests and returns, zero violations and 500202 inclusive tokens. All 6797 static business/wire record mutations across those 28 primary records are rejected; the earlier narrow post-approval trace remains supplemental and is not counted twice. The mutation tool passes 36 native tests and Clippy, and is connected to the standard Wasm qualification entry. Summaries and exact artifact references are in target/task-qualification-3E-20261108. Runtime source reuse checks 693 unchanged Rust/manifest inputs, including no added runtime source files. These are finite mechanism/pilot qualifications, not scored comparisons or a general Rust refinement proof",
-    "qualification_remaining": "Freeze and qualify the final core/consumer release artifact, finish remaining task ports and run the scored experiment matrix. This port does not establish other tasks or comparative performance."
+    "qualification_remaining": "Freeze and qualify the final core/consumer release artifact, finish remaining task ports and run the scored experiment matrix. This port does not establish other tasks or comparative performance.",
+    "qualification_historical_pre_direct_files": "The current runtime passes eighteen ordinary and eight extended-rejection real-WASI conditions with original scoring, EPF and effect audits. A dedicated invalid-input condition rejects early combination, malformed/wrong-target requests, all four researcher operations after approval and revision after the actual combine result, then completes without extra effects. Completed business Endpoint fragments are retired while private WASI I/O remains live; no progress flag or workflow message is added and the compiled protocol is unchanged. Five native receiver/data tests and application Clippy pass. The 27 scripted conditions and one three-gpt-6-luna-xhigh ChatGPT-subscription pilot have source-bound original, EPF and effect audits. The pilot at original depth 2 completed in 57.12359775 seconds, with four reviews including two rejections, two revisions, seven actual resource requests and returns, zero violations and 500202 inclusive tokens. All 6797 static business/wire record mutations across those 28 primary records are rejected; the earlier narrow post-approval trace remains supplemental and is not counted twice. The mutation tool passes 36 native tests and Clippy, and is connected to the standard Wasm qualification entry. Summaries and exact artifact references are in target/task-qualification-3E-20261108. Runtime source reuse checks 693 unchanged Rust/manifest inputs, including no added runtime source files. These are finite mechanism/pilot qualifications, not scored comparisons or a general Rust refinement proof",
+    "qualification_current": "The 18 ordinary, 8 extended-rejection and 1 invalid/post-completion real-Wasm conditions pass on binary 7572940734d40e95115a6f8bdef29d5b6dfd7b84df975e4246f1f03ec833ebb8. Each has complete EPF capture, actual receive/effect/result correspondence and common scoring; 6579 record mutations are rejected. A source-bound depth-2 ChatGPT pilot with three gpt-6-luna/xhigh participants completes in 106.091916458 seconds, uses 806895 inclusive tokens, performs 13 effects, four reviews including two rejections, and seven resource requests. All guests exit 0 and the same run passes EPF over 23012 records, effect audit and common scoring with zero violations. No domain-effect overlap is observed in that pilot. The previous 113.028-second pilot failed on an unnecessary final author-file receive and remains preserved separately. Evidence: output/experiments/research-report-direct-files-20261114/qualification-v30.json. This is finite unscored qualification, not complete core/family certification or comparative performance."
   },
   "dining_procedure": {
     "tasks": [
@@ -350,11 +409,11 @@
       "Build-complete, tests-passed and both deployment-complete notifications",
       "Original no-retry outcomes and unchanged failure profiles"
     ],
-    "hibana_execution": "After validation of the actual WASI file close, the guest receives the infrastructure Endpoint, sends its actual argument data through it, receives the actual simulator result and returns the same Endpoint. The build server returns to its owner before it is lent to the tester. Private shell work does not hold infrastructure. Both final notifications run concurrently through par. Global and direct localside operations own all permissions and progress; no unit grants or parallel owner table remain",
-    "qualification": "Native Endpoint tests and actual-WASI original depths 0/1/2 pass under ordinary Git pins with three actual requests and returns, original completion and zero violations. Each run is bound to its executable and compiled projection; all frames, including coherently altered wire labels or lanes, are checked against that artifact. Sixteen record mutants per completed case, 48 in total, are rejected. A separate guest-early-exit case produces no original effect. This source passes 40 native application tests, 29 runner tests and both Clippy checks. These are model-free mechanism qualifications. Earlier three-Luna-xhigh subscription pilots and their source versions remain recorded separately in plan.md; they do not qualify this current source. Dynamic eligibility replay, full-task acceptance and matched comparisons remain pending."
+    "hibana_execution": "Each shell operation file owns its actual projected Endpoint. Its object close is the real request; the native localside receives it through ChoreoFS, validates the exact target and sends the admitted arguments through the actual infrastructure Endpoint. The effect owner independently validates the received request before executing it. The same resource returns after the result. Build-complete, tests-passed, actual operation results and both concurrent deployment-complete notifications are ordinary messages projected directly as reads of those files. No generic mailbox, host-selected next command, request-ready grant, validation flag or task owner table remains.",
+    "qualification": "The Endpoint-bound path passes one production-receiver forgery test, three completed Wasm conditions at original depths 0/1/2, and one early-exit case with zero effects. Each completed record passes EPF, exact file/request/effect/result correspondence and common scoring; 3 x 16 record mutants are rejected. After retaining unsafe-deployment observations in the common scorer, unchanged Rust/SDK/runtime/runner evidence was carried forward, with one current-scorer ordinary Wasm case and its 16 mutants added. A fresh three-person Luna xhigh pilot on that final source passes independent run, EPF and effect/score audits: 32.079833 seconds, 386756 inclusive tokens, three effects, seven incoming messages and zero violations. The initial source-bound pilot remains separate. These are unscored finite qualifications, not all-family certification or matched comparisons. Evidence: output/experiments/cicd-direct-projection-20261113/qualification-summary.json."
   },
   "simulator": {
-    "contract": "common-environment-v18",
+    "contract": "common-environment-v23",
     "source": "benchmark",
     "manifest": "benchmark/simulator-manifest.json",
     "base_upstream_revision": "36b4bd108fcd74f7efb17613aebbe3fdf55499a9",
@@ -372,7 +431,10 @@
       "14E",
       "14H",
       "14M",
+      "16E",
+      "3E",
       "3M",
+      "4E",
       "4M",
       "5E",
       "5H",
@@ -405,10 +467,15 @@
       "Version 15 unifies 14E/14M material receipts, failed/pending replacement handling and actual decisions. 14M regulatory review binds the completed current decision, rejection requires a new decision without prescribing extra assays, and documentation requires its current approval. Shared journals own copied input/result data. Independent calls remain unscheduled; resource conflicts stay visible. The 14M application and 14H world/port are not qualified by these tests.",
       "Version 16 replaces 14H done maps and its ignored sample counter with actual compound/formulation, positive or negative assay outcomes, clinical assessment, regulatory evidence and a recorded director outcome. Three total samples are consumed once by valid bio/tox attempts including failures; culture preparation and invalid inputs consume none. Retry does not replenish stock. An exhausted/failed study may support an honest abort, never positive continuation. A hold on unchanged evidence needs deeper dual-instrument review or new scientific evidence. The simulator neither schedules callers nor consults Hibana/EPF. Independent assay orders remain free. Director decision is exposed equally to all methods; the phantom duplicate clinical mass-spec requirement is removed. Synthetic 1–5 second instrument/review delays are common to all methods. Prior source-bound results retain their older worlds.",
       "Version 17 gives every scientific result a run-local event_id, including injected failures, exhaustion and clinical holds. A positive artifact_id remains absent on failure. Clinical inputs can therefore cite the exact negative occurrence without inventing a successful artifact or a new sample. The ID is derived from the existing owned event journal; no workflow flag, owner table or additional counter is introduced. The same response field is available to every method. Earlier v15/v16 source-bound qualifications remain distinct.",
-      "Version 18 gives 3M actual completed research artifacts, section/reference material, fact and editorial receipts, and publication-time evidence through the shared document journal. Extra research topics remain free; each assigned section still needs its own actual inputs. Each completed section can be checked and edited before other authors start. Resource requirements come only from existing common metadata, including DATABASE exclusion. Neither a choreography nor caller scheduling is introduced. Earlier source-bound results retain their recorded worlds."
+      "Version 18 gives 3M actual completed research artifacts, section/reference material, fact and editorial receipts, and publication-time evidence through the shared document journal. Extra research topics remain free; each assigned section still needs its own actual inputs. Each completed section can be checked and edited before other authors start. Resource requirements come only from existing common metadata, including DATABASE exclusion. Neither a choreography nor caller scheduling is introduced. Earlier source-bound results retain their recorded worlds.",
+      "Version 19 replaces 4E done flags with an actual API document, backend/frontend source files, their completed API inputs and executed integration-test snapshots. All tool orders remain callable, both implementation orders are valid, and premature implementations/tests remain actual observable attempts. Completion needs a finished passing test of the current file bytes; later work cannot repair an earlier failed test, while identical rewrites do not invalidate equal-content evidence. Resource conflicts remain separate observations. The scorer never reads Hibana, EPF or a method's workflow. Earlier 4E pilots retain their older scorer and do not qualify this application/scorer combination.",
+      "Version 20 replaces 16E done flags with compiled application bytes, executed unit/integration/smoke checks, actual production bytes and matching completed integration evidence observed at deployment. Tools remain callable in all six serial orders and can be repeated; an untested deployment still changes production, but later tests cannot validate that earlier effect. Equal-content rebuilds preserve matching evidence, incomplete builds/tests do not supply completed inputs, and physical resource conflicts remain independent. The other 47 task worlds remain unchanged from v19. Earlier source-bound results retain their exact world source and scope.",
+      "Version 21 moves 3E from done maps to the same content-bound document world used by 3M and 7E/M/H. Actual completed assigned-topic research is required by draft/reference artifacts; each section's named review covers that section's current material, without invalidating the other section's independent review. Stale, failed and pending evidence cannot authorize combination, and a later repair retains any unsafe publication violation. Both author orders, write/reference orders, review orders and independent DOCUMENT/DATABASE effects remain free for every method. This version entry records the world-only checkpoint; the later direct-file 3E qualification is recorded in research_report_procedure.",
+      "Version 22 replaces 2E/2M/2H read/draft/write/review done flags with actual completed literature, content-bound drafts, document contributions and review snapshots. Any method can invoke tools in any order and retry; later inputs cannot supply an earlier operation. Equal-content rewrites preserve matching evidence. Physical section conflicts remain separately observable. The other 45 task worlds, 48 task interfaces and 825 checklist items are unchanged. Earlier ports retain their exact world sources and are not relabeled.",
+      "Version 23 replaces the 1E/1M/1H design/implementation/commit/test done maps with completed design text, content-bound synthetic source, actual committed module snapshots and test receipts. Calls remain free to every method and later inputs cannot validate earlier work. The 1H repair consumes an actual completed negative test diagnostic and is committed before retesting; no workflow cursor or expected-next-call is used. Identical content preserves matching evidence; later failures invalidate older passing receipts. Original failure profiles and physical module conflicts remain. This is a synthetic content world, not a real compiler. Other 45 worlds, all 48 interfaces and 825 checklist items are unchanged. Existing qualifications retain their exact earlier world sources."
     ],
     "earlier_results": "Earlier qualifications retain their exact recorded simulator source/hash, including intermediate common-environment snapshots. No result is relabeled as another source.",
-    "task_revision": "Version 18 repairs the common 3M research-paper scorer while preserving all 48 tasks, tools, participants and 825 original checklist items. Existing 7E/7M/7H document semantics use their same physical metadata through one binding path. Common-world tests do not qualify a 3M application; previously accepted ports and pilots retain their exact source versions.",
+    "task_revision": "Version 23 replaces the 1E/1M/1H design/implementation/commit/test done maps with completed design text, content-bound synthetic source, actual committed module snapshots and test receipts. Calls remain free to every method and later inputs cannot validate earlier work. The 1H repair consumes an actual completed negative test diagnostic and is committed before retesting; no workflow cursor or expected-next-call is used. Identical content preserves matching evidence; later failures invalidate older passing receipts. Original failure profiles and physical module conflicts remain. This is a synthetic content world, not a real compiler. Other 45 worlds, all 48 interfaces and 825 checklist items are unchanged. Existing qualifications retain their exact earlier world sources.",
     "document_data_qualification": {
       "contract": "common-environment-v8",
       "task": "7E",
@@ -677,160 +744,210 @@
     "final_all_family_certification": false
   },
   "migration_status": {
+    "scope": "Source-bound direct ChoreoFS ports. Earlier procedure reports retain their recorded sources and historical pre-direct-boundary scope.",
     "migrated_tasks": [
+      "1E",
+      "1M",
+      "1H",
+      "2E",
+      "2M",
+      "2H",
+      "3E",
+      "4E",
+      "7E",
+      "8E",
+      "9E",
+      "9M",
+      "9H",
       "10E",
       "10M",
       "11E",
       "12E",
-      "13E",
-      "13M",
-      "14E",
-      "14H",
-      "14M",
-      "16E",
-      "1E",
-      "1H",
-      "1M",
-      "2E",
-      "2H",
-      "2M",
-      "3E",
-      "4E",
-      "4M",
-      "5E",
-      "5H",
-      "5M",
-      "6E",
-      "6M",
-      "7E",
-      "8E",
-      "9E",
-      "9H",
-      "9M"
+      "16E"
     ],
-    "count": 29,
-    "remaining": 19,
+    "count": 18,
+    "remaining": 30,
+    "qualified_direct_families": 12,
     "final_source_all_family_certification": false,
-    "current_causal_contract_requalification": {
-      "tasks": [
-        "4M",
-        "13E",
-        "14E"
-      ],
-      "common_tests": 40,
-      "wasm_conditions": 11,
-      "live_model_participants": 12,
-      "common_scoring_epf_and_effect_audits": "passed",
-      "other_tasks_causal_certified": false,
-      "aggregate": "output/experiments/causal-qualification-summary.json",
-      "additional_13E_aggregate": "output/experiments/lab-qualification-summary.json",
-      "scope": "Per-task source-bound qualifications with their exact simulator hashes, not one final all-family source certification"
-    },
     "scored_comparisons": 0,
-    "families": 23,
     "latest_source_bound_port": {
-      "task": "14H",
-      "simulator_contract": "common-environment-v17",
-      "evidence": "output/experiments/multi-round-discovery-14H-development-v1/application-qualification-v1.json"
-    },
-    "multi_round_discovery_qualification": {
-      "task": "14H",
-      "status": "source_bound_port_qualified",
-      "accepted_port": 29,
-      "business_events": 218,
-      "full_source_events": 400,
-      "programs": 32,
-      "scientist_wasm_participants": 7,
-      "effect_owners": 5,
-      "actual_wasm_conditions": 12,
-      "actual_wasm_scientific_effects": 192,
-      "actual_wasm_captured_records": 106584,
-      "checked_receive_commits": 231,
-      "native_component_conditions": 47,
-      "application_native_tests": 23,
-      "miri": {
-        "status": "passed",
-        "task": "14H",
-        "toolchain": "nightly-2026-10-12",
-        "miriflags": "-Zmiri-strict-provenance",
-        "test_functions": 3,
-        "component_conditions": 28,
-        "conditions": {
-          "cells": 12,
-          "hplc_and_study": 8,
-          "mass_and_clinical": 8
-        },
-        "input_files": 920,
-        "inputs_before_and_after_match": true,
-        "input_manifest_sha256": "e53ae1a14aee04cb3ff269c2ddb27a30850dc2c6664b54c678bea2ed3a859570",
-        "miri_log_sha256": "3afb2ae6475a08f48a637b1d9b6a2d4b0953bd1f0028036e032555bf401af18f",
-        "maximum_descendant_bytes": 1371602944,
-        "stop_bytes": 2750000000,
-        "scope": "Production Endpoint receivers and in-process adversarial/positive fixture inputs; final interpreter leak checks included. No Wasm, model, host-kqueue or all-core-gate certification.",
-        "reported_test_seconds": 3719.49,
-        "reported_time_is_native_performance_measurement": false,
-        "model_calls": 0,
-        "scored_runs": 0,
-        "evidence": "output/experiments/multi-round-discovery-14H-development-v1/round-matrix-v5/receiver-miri-v9/qualification.json",
-        "current_input_recheck": "output/experiments/multi-round-discovery-14H-development-v1/round-matrix-v5/receiver-miri-v9/inputs-current-verification-v13.log"
-      },
-      "scripted_record_mutants_rejected": 852,
-      "scripted_receive_order_controls": 51,
-      "pilot": {
-        "run": "output/experiments/model-qualification/current-core-multi-round-discovery-14H-v2",
-        "model": "gpt-6-luna",
-        "reasoning": "xhigh",
-        "access": "existing ChatGPT subscription",
-        "participant_turns": 7,
-        "elapsed_seconds": 193.161955167,
-        "inclusive_tokens": 1913110,
-        "effects": 13,
-        "checked_receive_commits": 15,
-        "max_simultaneous_model_turns": 7,
-        "max_concurrent_effects": 3,
-        "independent_effect_overlap_pairs": 4,
-        "violations": 0,
-        "audit": "output/experiments/multi-round-discovery-14H-development-v1/round-matrix-v5/model-preflight-audit-v3.json",
-        "audit_sha256": "d7c7b9849c3a385b2cffd0c8a24d4f9b71a066a3a254c32d3d7c5c54e3fe4d6f",
-        "business_record_mutants_rejected": 226,
-        "business_mutation_sha256": "73bd4c176e25dd84016955552211cbb57ff038de50b101204a7e84e47a2358c6",
-        "run_record_mutants_rejected": 11,
-        "run_mutation_sha256": "354293da6c402956d4bd03f6db84560ab8587785140a49d6e3c07d6d08b3e7cc",
-        "audit_reader": "output/experiments/multi-round-discovery-14H-development-v1/round-matrix-v5/model-audit-reader-v13/receipt.json",
-        "original_postrun_audit": "participant assignments: auditor assumed fixed ordered calls instead of original free tool schemas; corrected auditor alone, no additional model execution"
-      },
-      "previous_failed_pilot": {
-        "run": "output/experiments/model-qualification/current-core-multi-round-discovery-14H-v1",
-        "elapsed_seconds": 143.119385333,
-        "error": "guest runtime failed: exit=1, protocol={\"error\":\"scientist exited before completing an analysis\",\"status\":\"failed\",\"type\":\"run_result\"}, error=null, backend_errors=[]",
-        "correction": "Runner records the original assigned resources and unmodified tool schemas instead of empty calls; prompt clarifies actual required final documentation. Product global, localsides and world unchanged.",
-        "counted_as_success": false,
-        "pooled_with_successful_pilot": false
-      },
-      "canonical_adjacent_core_instances": 1,
-      "tokio_instances": 0,
-      "qualification": "output/experiments/multi-round-discovery-14H-development-v1/application-qualification-v1.json",
-      "core_normal_contract_complete": false,
-      "scored_runs": 0,
-      "scope": "Finite source-bound port qualification with actual Wasm, common scoring, complete EPF capture, one-use effect audit and an unscored live pilot. Not full-core verification, general Rust refinement, all interleavings or a scored comparison."
+      "tasks": [
+        "12E"
+      ],
+      "simulator_contract": "common-environment-v23",
+      "evidence": "output/experiments/kitchen-direct-files-20261115/qualification-v25.json"
     },
     "direct_choreofs_boundary": {
-      "status": "bound_library_ordinary_gates_pass_task_migration_unfinished",
-      "audit": "analysis/choreofs-boundary-audit.md",
-      "inspected_families": 23,
-      "source_bound_historical_tasks": 29,
-      "generic_mailbox_families": 20,
-      "generic_mailbox_tasks": 24,
-      "direct_or_mixed_families": 3,
-      "direct_or_mixed_tasks": 5,
-      "next_file_source_files": 65,
-      "strengthened_boundary_qualified_tasks": 0,
+      "status": "migration_in_progress",
+      "strengthened_boundary_qualified_tasks": 18,
+      "remaining_tasks": 30,
       "unsafe_application_miri_required": false,
-      "model_calls": 0,
       "scored_runs": 0,
-      "note": "Binding was already required. All 26 current task directories and shared I/O were inspected. Codebase design also has a mailbox path: 20 families/24 tasks confirmed. The bound WASI library passed its full ordinary local gate, including Miri at the library boundary; task globals/localsides still require migration. Historical results retain their original scope; no task is qualified under the direct boundary. The full 48-task goal remains.",
-      "wasi_library_revision": "0362074",
-      "wasi_library_ordinary_gates": "passed_local"
+      "full_48_task_goal_unchanged": true,
+      "earlier_legacy_reference_review": {
+        "after_port": "3E",
+        "families": 17,
+        "files": 76,
+        "scope": "Manual source review includes tests and supporting references, not 76 independent defects.",
+        "current_review": false
+      }
+    },
+    "historical_pre_direct_boundary": {
+      "migrated_tasks": [
+        "10E",
+        "10M",
+        "11E",
+        "12E",
+        "13E",
+        "13M",
+        "14E",
+        "14H",
+        "14M",
+        "16E",
+        "1E",
+        "1H",
+        "1M",
+        "2E",
+        "2H",
+        "2M",
+        "3E",
+        "4E",
+        "4M",
+        "5E",
+        "5H",
+        "5M",
+        "6E",
+        "6M",
+        "7E",
+        "8E",
+        "9E",
+        "9H",
+        "9M"
+      ],
+      "count": 29,
+      "remaining": 19,
+      "final_source_all_family_certification": false,
+      "current_causal_contract_requalification": {
+        "tasks": [
+          "4M",
+          "13E",
+          "14E"
+        ],
+        "common_tests": 40,
+        "wasm_conditions": 11,
+        "live_model_participants": 12,
+        "common_scoring_epf_and_effect_audits": "passed",
+        "other_tasks_causal_certified": false,
+        "aggregate": "output/experiments/causal-qualification-summary.json",
+        "additional_13E_aggregate": "output/experiments/lab-qualification-summary.json",
+        "scope": "Per-task source-bound qualifications with their exact simulator hashes, not one final all-family source certification"
+      },
+      "scored_comparisons": 0,
+      "families": 23,
+      "latest_source_bound_port": {
+        "task": "14H",
+        "simulator_contract": "common-environment-v17",
+        "evidence": "output/experiments/multi-round-discovery-14H-development-v1/application-qualification-v1.json"
+      },
+      "multi_round_discovery_qualification": {
+        "task": "14H",
+        "status": "source_bound_port_qualified",
+        "accepted_port": 29,
+        "business_events": 218,
+        "full_source_events": 400,
+        "programs": 32,
+        "scientist_wasm_participants": 7,
+        "effect_owners": 5,
+        "actual_wasm_conditions": 12,
+        "actual_wasm_scientific_effects": 192,
+        "actual_wasm_captured_records": 106584,
+        "checked_receive_commits": 231,
+        "native_component_conditions": 47,
+        "application_native_tests": 23,
+        "miri": {
+          "status": "passed",
+          "task": "14H",
+          "toolchain": "nightly-2026-10-12",
+          "miriflags": "-Zmiri-strict-provenance",
+          "test_functions": 3,
+          "component_conditions": 28,
+          "conditions": {
+            "cells": 12,
+            "hplc_and_study": 8,
+            "mass_and_clinical": 8
+          },
+          "input_files": 920,
+          "inputs_before_and_after_match": true,
+          "input_manifest_sha256": "e53ae1a14aee04cb3ff269c2ddb27a30850dc2c6664b54c678bea2ed3a859570",
+          "miri_log_sha256": "3afb2ae6475a08f48a637b1d9b6a2d4b0953bd1f0028036e032555bf401af18f",
+          "maximum_descendant_bytes": 1371602944,
+          "stop_bytes": 2750000000,
+          "scope": "Production Endpoint receivers and in-process adversarial/positive fixture inputs; final interpreter leak checks included. No Wasm, model, host-kqueue or all-core-gate certification.",
+          "reported_test_seconds": 3719.49,
+          "reported_time_is_native_performance_measurement": false,
+          "model_calls": 0,
+          "scored_runs": 0,
+          "evidence": "output/experiments/multi-round-discovery-14H-development-v1/round-matrix-v5/receiver-miri-v9/qualification.json",
+          "current_input_recheck": "output/experiments/multi-round-discovery-14H-development-v1/round-matrix-v5/receiver-miri-v9/inputs-current-verification-v13.log"
+        },
+        "scripted_record_mutants_rejected": 852,
+        "scripted_receive_order_controls": 51,
+        "pilot": {
+          "run": "output/experiments/model-qualification/current-core-multi-round-discovery-14H-v2",
+          "model": "gpt-6-luna",
+          "reasoning": "xhigh",
+          "access": "existing ChatGPT subscription",
+          "participant_turns": 7,
+          "elapsed_seconds": 193.161955167,
+          "inclusive_tokens": 1913110,
+          "effects": 13,
+          "checked_receive_commits": 15,
+          "max_simultaneous_model_turns": 7,
+          "max_concurrent_effects": 3,
+          "independent_effect_overlap_pairs": 4,
+          "violations": 0,
+          "audit": "output/experiments/multi-round-discovery-14H-development-v1/round-matrix-v5/model-preflight-audit-v3.json",
+          "audit_sha256": "d7c7b9849c3a385b2cffd0c8a24d4f9b71a066a3a254c32d3d7c5c54e3fe4d6f",
+          "business_record_mutants_rejected": 226,
+          "business_mutation_sha256": "73bd4c176e25dd84016955552211cbb57ff038de50b101204a7e84e47a2358c6",
+          "run_record_mutants_rejected": 11,
+          "run_mutation_sha256": "354293da6c402956d4bd03f6db84560ab8587785140a49d6e3c07d6d08b3e7cc",
+          "audit_reader": "output/experiments/multi-round-discovery-14H-development-v1/round-matrix-v5/model-audit-reader-v13/receipt.json",
+          "original_postrun_audit": "participant assignments: auditor assumed fixed ordered calls instead of original free tool schemas; corrected auditor alone, no additional model execution"
+        },
+        "previous_failed_pilot": {
+          "run": "output/experiments/model-qualification/current-core-multi-round-discovery-14H-v1",
+          "elapsed_seconds": 143.119385333,
+          "error": "guest runtime failed: exit=1, protocol={\"error\":\"scientist exited before completing an analysis\",\"status\":\"failed\",\"type\":\"run_result\"}, error=null, backend_errors=[]",
+          "correction": "Runner records the original assigned resources and unmodified tool schemas instead of empty calls; prompt clarifies actual required final documentation. Product global, localsides and world unchanged.",
+          "counted_as_success": false,
+          "pooled_with_successful_pilot": false
+        },
+        "canonical_adjacent_core_instances": 1,
+        "tokio_instances": 0,
+        "qualification": "output/experiments/multi-round-discovery-14H-development-v1/application-qualification-v1.json",
+        "core_normal_contract_complete": false,
+        "scored_runs": 0,
+        "scope": "Finite source-bound port qualification with actual Wasm, common scoring, complete EPF capture, one-use effect audit and an unscored live pilot. Not full-core verification, general Rust refinement, all interleavings or a scored comparison."
+      },
+      "direct_choreofs_boundary": {
+        "status": "bound_library_ordinary_gates_pass_task_migration_unfinished",
+        "audit": "analysis/choreofs-boundary-audit.md",
+        "inspected_families": 23,
+        "source_bound_historical_tasks": 29,
+        "generic_mailbox_families": 20,
+        "generic_mailbox_tasks": 24,
+        "direct_or_mixed_families": 3,
+        "direct_or_mixed_tasks": 5,
+        "next_file_source_files": 65,
+        "strengthened_boundary_qualified_tasks": 0,
+        "unsafe_application_miri_required": false,
+        "model_calls": 0,
+        "scored_runs": 0,
+        "note": "Binding was already required. All 26 current task directories and shared I/O were inspected. Codebase design also has a mailbox path: 20 families/24 tasks confirmed. The bound WASI library passed its full ordinary local gate, including Miri at the library boundary; task globals/localsides still require migration. Historical results retain their original scope; no task is qualified under the direct boundary. The full 48-task goal remains.",
+        "wasi_library_revision": "0362074",
+        "wasi_library_ordinary_gates": "passed_local"
+      }
     }
   },
   "shared_build_procedure": {
@@ -1432,6 +1549,41 @@
   },
   "manufacturing_procedure": {
     "task": "11E",
+    "status": "finite_mechanism_and_live_path_qualified",
+    "accepted_direct_boundary_port": 17,
+    "source_roles": 23,
+    "message_contracts": 24,
+    "bound_operation_file_endpoints": 5,
+    "physical_workstation_endpoints": 2,
+    "application_coordination": "Direct Endpoint send/recv/par in localsides; actual requests select each workstation order; no Ready/Busy protocol, post-close dispatch, holder table or progress flag",
+    "availability_feedback": "Standard WASI NONBLOCK through wash dd of=FILE oflag=nonblock; pending source preparation returns EAGAIN without transport I/O, while accepted sends finish on the same Future",
+    "native_tests": 3,
+    "wasm_conditions": 36,
+    "wasm_condition_groups": {
+      "total_job_orders": 24,
+      "adversarial_recovery": 4,
+      "contended_early_and_late_retry": 8
+    },
+    "frame_record_mutations_rejected": 2448,
+    "successful_live_model_pilots": 1,
+    "model_participants": 3,
+    "model_elapsed_seconds": 32.079503584,
+    "inclusive_total_tokens": 321179,
+    "model_shell_calls": 15,
+    "producer_records": 1499,
+    "actual_job_effects": 4,
+    "actual_reports": 1,
+    "resource_endpoint_returns": 4,
+    "live_distinct_machine_overlap_pairs": 1,
+    "live_recovery": "TECHNICIAN_A received EAGAIN on lathe_job_a, chose mill_job_a and later retried lathe_job_a without a host-selected command",
+    "epf_effect_and_common_score": "passed on the same complete-capture run; zero violations",
+    "evidence": "output/experiments/manufacturing-direct-files-20261115/qualification-v28.json",
+    "qualification_scope": "Finite current-path mechanism and one unscored pilot, not a success-rate estimate, timing comparison, complete core gate, all-family certification or general Rust refinement proof",
+    "scored_runs": 0,
+    "procedure_notes": "benchmark/ports/11E.md"
+  },
+  "historical_manufacturing_ready_busy_procedure": {
+    "task": "11E",
     "status": "passed_source_bound_port_qualification",
     "counted_in_migrated_tasks": true,
     "source_roles": 15,
@@ -1677,6 +1829,53 @@
   },
   "kitchen_procedure": {
     "task": "12E",
+    "status": "direct_file_finite_mechanism_and_live_path_qualified",
+    "counted_in_migrated_tasks": true,
+    "accepted_direct_port": 18,
+    "simulator_contract": "common-environment-v23",
+    "global": "src/tasks/kitchen/global.rs",
+    "localsides": "src/tasks/kitchen/localside",
+    "projected_roles": 32,
+    "operation_file_endpoints": 9,
+    "base_equipment_orders": 6,
+    "per_chef_input_order_combinations": 8,
+    "controlled_delay_cases": 3,
+    "actual_wasm_conditions": 51,
+    "actual_wasm_effects": 459,
+    "record_mutants_rejected": 4845,
+    "application_miri_required": false,
+    "runtime_binary_sha256": "49e68feee11c71afd2fcac5d6d5c37b65eb08b4118f943e82b8f40606462cc33",
+    "source_manifest_sha256": "78db306e1292a36dbd6bf4fee9654611c1ebd493ca97a329db2667bc2061ef00",
+    "live_model": {
+      "participants": 3,
+      "model": "gpt-6-luna",
+      "effort": "xhigh",
+      "elapsed_seconds": 23.985788499999998,
+      "inclusive_tokens": 332800,
+      "shell_calls": 16,
+      "effects": 9,
+      "capture_records": 4006,
+      "resource_requests": 5,
+      "resource_returns": 5,
+      "max_simultaneous_model_turns": 3,
+      "violations": 0,
+      "test_delay_overrides": 0
+    },
+    "source_bound_evidence": "output/experiments/kitchen-direct-files-20261115/qualification-v25.json",
+    "notes": "benchmark/ports/12E.md",
+    "scored_runs": 0,
+    "coordination": "Operation files own actual Endpoints; direct localsides receive actual file/equipment requests, apply actual effects and return exact results. No generic close dispatch, decision cell, progress flag or holder table.",
+    "timing_scope": "Original tools have zero delay. Three explicitly controlled fixtures use base=150ms and ingredient=100ms, observing three overlap pairs each and early per-dish completion. The live pilot retains original timing. No throughput or comparative speedup is claimed.",
+    "unfinished": [
+      "final-source repeated passive-choice validation with delegated parallel/nested-roll generated coverage",
+      "final-source full core gates",
+      "12M/12H",
+      "final all-family certification",
+      "scored comparisons"
+    ]
+  },
+  "historical_kitchen_generic_close_procedure": {
+    "task": "12E",
     "status": "thirteen_real_wasm_conditions_and_one_source_bound_subscription_pilot_qualified",
     "counted_in_migrated_tasks": true,
     "accepted_port": 27,
@@ -1724,5 +1923,20 @@
     "notes": "benchmark/ports/12E.md",
     "coordination": "One global, actual equipment Endpoint requests/results/returns, immediate completed ingredient delivery, per-dish independent completion. Resolvers read actual input data only; no owner/progress table or flags. Controlled fixture arrival barriers are not production scheduling.",
     "scope": "Finite native, actual-Wasm and one unscored pilot qualification. Each chef may request base or ingredient first, and a dish can complete before another chef requests its base. The common world has no configured operation delays here; no cooking throughput or sustained effect-overlap result is claimed. Prior Miri remains limited to unchanged receiver bodies and its eight malformed requests, not all new guest paths. Record mutations test auditors, not runtime attack prevention. 12M/12H ports, final core/all-family certification and scored comparisons remain unfinished; earlier evidence retains its exact sources."
+  },
+  "codebase_direct_boundary": {
+    "status": "implementation_preparing_qualification",
+    "tasks": [
+      "1E",
+      "1M",
+      "1H"
+    ],
+    "simulator_contract": "common-environment-v23",
+    "world_tests": 258,
+    "focused_tests": 11,
+    "application_qualified": false,
+    "model_calls": 0,
+    "scored_runs": 0,
+    "scope": "The generic WASI stage dispatcher and fd-bearing Close envelope have been removed. All four operation files own their actual Endpoints. Localsides directly receive requests, drive both owned module Endpoints, check actual admitted arguments, apply effects and return actual results. Handoffs return before testing. Actual test responses drive 1H resolver branches; no workflow flags or holder table are added. EPF handles source execution; the independent auditor binds actual receive occurrences, material/results, module returns, test decisions and common scores. Real-Wasm and real-model qualification remain pending."
   }
 }

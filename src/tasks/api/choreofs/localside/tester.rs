@@ -1,150 +1,330 @@
-use super::super::global::*;
+use super::super::{
+    global::*,
+    imp::{ApiArguments, TEST},
+};
 use crate::shell::{
     ShellError, ShellResult,
-    imp::service::{Domain, File, Validation},
+    imp::{
+        file_data::FileData,
+        service::{Domain, Validation},
+    },
 };
 use hibana::Endpoint;
 use hibana_wasip1_runtime::protocol;
-use serde_json::json;
+
 #[hibana_runtime::scope]
-pub async fn run<D: Domain>(
-    endpoint: &mut Endpoint<TESTER>,
-    domain: &D,
-    validation: &Validation,
-    result_input: &super::super::super::imp::TestInput,
+pub(crate) async fn run<'run>(
+    io: &mut Endpoint<'run, TESTER>,
+    (file, mut control, admin_read, backend_read): (
+        Endpoint<'run, TESTER_FILE>,
+        Endpoint<'run, TESTER_CLOSE>,
+        Endpoint<'run, ADMIN_OUTCOME_READ>,
+        Endpoint<'run, BACKEND_OUTCOME_READ>,
+    ),
+    (domain, input, result_input): (
+        &impl Domain,
+        &Validation,
+        &super::super::super::imp::TestInput,
+    ),
 ) -> ShellResult<()> {
-    endpoint.recv::<BackendReady>().await?;
-    let mut file = File::new(b"service/run_integration_tests", SERVICE_FD);
+    let mut data = FileData::new(TESTER_OBJECT);
+    io.send::<Loan<TESTER_FILE>>(file).await?;
     loop {
-        endpoint.send::<Request>(&()).await?;
-        endpoint.send::<RequestReady>(&()).await?;
-        let branch = endpoint.offer().await?;
-        match branch.label() {
-            100 => {
-                let request = branch.recv::<Open>().await?;
-                let response = file.open(request);
-                endpoint.send::<Opened>(&response).await?;
-            }
-            102 => {
-                let request = branch.recv::<Write>().await?;
-                let response = file.write(request);
-                endpoint.send::<Written>(&response).await?;
-            }
-            104 => {
-                let request = branch.recv::<Commit>().await?;
-                validation.record(file.arguments(request, "suite").and_then(|v| {
-                    if v["suite"] == "backend_schema_integration" {
-                        Ok(v)
+        let incoming = hibana_runtime::race(
+            async {
+                let branch = io.offer().await?;
+                Ok(core::ops::ControlFlow::Continue(branch.label()))
+            },
+            async {
+                control
+                    .recv::<BackendReady>()
+                    .await
+                    .map(core::ops::ControlFlow::Break)
+            },
+        )
+        .await?;
+        match incoming {
+            core::ops::ControlFlow::Continue(label) => match label {
+                protocol::LABEL_WASI_PATH_OPEN => {
+                    let received = io.recv::<protocol::PathOpenReqMsg>().await?;
+                    let response = data.open(received);
+                    io.send::<protocol::PathOpenRetMsg>(&response).await?;
+                }
+                protocol::LABEL_WASI_FD_WRITE_OBJECT => {
+                    let received = io.recv::<protocol::FdWriteObjectReqMsg>().await?;
+                    let response = data.write(received)?;
+                    io.send::<protocol::FdWriteObjectRetMsg>(&response).await?;
+                }
+                protocol::LABEL_WASI_FD_PRESTAT_GET => {
+                    let request = io.recv::<protocol::FdPrestatGetReqMsg>().await?;
+                    let response = protocol::FdPrestatRet(protocol::FdPrestat::new_with_errno(
+                        request.0.fd(),
+                        0,
+                        8,
+                    ));
+                    io.send::<protocol::FdPrestatGetRetMsg>(&response).await?;
+                }
+                protocol::LABEL_WASI_FD_PRESTAT_DIR_NAME => {
+                    let request = io.recv::<protocol::FdPrestatDirNameReqMsg>().await?;
+                    let response = protocol::FdPrestatDirNameRet(
+                        protocol::FdPrestatDirNameDone::new(request.0.fd(), b"", 8)?,
+                    );
+                    io.send::<protocol::FdPrestatDirNameRetMsg>(&response)
+                        .await?;
+                }
+                protocol::LABEL_WASI_FD_READDIR => {
+                    let request = io.recv::<protocol::FdReaddirReqMsg>().await?;
+                    let response = data.objects().choreofs().fd_readdir(request).read_dir()?;
+                    io.send::<protocol::FdReaddirRetMsg>(&response).await?;
+                }
+                protocol::LABEL_WASI_FD_READ => {
+                    let received = io.recv::<protocol::FdReadReqMsg>().await?;
+                    let response = data.read(received)?;
+                    io.send::<protocol::FdReadRetMsg>(&response).await?;
+                }
+                protocol::LABEL_WASI_FD_FDSTAT_GET => {
+                    let request = io.recv::<protocol::FdFdstatGetReqMsg>().await?;
+                    let response = data.objects().choreofs().fd_fdstat_get(request);
+                    io.send::<protocol::FdFdstatGetRetMsg>(&response).await?;
+                }
+                protocol::LABEL_WASI_FD_FILESTAT_GET => {
+                    let request = io.recv::<protocol::FdFilestatGetReqMsg>().await?;
+                    let response = data.objects().choreofs().fd_filestat_get(request);
+                    io.send::<protocol::FdFilestatGetRetMsg>(&response).await?;
+                }
+                protocol::LABEL_WASI_PATH_FILESTAT_GET => {
+                    let request = io.recv::<protocol::PathFilestatGetReqMsg>().await?;
+                    let response = data.objects().choreofs().path_filestat_get(request);
+                    io.send::<protocol::PathFilestatGetRetMsg>(&response)
+                        .await?;
+                }
+                protocol::LABEL_WASI_FD_CLOSE => {
+                    let request = io.recv::<protocol::FdCloseReqMsg>().await?;
+                    let response = data.objects().choreofs().fd_close(request);
+                    io.send::<protocol::FdCloseRetMsg>(&response).await?;
+                }
+
+                241 => {
+                    let status = io.recv::<FileExit>().await?;
+                    return Err(ShellError::message(format!(
+                        "guest exited before dependency: {status}"
+                    )));
+                }
+                label => {
+                    return Err(ShellError::message(format!(
+                        "unexpected operation-file request {label}"
+                    )));
+                }
+            },
+            core::ops::ControlFlow::Break(()) => break,
+        }
+    }
+    let status = {
+        let mut authority = Some((control, admin_read, backend_read));
+        loop {
+            let incoming = if let Some((operation, _, _)) = authority.as_mut() {
+                hibana_runtime::race(
+                    async {
+                        let branch = io.offer().await?;
+                        Ok(core::ops::ControlFlow::Continue(branch.label()))
+                    },
+                    async {
+                        operation
+                            .recv::<protocol::FdCloseObjectReqMsg>()
+                            .await
+                            .map(core::ops::ControlFlow::Break)
+                    },
+                )
+                .await?
+            } else {
+                core::ops::ControlFlow::Continue(io.offer().await?.label())
+            };
+            match incoming {
+                core::ops::ControlFlow::Continue(label) => match label {
+                    protocol::LABEL_WASI_PATH_OPEN => {
+                        let received = io.recv::<protocol::PathOpenReqMsg>().await?;
+                        let response = data.open(received);
+                        io.send::<protocol::PathOpenRetMsg>(&response).await?;
+                    }
+                    protocol::LABEL_WASI_FD_WRITE_OBJECT => {
+                        let received = io.recv::<protocol::FdWriteObjectReqMsg>().await?;
+                        let response = data.write(received)?;
+                        io.send::<protocol::FdWriteObjectRetMsg>(&response).await?;
+                    }
+                    protocol::LABEL_WASI_FD_PRESTAT_GET => {
+                        let request = io.recv::<protocol::FdPrestatGetReqMsg>().await?;
+                        let response = protocol::FdPrestatRet(protocol::FdPrestat::new_with_errno(
+                            request.0.fd(),
+                            0,
+                            8,
+                        ));
+                        io.send::<protocol::FdPrestatGetRetMsg>(&response).await?;
+                    }
+                    protocol::LABEL_WASI_FD_PRESTAT_DIR_NAME => {
+                        let request = io.recv::<protocol::FdPrestatDirNameReqMsg>().await?;
+                        let response = protocol::FdPrestatDirNameRet(
+                            protocol::FdPrestatDirNameDone::new(request.0.fd(), b"", 8)?,
+                        );
+                        io.send::<protocol::FdPrestatDirNameRetMsg>(&response)
+                            .await?;
+                    }
+                    protocol::LABEL_WASI_FD_READDIR => {
+                        let request = io.recv::<protocol::FdReaddirReqMsg>().await?;
+                        let response = data.objects().choreofs().fd_readdir(request).read_dir()?;
+                        io.send::<protocol::FdReaddirRetMsg>(&response).await?;
+                    }
+                    protocol::LABEL_WASI_FD_READ => {
+                        let received = io.recv::<protocol::FdReadReqMsg>().await?;
+                        let response = data.read(received)?;
+                        io.send::<protocol::FdReadRetMsg>(&response).await?;
+                    }
+                    protocol::LABEL_WASI_FD_FDSTAT_GET => {
+                        let request = io.recv::<protocol::FdFdstatGetReqMsg>().await?;
+                        let response = data.objects().choreofs().fd_fdstat_get(request);
+                        io.send::<protocol::FdFdstatGetRetMsg>(&response).await?;
+                    }
+                    protocol::LABEL_WASI_FD_FILESTAT_GET => {
+                        let request = io.recv::<protocol::FdFilestatGetReqMsg>().await?;
+                        let response = data.objects().choreofs().fd_filestat_get(request);
+                        io.send::<protocol::FdFilestatGetRetMsg>(&response).await?;
+                    }
+                    protocol::LABEL_WASI_PATH_FILESTAT_GET => {
+                        let request = io.recv::<protocol::PathFilestatGetReqMsg>().await?;
+                        let response = data.objects().choreofs().path_filestat_get(request);
+                        io.send::<protocol::PathFilestatGetRetMsg>(&response)
+                            .await?;
+                    }
+                    protocol::LABEL_WASI_FD_CLOSE => {
+                        let request = io.recv::<protocol::FdCloseReqMsg>().await?;
+                        let response = data.objects().choreofs().fd_close(request);
+                        io.send::<protocol::FdCloseRetMsg>(&response).await?;
+                    }
+
+                    241 => {
+                        let status = io.recv::<FileExit>().await?;
+                        break status;
+                    }
+                    label => {
+                        return Err(ShellError::message(format!(
+                            "unexpected operation-file request {label}"
+                        )));
+                    }
+                },
+                core::ops::ControlFlow::Break(request) => {
+                    let close = data.objects().choreofs().fd_close(request);
+                    let operation = &mut authority
+                        .as_mut()
+                        .ok_or_else(|| ShellError::message("missing owned close Endpoint"))?
+                        .0;
+                    input.record(if close.0.errno() == 0 {
+                        serde_json::from_slice(&data.bytes)
+                            .map_err(|error| ShellError::message(error.to_string()))
+                            .and_then(|value| {
+                                if value
+                                    == serde_json::json!({"suite":"backend_schema_integration"})
+                                {
+                                    Ok(value)
+                                } else {
+                                    Err(ShellError::message(
+                                        "arguments name a different test suite",
+                                    ))
+                                }
+                            })
                     } else {
-                        Err(ShellError::message(
-                            "arguments name a different task object",
-                        ))
+                        Err(ShellError::message("invalid file descriptor"))
+                    });
+                    drop(operation.offer().await?);
+                    let admitted = match input.take() {
+                        Ok(value) => value,
+                        Err(_) => {
+                            operation
+                                .send::<protocol::FdCloseRejectedRetMsg>(
+                                    &protocol::FdCloseRejectedRet::new(close.0.fd(), 28)?,
+                                )
+                                .await?;
+                            continue;
+                        }
+                    };
+                    let (mut operation, admin_read, backend_read) = authority
+                        .take()
+                        .ok_or_else(|| ShellError::message("missing owned result Endpoints"))?;
+                    let encoded = serde_json::to_vec(&admitted)
+                        .map_err(|error| ShellError::message(error.to_string()))?;
+                    let arguments = ApiArguments::<TEST>::from_bytes(&encoded)?;
+                    operation.send::<TestIntent>(&arguments).await?;
+                    let request = operation.recv::<TestRequest>().await?.into_value();
+                    let mut test_environment = operation.recv::<Loan<TEST_RESOURCE>>().await?;
+                    if request != admitted {
+                        return Err(ShellError::message(
+                            "resource request differs from admitted test",
+                        ));
                     }
-                }));
-                let decision = endpoint.offer().await?;
-                match decision.label() {
-                    111 => {
-                        decision.recv::<Validate>().await?;
-                        let arguments = serde_json::to_vec(&validation.take()?)
-                            .map_err(|error| ShellError::message(error.to_string()))?;
-                        endpoint.send::<Admitted>(&arguments.as_slice()).await?;
-                        break;
+                    let result = domain
+                        .execute("TESTER", "run_integration_tests", request)
+                        .await
+                        .map_err(ShellError::message)?;
+                    let bytes = serde_json::to_vec(&result)
+                        .map_err(|error| ShellError::message(error.to_string()))?;
+                    test_environment
+                        .send::<TestCompleted>(&bytes.as_slice())
+                        .await?;
+                    operation
+                        .send::<Loan<TEST_RESOURCE>>(test_environment)
+                        .await?;
+                    result_input.record(result.clone());
+                    let decision = operation.offer().await?;
+                    let label = decision.label();
+                    drop(decision);
+                    {
+                        let [mut admin, mut backend] = operation.par()?;
+                        match label {
+                            50 | 51 => {
+                                async {
+                                    async {
+                                        admin.send::<PassedAdmin>(&bytes.as_slice()).await?;
+                                        admin.send::<Loan<ADMIN_OUTCOME_READ>>(admin_read).await?;
+                                    };
+                                    async {
+                                        backend.send::<PassedBackend>(&bytes.as_slice()).await?;
+                                        backend
+                                            .send::<Loan<BACKEND_OUTCOME_READ>>(backend_read)
+                                            .await?;
+                                    };
+                                    Ok(())
+                                }
+                                .await?;
+                            }
+                            60 | 61 => {
+                                async {
+                                    async {
+                                        admin.send::<FailedAdmin>(&bytes.as_slice()).await?;
+                                        admin.send::<Loan<ADMIN_OUTCOME_READ>>(admin_read).await?;
+                                    };
+                                    async {
+                                        backend.send::<FailedBackend>(&bytes.as_slice()).await?;
+                                        backend
+                                            .send::<Loan<BACKEND_OUTCOME_READ>>(backend_read)
+                                            .await?;
+                                    };
+                                    Ok(())
+                                }
+                                .await?;
+                            }
+                            _ => return Err(ShellError::message("unexpected test-result branch")),
+                        }
                     }
-                    106 => {
-                        let bytes = serde_json::to_vec(
-                            &json!({"status":"invalid_arguments","error":validation.rejection()?}),
-                        )
-                        .map_err(|e| ShellError::message(e.to_string()))?;
-                        decision.send::<Rejected>(&bytes.as_slice()).await?;
-                    }
-                    _ => return Err(ShellError::message("unexpected argument decision")),
+                    data.replace(result)?;
+                    operation
+                        .send::<protocol::FdCloseObjectRetMsg>(&close)
+                        .await?;
+                    io.send::<CloseAuthority<TESTER_CLOSE>>(operation).await?;
                 }
             }
-            _ => return Err(ShellError::message("unexpected service request")),
         }
+    };
+    if status != 0 {
+        return Err(ShellError::message(format!("guest exited with {status}")));
     }
-    let arguments = endpoint.recv::<TestRequest>().await?.into_value();
-    let result = domain
-        .execute("TESTER", "run_integration_tests", arguments)
-        .await
-        .map_err(ShellError::message)?;
-    let bytes = serde_json::to_vec(&result).map_err(|e| ShellError::message(e.to_string()))?;
-    let response = bytes.as_slice();
-    endpoint.send::<TestCompleted>(&response).await?;
-    result_input.record(result);
-    let decision = endpoint.offer().await?;
-    let label = decision.label();
-    drop(decision);
-    {
-        let [mut admin, mut backend] = endpoint.par()?;
-        let response = bytes.as_slice();
-        match label {
-            50 | 51 => {
-                async {
-                    async {
-                        admin.send::<PassedAdmin>(&response).await?;
-                    };
-                    async {
-                        backend.send::<PassedBackend>(&response).await?;
-                    };
-                    Ok(())
-                }
-                .await?;
-            }
-            60 | 61 => {
-                async {
-                    async {
-                        admin.send::<FailedAdmin>(&response).await?;
-                    };
-                    async {
-                        backend.send::<FailedBackend>(&response).await?;
-                    };
-                    Ok(())
-                }
-                .await?;
-            }
-            _ => return Err(ShellError::message("unexpected test outcome")),
-        }
-    }
-    loop {
-        endpoint.send::<RejectRequest>(&()).await?;
-        endpoint.send::<RequestReady>(&()).await?;
-        let branch = endpoint.offer().await?;
-        match branch.label() {
-            100 => {
-                branch.recv::<Open>().await?;
-                let response = protocol::PathOpenedRet(protocol::PathOpened::new(0, 8));
-                endpoint.send::<Opened>(&response).await?;
-            }
-            102 => {
-                let r = branch.recv::<Write>().await?;
-                let response = protocol::FdWriteDoneRet(protocol::FdWriteDone::new_with_errno(
-                    hibana_wasip1_runtime::choreofs::ChoreoFsRequest::request(&r)
-                        .0
-                        .fd(),
-                    0,
-                    8,
-                ));
-                endpoint.send::<Written>(&response).await?;
-            }
-            104 => {
-                let r = branch.recv::<Commit>().await?;
-                let response = protocol::FdClosedRet(protocol::FdClosed::new_with_errno(
-                    hibana_wasip1_runtime::choreofs::ChoreoFsRequest::request(&r)
-                        .0
-                        .fd(),
-                    8,
-                ));
-                endpoint.send::<Unavailable>(&response).await?;
-            }
-            241 => {
-                let status = branch.recv::<ServiceExit>().await?;
-                if status != 0 {
-                    return Err(ShellError::message("guest failed"));
-                }
-                return Ok(());
-            }
-            _ => return Err(ShellError::message("unexpected completed service request")),
-        }
-    }
+    let _file = io.recv::<Loan<TESTER_FILE>>().await?;
+    Ok(())
 }

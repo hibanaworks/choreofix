@@ -20,6 +20,7 @@ pub const MIGRATE: u8 = 1;
 pub const TEST: u8 = 2;
 
 /// The canonical arguments received through a resource Endpoint.
+#[derive(Debug, PartialEq, Eq)]
 pub struct ApiArguments<const OPERATION: u8>(Vec<u8>);
 
 impl<const OPERATION: u8> ApiArguments<OPERATION> {
@@ -74,15 +75,6 @@ pub(crate) struct OutcomeFile {
     offset: usize,
 }
 
-pub(crate) enum FileReply {
-    Opened(protocol::PathOpenedRet),
-    Read(protocol::FdReadDoneRet),
-    Stat(protocol::FdStatRet),
-    FileStat(protocol::FdFilestatRet),
-    Closed(protocol::FdClosedRet),
-    PathStat(protocol::PathFilestatRet),
-    Exit(i32),
-}
 impl OutcomeFile {
     pub fn new() -> Self {
         Self {

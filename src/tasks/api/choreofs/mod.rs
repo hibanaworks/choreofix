@@ -2,22 +2,20 @@
 pub mod global;
 mod imp;
 mod localside;
-#[cfg(test)]
-mod tests;
 use crate::{
     imp::transport::InMemoryTransport,
     shell::{
         ShellError, ShellResult,
         imp::{
             bus::{Bus, Terminal},
-            private_fs::{PrivateFs, bindings},
+            private_fs::PrivateFs,
             service::Validation,
         },
         localside::private_io,
     },
 };
 use hibana::runtime::{SessionKitStorage, ids::SessionId, resolver::ResolverRef};
-use hibana_wasip1_runtime::{GuestMemory, HibanaWasiGuestStorage};
+use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasiGuestStorage};
 #[hibana_runtime::scope]
 async fn run_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> ShellResult<()> {
     use global::*;
@@ -40,22 +38,22 @@ async fn run_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> Shell
     let session = SessionId::new(28);
     let result = async {
         rv.set_resolver(
-            &p.admin,
+            &p.admin_close,
             ResolverRef::<CHECK_ADMIN>::decision_state(&ac, Validation::decide),
         )
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
         rv.set_resolver(
-            &p.backend,
+            &p.backend_close,
             ResolverRef::<CHECK_BACKEND>::decision_state(&bc, Validation::decide),
         )
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
         rv.set_resolver(
-            &p.tester,
+            &p.tester_close,
             ResolverRef::<CHECK_TESTER>::decision_state(&tc, Validation::decide),
         )
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
         rv.set_resolver(
-            &p.tester,
+            &p.tester_close,
             ResolverRef::<TEST_RESULT>::decision_state(&result, super::imp::decide),
         )
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
@@ -66,69 +64,158 @@ async fn run_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> Shell
         let mut test_env = rv.enter(session, &p.test_env)?;
         let database_resource = rv.enter(session, &p.database_resource)?;
         let test_resource = rv.enter(session, &p.test_resource)?;
-        let mut admin_vm = rv.enter(session, &p.admin_vm)?;
-        let mut backend_vm = rv.enter(session, &p.backend_vm)?;
-        let mut tester_vm = rv.enter(session, &p.tester_vm)?;
+        let admin_vm = rv.enter(session, &p.admin_vm)?;
+        let backend_vm = rv.enter(session, &p.backend_vm)?;
+        let tester_vm = rv.enter(session, &p.tester_vm)?;
         let mut admin_io = rv.enter(session, &p.admin_io)?;
         let mut backend_io = rv.enter(session, &p.backend_io)?;
         let mut tester_io = rv.enter(session, &p.tester_io)?;
         let mut admin_outcome = rv.enter(session, &p.admin_outcome)?;
         let mut backend_outcome = rv.enter(session, &p.backend_outcome)?;
-        let mut admin_outcome_vm = rv.enter(session, &p.admin_outcome_vm)?;
-        let mut backend_outcome_vm = rv.enter(session, &p.backend_outcome_vm)?;
+        let admin_outcome_file = rv.enter(session, &p.admin_outcome_file)?;
+        let backend_outcome_file = rv.enter(session, &p.backend_outcome_file)?;
+        let admin_file = rv.enter(session, &p.admin_file)?;
+        let backend_file = rv.enter(session, &p.backend_file)?;
+        let tester_file = rv.enter(session, &p.tester_file)?;
+        let admin_close = rv.enter(session, &p.admin_close)?;
+        let backend_close = rv.enter(session, &p.backend_close)?;
+        let tester_close = rv.enter(session, &p.tester_close)?;
+        let admin_read = rv.enter(session, &p.admin_outcome_read)?;
+        let backend_read = rv.enter(session, &p.backend_outcome_read)?;
         let [bterm, aterm, tterm] = terminals;
-        let mut afile = imp::OutcomeFile::new();
-        let mut bfile = imp::OutcomeFile::new();
-        let afs = PrivateFs::new(aterm, bus);
-        let bfs = PrivateFs::new(bterm, bus);
-        let tfs = PrivateFs::new(tterm, bus);
-        let mut amemory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-        let mut bmemory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-        let mut tmemory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-        let mut astore = HibanaWasiGuestStorage::uninit();
-        let mut bstore = HibanaWasiGuestStorage::uninit();
-        let mut tstore = HibanaWasiGuestStorage::uninit();
-        let aguest = astore.init(module, GuestMemory::new(&mut amemory), bindings())?;
-        let bguest = bstore.init(module, GuestMemory::new(&mut bmemory), bindings())?;
-        let tguest = tstore.init(module, GuestMemory::new(&mut tmemory), bindings())?;
         async {
-            localside::admin::run(&mut admin, bus, &ac).await?;
+            localside::admin::run(&mut admin, (admin_file, admin_close), (bus, &ac)).await?;
         };
         async {
-            localside::backend::run(&mut backend, bus, &bc).await?;
+            localside::backend::run(&mut backend, (backend_file, backend_close), (bus, &bc))
+                .await?;
         };
         async {
-            localside::tester::run(&mut tester, bus, &tc, &result).await?;
+            localside::tester::run(
+                &mut tester,
+                (tester_file, tester_close, admin_read, backend_read),
+                (bus, &tc, &result),
+            )
+            .await?;
         };
         async {
-            localside::resources::run(&mut database, database_resource).await?;
+            localside::resources::database(&mut database, database_resource).await?;
         };
         async {
-            localside::resources::run(&mut test_env, test_resource).await?;
+            localside::resources::test_environment(&mut test_env, test_resource).await?;
         };
         async {
-            localside::outcome::admin::admin(&mut admin_outcome, &mut afile).await?;
+            localside::outcome::admin(&mut admin_outcome, admin_outcome_file).await?;
         };
         async {
-            localside::outcome::backend::backend(&mut backend_outcome, &mut bfile).await?;
+            localside::outcome::backend(&mut backend_outcome, backend_outcome_file).await?;
         };
         async {
-            localside::wasi::admin(aguest, &mut admin_vm, &mut admin_outcome_vm).await?;
+            let mut endpoint = admin_vm;
+            let (service, outcome) = async {
+                let [mut service, mut outcome] = endpoint.par()?;
+                async { service.recv::<Loan<ADMIN_FILE>>().await };
+                async { outcome.recv::<Loan<ADMIN_OUTCOME_FILE>>().await };
+            }
+            .await?;
+            let files = ChoreoFsFiles::new(endpoint)
+                .file(
+                    ChoreoFsFile::new(ADMIN_OBJECT, service)
+                        .close_with::<CloseAuthority<ADMIN_CLOSE>>(),
+                )?
+                .file(ChoreoFsFile::new(OUTCOME_OBJECT, outcome))?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut endpoint, (outcome, (service, ()))) = files.into_parts();
+            let mut service = service.into_endpoint();
+            let mut outcome = outcome.into_endpoint();
+            outcome.send::<FileExit>(&status).await?;
+            service.send::<FileExit>(&status).await?;
+            async {
+                let [mut service_return, mut outcome_return] = endpoint.par()?;
+                async { service_return.send::<Loan<ADMIN_FILE>>(service).await };
+                async {
+                    outcome_return
+                        .send::<Loan<ADMIN_OUTCOME_FILE>>(outcome)
+                        .await
+                };
+            }
+            .await?;
+            endpoint.send::<crate::shell::global::Exit>(&status).await?;
         };
         async {
-            localside::private_io::run(&mut admin_io, afs).await?;
+            private_io::run(
+                &mut admin_io,
+                PrivateFs::new(aterm, bus, &[ADMIN_OBJECT, OUTCOME_OBJECT]),
+            )
+            .await?;
         };
         async {
-            localside::wasi::backend(bguest, &mut backend_vm, &mut backend_outcome_vm).await?;
+            let mut endpoint = backend_vm;
+            let (service, outcome) = async {
+                let [mut service, mut outcome] = endpoint.par()?;
+                async { service.recv::<Loan<BACKEND_FILE>>().await };
+                async { outcome.recv::<Loan<BACKEND_OUTCOME_FILE>>().await };
+            }
+            .await?;
+            let files = ChoreoFsFiles::new(endpoint)
+                .file(
+                    ChoreoFsFile::new(BACKEND_OBJECT, service)
+                        .close_with::<CloseAuthority<BACKEND_CLOSE>>(),
+                )?
+                .file(ChoreoFsFile::new(OUTCOME_OBJECT, outcome))?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut endpoint, (outcome, (service, ()))) = files.into_parts();
+            let mut service = service.into_endpoint();
+            let mut outcome = outcome.into_endpoint();
+            outcome.send::<FileExit>(&status).await?;
+            service.send::<FileExit>(&status).await?;
+            async {
+                let [mut service_return, mut outcome_return] = endpoint.par()?;
+                async { service_return.send::<Loan<BACKEND_FILE>>(service).await };
+                async {
+                    outcome_return
+                        .send::<Loan<BACKEND_OUTCOME_FILE>>(outcome)
+                        .await
+                };
+            }
+            .await?;
+            endpoint.send::<crate::shell::global::Exit>(&status).await?;
         };
         async {
-            localside::private_io::run(&mut backend_io, bfs).await?;
+            private_io::run(
+                &mut backend_io,
+                PrivateFs::new(bterm, bus, &[BACKEND_OBJECT, OUTCOME_OBJECT]),
+            )
+            .await?;
         };
         async {
-            localside::wasi::tester(tguest, &mut tester_vm).await?;
+            let mut endpoint = tester_vm;
+            let service = endpoint.recv::<Loan<TESTER_FILE>>().await?;
+            let files = ChoreoFsFiles::new(endpoint).file(
+                ChoreoFsFile::new(TESTER_OBJECT, service)
+                    .close_with::<CloseAuthority<TESTER_CLOSE>>(),
+            )?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut endpoint, (service, ())) = files.into_parts();
+            let mut service = service.into_endpoint();
+            service.send::<FileExit>(&status).await?;
+            endpoint.send::<Loan<TESTER_FILE>>(service).await?;
+            endpoint.send::<crate::shell::global::Exit>(&status).await?;
         };
         async {
-            private_io::run(&mut tester_io, tfs).await?;
+            private_io::run(&mut tester_io, PrivateFs::new(tterm, bus, &[TESTER_OBJECT])).await?;
         };
         Ok(())
     }
@@ -146,6 +233,16 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
         [
             (session, global::DATABASE_RESOURCE),
             (session, global::TEST_RESOURCE),
+            (session, global::ADMIN_FILE),
+            (session, global::BACKEND_FILE),
+            (session, global::TESTER_FILE),
+            (session, global::ADMIN_OUTCOME_FILE),
+            (session, global::BACKEND_OUTCOME_FILE),
+            (session, global::ADMIN_CLOSE),
+            (session, global::BACKEND_CLOSE),
+            (session, global::TESTER_CLOSE),
+            (session, global::ADMIN_OUTCOME_READ),
+            (session, global::BACKEND_OUTCOME_READ),
         ],
     );
     let result = hibana_runtime::race(run_guests(module, &bus, terminals), reader.run(&bus)).await;

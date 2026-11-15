@@ -144,10 +144,8 @@ async fn inputs<const N: usize>(
     Ok(results.into_iter().collect())
 }
 
-#[hibana_runtime::main]
-#[test]
-#[ignore = "requires the source-qualified dining runtime, wash and unchanged original environments"]
-async fn all_dining_levels_use_both_resource_endpoints_through_wasi() -> Result<()> {
+#[hibana_runtime::scope]
+async fn actual_wasi_dining(task: &str, adversarial: bool) -> Result<()> {
     std::env::set_current_dir(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
@@ -160,115 +158,147 @@ async fn all_dining_levels_use_both_resource_endpoints_through_wasi() -> Result<
                 SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
             ));
     fs::create_dir_all(&root)?;
-    let mut summary = Vec::new();
-    for (task, adversarial) in [
-        ("9E", false),
-        ("9M", false),
-        ("9H", false),
-        ("9E", true),
-        ("9M", true),
-        ("9H", true),
-    ] {
-        let case = root.join(format!(
-            "{task}-{}",
-            if adversarial { "adversarial" } else { "normal" }
-        ));
-        fs::create_dir(&case)?;
-        let versions = snapshot::freeze(task, &case)?;
-        save(
-            &case.join("case.json"),
-            &json!({"task":task,"depth":0,"model_calls":0,
+    let case = root.join(format!(
+        "{task}-{}",
+        if adversarial { "adversarial" } else { "normal" }
+    ));
+    fs::create_dir(&case)?;
+    let versions = snapshot::freeze(task, &case)?;
+    save(
+        &case.join("case.json"),
+        &json!({"task":task,"depth":0,"model_calls":0,
             "kind":"scripted_actual_wasi_boundary","scored_benchmark":false,"adversarial_inputs":adversarial,
             "domain_delay_multiplier":1.0,"test_barriers":"none","versions":versions}),
-        )?;
-        let trace = Trace::create(&case.join("events.jsonl"))?;
-        let (simulator, fixture) = oracle::Simulator::new(task, 0, 1.0, trace.clone(), &[])?;
-        let (guest, runtime) = process::guest(
-            &case.join("runtime").canonicalize()?,
-            &case.join("wash.wasm").canonicalize()?,
-            &[task],
-            &case,
-            trace,
-            simulator.clone(),
-        )?;
-        let actors = fixture["fixtures"]
-            .as_array()
-            .ok_or("original participants")?;
-        let (runtime, mut outcomes) = hibana_runtime::race(
+    )?;
+    let trace = Trace::create(&case.join("events.jsonl"))?;
+    let (simulator, fixture) = oracle::Simulator::new(task, 0, 1.0, trace.clone(), &[])?;
+    let (guest, runtime) = process::guest(
+        &case.join("runtime").canonicalize()?,
+        &case.join("wash.wasm").canonicalize()?,
+        &[task],
+        &case,
+        trace,
+        simulator.clone(),
+    )?;
+    let actors = fixture["fixtures"]
+        .as_array()
+        .ok_or("original participants")?;
+    let (runtime, mut outcomes) = hibana_runtime::race(
+        async {
+            async { (runtime).await };
             async {
-                async { (runtime).await };
-                async {
-                    match task {
-                        "9E" => {
-                            inputs(
-                                &guest,
-                                &simulator,
-                                (
-                                    <[Value; 3]>::try_from(actors.clone())
-                                        .map_err(|_| "dining actor count")?,
-                                    adversarial,
-                                ),
-                            )
-                            .await
-                        }
-                        "9M" => {
-                            inputs(
-                                &guest,
-                                &simulator,
-                                (
-                                    <[Value; 5]>::try_from(actors.clone())
-                                        .map_err(|_| "dining actor count")?,
-                                    adversarial,
-                                ),
-                            )
-                            .await
-                        }
-                        "9H" => {
-                            inputs(
-                                &guest,
-                                &simulator,
-                                (
-                                    <[Value; 7]>::try_from(actors.clone())
-                                        .map_err(|_| "dining actor count")?,
-                                    adversarial,
-                                ),
-                            )
-                            .await
-                        }
-                        _ => Err("unknown dining task".into()),
+                match task {
+                    "9E" => {
+                        inputs(
+                            &guest,
+                            &simulator,
+                            (
+                                <[Value; 3]>::try_from(actors.clone())
+                                    .map_err(|_| "dining actor count")?,
+                                adversarial,
+                            ),
+                        )
+                        .await
                     }
-                };
-            },
-            hibana_runtime::host::deadline(Duration::from_secs(120)),
-        )
-        .await?;
-        outcomes.push(json!({"kind":"runtime","result":runtime}));
-        save(&case.join("outcomes.json"), &json!(outcomes))?;
-        assert_eq!(outcomes.len(), actors.len() + 1);
-        assert_eq!(runtime["runtime_exit_code"], 0);
-        assert_eq!(runtime["protocol"]["status"], "complete");
-        assert_eq!(runtime["score"]["complete"], true);
-        assert_eq!(runtime["score"]["violations"], json!([]));
-        assert_eq!(runtime["backend_errors"], json!([]));
-        let audit = philosophers_audit::audit(&case.join("events.jsonl"))?;
-        assert_eq!(audit["max_disjoint_eaters"], actors.len() / 2);
-        assert_eq!(audit["actual_resource_endpoint_returns"], 2 * actors.len());
-        save(&case.join("audit.json"), &audit)?;
-        let mutants =
-            philosophers_audit::check_mutants(&case.join("events.jsonl"), &case.join("mutants"))?;
-        assert_eq!(
-            mutants["mutants"]
-                .as_array()
-                .ok_or("mutation verdicts")?
-                .len(),
-            19
-        );
-        summary.push(
-            json!({"task":task,"model_calls":0,"scored_benchmark":false,"audit":audit,
-            "mutants":mutants,"events_sha256":digest(&case.join("events.jsonl"))?}),
-        );
-        save(&root.join("summary.json"), &json!(summary))?;
-    }
+                    "9M" => {
+                        inputs(
+                            &guest,
+                            &simulator,
+                            (
+                                <[Value; 5]>::try_from(actors.clone())
+                                    .map_err(|_| "dining actor count")?,
+                                adversarial,
+                            ),
+                        )
+                        .await
+                    }
+                    "9H" => {
+                        inputs(
+                            &guest,
+                            &simulator,
+                            (
+                                <[Value; 7]>::try_from(actors.clone())
+                                    .map_err(|_| "dining actor count")?,
+                                adversarial,
+                            ),
+                        )
+                        .await
+                    }
+                    _ => Err("unknown dining task".into()),
+                }
+            };
+        },
+        hibana_runtime::host::deadline(Duration::from_secs(120)),
+    )
+    .await?;
+    outcomes.push(json!({"kind":"runtime","result":runtime}));
+    save(&case.join("outcomes.json"), &json!(outcomes))?;
+    assert_eq!(outcomes.len(), actors.len() + 1);
+    assert_eq!(runtime["runtime_exit_code"], 0);
+    assert_eq!(runtime["protocol"]["status"], "complete");
+    assert_eq!(runtime["score"]["complete"], true);
+    assert_eq!(runtime["score"]["violations"], json!([]));
+    assert_eq!(runtime["backend_errors"], json!([]));
+    let (audit, mutants) =
+        philosophers_audit::check_mutants(&case.join("events.jsonl"), &case.join("mutants"))?;
+    assert_eq!(audit["max_disjoint_eaters"], actors.len() / 2);
+    assert_eq!(audit["actual_resource_endpoint_returns"], 2 * actors.len());
+    save(&case.join("audit.json"), &audit)?;
+    assert_eq!(
+        mutants["mutants"]
+            .as_array()
+            .ok_or("mutation verdicts")?
+            .len(),
+        20
+    );
+    save(
+        &root.join("summary.json"),
+        &json!([{"task":task,"adversarial_inputs":adversarial,"model_calls":0,
+            "scored_benchmark":false,"audit":audit,"mutants":mutants,
+            "events_sha256":digest(&case.join("events.jsonl"))?}]),
+    )?;
     println!("{}", root.display());
     Ok(())
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires the source-qualified dining runtime, wash and original environment"]
+async fn three_philosophers_normal() -> Result<()> {
+    actual_wasi_dining("9E", false).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires the source-qualified dining runtime, wash and original environment"]
+async fn five_philosophers_normal() -> Result<()> {
+    actual_wasi_dining("9M", false).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires the source-qualified dining runtime, wash and original environment"]
+async fn seven_philosophers_normal() -> Result<()> {
+    actual_wasi_dining("9H", false).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires the source-qualified dining runtime, wash and original environment"]
+async fn three_philosophers_adversarial() -> Result<()> {
+    actual_wasi_dining("9E", true).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires the source-qualified dining runtime, wash and original environment"]
+async fn five_philosophers_adversarial() -> Result<()> {
+    actual_wasi_dining("9M", true).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires the source-qualified dining runtime, wash and original environment"]
+async fn seven_philosophers_adversarial() -> Result<()> {
+    actual_wasi_dining("9H", true).await
 }

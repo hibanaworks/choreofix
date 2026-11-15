@@ -47,8 +47,15 @@ The normal command and live subscription tests use the same execution path.
 It supports `1E`, `1M`, `1H`, `2E`, `2M`, `2H`, `3E`, `4E`, `4M`, `5E`, `5M`, `5H`,
 `6E`, `6M`, `7E`, `8E`, `9E`, `9M`, `9H`, `10E`, `10M`, `11E`, `12E`, `13E`, `13M`, `14E`,
 `14M`, `14H` and `16E`, with the original failure conditions `0`, `1` and `2`. Each qualification
-retains its exact source and simulator version; these are 29 accepted task ports,
-not final-source certification of every family. The
+retains its exact source and simulator version. The 29 historical task entries
+are not acceptance of their current file/Endpoint boundary. Seven source-bound
+tasks have completed the direct-projection mechanism and live-model checks;
+the remaining 41 still require that qualification. The rewritten 7E passes
+twelve real-wash mechanism cases, EPF/effect audits and 1,503 record mutations.
+Three Luna/xhigh participants also completed depth 2 on the same runtime binary;
+the same run passes the model, EPF, effect and common-world audits. Its actual
+publication request selects the global's final branch directly; there is no
+separate approval-submission operation. These are finite, unscored results. The
 original `12E`, `13E` and `14E` environments have no injected failures. Run from the
 repository root and choose a new output directory:
 
@@ -67,15 +74,26 @@ Endpoint messages, and its recorded common-simulator outcome. A negative domain 
 is preserved as a domain result. It is not changed into successful work by a
 completed protocol. The same runner audits each migrated task's records.
 
-The kitchen `12E` qualification uses all six equipment orders and both ordinary
-request orders, plus one invalid-input/pipeline condition. The common entry
-assigns each of these thirteen conditions once and reconciles the saved case
+EPF checks dynamic source execution, including operation order, route/roll
+choices and affine delegation. Effect auditors do not reconstruct loan windows,
+current holders or another workflow. They bind accepted requests to the actual
+arguments, effects, replies and common-simulator scores. Final returns remain
+completion evidence: acceptance of a finite source prefix alone is insufficient.
+
+The kitchen `12E` finite domain crosses all six equipment orders with all eight
+per-chef base/ingredient orders, plus three controlled-delay refusal/recovery cases
+that finish a dish before unrelated bases and its own outgoing ingredient.
+The common entry assigns each of these 51 conditions once and reconciles the saved case
 reports. It rejects an external `CHOREOFIX_KITCHEN_CASE` selector; that selector
 is available only on the direct boundary test for explicitly partial diagnosis.
 Use `--qualify-wasi NEW_OUTPUT kitchen_boundary::` for the complete kitchen
 family, and `--audit-kitchen EVENTS` to recheck an existing kitchen execution
 without repeating its guest effects or model calls. The source-bound scope and
 the qualified pilot are recorded in `benchmark/ports/12E.md`.
+The original kitchen tools have zero processing delay. The three concurrency
+fixtures explicitly set 150 ms base and 100 ms ingredient delays through the
+test-only environment connection; raw records retain that profile. Live-model
+trials retain the original timing, and these controlled delays are not performance data.
 
 Model errors or timeouts, runtime errors, nonzero runtime exits and failed
 backend jobs set the run's `error` and produce a nonzero CLI exit. A completed
@@ -121,27 +139,54 @@ deliberately altered records without making model calls.
 The `3E` report path uses the same command and `REPORT` build variables.
 Its current source has passed the 18 ordinary conditions, eight extended
 rejection conditions, one invalid-input/post-completion condition and a
-three-model pilot. The exact sources, compiled image, original score, EPF and
+three-model pilot. Researchers can exit after their own positive section review;
+their native localsides retain the remaining publication communication. No
+extra shell read, host completion flag or automatic reply-draining path is used.
+The exact sources, compiled image, original score, EPF and
 effect audit are retained with each run; this does not qualify other source
 revisions or establish comparative performance.
 `--check-report-mutants EVENTS NEW_DIRECTORY` checks omissions, coherent
-forgeries and duplicates of actual business frames, owned Endpoint envelopes,
-WASI closes, effect ordering, original results and completion. It operates on
+forgeries and duplicates of actual business values, wire headers and the actual
+receive/effect/result boundaries. It operates on
 the saved records without model calls or Endpoint execution. The production
 auditor checks EPF source execution and binds its successful receive commits to
 actual request values, effects and results. It does not reconstruct another
-resource-holder or transfer-order model. Each record counterexample uses that
-same auditor in a fresh process, releasing its search storage between inputs;
-no source copy, defect restoration or rebuild is involved.
+resource-holder or transfer-order model. Each original capture is checked once.
+Value/header/effect counterexamples retain its record contents and positions;
+frame omissions fail because a checked receive loses its matching frame.
+Changes to producer records must be checked by EPF again. The boundary test
+reuses the baseline audit saved by
+this command rather than running EPF twice. No source copy, defect restoration
+or rebuild is involved.
+Current evidence is in
+`output/experiments/research-report-direct-files-20261114/qualification-v30.json`.
 
 The `4E` API-coordination path uses `COORDINATION` build variables and the same
 normal run and `--audit-run` commands. Each of the three actual models owns one
 Wasm shell. The global moves the actual repository and test-environment Endpoints;
 the localsides expose their operations directly without task flags or an owner table.
-Five scripted conditions cover both implementation orders, one/three API amendments
-and normal delay. One three-model pilot also passes original scoring and EPF/effect
-checks. These are unscored, source-bound results. `--audit-coordination EVENTS`
-checks the saved protocol/effect evidence without model calls.
+The files own their projected Endpoints from the outset. Contract, agreement,
+candidate and result reads use the SDK's actual message receive projection;
+the host does not choose the shell's next operation. A refused unadmitted call
+returns an error so the same guest can choose another operation or retry.
+
+With common world v19, five actual-Wasm conditions pass both implementation
+orders, one/three API amendments, invalid-input recovery and normal delay.
+The first three records were reused after correcting occurrence matching in
+the effect auditor; only the remaining two conditions needed new Wasm runs.
+The earlier failed command remains recorded as failed. A three-person Luna
+xhigh pilot using the same runtime binary also passes independent EPF/effect
+and common-scorer checks: 39.862 seconds, 352,337 inclusive total tokens,
+four actual effects and zero violations. These are finite, unscored,
+source-bound results, not qualification of all families or scored comparisons.
+See `output/experiments/coordination-direct-projection-20261113/qualification-summary.json`
+and `output/experiments/coordination-free-shell-current-20261113-live/`.
+`--audit-coordination EVENTS` checks saved evidence without model calls.
+
+The v19 world executes actual backend/frontend code and binds completed
+integration tests to the current repository contents. Its world tests cover
+both implementation orders and all 24 serial tool orders. World behavior,
+EPF conformance and the actual request/effect audit are separate checks.
 
 The `4M` shared-refactoring path uses `REFACTOR` build variables. Five actual
 Wasm shells drive the architect, both developers, reviewer and tester. The
@@ -210,6 +255,13 @@ These scripted tests make no model calls. They check actual wash guests,
 resource requests and returns, independent work, malformed and duplicate
 requests, reconsideration where the task permits it, and terminal domain failures.
 
+Protocol interpretation belongs to EPF. The kitchen and manufacturing effect
+auditors use its checked receive commits, without replaying loan intervals,
+return order, Ready retirement or Busy/retry sequencing. They still match actual
+file arguments, resource requests, effects, replies and common-world outcomes.
+Checking those values is separate from source conformance; a valid EPF prefix
+alone does not certify an application result.
+
 The code-review auditor checks the review-control Endpoint, repository Endpoint, actual WASI
 arguments, simulator requests and results, approval before merging, and guest
 exits. Each review uses distinct intent deliveries, a request, an argument-file
@@ -271,14 +323,17 @@ Dining checks use the original 3/5/7-person environments through the Rust
 connection and actual wash guests. They cover private work, early and duplicate
 operations, malformed arguments, argument preservation, both fork Endpoints,
 and observed overlap of independent meals. There are six conditions: normal
-and adversarial input for each participant count. Nineteen record mutations
+and adversarial input for each participant count. Twenty record mutations
 must fail. EPF checks the complete source execution; the dining effect check
 only binds its committed receive occurrences to admitted file bytes, actual
 resource requests, physical effects/replies and the common simulator score.
 It does not recreate protocol progress or a current resource-holder table.
+EPF also owns communication order and delegation-envelope validation. The
+effect check requires the actual requests before an effect and its result
+before the reply; it does not recheck ordering between protocol operations.
 Five mutations retain EPF-valid execution while changing effect arguments,
 file data, result data, effect timing or effect multiplicity; the effect check
-must reject these separately. This is recorded-data validation, not nineteen
+must reject these separately. This is recorded-data validation, not twenty
 runtime attacks.
 The selected runtime requires `CHOREOFIX_PHILOSOPHERS_WASI_BINARY` and
 `CHOREOFIX_PHILOSOPHERS_BUILD_RECEIPT`; `CHOREOFIX_EVIDENCE_ROOT` selects a new
@@ -289,6 +344,11 @@ cargo +stable test --locked --manifest-path tools/runner/Cargo.toml \
   philosophers_boundary:: -- --ignored --test-threads=1 --nocapture
 ```
 
+For the complete source-bound qualification use `--qualify-wasi NEW_DIRECTORY
+philosophers_boundary::`. It runs each of the six conditions in its own process
+and requires all six reports against one runtime binary. This releases each
+condition's audit search workspace before starting the next condition.
+
 The codebase and writing effect checks also require EPF source conformance and
 bind requests to its committed receives. Their duplicate holder/transfer tables
 and transport transition implementations have been removed; they share the
@@ -296,18 +356,43 @@ journal reader used by dining. Complete captures are required, with no old-audit
 fallback. Earlier static-only records are historical evidence and do not qualify
 these revised checks. The tasks still require their new ChoreoFS boundary ports
 and actual Wasm/model qualification. An EPF-valid finite prefix is insufficient
-when a request's committed receive is absent.
+when a request's committed receive is absent. Task completion also requires
+observed final resource returns; these are counted from the checked journal,
+without reconstructing holders or transfer states. Effects and delivered values
+are read once at their EPF receive commits, not again at transport-send rows.
 
 The CI/CD record auditor runs without starting a model or guest:
+
+The current 16E files own their projected Endpoints. Closing one submits that
+operation; the host does not preselect a command or send a request-ready grant.
+Reads of the same file receive actual `{kind,result}` messages: operation
+results, build-complete, tests-passed and both deployment-complete notifications.
+Private work stays available independently. Unadmitted and malformed requests
+return errors so that the same shell can continue.
+
+The declared Wasm assignments are `adversarial_depth_0`, `ordinary_depth_1`,
+`normal_delay_depth_2` and `real_wasi_cicd_early_exit_has_no_domain_effect`.
+All four passed; the three completed records reject 16 record counterexamples
+each. Early exit has no actual domain effect. The final common-world change
+retains unvalidated-publication violations after repair; its 10 world tests
+pass, while native Rust, SDK, runtime and runner bytes remain unchanged.
+Their existing boundary evidence is retained, with one new ordinary Wasm run
+and a fresh model pilot under the final scorer. The final Luna xhigh pilot
+uses three actual models and passes independent EPF/effect/common-score checks:
+32.079833 seconds, 386,756 inclusive total tokens, three effects, seven actual
+incoming messages and zero violations. These are finite, unscored results.
+See `output/experiments/cicd-direct-projection-20261113/qualification-summary.json`.
 
 ```sh
 cargo +stable run --locked --manifest-path tools/runner/Cargo.toml -- --audit-cicd EVENTS.jsonl
 cargo +stable run --locked --manifest-path tools/runner/Cargo.toml -- --check-cicd-mutants EVENTS.jsonl NEW_DIRECTORY
 ```
 
-It checks the actual resource loans, requests, returned results, notifications
-and original simulator score. Mutation checks remove whole frames or alter
-every observation of the same frame, and include overlapping build-server loans.
+It checks EPF source conformance, actual requests, returned results,
+notifications and the original simulator score. Mutation checks remove whole
+frames or alter every observation of the same frame. Moving transport
+observations alone is not a source-execution counterexample; early-effect
+checks must move the effect before its required EPF receive commit.
 
 The writing auditor checks both section Endpoints, actual requests and replies,
 returns, original outcomes and disjoint write overlap for 3/5/7 participants:
@@ -352,10 +437,11 @@ comparisons. Keep the original comparison implementations unchanged.
 
 Run builds and verification under Hibana’s resource guard with one Cargo job.
 PyO3 loads the canonical common simulator from `benchmark/`; no Python adapter
-or evaluated snippet is used. `common-environment-v2` models actual 4M repository
-contents and completed exact-content review/test receipts before publication.
-14E checks material inputs, completed analyses and the actual submitted decision
-before documentation. Independent legal orders remain free. Every
+or evaluated snippet is used. `common-environment-v21` binds actual material
+and completed validation to publication. In 3E, drafts and references name the
+research they used; each section's review names that section's current material.
+Independent author, write/reference and review orders remain free. This common
+world qualification does not certify the unfinished 3E Endpoint/file port. Every
 condition uses the same environment. Each fixture records its contract and
 manifest hash; earlier results retain their recorded simulator version.
 

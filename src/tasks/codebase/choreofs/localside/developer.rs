@@ -1,137 +1,142 @@
-//! Both module endpoints carry the commit request before the shared effect.
-use super::super::{
-    global::*,
-    input::assignment,
-    wire::{COMMIT, Close, DESIGN, IMPLEMENT, TEST},
-};
+//! Actual requests, both owned module views, effects and original results.
+use super::super::{global::*, input, wire};
 use crate::shell::{ShellError, ShellResult, imp::service::Domain};
 use hibana::Endpoint;
 
 #[hibana_runtime::scope]
-pub(crate) async fn run<const TASK: u8, const ROLE: u8, const FIRST: u8, const SECOND: u8>(
-    endpoint: &mut Endpoint<ROLE>,
+pub async fn run<'run, const ROLE: u8, const FIRST: u8, const SECOND: u8>(
+    endpoint: &mut Endpoint<'run, ROLE>,
     domain: &impl Domain,
 ) -> ShellResult<()> {
-    let input = assignment::<TASK, ROLE>();
-
-    let request = endpoint.recv::<DesignRequest<TASK, ROLE>>().await?;
-    let arguments = serde_json::from_slice(&request.as_bytes()[1..])
-        .map_err(|error| ShellError::message(error.to_string()))?;
-    let result = Close::<TASK, ROLE, DESIGN>::objects()
-        .choreofs()
-        .fd_close(request);
-    if result.0.errno() != 0 {
-        return Err(ShellError::message("design object could not materialize"));
-    }
-    let result = domain
+    let input = input::assignment(ROLE);
+    let arguments = endpoint.recv::<DesignRequest<ROLE>>().await?.into_value();
+    let designed = domain
         .execute(input.agent, "design_feature", arguments)
         .await
         .map_err(ShellError::message)?;
-    if result["success"] != true {
-        return Err(ShellError::message(format!(
-            "domain design_feature failed: {result}"
-        )));
-    }
-    let bytes =
-        serde_json::to_vec(&result).map_err(|error| ShellError::message(error.to_string()))?;
-    let response = bytes.as_slice();
-    endpoint.send::<DesignCompleted>(&response).await?;
-
-    let request = endpoint.recv::<ImplementRequest<TASK, ROLE>>().await?;
-    let arguments = serde_json::from_slice(&request.as_bytes()[1..])
-        .map_err(|error| ShellError::message(error.to_string()))?;
-    let result = Close::<TASK, ROLE, IMPLEMENT>::objects()
-        .choreofs()
-        .fd_close(request);
-    if result.0.errno() != 0 {
+    wire::result(&designed, "design_feature", input.agent)?;
+    if designed["success"] != true || !designed["data"]["artifact"]["id"].is_string() {
         return Err(ShellError::message(
-            "implementation object could not materialize",
+            "design effect did not return its actual input",
         ));
     }
-    let result = domain
+    let bytes = wire::encode(&designed)?;
+    endpoint.send::<DesignCompleted>(&bytes.as_slice()).await?;
+
+    let arguments = endpoint
+        .recv::<ImplementRequest<ROLE>>()
+        .await?
+        .into_value();
+    let implemented = domain
         .execute(input.agent, "implement_code", arguments)
         .await
         .map_err(ShellError::message)?;
-    if result["success"] != true {
-        return Err(ShellError::message(format!(
-            "domain implement_code failed: {result}"
-        )));
-    }
-    let bytes =
-        serde_json::to_vec(&result).map_err(|error| ShellError::message(error.to_string()))?;
-    let response = bytes.as_slice();
-    endpoint.send::<ImplementCompleted>(&response).await?;
-
-    let arguments = {
-        let [mut first, mut second] = endpoint.par()?;
-        let (first, second) = async {
-            async { (first.recv::<CommitRequest<TASK, ROLE, FIRST>>()).await };
-            async { (second.recv::<CommitRequest<TASK, ROLE, SECOND>>()).await };
-        }
-        .await?;
-        if first.as_bytes() != second.as_bytes() {
-            return Err(ShellError::message(
-                "module requests name different commits",
-            ));
-        }
-        let arguments = serde_json::from_slice(&first.as_bytes()[1..])
-            .map_err(|error| ShellError::message(error.to_string()))?;
-        let objects = Close::<TASK, ROLE, COMMIT>::objects();
-        let fs = objects.choreofs();
-        let first = fs.fd_close(first);
-        let second = fs.fd_close(second);
-        if first.0.errno() != 0 || second.0.errno() != 0 {
-            return Err(ShellError::message("commit object could not materialize"));
-        }
-        arguments
-    };
-    let result = domain
-        .execute(input.agent, "commit_changes", arguments)
-        .await
-        .map_err(ShellError::message)?;
-    if result["success"] != true {
-        return Err(ShellError::message(format!(
-            "domain commit_changes failed: {result}"
-        )));
-    }
-    let bytes =
-        serde_json::to_vec(&result).map_err(|error| ShellError::message(error.to_string()))?;
+    wire::result(&implemented, "implement_code", input.agent)?;
+    if implemented["success"] != true
+        || implemented["data"]["artifact"]["design"] != designed["data"]["artifact"]
     {
-        let [mut first, mut second] = endpoint.par()?;
-        let payload = bytes.as_slice();
+        return Err(ShellError::message(
+            "implementation did not consume its actual design",
+        ));
+    }
+    let bytes = wire::encode(&implemented)?;
+    endpoint
+        .send::<ImplementCompleted>(&bytes.as_slice())
+        .await?;
+
+    let admitted = endpoint.recv::<CommitRequest<ROLE>>().await?;
+    let arguments = wire::ModuleArguments::from_bytes(admitted.as_bytes())?;
+    let (mut first, mut second) = async {
+        let [mut a, mut b] = endpoint.par()?;
+        async { a.recv::<Loan<FIRST>>().await };
+        async { b.recv::<Loan<SECOND>>().await };
+    }
+    .await?;
+    let (request_a, request_b) = async {
+        let [mut a, mut b] = endpoint.par()?;
         async {
             async {
-                first.send::<CommitCompleted<FIRST>>(&payload).await?;
+                first.send::<ModuleRequest<FIRST>>(&arguments).await?;
             };
+            Ok(a.recv::<ModuleRequest<FIRST>>().await?)
+        };
+        async {
             async {
-                second.send::<CommitCompleted<SECOND>>(&payload).await?;
+                second.send::<ModuleRequest<SECOND>>(&arguments).await?;
             };
+            Ok(b.recv::<ModuleRequest<SECOND>>().await?)
+        };
+    }
+    .await?;
+    let admitted = admitted.into_value();
+    if request_a != request_b || request_a.into_value() != admitted {
+        return Err(ShellError::message(
+            "module requests differ from the actual file request",
+        ));
+    }
+    let committed = domain
+        .execute(input.agent, "commit_changes", admitted)
+        .await
+        .map_err(ShellError::message)?;
+    wire::result(&committed, "commit_changes", input.agent)?;
+    if committed["success"] != true
+        || committed["data"]["artifact"]["source"] != implemented["data"]["artifact"]
+    {
+        return Err(ShellError::message(
+            "module effect did not consume its actual implementation",
+        ));
+    }
+    let bytes = wire::encode(&committed)?;
+    async {
+        let [mut a, mut b] = endpoint.par()?;
+        async {
+            async {
+                a.send::<ModuleCompleted<FIRST>>(&bytes.as_slice()).await?;
+            };
+            let received = first.recv::<ModuleCompleted<FIRST>>().await?;
+            if received[..] != bytes {
+                return Err(ShellError::message("first module result differs"));
+            }
             Ok(())
-        }
-        .await?;
+        };
+        async {
+            async {
+                b.send::<ModuleCompleted<SECOND>>(&bytes.as_slice()).await?;
+            };
+            let received = second.recv::<ModuleCompleted<SECOND>>().await?;
+            if received[..] != bytes {
+                return Err(ShellError::message("second module result differs"));
+            }
+            Ok(())
+        };
+        Ok(())
     }
+    .await?;
+    async {
+        let [mut a, mut b] = endpoint.par()?;
+        async {
+            a.send::<Loan<FIRST>>(first).await?;
+        };
+        async {
+            b.send::<Loan<SECOND>>(second).await?;
+        };
+        Ok(())
+    }
+    .await?;
+    endpoint.send::<CommitCompleted>(&bytes.as_slice()).await?;
 
-    let request = endpoint.recv::<TestRequest<TASK, ROLE>>().await?;
-    let arguments = serde_json::from_slice(&request.as_bytes()[1..])
-        .map_err(|error| ShellError::message(error.to_string()))?;
-    let result = Close::<TASK, ROLE, TEST>::objects()
-        .choreofs()
-        .fd_close(request);
-    if result.0.errno() != 0 {
-        return Err(ShellError::message("test object could not materialize"));
-    }
-    let result = domain
+    let arguments = endpoint.recv::<TestRequest<ROLE>>().await?.into_value();
+    let tested = domain
         .execute(input.agent, "run_local_tests", arguments)
         .await
         .map_err(ShellError::message)?;
-    // The original 1E/1M test is terminal, including a false domain verdict.
-    let bytes =
-        serde_json::to_vec(&result).map_err(|error| ShellError::message(error.to_string()))?;
-    let response = bytes.as_slice();
-    endpoint.send::<TestCompleted>(&response).await?;
-    let status = endpoint.recv::<ServiceExit>().await?;
-    if status != 0 {
-        return Err(ShellError::message("developer guest failed"));
+    wire::result(&tested, "run_local_tests", input.agent)?;
+    if tested["data"]["input_snapshot"] != committed["data"]["artifact"] {
+        return Err(ShellError::message(
+            "test did not examine the actual module",
+        ));
     }
+    let bytes = wire::encode(&tested)?;
+    endpoint.send::<TestCompleted>(&bytes.as_slice()).await?;
     Ok(())
 }

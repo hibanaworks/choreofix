@@ -7,6 +7,20 @@ use serde_json::{Value, json};
 
 #[hibana_runtime::main]
 #[test]
+#[ignore = "uses three Luna xhigh participants, direct machine-operation files and actual Wasm"]
+async fn subscription_technicians_choose_actual_machine_operations() -> Result<()> {
+    subscription_case("11E", 0).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "uses three Luna xhigh participants, direct build files, actual Wasm and the common object world"]
+async fn subscription_builders_use_direct_files_and_current_objects() -> Result<()> {
+    subscription_case("10E", 0).await
+}
+
+#[hibana_runtime::main]
+#[test]
 #[ignore = "uses three Luna xhigh participants, actual Wasm guests and the common kitchen world"]
 async fn subscription_chefs_use_actual_equipment_and_ingredients() -> Result<()> {
     subscription_case("12E", 0).await
@@ -51,6 +65,20 @@ async fn subscription_seven_philosophers_use_independent_wash_guests() -> Result
 #[ignore = "uses seven Luna xhigh participants, actual WASI guests and upstream test failures"]
 async fn subscription_developers_reconsider_through_seven_wash_guests() -> Result<()> {
     subscription_case("1H", 2).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "uses three Luna xhigh participants and actual operation-file and module Endpoints"]
+async fn subscription_three_developers_use_direct_operation_files() -> Result<()> {
+    subscription_case("1E", 0).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "uses five Luna xhigh participants and actual operation-file and module Endpoints"]
+async fn subscription_five_developers_use_direct_operation_files() -> Result<()> {
+    subscription_case("1M", 0).await
 }
 
 #[hibana_runtime::main]
@@ -234,7 +262,29 @@ async fn subscription_case(task: &str, depth: u8) -> Result<()> {
     let audited = crate::audit::run(&directory)?;
     save(&directory.join("audit.json"), &audited)?;
     let audit = &audited["protocol"];
+    if task == "10E" {
+        let compiles = audit["actual_compile_effects"]
+            .as_u64()
+            .filter(|count| (2..=3).contains(count))
+            .ok_or("actual build compile count")?;
+        if audit["domain_calls"].as_u64() != Some(compiles + 1)
+            || audit["actual_resource_endpoint_requests"].as_u64() != Some(2 * compiles)
+        {
+            return Err("actual compiles, link and resource receives do not correspond".into());
+        }
+    }
     if audit["status"] != "passed"
+        || (task == "11E"
+            && (audit["actual_jobs"] != 4
+                || audit["actual_reports"] != 1
+                || audit["actual_typed_file_requests"] != 5
+                || audit["actual_resource_endpoint_requests"] != 4
+                || audit["actual_resource_endpoint_returns"] != 4
+                || audit["dynamic_protocol"]["status"] != "passed"))
+        || (task == "10E"
+            && (audit["final_resource_endpoint_returns"] != 2
+                || audit["simulator_complete"] != true
+                || audit["dynamic_protocol"]["status"] != "passed"))
         || (task == "6E"
             && (audit["actual_resource_endpoint_requests"] != 4 + u64::from(depth)
                 || audit["actual_resource_endpoint_returns"] != 4 + u64::from(depth)
@@ -245,11 +295,16 @@ async fn subscription_case(task: &str, depth: u8) -> Result<()> {
         || (matches!(task, "9E" | "9M" | "9H")
             && audit["actual_resource_endpoint_returns"] != 2 * participant_count)
         || (task == "1H"
-            && !audit["attempts"]
-                .as_object()
-                .ok_or("revision attempts")?
-                .values()
-                .all(|visits| visits.as_u64() == Some(3)))
+            && (audit["actual_test_resolver_decisions"]
+                != participant_count * (usize::from(depth) + 1)
+                || audit["actual_resource_endpoint_requests"]
+                    != 2 * participant_count * (usize::from(depth) + 1)
+                || audit["actual_resource_endpoint_returns"]
+                    != 2 * participant_count * (usize::from(depth) + 1)))
+        || (matches!(task, "1E" | "1M")
+            && (audit["actual_resource_endpoint_requests"] != 2 * participant_count
+                || audit["actual_resource_endpoint_returns"] != 2 * participant_count
+                || audit["simulator_complete"] != expected_complete))
         || (task == "8E"
             && (audit["actual_resource_endpoint_requests"] != 2
                 || audit["actual_resource_endpoint_returns"] != 2
@@ -262,4 +317,11 @@ async fn subscription_case(task: &str, depth: u8) -> Result<()> {
         return Err("delegation audit did not confirm all actual returns".into());
     }
     Ok(())
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires real Luna participants and source-qualified 10M"]
+async fn subscription_cascading_build() -> Result<()> {
+    subscription_case("10M", 2).await
 }

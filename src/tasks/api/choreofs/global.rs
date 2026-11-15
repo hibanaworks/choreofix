@@ -1,9 +1,13 @@
-//! Task 8E: actual WASI requests, physical resources and result-file reads.
+//! Endpoint-bound operation files, actual resources and result-file delivery.
 use hibana::{
     Endpoint, g,
     runtime::program::{Projectable, RoleProgram, project},
 };
-use hibana_wasip1_runtime::protocol;
+use hibana_wasip1_runtime::{
+    choreofs::{ChoreoFsObject, FdSpec, ObjectId},
+    protocol,
+};
+
 pub const ADMIN: u8 = 0;
 pub const BACKEND: u8 = 1;
 pub const TESTER: u8 = 2;
@@ -17,35 +21,65 @@ pub const BACKEND_IO: u8 = 9;
 pub const TESTER_IO: u8 = 10;
 pub const ADMIN_OUTCOME: u8 = 11;
 pub const BACKEND_OUTCOME: u8 = 12;
-pub const ADMIN_OUTCOME_VM: u8 = 13;
-pub const BACKEND_OUTCOME_VM: u8 = 14;
+pub const ADMIN_OUTCOME_FILE: u8 = 13;
+pub const BACKEND_OUTCOME_FILE: u8 = 14;
 pub const DATABASE_RESOURCE: u8 = 15;
 pub const TEST_RESOURCE: u8 = 16;
+pub const ADMIN_FILE: u8 = 17;
+pub const BACKEND_FILE: u8 = 18;
+pub const TESTER_FILE: u8 = 19;
+pub const ADMIN_CLOSE: u8 = 20;
+pub const BACKEND_CLOSE: u8 = 21;
+pub const TESTER_CLOSE: u8 = 22;
+pub const ADMIN_OUTCOME_READ: u8 = 23;
+pub const BACKEND_OUTCOME_READ: u8 = 24;
 pub const CHECK_ADMIN: u16 = 680;
 pub const CHECK_BACKEND: u16 = 681;
 pub const CHECK_TESTER: u16 = 682;
 pub const TEST_RESULT: u16 = 683;
 pub const SERVICE_FD: u8 = 4;
-pub const SERVICE_PREFIX: &[u8] = b"service/";
-pub const RESULT_PATH: &[u8] = b"service/result";
+pub const OUTCOME_FD: u8 = 5;
 pub const OUTCOME_PATH: &[u8] = b"service/outcome";
-pub const OUTCOME_FD: u8 = 16;
-pub type Open = g::Msg<100, protocol::PathOpenReq>;
-pub type Opened = g::Msg<101, protocol::PathOpenedRet>;
-pub type Write = g::Msg<102, protocol::FdWriteObjectReq>;
-pub type Written = g::Msg<103, protocol::FdWriteDoneRet>;
-pub type Commit = g::Msg<104, protocol::FdCloseReq>;
-pub type Admitted<'a> = g::Msg<105, &'a [u8]>;
-pub type Rejected<'a> = g::Msg<106, &'a [u8]>;
-pub type ResultBytes<'a> = g::Msg<107, &'a [u8]>;
-pub type Unavailable = g::Msg<109, protocol::FdClosedRet>;
-pub type RequestReady = g::Msg<110, ()>;
-pub type Validate = g::Msg<111, ()>;
-pub type Request = g::Msg<112, ()>;
-pub type RejectRequest = g::Msg<113, ()>;
-pub type Effect = g::Msg<115, ()>;
-pub type ServiceExit = g::Msg<241, i32>;
-pub type Loan<'r, const RESOURCE: u8> = g::Msg<10, Endpoint<'r, RESOURCE>>;
+
+const OPERATION_BINDING: protocol::FdBinding = protocol::FdBinding {
+    read: Some(protocol::FdReadRow::Base),
+    write: Some(protocol::FdWriteRow::Object),
+    readdir: None,
+};
+pub const ADMIN_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
+    b"service/migrate_schema",
+    ObjectId(SERVICE_FD as u32),
+    FdSpec::new(SERVICE_FD, 66, 1),
+    b"",
+    OPERATION_BINDING,
+);
+pub const BACKEND_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
+    b"service/implement_backend",
+    ObjectId(SERVICE_FD as u32),
+    FdSpec::new(SERVICE_FD, 66, 1),
+    b"",
+    OPERATION_BINDING,
+);
+pub const TESTER_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
+    b"service/run_integration_tests",
+    ObjectId(SERVICE_FD as u32),
+    FdSpec::new(SERVICE_FD, 66, 1),
+    b"",
+    OPERATION_BINDING,
+);
+pub const OUTCOME_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::readable(
+    OUTCOME_PATH,
+    ObjectId(5),
+    FdSpec::new(5, 2, 1),
+    b"",
+    protocol::FdBinding::read(protocol::FdReadRow::Base),
+);
+
+pub type Loan<'run, const RESOURCE: u8> = g::Msg<10, Endpoint<'run, RESOURCE>>;
+pub type CloseAuthority<'run, const RESOURCE: u8> = g::Msg<165, Endpoint<'run, RESOURCE>>;
+pub type FileExit = g::Msg<241, i32>;
+pub type MigrationIntent = g::Msg<18, super::imp::ApiArguments<{ super::imp::MIGRATE }>>;
+pub type TestIntent = g::Msg<19, super::imp::ApiArguments<{ super::imp::TEST }>>;
 pub type MigrationRequest = g::Msg<20, super::imp::ApiArguments<{ super::imp::MIGRATE }>>;
 pub type MigrationCompleted<'a> = g::Msg<21, &'a [u8]>;
 pub type TestRequest = g::Msg<22, super::imp::ApiArguments<{ super::imp::TEST }>>;
@@ -56,108 +90,136 @@ pub type PassedAdmin<'a> = g::Msg<50, &'a [u8]>;
 pub type PassedBackend<'a> = g::Msg<51, &'a [u8]>;
 pub type FailedAdmin<'a> = g::Msg<60, &'a [u8]>;
 pub type FailedBackend<'a> = g::Msg<61, &'a [u8]>;
-pub type OutcomeOpen = g::Msg<150, protocol::PathOpenReq>;
-pub type OutcomeOpened = g::Msg<151, protocol::PathOpenedRet>;
-pub type OutcomeRead = g::Msg<152, protocol::FdReadReq>;
-pub type OutcomeReadDone = g::Msg<153, protocol::FdReadDoneRet>;
-pub type OutcomeStat = g::Msg<154, protocol::FdFdstatGetReq>;
-pub type OutcomeStatDone = g::Msg<155, protocol::FdStatRet>;
-pub type OutcomeFileStat = g::Msg<156, protocol::FdFilestatGetReq>;
-pub type OutcomeFileStatDone = g::Msg<157, protocol::FdFilestatRet>;
-pub type OutcomeClose = g::Msg<158, protocol::FdCloseReq>;
-pub type OutcomeClosed = g::Msg<159, protocol::FdClosedRet>;
-pub type OutcomePathStat = g::Msg<160, protocol::PathFilestatGetReq>;
-pub type OutcomePathStatDone = g::Msg<161, protocol::PathFilestatRet>;
-pub type OutcomeExit = g::Msg<242, i32>;
-fn requests<const VM: u8, const OWNER: u8, const CHECK: u16>() -> impl Projectable {
-    g::seq(
-        g::send::<OWNER, OWNER, Request>(),
-        g::seq(
-            g::send::<OWNER, VM, RequestReady>(),
-            g::route(
-                g::seq(g::send::<VM, OWNER, Open>(), g::send::<OWNER, VM, Opened>()),
-                g::route(
-                    g::seq(
-                        g::send::<VM, OWNER, Write>(),
-                        g::send::<OWNER, VM, Written>(),
-                    ),
-                    g::seq(
-                        g::send::<VM, OWNER, Commit>(),
-                        g::route(
-                            g::seq(
-                                g::send::<OWNER, OWNER, Validate>(),
-                                g::send::<OWNER, VM, Admitted>(),
-                            ),
-                            g::send::<OWNER, VM, Rejected>(),
-                        )
-                        .resolve::<CHECK>(),
-                    ),
-                ),
-            ),
-        ),
-    )
-    .roll()
-}
-fn closed<const VM: u8, const OWNER: u8>() -> impl Projectable {
-    g::seq(
-        g::send::<OWNER, OWNER, RejectRequest>(),
-        g::seq(
-            g::send::<OWNER, VM, RequestReady>(),
-            g::route(
-                g::seq(g::send::<VM, OWNER, Open>(), g::send::<OWNER, VM, Opened>()),
-                g::route(
-                    g::seq(
-                        g::send::<VM, OWNER, Write>(),
-                        g::send::<OWNER, VM, Written>(),
-                    ),
-                    g::route(
-                        g::seq(
-                            g::send::<VM, OWNER, Commit>(),
-                            g::send::<OWNER, VM, Unavailable>(),
-                        ),
-                        g::send::<VM, OWNER, ServiceExit>(),
-                    ),
-                ),
-            ),
-        ),
-    )
-    .roll()
-}
-fn outcome_io<const VM: u8, const OWNER: u8>() -> impl Projectable {
-    // Opening the file is a required result-receipt step. Its owner must receive
-    // the test notification before entering this fragment or answering any read.
-    let first_open = g::send::<OWNER, VM, OutcomeOpened>();
-    let io = g::route(
-        g::seq(
-            g::send::<VM, OWNER, OutcomeOpen>(),
-            g::send::<OWNER, VM, OutcomeOpened>(),
-        ),
+
+// Repeated syscall fragments; object close is the business operation below.
+fn file_io<const FILE: u8, const OWNER: u8>() -> impl Projectable {
+    let open = g::seq(
+        g::send::<FILE, OWNER, protocol::PathOpenReqMsg>(),
+        g::send::<OWNER, FILE, protocol::PathOpenRetMsg>(),
+    );
+    let write = g::seq(
+        g::send::<FILE, OWNER, protocol::FdWriteObjectReqMsg>(),
+        g::send::<OWNER, FILE, protocol::FdWriteObjectRetMsg>(),
+    );
+    let read = g::seq(
+        g::send::<FILE, OWNER, protocol::FdReadReqMsg>(),
+        g::send::<OWNER, FILE, protocol::FdReadRetMsg>(),
+    );
+    let stat = g::seq(
+        g::send::<FILE, OWNER, protocol::FdFdstatGetReqMsg>(),
+        g::send::<OWNER, FILE, protocol::FdFdstatGetRetMsg>(),
+    );
+    let filestat = g::seq(
+        g::send::<FILE, OWNER, protocol::FdFilestatGetReqMsg>(),
+        g::send::<OWNER, FILE, protocol::FdFilestatGetRetMsg>(),
+    );
+    let pathstat = g::seq(
+        g::send::<FILE, OWNER, protocol::PathFilestatGetReqMsg>(),
+        g::send::<OWNER, FILE, protocol::PathFilestatGetRetMsg>(),
+    );
+    let close = g::seq(
+        g::send::<FILE, OWNER, protocol::FdCloseReqMsg>(),
+        g::send::<OWNER, FILE, protocol::FdCloseRetMsg>(),
+    );
+    let prestat = g::seq(
+        g::send::<FILE, OWNER, protocol::FdPrestatGetReqMsg>(),
+        g::send::<OWNER, FILE, protocol::FdPrestatGetRetMsg>(),
+    );
+    let prestat_name = g::seq(
+        g::send::<FILE, OWNER, protocol::FdPrestatDirNameReqMsg>(),
+        g::send::<OWNER, FILE, protocol::FdPrestatDirNameRetMsg>(),
+    );
+    let directory = g::seq(
+        g::send::<FILE, OWNER, protocol::FdReaddirReqMsg>(),
+        g::send::<OWNER, FILE, protocol::FdReaddirRetMsg>(),
+    );
+    g::route(
+        prestat,
         g::route(
-            g::seq(
-                g::send::<VM, OWNER, OutcomeRead>(),
-                g::send::<OWNER, VM, OutcomeReadDone>(),
-            ),
+            prestat_name,
             g::route(
-                g::seq(
-                    g::send::<VM, OWNER, OutcomeStat>(),
-                    g::send::<OWNER, VM, OutcomeStatDone>(),
-                ),
+                directory,
                 g::route(
-                    g::seq(
-                        g::send::<VM, OWNER, OutcomeFileStat>(),
-                        g::send::<OWNER, VM, OutcomeFileStatDone>(),
-                    ),
-                    g::seq(
-                        g::send::<VM, OWNER, OutcomeClose>(),
-                        g::send::<OWNER, VM, OutcomeClosed>(),
+                    open,
+                    g::route(
+                        write,
+                        g::route(
+                            read,
+                            g::route(stat, g::route(filestat, g::route(pathstat, close))),
+                        ),
                     ),
                 ),
             ),
         ),
     )
-    .roll();
-    g::seq(first_open, io)
+    .roll()
 }
+
+fn outcome_metadata<const FILE: u8, const OWNER: u8>() -> impl Projectable {
+    let prestat = g::seq(
+        g::send::<FILE, OWNER, protocol::FdPrestatGetReqMsg>(),
+        g::send::<OWNER, FILE, protocol::FdPrestatGetRetMsg>(),
+    );
+    let prestat_name = g::seq(
+        g::send::<FILE, OWNER, protocol::FdPrestatDirNameReqMsg>(),
+        g::send::<OWNER, FILE, protocol::FdPrestatDirNameRetMsg>(),
+    );
+    let directory = g::seq(
+        g::send::<FILE, OWNER, protocol::FdReaddirReqMsg>(),
+        g::send::<OWNER, FILE, protocol::FdReaddirRetMsg>(),
+    );
+    let open = g::seq(
+        g::send::<FILE, OWNER, protocol::PathOpenReqMsg>(),
+        g::send::<OWNER, FILE, protocol::PathOpenRetMsg>(),
+    );
+    let stat = g::seq(
+        g::send::<FILE, OWNER, protocol::FdFdstatGetReqMsg>(),
+        g::send::<OWNER, FILE, protocol::FdFdstatGetRetMsg>(),
+    );
+    let filestat = g::seq(
+        g::send::<FILE, OWNER, protocol::FdFilestatGetReqMsg>(),
+        g::send::<OWNER, FILE, protocol::FdFilestatGetRetMsg>(),
+    );
+    let pathstat = g::seq(
+        g::send::<FILE, OWNER, protocol::PathFilestatGetReqMsg>(),
+        g::send::<OWNER, FILE, protocol::PathFilestatGetRetMsg>(),
+    );
+    let close = g::seq(
+        g::send::<FILE, OWNER, protocol::FdCloseReqMsg>(),
+        g::send::<OWNER, FILE, protocol::FdCloseRetMsg>(),
+    );
+    g::route(
+        prestat,
+        g::route(
+            prestat_name,
+            g::route(
+                directory,
+                g::route(
+                    open,
+                    g::route(
+                        stat,
+                        g::route(
+                            filestat,
+                            g::route(
+                                pathstat,
+                                g::route(close, g::send::<FILE, OWNER, FileExit>()),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+    .roll()
+}
+fn outcome_reads<const FILE: u8, const READ: u8>() -> impl Projectable {
+    g::seq(
+        g::send::<FILE, READ, protocol::FdReadReqMsg>(),
+        g::send::<READ, FILE, protocol::FdReadRetMsg>(),
+    )
+    .roll()
+}
+
 pub struct Programs {
     pub admin: RoleProgram<ADMIN>,
     pub backend: RoleProgram<BACKEND>,
@@ -174,71 +236,184 @@ pub struct Programs {
     pub tester_io: RoleProgram<TESTER_IO>,
     pub admin_outcome: RoleProgram<ADMIN_OUTCOME>,
     pub backend_outcome: RoleProgram<BACKEND_OUTCOME>,
-    pub admin_outcome_vm: RoleProgram<ADMIN_OUTCOME_VM>,
-    pub backend_outcome_vm: RoleProgram<BACKEND_OUTCOME_VM>,
+    pub admin_outcome_file: RoleProgram<ADMIN_OUTCOME_FILE>,
+    pub backend_outcome_file: RoleProgram<BACKEND_OUTCOME_FILE>,
+    pub admin_file: RoleProgram<ADMIN_FILE>,
+    pub backend_file: RoleProgram<BACKEND_FILE>,
+    pub tester_file: RoleProgram<TESTER_FILE>,
+    pub admin_close: RoleProgram<ADMIN_CLOSE>,
+    pub backend_close: RoleProgram<BACKEND_CLOSE>,
+    pub tester_close: RoleProgram<TESTER_CLOSE>,
+    pub admin_outcome_read: RoleProgram<ADMIN_OUTCOME_READ>,
+    pub backend_outcome_read: RoleProgram<BACKEND_OUTCOME_READ>,
 }
 pub fn programs() -> Programs {
+    let bootstrap = g::par(
+        g::par(
+            g::send::<ADMIN, ADMIN_VM, Loan<ADMIN_FILE>>(),
+            g::send::<ADMIN_OUTCOME, ADMIN_VM, Loan<ADMIN_OUTCOME_FILE>>(),
+        ),
+        g::par(
+            g::par(
+                g::send::<BACKEND, BACKEND_VM, Loan<BACKEND_FILE>>(),
+                g::send::<BACKEND_OUTCOME, BACKEND_VM, Loan<BACKEND_OUTCOME_FILE>>(),
+            ),
+            g::send::<TESTER, TESTER_VM, Loan<TESTER_FILE>>(),
+        ),
+    );
+    let migration_request = g::send::<ADMIN_FILE, ADMIN_CLOSE, protocol::FdCloseObjectReqMsg>();
     let migration = g::seq(
-        requests::<ADMIN_VM, ADMIN, CHECK_ADMIN>(),
-        g::seq(
-            g::send::<DATABASE, ADMIN_VM, Loan<DATABASE_RESOURCE>>(),
+        migration_request,
+        g::route(
             g::seq(
-                g::send::<DATABASE_RESOURCE, ADMIN, MigrationRequest>(),
+                g::send::<ADMIN_CLOSE, DATABASE, MigrationIntent>(),
                 g::seq(
-                    g::send::<ADMIN, DATABASE_RESOURCE, MigrationCompleted>(),
+                    g::send::<DATABASE_RESOURCE, ADMIN_CLOSE, MigrationRequest>(),
                     g::seq(
-                        g::send::<ADMIN_VM, DATABASE, Loan<DATABASE_RESOURCE>>(),
-                        g::send::<ADMIN, BACKEND, MigrationDone>(),
+                        g::send::<DATABASE, ADMIN_CLOSE, Loan<DATABASE_RESOURCE>>(),
+                        g::seq(
+                            g::send::<DATABASE_RESOURCE, DATABASE, MigrationCompleted>(),
+                            g::seq(
+                                g::send::<ADMIN_CLOSE, DATABASE, Loan<DATABASE_RESOURCE>>(),
+                                g::seq(
+                                    g::send::<ADMIN_CLOSE, BACKEND_CLOSE, MigrationDone>(),
+                                    g::seq(
+                                        g::send::<ADMIN_CLOSE, ADMIN_FILE, protocol::FdCloseObjectRetMsg>(),
+                                        g::send::<ADMIN, ADMIN_FILE, CloseAuthority<ADMIN_CLOSE>>(),
+                                    ),
+                                ),
+                            ),
+                        ),
                     ),
                 ),
             ),
+            g::seq(
+                g::seq(
+                    g::send::<ADMIN_CLOSE, ADMIN_FILE, protocol::FdCloseRejectedRetMsg>(),
+                    migration_request,
+                ).roll(),
+                g::seq(
+                    g::send::<ADMIN_CLOSE, DATABASE, MigrationIntent>(),
+                    g::seq(
+                        g::send::<DATABASE_RESOURCE, ADMIN_CLOSE, MigrationRequest>(),
+                        g::seq(
+                            g::send::<DATABASE, ADMIN_CLOSE, Loan<DATABASE_RESOURCE>>(),
+                            g::seq(
+                                g::send::<DATABASE_RESOURCE, DATABASE, MigrationCompleted>(),
+                                g::seq(
+                                    g::send::<ADMIN_CLOSE, DATABASE, Loan<DATABASE_RESOURCE>>(),
+                                    g::seq(
+                                        g::send::<ADMIN_CLOSE, BACKEND_CLOSE, MigrationDone>(),
+                                        g::seq(
+                                            g::send::<ADMIN_CLOSE, ADMIN_FILE, protocol::FdCloseObjectRetMsg>(),
+                                            g::send::<ADMIN, ADMIN_FILE, CloseAuthority<ADMIN_CLOSE>>(),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ).resolve::<CHECK_ADMIN>(),
+    );
+    let backend_request = g::send::<BACKEND_FILE, BACKEND_CLOSE, protocol::FdCloseObjectReqMsg>();
+    let backend_approved = g::seq(
+        g::send::<BACKEND_CLOSE, TESTER_CLOSE, BackendReady>(),
+        g::seq(
+            g::send::<BACKEND_CLOSE, BACKEND_FILE, protocol::FdCloseObjectRetMsg>(),
+            g::send::<BACKEND, BACKEND_FILE, CloseAuthority<BACKEND_CLOSE>>(),
         ),
     );
     let backend = g::seq(
-        requests::<BACKEND_VM, BACKEND, CHECK_BACKEND>(),
-        g::seq(
-            g::send::<BACKEND, BACKEND, Effect>(),
+        backend_request,
+        g::route(
+            backend_approved,
             g::seq(
-                g::send::<BACKEND, BACKEND_VM, ResultBytes>(),
-                g::send::<BACKEND, TESTER, BackendReady>(),
-            ),
-        ),
-    );
-    let test = g::seq(
-        requests::<TESTER_VM, TESTER, CHECK_TESTER>(),
-        g::seq(
-            g::send::<TEST_ENV, TESTER_VM, Loan<TEST_RESOURCE>>(),
-            g::seq(
-                g::send::<TEST_RESOURCE, TESTER, TestRequest>(),
                 g::seq(
-                    g::send::<TESTER, TEST_RESOURCE, TestCompleted>(),
-                    g::send::<TESTER_VM, TEST_ENV, Loan<TEST_RESOURCE>>(),
+                    g::send::<BACKEND_CLOSE, BACKEND_FILE, protocol::FdCloseRejectedRetMsg>(),
+                    backend_request,
+                )
+                .roll(),
+                backend_approved,
+            ),
+        )
+        .resolve::<CHECK_BACKEND>(),
+    );
+    let test_request = g::send::<TESTER_FILE, TESTER_CLOSE, protocol::FdCloseObjectReqMsg>();
+    let test_resources = g::seq(
+        g::send::<TESTER_CLOSE, TEST_ENV, TestIntent>(),
+        g::seq(
+            g::send::<TEST_RESOURCE, TESTER_CLOSE, TestRequest>(),
+            g::seq(
+                g::send::<TEST_ENV, TESTER_CLOSE, Loan<TEST_RESOURCE>>(),
+                g::seq(
+                    g::send::<TEST_RESOURCE, TEST_ENV, TestCompleted>(),
+                    g::send::<TESTER_CLOSE, TEST_ENV, Loan<TEST_RESOURCE>>(),
                 ),
             ),
         ),
     );
     let outcome = g::route(
         g::par(
-            g::send::<TESTER, ADMIN_OUTCOME, PassedAdmin>(),
-            g::send::<TESTER, BACKEND_OUTCOME, PassedBackend>(),
+            g::seq(
+                g::send::<TESTER_CLOSE, ADMIN_OUTCOME, PassedAdmin>(),
+                g::send::<TESTER_CLOSE, ADMIN_OUTCOME, Loan<ADMIN_OUTCOME_READ>>(),
+            ),
+            g::seq(
+                g::send::<TESTER_CLOSE, BACKEND_OUTCOME, PassedBackend>(),
+                g::send::<TESTER_CLOSE, BACKEND_OUTCOME, Loan<BACKEND_OUTCOME_READ>>(),
+            ),
         ),
         g::par(
-            g::send::<TESTER, ADMIN_OUTCOME, FailedAdmin>(),
-            g::send::<TESTER, BACKEND_OUTCOME, FailedBackend>(),
+            g::seq(
+                g::send::<TESTER_CLOSE, ADMIN_OUTCOME, FailedAdmin>(),
+                g::send::<TESTER_CLOSE, ADMIN_OUTCOME, Loan<ADMIN_OUTCOME_READ>>(),
+            ),
+            g::seq(
+                g::send::<TESTER_CLOSE, BACKEND_OUTCOME, FailedBackend>(),
+                g::send::<TESTER_CLOSE, BACKEND_OUTCOME, Loan<BACKEND_OUTCOME_READ>>(),
+            ),
         ),
     )
     .resolve::<TEST_RESULT>();
-    let task = g::seq(
-        migration,
-        g::par(
-            closed::<ADMIN_VM, ADMIN>(),
+    let test_approved = g::seq(
+        test_resources,
+        g::seq(
+            outcome,
             g::seq(
-                backend,
-                g::par(
-                    closed::<BACKEND_VM, BACKEND>(),
-                    g::seq(test, g::seq(outcome, closed::<TESTER_VM, TESTER>())),
-                ),
+                g::send::<TESTER_CLOSE, TESTER_FILE, protocol::FdCloseObjectRetMsg>(),
+                g::send::<TESTER, TESTER_FILE, CloseAuthority<TESTER_CLOSE>>(),
             ),
+        ),
+    );
+    let test_admission = g::seq(
+        test_request,
+        g::route(
+            test_approved,
+            g::seq(
+                g::seq(
+                    g::send::<TESTER_CLOSE, TESTER_FILE, protocol::FdCloseRejectedRetMsg>(),
+                    test_request,
+                )
+                .roll(),
+                test_approved,
+            ),
+        )
+        .resolve::<CHECK_TESTER>(),
+    );
+    let test = g::seq(
+        test_admission,
+        g::par(
+            outcome_reads::<ADMIN_OUTCOME_FILE, ADMIN_OUTCOME_READ>(),
+            outcome_reads::<BACKEND_OUTCOME_FILE, BACKEND_OUTCOME_READ>(),
+        ),
+    );
+    let ordinary_io = g::par(
+        file_io::<ADMIN_FILE, ADMIN>(),
+        g::par(
+            file_io::<BACKEND_FILE, BACKEND>(),
+            file_io::<TESTER_FILE, TESTER>(),
         ),
     );
     let private = g::par(
@@ -248,38 +423,44 @@ pub fn programs() -> Programs {
             crate::shell::global::private_io::<TESTER_VM, TESTER_IO>(),
         ),
     );
-    let results = g::seq(
-        g::par(
-            task,
-            g::par(
-                g::send::<ADMIN_OUTCOME_VM, ADMIN_OUTCOME, OutcomeOpen>(),
-                g::send::<BACKEND_OUTCOME_VM, BACKEND_OUTCOME, OutcomeOpen>(),
+    let results = g::par(
+        outcome_metadata::<ADMIN_OUTCOME_FILE, ADMIN_OUTCOME>(),
+        outcome_metadata::<BACKEND_OUTCOME_FILE, BACKEND_OUTCOME>(),
+    );
+    let task = g::seq(migration, g::seq(backend, test));
+    let work = g::par(g::par(ordinary_io, private), g::par(task, results));
+    let finish = g::par(
+        g::seq(
+            g::send::<ADMIN_FILE, ADMIN, FileExit>(),
+            g::seq(
+                g::par(
+                    g::send::<ADMIN_VM, ADMIN, Loan<ADMIN_FILE>>(),
+                    g::send::<ADMIN_VM, ADMIN_OUTCOME, Loan<ADMIN_OUTCOME_FILE>>(),
+                ),
+                g::send::<ADMIN_VM, ADMIN_IO, crate::shell::global::Exit>(),
             ),
         ),
         g::par(
-            outcome_io::<ADMIN_OUTCOME_VM, ADMIN_OUTCOME>(),
-            outcome_io::<BACKEND_OUTCOME_VM, BACKEND_OUTCOME>(),
+            g::seq(
+                g::send::<BACKEND_FILE, BACKEND, FileExit>(),
+                g::seq(
+                    g::par(
+                        g::send::<BACKEND_VM, BACKEND, Loan<BACKEND_FILE>>(),
+                        g::send::<BACKEND_VM, BACKEND_OUTCOME, Loan<BACKEND_OUTCOME_FILE>>(),
+                    ),
+                    g::send::<BACKEND_VM, BACKEND_IO, crate::shell::global::Exit>(),
+                ),
+            ),
+            g::seq(
+                g::send::<TESTER_FILE, TESTER, FileExit>(),
+                g::seq(
+                    g::send::<TESTER_VM, TESTER, Loan<TESTER_FILE>>(),
+                    g::send::<TESTER_VM, TESTER_IO, crate::shell::global::Exit>(),
+                ),
+            ),
         ),
     );
-    let metadata = g::par(
-        g::route(
-            g::seq(
-                g::send::<ADMIN_IO, ADMIN_OUTCOME, OutcomePathStat>(),
-                g::send::<ADMIN_OUTCOME, ADMIN_IO, OutcomePathStatDone>(),
-            ),
-            g::send::<ADMIN_IO, ADMIN_OUTCOME, OutcomeExit>(),
-        )
-        .roll(),
-        g::route(
-            g::seq(
-                g::send::<BACKEND_IO, BACKEND_OUTCOME, OutcomePathStat>(),
-                g::send::<BACKEND_OUTCOME, BACKEND_IO, OutcomePathStatDone>(),
-            ),
-            g::send::<BACKEND_IO, BACKEND_OUTCOME, OutcomeExit>(),
-        )
-        .roll(),
-    );
-    let global = g::par(results, g::par(private, metadata));
+    let global = g::seq(bootstrap, g::seq(work, finish));
     Programs {
         admin: project(&global),
         backend: project(&global),
@@ -296,14 +477,43 @@ pub fn programs() -> Programs {
         tester_io: project(&global),
         admin_outcome: project(&global),
         backend_outcome: project(&global),
-        admin_outcome_vm: project(&global),
-        backend_outcome_vm: project(&global),
+        admin_outcome_file: project(&global),
+        backend_outcome_file: project(&global),
+        admin_file: project(&global),
+        backend_file: project(&global),
+        tester_file: project(&global),
+        admin_close: project(&global),
+        backend_close: project(&global),
+        tester_close: project(&global),
+        admin_outcome_read: project(&global),
+        backend_outcome_read: project(&global),
     }
 }
-
 impl Programs {
     pub(crate) fn observation(&self) -> serde_json::Value {
         use crate::imp::projection::rows;
-        serde_json::json!({"type":"compiled_projection","format_version":1,"task":"8E","programs":[rows(&self.admin), rows(&self.backend), rows(&self.tester), rows(&self.database), rows(&self.test_env), rows(&self.database_resource), rows(&self.test_resource), rows(&self.admin_vm), rows(&self.backend_vm), rows(&self.tester_vm), rows(&self.admin_io), rows(&self.backend_io), rows(&self.tester_io), rows(&self.admin_outcome), rows(&self.backend_outcome), rows(&self.admin_outcome_vm), rows(&self.backend_outcome_vm)]})
+        serde_json::json!({"type":"compiled_projection","format_version":1,"task":"8E",
+        "roles":{
+            "DB_ADMIN":ADMIN,"BACKEND_DEV":BACKEND,"TESTER":TESTER,
+            "DATABASE":DATABASE,"TEST_ENV":TEST_ENV,
+            "ADMIN_VM":ADMIN_VM,"BACKEND_VM":BACKEND_VM,"TESTER_VM":TESTER_VM,
+            "ADMIN_IO":ADMIN_IO,"BACKEND_IO":BACKEND_IO,"TESTER_IO":TESTER_IO,
+            "ADMIN_OUTCOME":ADMIN_OUTCOME,"BACKEND_OUTCOME":BACKEND_OUTCOME,
+            "ADMIN_OUTCOME_FILE":ADMIN_OUTCOME_FILE,"BACKEND_OUTCOME_FILE":BACKEND_OUTCOME_FILE,
+            "DATABASE_RESOURCE":DATABASE_RESOURCE,"TEST_RESOURCE":TEST_RESOURCE,
+            "ADMIN_FILE":ADMIN_FILE,"BACKEND_FILE":BACKEND_FILE,"TESTER_FILE":TESTER_FILE,
+            "ADMIN_CLOSE":ADMIN_CLOSE,"BACKEND_CLOSE":BACKEND_CLOSE,"TESTER_CLOSE":TESTER_CLOSE,
+            "ADMIN_OUTCOME_READ":ADMIN_OUTCOME_READ,"BACKEND_OUTCOME_READ":BACKEND_OUTCOME_READ
+        },"service_fd":SERVICE_FD,"outcome_fd":OUTCOME_FD,"programs":[
+            rows(&self.admin),rows(&self.backend),rows(&self.tester),rows(&self.database),
+            rows(&self.test_env),rows(&self.database_resource),rows(&self.test_resource),
+            rows(&self.admin_vm),rows(&self.backend_vm),rows(&self.tester_vm),
+            rows(&self.admin_io),rows(&self.backend_io),rows(&self.tester_io),
+            rows(&self.admin_outcome),rows(&self.backend_outcome),
+            rows(&self.admin_outcome_file),rows(&self.backend_outcome_file),
+            rows(&self.admin_file),rows(&self.backend_file),rows(&self.tester_file),
+            rows(&self.admin_close),rows(&self.backend_close),rows(&self.tester_close),
+            rows(&self.admin_outcome_read),rows(&self.backend_outcome_read)
+        ]})
     }
 }

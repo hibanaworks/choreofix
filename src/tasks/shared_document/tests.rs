@@ -1,5 +1,28 @@
 use super::{global::*, imp};
+use crate::shell::global::{FileExit, Loan};
 use serde_json::{Value, json};
+
+#[test]
+fn writer_selection_preserves_the_actual_wire_bytes() {
+    use crate::shell::imp::report_arguments::ReportArguments;
+    use hibana::runtime::wire::WireEncode;
+
+    for name in ["WRITER_A", "WRITER_B"] {
+        let bytes = format!(" {{ \"first_writer\" : \"{name}\" }} \n").into_bytes();
+        let arguments = ReportArguments::<7>::from_bytes(&bytes).unwrap();
+        let mut encoded = vec![0; bytes.len()];
+        assert_eq!(arguments.encode_into(&mut encoded).unwrap(), bytes.len());
+        assert_eq!(encoded, bytes);
+        assert_eq!(arguments.into_value()["first_writer"], name);
+    }
+    for bytes in [
+        br#"{"first_writer":"OUTSIDE"}"#.as_slice(),
+        br#"{"first_writer":"WRITER_A","stage":"ready"}"#,
+        br#"{"first_writer":1}"#,
+    ] {
+        assert!(ReportArguments::<7>::from_bytes(bytes).is_err());
+    }
+}
 
 // Actual attempted effect arguments only; this journal grants no operation.
 struct EffectRequests(std::cell::Cell<Vec<Value>>);
@@ -140,10 +163,45 @@ fn complete_source_projects_and_exports_checked_actor_bindings() {
         tap::projected(&p.a_io).collect(),
         tap::projected(&p.b_io).collect(),
         tap::projected(&p.editor_io).collect(),
+        tap::projected(&p.allocation_file).collect(),
+        tap::projected(&p.allocation_data).collect(),
+        tap::projected(&p.a_file).collect(),
+        tap::projected(&p.a_data).collect(),
+        tap::projected(&p.b_file).collect(),
+        tap::projected(&p.b_data).collect(),
+        tap::projected(&p.a_vm).collect(),
+        tap::projected(&p.b_vm).collect(),
+        tap::projected(&p.editor_vm).collect(),
     ];
     for rows in snapshots {
         let mut storage = vec![0; Protocol::workspace_len(&rows).unwrap()];
         Protocol::new(&rows, &mut storage).unwrap();
+    }
+}
+
+// A deliberately dishonest wire payload tests the production receiver rather
+// than relying on the SDK to reject the wrong chapter before sending it.
+struct Untrusted<const SCHEMA: u32>(Vec<u8>);
+impl<const SCHEMA: u32> hibana::runtime::wire::WireEncode for Untrusted<SCHEMA> {
+    fn encode_into(&self, out: &mut [u8]) -> Result<usize, hibana::runtime::wire::CodecError> {
+        out.get_mut(..self.0.len())
+            .ok_or(hibana::runtime::wire::CodecError::Truncated)?
+            .copy_from_slice(&self.0);
+        Ok(self.0.len())
+    }
+}
+impl<const SCHEMA: u32> hibana::runtime::wire::WirePayload for Untrusted<SCHEMA> {
+    const SCHEMA_ID: u32 = SCHEMA;
+    type Decoded<'a> = &'a [u8];
+    fn validate_payload(
+        _: hibana::runtime::wire::Payload,
+    ) -> Result<(), hibana::runtime::wire::CodecError> {
+        Ok(())
+    }
+    fn decode_validated_payload<'a>(
+        payload: hibana::runtime::wire::ReceivedPayload<'a, Self>,
+    ) -> &'a [u8] {
+        payload.as_bytes()
     }
 }
 
@@ -152,21 +210,27 @@ fn complete_source_projects_and_exports_checked_actor_bindings() {
 async fn the_real_document_receiver_rejects_substituted_arguments_and_wrong_initial_chapters()
 -> crate::shell::ShellResult<()> {
     use super::localside;
-    use crate::{
-        shell::imp::report_arguments::ReportArguments,
-        shell::{ShellError, imp::bus::Bus},
+    use crate::shell::{
+        ShellError,
+        imp::{bus::Bus, report_arguments::ReportArguments},
     };
-    use hibana::runtime::{
-        SessionKitStorage,
-        ids::SessionId,
-        resolver::{DecisionArm, ResolverRef},
-    };
+    use hibana::runtime::{SessionKitStorage, ids::SessionId};
     let p = programs();
-    for first in [DecisionArm::Left, DecisionArm::Right] {
+    for assigned in [CHAPTER_A, CHAPTER_B] {
         for wrong_chapter in [false, true] {
             let session = SessionId::new(SESSION + 1);
-            let (bus, _io, _terminals) =
-                Bus::open(["WRITER_A", "WRITER_B", "EDITOR"], [(session, DOCUMENT)]);
+            let (bus, _, _) = Bus::open(
+                [],
+                [
+                    (session, DOCUMENT),
+                    (session, WRITER_A),
+                    (session, WRITER_B),
+                    (session, EDITOR),
+                    (session, A_FILE),
+                    (session, B_FILE),
+                    (session, ALLOCATION_FILE),
+                ],
+            );
             let mut owner_slab = vec![0; 1024 * 1024];
             let mut caller_slab = vec![0; 1024 * 1024];
             let mut owner_store = SessionKitStorage::uninit();
@@ -179,81 +243,78 @@ async fn the_real_document_receiver_rejects_substituted_arguments_and_wrong_init
                 .rendezvous(&mut caller_slab, &bus.transport)?;
             let mut service = owner.enter(session, &p.service)?;
             let document = owner.enter(session, &p.document)?;
-            let mut a = caller.enter(session, &p.a)?;
-            let mut b = caller.enter(session, &p.b)?;
-            let [mut a, _a_private] = a.par()?;
-            let [mut b, _b_private] = b.par()?;
-            owner
-                .set_resolver(
-                    &p.service,
-                    ResolverRef::<FIRST_WRITER>::decision_state(&first, |arm| Ok(*arm)),
-                )
-                .map_err(|_| ShellError::message("initial document resolver"))?;
-            let assigned = match first {
-                DecisionArm::Left => CHAPTER_A,
-                DecisionArm::Right => CHAPTER_B,
-            };
+            let mut a_vm = caller.enter(session, &p.a_vm)?;
+            let mut b_vm = caller.enter(session, &p.b_vm)?;
+            let mut editor_vm = caller.enter(session, &p.editor_vm)?;
+            service
+                .send::<Loan<WRITER_A>>(owner.enter(session, &p.a)?)
+                .await?;
+            let mut a = a_vm.recv::<Loan<WRITER_A>>().await?;
+            service
+                .send::<Loan<WRITER_B>>(owner.enter(session, &p.b)?)
+                .await?;
+            let mut b = b_vm.recv::<Loan<WRITER_B>>().await?;
+            service
+                .send::<Loan<EDITOR>>(owner.enter(session, &p.editor)?)
+                .await?;
+            let _editor = editor_vm.recv::<Loan<EDITOR>>().await?;
+            let mut a_data = owner.enter(session, &p.a_data)?;
+            let mut b_data = owner.enter(session, &p.b_data)?;
+            let mut data = owner.enter(session, &p.allocation_data)?;
+            a_data
+                .send::<Loan<A_FILE>>(owner.enter(session, &p.a_file)?)
+                .await?;
+            let mut a_file = a_vm.recv::<Loan<A_FILE>>().await?;
+            b_data
+                .send::<Loan<B_FILE>>(owner.enter(session, &p.b_file)?)
+                .await?;
+            let mut b_file = b_vm.recv::<Loan<B_FILE>>().await?;
+            data.send::<Loan<ALLOCATION_FILE>>(owner.enter(session, &p.allocation_file)?)
+                .await?;
+            let mut file = editor_vm.recv::<Loan<ALLOCATION_FILE>>().await?;
             let other = if assigned == CHAPTER_A {
                 CHAPTER_B
             } else {
                 CHAPTER_A
             };
-            let admitted = json!({"section_name":if wrong_chapter { other } else { assigned },"content_notes":"admitted actual notes"});
-            let substituted = json!({"section_name":assigned,"content_notes":"substituted notes"});
-            let admitted =
-                ReportArguments::<2>::from_bytes(&serde_json::to_vec(&admitted).unwrap())?;
-            let substituted =
-                ReportArguments::<2>::from_bytes(&serde_json::to_vec(&substituted).unwrap())?;
+            let admitted = json!({"section_name":if wrong_chapter {other} else {assigned},"content_notes":"actual admitted notes"});
+            let substituted = ReportArguments::<2>::from_bytes(&imp::encode(
+                &json!({"section_name":assigned,"content_notes":"substituted notes"}),
+            )?)?;
             let effects = EffectRequests(std::cell::Cell::new(Vec::new()));
-            let result = hibana_runtime::race(
-                hibana_runtime::race(
-                    async {
-                        let _document =
-                            localside::document::run(&mut service, (document, first), &effects)
-                                .await?;
-                        Ok::<(), ShellError>(())
-                    },
-                    async {
-                        let mut document = match first {
-                            DecisionArm::Left => {
-                                let document = a.recv::<InitialDocument>().await?;
-                                a.send::<WriteA>(&admitted).await?;
-                                document
-                            }
-                            DecisionArm::Right => {
-                                let document = b.recv::<InitialDocument>().await?;
-                                b.send::<WriteB>(&admitted).await?;
-                                document
-                            }
-                        };
-                        assert!(owner.enter(session, &p.document).is_err());
-                        assert!(caller.enter(session, &p.document).is_err());
-                        document.send::<WriteOnDocument>(&substituted).await?;
-                        document.recv::<Written>().await?;
-                        Err::<(), _>(ShellError::message("the changed request was accepted"))
-                    },
-                ),
-                hibana_runtime::host::deadline(std::time::Duration::from_secs(5)),
-            )
-            .await;
-            let expected = if wrong_chapter {
-                if assigned == CHAPTER_A {
-                    "initial chapter A differs"
+            let result = hibana_runtime::race(async {
+                let _document = localside::document::run(&mut service,document,&effects).await?;
+                Ok::<(),ShellError>(())
+            }, async {
+                let input = ReportArguments::<7>::from_bytes(&imp::encode(&json!({"first_writer":if assigned==CHAPTER_A {"WRITER_A"} else {"WRITER_B"}}))?)?;
+                file.send::<Allocate>(&input).await?;
+                let mut document = if assigned==CHAPTER_A { a.recv::<InitialDocument>().await? } else { b.recv::<InitialDocumentB>().await? };
+                if wrong_chapter {
+                    let bytes = imp::encode(&admitted)?;
+                    if assigned==CHAPTER_A {
+                        a_file.send::<hibana::g::Msg<4,Untrusted<0xac03_0008>>>(&Untrusted(bytes)).await?;
+                    } else {
+                        b_file.send::<hibana::g::Msg<5,Untrusted<0xac03_0009>>>(&Untrusted(bytes)).await?;
+                    }
+                    core::future::pending::<()>().await;
                 } else {
-                    "initial chapter B differs"
+                    let bytes = imp::encode(&admitted)?;
+                    if assigned==CHAPTER_A {
+                        a_file.send::<WriteA>(&ReportArguments::<8>::from_bytes(&bytes)?).await?;
+                        a.recv::<WriteArgumentsA>().await?;
+                    } else {
+                        b_file.send::<WriteB>(&ReportArguments::<9>::from_bytes(&bytes)?).await?;
+                        b.recv::<WriteArgumentsB>().await?;
+                    }
+                    document.send::<WriteOnDocument>(&substituted).await?;
+                    document.recv::<Written>().await?;
                 }
-            } else {
-                "document request differs from admitted arguments"
-            };
-            assert!(
-                result
-                    .as_ref()
-                    .is_err_and(|error| error.to_string() == expected),
-                "{result:?}"
-            );
+                Err::<(),_>(ShellError::message("forged request unexpectedly returned"))
+            }).await;
+            assert!(result.is_err());
             assert!(
                 effects.0.take().is_empty(),
-                "rejection must precede the real effect entry"
+                "rejection must precede the actual effect"
             );
         }
     }
@@ -267,33 +328,37 @@ async fn the_real_document_receiver_rejects_substituted_arguments_and_wrong_init
 #[test]
 async fn the_frozen_document_cannot_reopen_editing_before_or_after_publication_reply()
 -> crate::shell::ShellResult<()> {
-    use crate::shell::{
-        ShellError,
-        imp::{bus::Bus, report_arguments::ReportArguments, review_reply::ReviewReply},
+    use crate::shell::imp::{
+        bus::Bus, report_arguments::ReportArguments, review_reply::ReviewReply,
     };
-    use hibana::runtime::{
-        SessionKitStorage,
-        ids::SessionId,
-        resolver::{DecisionArm, ResolverRef},
-    };
+    use hibana::runtime::{SessionKitStorage, ids::SessionId};
     use std::time::Duration;
 
     let p = programs();
-    let first = DecisionArm::Left;
     let chapter_a = ReportArguments::<2>::from_bytes(br#"{"section_name":"CHAPTER_1"}"#)?;
     let chapter_b = ReportArguments::<2>::from_bytes(br#"{"section_name":"CHAPTER_2"}"#)?;
-    let references_a = ReportArguments::<4>::from_bytes(br#"{"section_name":"CHAPTER_1"}"#)?;
-    let references_b = ReportArguments::<4>::from_bytes(br#"{"section_name":"CHAPTER_2"}"#)?;
-    let review_a = ReportArguments::<5>::from_bytes(br#"{"section_name":"CHAPTER_1"}"#)?;
-    let review_b = ReportArguments::<5>::from_bytes(br#"{"section_name":"CHAPTER_2"}"#)?;
+    let references_a = ReportArguments::<10>::from_bytes(br#"{"section_name":"CHAPTER_1"}"#)?;
+    let references_b = ReportArguments::<11>::from_bytes(br#"{"section_name":"CHAPTER_2"}"#)?;
+    let review_a = ReportArguments::<12>::from_bytes(br#"{"section_name":"CHAPTER_1"}"#)?;
+    let review_b = ReportArguments::<13>::from_bytes(br#"{"section_name":"CHAPTER_2"}"#)?;
     let revision = ReportArguments::<3>::from_bytes(
         br#"{"section_name":"CHAPTER_2","feedback":"actual fixture rejection"}"#,
     )?;
     let combine = ReportArguments::<6>::from_bytes(br#"{"sections":"CHAPTER_1,CHAPTER_2"}"#)?;
+    let initial_a = ReportArguments::<8>::from_bytes(br#"{"section_name":"CHAPTER_1"}"#)?;
+    let initial_b = ReportArguments::<9>::from_bytes(br#"{"section_name":"CHAPTER_2"}"#)?;
+    let revision_input = ReportArguments::<14>::from_bytes(
+        br#"{"section_name":"CHAPTER_2","feedback":"actual fixture rejection"}"#,
+    )?;
+    let combine_input =
+        ReportArguments::<16>::from_bytes(br#"{"sections":"CHAPTER_1,CHAPTER_2"}"#)?;
     let positive_bytes = br#"{"success":true}"#.as_slice();
-    let negative_bytes = br#"{"success":false}"#.as_slice();
+    let negative_bytes =
+        br#"{"tool_name":"review_sections","success":false,"data":{"scope":"CHAPTER_1"}}"#
+            .as_slice();
     let positive = ReviewReply::<true>::from_bytes(positive_bytes)?;
-    let negative = ReviewReply::<false>::from_bytes(negative_bytes)?;
+    let negative = ReportArguments::<17>::from_bytes(negative_bytes)?;
+    let reconsider = ReportArguments::<18>::from_bytes(br#"{"review_id":"review:retry"}"#)?;
     let material = b"fixture material".as_slice();
 
     for failed_visits in [0, 1, 3] {
@@ -306,7 +371,18 @@ async fn the_frozen_document_cannot_reopen_editing_before_or_after_publication_r
             (true, "return"),
         ] {
             let session = SessionId::new(SESSION + 2);
-            let (bus, _, _) = Bus::open(["WRITER_A", "WRITER_B", "EDITOR"], [(session, DOCUMENT)]);
+            let (bus, _, _) = Bus::open(
+                ["WRITER_A", "WRITER_B", "EDITOR"],
+                [
+                    (session, DOCUMENT),
+                    (session, WRITER_A),
+                    (session, WRITER_B),
+                    (session, EDITOR),
+                    (session, A_FILE),
+                    (session, B_FILE),
+                    (session, ALLOCATION_FILE),
+                ],
+            );
             let mut owner_slab = vec![0; 1024 * 1024];
             let mut caller_slab = vec![0; 1024 * 1024];
             let mut owner_store = SessionKitStorage::uninit();
@@ -319,51 +395,87 @@ async fn the_frozen_document_cannot_reopen_editing_before_or_after_publication_r
                 .rendezvous(&mut caller_slab, &bus.transport)?;
             let mut service = owner.enter(session, &p.service)?;
             let document = owner.enter(session, &p.document)?;
-            let mut a = caller.enter(session, &p.a)?;
-            let mut b = caller.enter(session, &p.b)?;
-            let mut editor = caller.enter(session, &p.editor)?;
-            let [mut a, _a_private] = a.par()?;
-            let [mut b, _b_private] = b.par()?;
-            let [mut editor, _editor_private] = editor.par()?;
-            owner
-                .set_resolver(
-                    &p.service,
-                    ResolverRef::<FIRST_WRITER>::decision_state(&first, |arm| Ok(*arm)),
-                )
-                .map_err(|_| ShellError::message("initial document resolver"))?;
+            let mut a_vm = caller.enter(session, &p.a_vm)?;
+            let mut b_vm = caller.enter(session, &p.b_vm)?;
+            let mut editor_vm = caller.enter(session, &p.editor_vm)?;
+            service
+                .send::<Loan<WRITER_A>>(owner.enter(session, &p.a)?)
+                .await?;
+            let mut a = a_vm.recv::<Loan<WRITER_A>>().await?;
+            service
+                .send::<Loan<WRITER_B>>(owner.enter(session, &p.b)?)
+                .await?;
+            let mut b = b_vm.recv::<Loan<WRITER_B>>().await?;
+            service
+                .send::<Loan<EDITOR>>(owner.enter(session, &p.editor)?)
+                .await?;
+            let mut editor = editor_vm.recv::<Loan<EDITOR>>().await?;
+            let mut a_data = owner.enter(session, &p.a_data)?;
+            let mut b_data = owner.enter(session, &p.b_data)?;
+            let mut data = owner.enter(session, &p.allocation_data)?;
+            a_data
+                .send::<Loan<A_FILE>>(owner.enter(session, &p.a_file)?)
+                .await?;
+            let mut a_file = a_vm.recv::<Loan<A_FILE>>().await?;
+            b_data
+                .send::<Loan<B_FILE>>(owner.enter(session, &p.b_file)?)
+                .await?;
+            let mut b_file = b_vm.recv::<Loan<B_FILE>>().await?;
+            data.send::<Loan<ALLOCATION_FILE>>(owner.enter(session, &p.allocation_file)?)
+                .await?;
+            let mut file = editor_vm.recv::<Loan<ALLOCATION_FILE>>().await?;
+            let selection = ReportArguments::<7>::from_bytes(br#"{"first_writer":"WRITER_A"}"#)?;
+            file.send::<Allocate>(&selection).await?;
+            let selected = service.recv::<Allocate>().await?.into_value();
+            let selected = imp::encode(&selected)?;
+            service
+                .send::<AllocationAccepted>(&selected.as_slice())
+                .await?;
+            assert_eq!(
+                imp::decode(file.recv::<AllocationAccepted>().await?)?["first_writer"],
+                "WRITER_A"
+            );
 
             service.send::<InitialDocument>(document).await?;
             let mut document = a.recv::<InitialDocument>().await?;
-            a.send::<WriteA>(&chapter_a).await?;
-            service.recv::<WriteA>().await?;
+            a_file.send::<WriteA>(&initial_a).await?;
+            let admitted = service.recv::<WriteA>().await?;
+            service.send::<WriteArgumentsA>(&admitted).await?;
+            a.recv::<WriteArgumentsA>().await?;
             document.send::<WriteOnDocument>(&chapter_a).await?;
             service.recv::<WriteOnDocument>().await?;
             service.send::<Written>(&material).await?;
             document.recv::<Written>().await?;
+            a.send::<WriteResultA>(&material).await?;
+            a_file.recv::<WriteResultA>().await?;
             service.send::<MaterialA>(&material).await?;
             editor.recv::<MaterialA>().await?;
             a.send::<InitialDocument>(document).await?;
             let mut document = b.recv::<InitialDocument>().await?;
-            b.send::<WriteB>(&chapter_b).await?;
-            service.recv::<WriteB>().await?;
+            b_file.send::<WriteB>(&initial_b).await?;
+            let admitted = service.recv::<WriteB>().await?;
+            service.send::<WriteArgumentsB>(&admitted).await?;
+            b.recv::<WriteArgumentsB>().await?;
             document.send::<WriteOnDocument>(&chapter_b).await?;
             service.recv::<WriteOnDocument>().await?;
             service.send::<Written>(&material).await?;
             document.recv::<Written>().await?;
+            b.send::<WriteResultB>(&material).await?;
+            b_file.recv::<WriteResultB>().await?;
             service.send::<MaterialB>(&material).await?;
             editor.recv::<MaterialB>().await?;
             b.send::<InitialDocument>(document).await?;
             let mut document = editor.recv::<InitialDocument>().await?;
-            a.send::<ReferencesA>(&references_a).await?;
+            a_file.send::<ReferencesA>(&references_a).await?;
             service.recv::<ReferencesA>().await?;
             service.send::<ReferencedA>(&material).await?;
-            a.recv::<ReferencedA>().await?;
+            a_file.recv::<ReferencedA>().await?;
             service.send::<ReferenceMaterialA>(&material).await?;
             editor.recv::<ReferenceMaterialA>().await?;
-            b.send::<ReferencesB>(&references_b).await?;
+            b_file.send::<ReferencesB>(&references_b).await?;
             service.recv::<ReferencesB>().await?;
             service.send::<ReferencedB>(&material).await?;
-            b.recv::<ReferencedB>().await?;
+            b_file.recv::<ReferencedB>().await?;
             service.send::<ReferenceMaterialB>(&material).await?;
             editor.recv::<ReferenceMaterialB>().await?;
 
@@ -373,58 +485,90 @@ async fn the_frozen_document_cannot_reopen_editing_before_or_after_publication_r
                 } else {
                     negative_bytes
                 };
-                editor.send::<ReviewA>(&review_a).await?;
+                file.send::<ReviewA>(&review_a).await?;
                 service.recv::<ReviewA>().await?;
                 service.send::<ReviewedA>(&outcome).await?;
-                editor.recv::<ReviewedA>().await?;
-                editor.send::<ReviewB>(&review_b).await?;
+                file.recv::<ReviewedA>().await?;
+                service.send::<ReviewEvidenceA>(&outcome).await?;
+                editor.recv::<ReviewEvidenceA>().await?;
+                file.send::<ReviewB>(&review_b).await?;
                 service.recv::<ReviewB>().await?;
                 service.send::<ReviewedB>(&outcome).await?;
-                editor.recv::<ReviewedB>().await?;
+                file.recv::<ReviewedB>().await?;
+                service.send::<ReviewEvidenceB>(&outcome).await?;
+                editor.recv::<ReviewEvidenceB>().await?;
                 if visit == failed_visits {
                     break;
                 }
                 document = if visit % 2 == 0 {
+                    file.send::<RequestReconsiderA>(&reconsider).await?;
+                    editor.recv::<RequestReconsiderA>().await?;
                     editor.send::<ReconsiderA>(&negative).await?;
                     service.recv::<ReconsiderA>().await?;
-                    editor.send::<RejectedA>(&negative).await?;
-                    a.recv::<RejectedA>().await?;
-                    editor.send::<RejectedAForB>(&negative).await?;
-                    b.recv::<RejectedAForB>().await?;
+                    editor.send::<RevisionReviewA>(&negative).await?;
+                    a.recv::<RevisionReviewA>().await?;
+                    a.send::<FeedbackA>(&negative.as_bytes()).await?;
+                    a_file.recv::<FeedbackA>().await?;
+                    editor.send::<RevisionReviewAForB>(&negative).await?;
+                    b.recv::<RevisionReviewAForB>().await?;
+                    b.send::<FeedbackB>(&negative.as_bytes()).await?;
+                    b_file.recv::<FeedbackB>().await?;
                     editor.send::<RevisionDocument>(document).await?;
                     let mut document = a.recv::<RevisionDocument>().await?;
-                    a.send::<ReviseA>(&revision).await?;
-                    service.recv::<ReviseA>().await?;
+                    a_file.send::<ReviseA>(&revision_input).await?;
+                    let admitted = service.recv::<ReviseA>().await?;
+                    service.send::<RevisionArgumentsA>(&admitted).await?;
+                    a.recv::<RevisionArgumentsA>().await?;
                     document.send::<ReviseOnDocument>(&revision).await?;
                     service.recv::<ReviseOnDocument>().await?;
                     service.send::<Revised>(&material).await?;
                     document.recv::<Revised>().await?;
+                    a.send::<RevisionResultA>(&material).await?;
+                    a_file.recv::<RevisionResultA>().await?;
                     service.send::<UpdatedDocument>(&material).await?;
                     editor.recv::<UpdatedDocument>().await?;
                     a.send::<RevisionDocument>(document).await?;
-                    editor.recv::<RevisionDocument>().await?
+                    let document = editor.recv::<RevisionDocument>().await?;
+                    editor.send::<RevisionAckA>(&material).await?;
+                    file.recv::<RevisionAckA>().await?;
+                    document
                 } else {
+                    file.send::<RequestReconsiderB>(&reconsider).await?;
+                    editor.recv::<RequestReconsiderB>().await?;
                     editor.send::<ReconsiderB>(&negative).await?;
                     service.recv::<ReconsiderB>().await?;
-                    editor.send::<RejectedB>(&negative).await?;
-                    b.recv::<RejectedB>().await?;
-                    editor.send::<RejectedBForA>(&negative).await?;
-                    a.recv::<RejectedBForA>().await?;
+                    editor.send::<RevisionReviewB>(&negative).await?;
+                    b.recv::<RevisionReviewB>().await?;
+                    b.send::<FeedbackB>(&negative.as_bytes()).await?;
+                    b_file.recv::<FeedbackB>().await?;
+                    editor.send::<RevisionReviewBForA>(&negative).await?;
+                    a.recv::<RevisionReviewBForA>().await?;
+                    a.send::<FeedbackA>(&negative.as_bytes()).await?;
+                    a_file.recv::<FeedbackA>().await?;
                     editor.send::<RevisionDocument>(document).await?;
                     let mut document = b.recv::<RevisionDocument>().await?;
-                    b.send::<ReviseB>(&revision).await?;
-                    service.recv::<ReviseB>().await?;
+                    b_file.send::<ReviseB>(&revision_input).await?;
+                    let admitted = service.recv::<ReviseB>().await?;
+                    service.send::<RevisionArgumentsB>(&admitted).await?;
+                    b.recv::<RevisionArgumentsB>().await?;
                     document.send::<ReviseOnDocument>(&revision).await?;
                     service.recv::<ReviseOnDocument>().await?;
                     service.send::<Revised>(&material).await?;
                     document.recv::<Revised>().await?;
+                    b.send::<RevisionResultB>(&material).await?;
+                    b_file.recv::<RevisionResultB>().await?;
                     service.send::<UpdatedDocument>(&material).await?;
                     editor.recv::<UpdatedDocument>().await?;
                     b.send::<RevisionDocument>(document).await?;
-                    editor.recv::<RevisionDocument>().await?
+                    let document = editor.recv::<RevisionDocument>().await?;
+                    editor.send::<RevisionAckB>(&material).await?;
+                    file.recv::<RevisionAckB>().await?;
+                    document
                 };
             }
 
+            file.send::<CombineInput>(&combine_input).await?;
+            editor.recv::<CombineInput>().await?;
             editor.send::<FrozenDocument>(document).await?;
             let mut document = a.recv::<FrozenDocument>().await?;
             if after_reply {
@@ -449,7 +593,7 @@ async fn the_frozen_document_cannot_reopen_editing_before_or_after_publication_r
                 async {
                     Ok::<_, std::io::Error>(match operation {
                         "resource" => document.send::<ReviseOnDocument>(&revision).await,
-                        "writer" => a.send::<ReviseA>(&revision).await,
+                        "writer" => a_file.send::<ReviseA>(&revision_input).await,
                         "return" => a.send::<RevisionDocument>(document).await,
                         _ => unreachable!("undeclared adversarial test operation"),
                     })

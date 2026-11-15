@@ -1,684 +1,514 @@
-//! EPF source conformance and independent request/effect/result correspondence.
-//! These records never authorize an operation in the running experiment.
-use crate::evidence::Result;
+//! EPF source conformance and actual data/effect/result correspondence.
+//! Observations are consumed once; no holder, phase or workflow is replayed.
+use crate::{
+    evidence::{Result, digest, save},
+    journal::{Call, Frame, one, records},
+};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::{self, File},
-    io::Write,
+    fs,
     path::Path,
 };
 
-fn pair(arguments: &Value) -> Option<Vec<&str>> {
-    let mut modules: Vec<_> = arguments["modules"]
-        .as_str()?
+fn pair(value: &Value) -> Result<Vec<&str>> {
+    let mut names = value["modules"]
+        .as_str()
+        .ok_or("module arguments")?
         .split(',')
         .map(str::trim)
-        .collect();
-    modules.sort();
-    Some(modules)
+        .collect::<Vec<_>>();
+    names.sort_unstable();
+    Ok(names)
 }
-
-fn original_call(assignment: &Value, count: usize, revising: bool) -> Result<&Value> {
-    let index = if revising && count > 0 {
-        1 + (count - 1) % 3
-    } else {
-        count
+#[track_caller]
+fn take<'a>(
+    frames: &'a BTreeMap<u64, Frame>,
+    used: &mut BTreeSet<u64>,
+    matches: impl Fn(&Frame) -> bool,
+) -> Result<&'a Frame> {
+    let (id, frame) = one(frames
+        .iter()
+        .filter(|(id, f)| !used.contains(*id) && matches(f)))
+    .map_err(|e| {
+        format!(
+            "{e} at {}:{}",
+            std::panic::Location::caller().file(),
+            std::panic::Location::caller().line()
+        )
+    })?;
+    used.insert(*id);
+    Ok(frame)
+}
+fn prior<'a>(calls: &'a BTreeMap<u64, Call>, call: &Call, tool: &str) -> Result<&'a Value> {
+    let earlier = calls
+        .values()
+        .filter(|p| {
+            p.request["agent"] == call.request["agent"]
+                && p.request["tool"] == tool
+                && p.result.as_ref().is_some_and(|(at, _)| *at < call.emitted)
+        })
+        .max_by_key(|p| p.result.as_ref().map(|(at, _)| *at))
+        .ok_or("missing actual completed input")?;
+    Ok(earlier.result()?.1)
+}
+fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+    let fixture = &rows.first().ok_or("empty codebase evidence")?["message"];
+    let task = fixture["task"].as_str().ok_or("codebase task")?;
+    let participants = match task {
+        "1E" => 3,
+        "1M" => 5,
+        "1H" => 7,
+        _ => return Err("unknown codebase task".into()),
     };
-    assignment["calls"]
-        .get(index)
-        .ok_or_else(|| "request after completion".into())
+    let compiled = &artifact["compiled"];
+    let actors = fixture["fixtures"].as_array().ok_or("original inputs")?;
+    if compiled["task"] != task
+        || compiled["session"] != 20
+        || actors.len() != participants
+        || compiled["participants"]
+            .as_object()
+            .is_none_or(|p| p.len() != participants)
+    {
+        return Err("codebase participant or session differs".into());
+    }
+    let labels = crate::projection::frames(artifact, rows)?;
+    let headers = crate::projection::contracts(compiled)?;
+    let mut journal = crate::journal::read(rows, &labels, actors)?;
+    journal.bind_receives(dynamic)?;
+    let mut used = BTreeSet::new();
+    let mut seen = BTreeSet::new();
+    let mut latest_tests = BTreeMap::new();
+    let mut score_events = journal.score["events"]
+        .as_array()
+        .ok_or("original events")?
+        .clone();
+    let mut commits = Vec::new();
+    let mut expected_returns = BTreeMap::<u64, usize>::new();
+    let mut decisions = BTreeMap::<(usize, usize), (u64, u64, u64)>::new();
+    for (index, row) in rows.iter().enumerate() {
+        if row["message"]["type"] != "protocol_capture" {
+            continue;
+        }
+        for (ordinal, record) in row["message"]["records"]
+            .as_array()
+            .ok_or("capture records")?
+            .iter()
+            .enumerate()
+        {
+            if record[1] != hibana::runtime::tap::RESOLVER_AUDIT {
+                continue;
+            }
+            let causal = record[2].as_u64().ok_or("resolver actor/result")?;
+            let packed = record[4].as_u64().ok_or("resolver site/id")?;
+            if compiled["participants"]
+                .as_object()
+                .ok_or("participants")?
+                .values()
+                .any(|p| p["role"] == causal >> 8 && p["resolver"] == packed & 65535)
+            {
+                if record[3] != 20 {
+                    return Err("resolver session differs".into());
+                }
+                decisions.insert(
+                    (index, ordinal),
+                    (causal >> 8, packed & 65535, causal & 255),
+                );
+            }
+        }
+    }
+    let mut used_decisions = BTreeSet::new();
+    for call in journal.calls.values() {
+        let agent = call.request["agent"].as_str().ok_or("effect participant")?;
+        let actor = one(actors.iter().filter(|a| a["agent"] == agent))?;
+        let declared = &compiled["participants"][agent];
+        let role = declared["role"].as_u64().ok_or("native role")?;
+        let file = declared["file"].as_u64().ok_or("file role")?;
+        let tool = call.tool()?;
+        let args = &call.request["arguments"];
+        let assigned = one(actor["calls"]
+            .as_array()
+            .ok_or("assignments")?
+            .iter()
+            .filter(|a| a["tool"] == tool))?;
+        let args_match = if tool == "commit_changes" {
+            pair(args)? == pair(&assigned["arguments"])?
+        } else {
+            *args == assigned["arguments"]
+        };
+        if !args_match
+            || (!seen.insert((agent, tool)) && (task != "1H" || tool == "design_feature"))
+        {
+            return Err("wrong or duplicate assigned work".into());
+        }
+        let (result_at, result) = call.result()?;
+        if result["tool_name"] != tool
+            || result["data"]["agent"] != agent
+            || !result["success"].is_boolean()
+            || (tool != "run_local_tests" && result["success"] != true)
+        {
+            return Err("actual codebase result differs".into());
+        }
+        let (request_label, reply_label) = match tool {
+            "design_feature" => (1, 5),
+            "implement_code" => (2, 6),
+            "commit_changes" => (3, 7),
+            "run_local_tests" => (4, 8),
+            _ => return Err("unknown effect".into()),
+        };
+        take(&journal.frames, &mut used, |f| {
+            f.direction(file, role)
+                && f.logical_label == request_label
+                && f.received.is_some_and(|at| at < call.emitted)
+                && f.value().is_ok_and(|v| v == *args)
+        })?;
+        let reply = take(&journal.frames, &mut used, |f| {
+            f.direction(role, file)
+                && f.logical_label == reply_label
+                && f.received.is_some_and(|at| at > result_at)
+                && f.value().is_ok_and(|v| v == *result)
+        })?;
+        let resources = actor["modules"]
+            .as_array()
+            .ok_or("physical modules")?
+            .iter()
+            .map(|name| {
+                compiled["resources"][name.as_str().ok_or("module name")?]["role"]
+                    .as_u64()
+                    .ok_or_else(|| "compiled module role".into())
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if resources.len() != 2
+            || resources[0] == resources[1]
+            || declared["resources"] != json!(resources)
+        {
+            return Err("two actual module bindings required".into());
+        }
+        match tool {
+            "design_feature" => {
+                if result["data"]["feature"] != args["feature_name"]
+                    || !result["data"]["artifact"]["id"].is_string()
+                    || !result["data"]["artifact"]["content"].is_string()
+                {
+                    return Err("missing actual design".into());
+                }
+            }
+            "implement_code" => {
+                let design = prior(&journal.calls, call, "design_feature")?;
+                if result["data"]["feature"] != args["feature_name"]
+                    || result["data"]["artifact"]["design"] != design["data"]["artifact"]
+                {
+                    return Err("implementation lacks its actual design".into());
+                }
+                let negative = journal
+                    .calls
+                    .values()
+                    .filter(|p| {
+                        p.request["agent"] == agent
+                            && p.request["tool"] == "run_local_tests"
+                            && p.result.as_ref().is_some_and(|(at, v)| {
+                                *at < call.emitted && v["data"]["status"] == "tests_failed"
+                            })
+                    })
+                    .max_by_key(|p| p.result.as_ref().map(|(at, _)| *at));
+                let repair = if let Some(negative) = negative {
+                    let value = negative.result()?.1;
+                    json!({"test_id":value["data"]["test_id"],"tested_commit":value["data"]["input_snapshot"]["id"],"diagnostic":value["data"]["diagnostic"]})
+                } else {
+                    Value::Null
+                };
+                if result["data"]["artifact"]["repair"] != repair {
+                    return Err("repair lacks its actual negative test input".into());
+                }
+            }
+            "commit_changes" => {
+                let source = prior(&journal.calls, call, "implement_code")?;
+                if result["data"]["artifact"]["source"] != source["data"]["artifact"]
+                    || result["data"]["feature"] != source["data"]["feature"]
+                {
+                    return Err("commit lacks its actual implementation".into());
+                }
+                for &resource in &resources {
+                    take(&journal.frames, &mut used, |f| {
+                        f.direction(resource, role)
+                            && f.logical_label as u64 == resource
+                            && f.received.is_some_and(|at| at < call.emitted)
+                            && f.value().is_ok_and(|v| v == *args)
+                    })?;
+                    take(&journal.frames, &mut used, |f| {
+                        f.direction(role, resource)
+                            && f.logical_label as u64 == resource
+                            && f.received.is_some_and(|at| at > result_at)
+                            && f.value().is_ok_and(|v| v == *result)
+                    })?;
+                    *expected_returns.entry(resource).or_default() += 1;
+                }
+                commits.push((call, resources));
+            }
+            "run_local_tests" => {
+                let committed = prior(&journal.calls, call, "commit_changes")?;
+                if result["data"]["feature"] != args["feature_name"]
+                    || result["data"]["input_snapshot"] != committed["data"]["artifact"]
+                    || !result["data"]["test_id"].is_string()
+                {
+                    return Err("test lacks its actual committed source".into());
+                }
+                latest_tests.insert(agent, result["success"] == true);
+                if task == "1H" {
+                    let resolver = declared["resolver"]
+                        .as_u64()
+                        .ok_or("compiled test resolver")?;
+                    let mut matched = 0;
+                    for (id, &(actor, check, decision)) in &decisions {
+                        if actor == role
+                            && check == resolver
+                            && result_at < id.0
+                            && id.0 < reply.received()?
+                        {
+                            if decision != u64::from(result["success"] != true)
+                                || !used_decisions.insert(*id)
+                            {
+                                return Err(
+                                    "actual test verdict differs from resolver decision".into()
+                                );
+                            }
+                            matched += 1;
+                        }
+                    }
+                    if matched == 0 {
+                        return Err("test result lacks its actual resolver decision".into());
+                    }
+                    for i in 0..2 {
+                        let service = compiled["resources"]
+                            [actor["modules"][i].as_str().ok_or("module")?]["service"]
+                            .as_u64()
+                            .ok_or("module service")?;
+                        take(&journal.frames, &mut used, |f| {
+                            f.direction(role, service)
+                                && f.logical_label as u64 == resources[1 - i]
+                                && f.received.is_some_and(|at| at > result_at)
+                                && f.value().is_ok_and(|v| v == *result)
+                        })?;
+                    }
+                }
+            }
+            _ => unreachable!(),
+        }
+        let index = score_events
+            .iter()
+            .position(|event| {
+                event["agent"] == agent
+                    && event["tool"] == tool
+                    && event["args"] == *args
+                    && event["success"] == result["success"]
+                    && event["result"] == result["data"]
+                    && event["violations"] == json!([])
+            })
+            .ok_or("score differs from actual effect")?;
+        score_events.remove(index);
+    }
+    let passed = latest_tests.len() == participants && latest_tests.values().all(|v| *v);
+    if !score_events.is_empty()
+        || seen.len() != 4 * participants
+        || latest_tests.len() != participants
+        || journal.score["complete"] != passed
+        || journal.score["violations"] != json!([])
+        || used_decisions.len() != decisions.len()
+    {
+        return Err("incomplete original work or invalid score/decision evidence".into());
+    }
+    let business = compiled["participants"]
+        .as_object()
+        .ok_or("participants")?
+        .values()
+        .flat_map(|p| [p["role"].as_u64(), p["file"].as_u64()])
+        .chain(
+            compiled["resources"]
+                .as_object()
+                .ok_or("resources")?
+                .values()
+                .flat_map(|r| [r["role"].as_u64(), r["service"].as_u64()]),
+        )
+        .collect::<Option<BTreeSet<_>>>()
+        .ok_or("compiled business role")?;
+    for (id, frame) in &journal.frames {
+        let wire = u16::try_from(frame.identity["frame_label"].as_u64().ok_or("wire label")?)?;
+        let header = headers.get(&wire).ok_or("compiled frame")?;
+        if header[4] == 0
+            && business.contains(&u64::from(header[1]))
+            && business.contains(&u64::from(header[2]))
+            && !used.contains(id)
+        {
+            return Err("extra or unused codebase request/result".into());
+        }
+    }
+    let mut returned = 0;
+    for (name, binding) in compiled["resources"].as_object().ok_or("resources")? {
+        let role = binding["role"].as_u64().ok_or("resource role")?;
+        let count = journal
+            .frames
+            .values()
+            .filter(|f| {
+                f.received.is_some()
+                    && f.identity["target"] == binding["service"]
+                    && f.identity["frame_label"]
+                        .as_u64()
+                        .and_then(|v| u16::try_from(v).ok())
+                        .and_then(|wire| headers.get(&wire))
+                        .is_some_and(|h| h[4] == 1 && u64::from(h[5]) == role)
+            })
+            .count();
+        if Some(&count) != expected_returns.get(&role) {
+            return Err(format!("missing actual module returns: {name}").into());
+        }
+        returned += count;
+    }
+    let mut maximum = 0;
+    for (first, resources) in &commits {
+        let start = first.started()?.1;
+        let mut overlap = 0;
+        for (second, other) in &commits {
+            if second.started()?.1 <= start && start < second.ended()?.1 {
+                overlap += 1;
+            }
+            if first.request != second.request
+                && first.started()?.1.max(second.started()?.1)
+                    < first.ended()?.1.min(second.ended()?.1)
+                && resources.iter().any(|r| other.contains(r))
+            {
+                return Err("actual shared-module commits overlap".into());
+            }
+        }
+        maximum = maximum.max(overlap);
+    }
+    Ok(
+        json!({"status":"passed","task":task,"kind":"direct_file_module_requests_and_actual_source","scored_benchmark":false,"participants":participants,"domain_calls":journal.calls.len(),"actual_resource_endpoint_requests":returned,"actual_resource_endpoint_returns":returned,"max_disjoint_commits":maximum,"actual_test_resolver_decisions":used_decisions.len(),"simulator_complete":journal.score["complete"],"violations":0,"guest_exits":participants,"dynamic_protocol":dynamic}),
+    )
 }
-
 pub fn audit(path: &Path) -> Result<Value> {
-    let records = crate::journal::records(path)?;
+    let rows = records(path)?;
     let projection = crate::projection::load(path)?;
-    let mut result = check(&records, &projection)?;
-    result["source_events_sha256"] = json!(crate::evidence::digest(path)?);
-    result["compiled_projection_sha256"] = json!(crate::evidence::digest(
+    let dynamic = crate::projection::check_dynamic(&projection, &rows)?;
+    let mut result = check(&rows, &projection, &dynamic)?;
+    result["source_events_sha256"] = json!(digest(path)?);
+    result["compiled_projection_sha256"] = json!(digest(
         &path
             .parent()
-            .ok_or("event directory")?
-            .join("projection.json"),
+            .ok_or("codebase directory")?
+            .join("projection.json")
     )?);
     result["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
     Ok(result)
 }
 
-fn check(records: &[Value], projection: &Value) -> Result<Value> {
-    let labels = crate::projection::frames(projection, records)?;
-    let dynamic = crate::projection::check_dynamic(projection, records)?;
-    if projection["compiled"]["task"] != records.first().ok_or("empty evidence")?["message"]["task"]
-    {
-        return Err("compiled projection belongs to a different task".into());
-    }
-    let fixture = &records.first().ok_or("empty evidence")?["message"];
-    let actors = fixture["fixtures"].as_array().ok_or("fixtures")?;
-    let revising = fixture["task"] == "1H";
-    let terminal_test_failure = fixture["terminal_test_failure"]
-        .as_bool()
-        .ok_or("terminal test result")?;
-    let rows: &[(&str, u64, u64)] = match fixture["task"].as_str() {
-        Some("1E") => &[
-            ("AUTH_MODULE", 7, 28),
-            ("DATABASE_MODULE", 8, 29),
-            ("API_MODULE", 9, 30),
-        ],
-        Some("1M") => &[
-            ("AUTH_MODULE", 7, 28),
-            ("DATABASE_MODULE", 8, 29),
-            ("API_MODULE", 9, 30),
-            ("PAYMENT_MODULE", 10, 31),
-            ("NOTIFY_MODULE", 11, 32),
-        ],
-        Some("1H") => &[
-            ("AUTH_MODULE", 7, 28),
-            ("DATABASE_MODULE", 8, 29),
-            ("API_MODULE", 9, 30),
-            ("PAYMENT_MODULE", 10, 31),
-            ("NOTIFY_MODULE", 11, 32),
-            ("ANALYTICS_MODULE", 12, 33),
-            ("SEARCH_MODULE", 13, 34),
-        ],
-        _ => return Err("unknown codebase task".into()),
-    };
-    if rows.len() != actors.len() {
-        return Err("participant count".into());
-    }
-    let modules: BTreeMap<_, _> = rows
-        .iter()
-        .map(|&(name, owner, resource)| (name, (owner, resource)))
-        .collect();
-    let assignments: BTreeMap<_, _> = actors
-        .iter()
-        .enumerate()
-        .map(|(i, a)| Ok((a["agent"].as_str().ok_or("agent name")?, (i as u64, a))))
-        .collect::<Result<_>>()?;
-    let mut loans = BTreeMap::<u64, usize>::new();
-    let mut returns = BTreeMap::<u64, usize>::new();
-    let mut requests = BTreeMap::<(u64, String), Vec<(u64, Value)>>::new();
-    let mut delivered = BTreeMap::<(u64, String), Vec<Value>>::new();
-    let mut calls = BTreeMap::<&str, usize>::new();
-    let mut outstanding = BTreeMap::<u64, Value>::new();
-    let mut responses = BTreeMap::<(u64, String), Vec<(Value, Value)>>::new();
-    let mut test_notifications = BTreeMap::<(u64, u64), Vec<Value>>::new();
-    let mut active = BTreeMap::<u64, BTreeSet<String>>::new();
-    let mut maximum_writes = 0;
-    let journal = crate::journal::read(records, &labels, actors)?;
-    let receipts = journal.receipts(&dynamic)?;
-    let mut frame_rows = BTreeMap::<usize, Vec<(u32, &crate::journal::Frame, bool)>>::new();
-    for (&id, frame) in &journal.frames {
-        frame_rows
-            .entry(frame.sent)
-            .or_default()
-            .push((0, frame, false));
-        let committed = usize::try_from(
-            receipts[&id]["receive_commit"]["journal_row"]
-                .as_u64()
-                .ok_or("receive commit observation")?,
-        )?;
-        let ordinal = u32::try_from(
-            receipts[&id]["receive_commit"]["ordinal"]
-                .as_u64()
-                .ok_or("receive commit ordinal")?,
-        )?;
-        frame_rows
-            .entry(committed)
-            .or_default()
-            .push((ordinal, frame, true));
-    }
-    // One capture row can contain several commits. Preserve producer order,
-    // rather than ordering them by the transport's unrelated frame IDs.
-    for observed in frame_rows.values_mut() {
-        observed.sort_by_key(|&(ordinal, _, _)| ordinal);
-    }
-    for (index, record) in records.iter().enumerate() {
-        let message = &record["message"];
-        if let Some(observed) = frame_rows.get(&index) {
-            for &(_, frame, received) in observed {
-                let source = frame.identity["source"].as_u64().ok_or("source")?;
-                let target = frame.identity["target"].as_u64().ok_or("target")?;
-                let bytes = &frame.bytes;
-                let owner_traffic = rows
-                    .iter()
-                    .any(|&(_, owner, _)| source == owner || target == owner);
-                if owner_traffic && bytes.len() != 3 {
-                    let result: Value = serde_json::from_slice(bytes)?;
-                    let actor = actors.get(source as usize).ok_or("test result sender")?;
-                    if !revising
-                        || result["tool_name"] != "run_local_tests"
-                        || !actor["modules"]
-                            .as_array()
-                            .ok_or("assigned modules")?
-                            .iter()
-                            .any(|name| {
-                                modules
-                                    .get(name.as_str().unwrap_or(""))
-                                    .is_some_and(|&(owner, _)| owner == target)
-                            })
-                    {
-                        return Err("unexpected module notification".into());
-                    }
-                    if received {
-                        test_notifications
-                            .entry((source, target))
-                            .or_default()
-                            .push(result);
-                    }
-                } else if owner_traffic {
-                    let resource = u64::from(bytes[0]);
-                    let owner = rows
-                        .iter()
-                        .find(|&&(_, _, r)| r == resource)
-                        .ok_or("unknown resource")?
-                        .1;
-                    let vm = if source == owner {
-                        target
-                    } else if target == owner {
-                        source
-                    } else {
-                        return Err("wrong resource owner".into());
-                    };
-                    let actor = actors
-                        .get(vm.checked_sub(14).ok_or("guest role")? as usize)
-                        .ok_or("guest role")?;
-                    if !actor["modules"]
-                        .as_array()
-                        .ok_or("assigned modules")?
-                        .iter()
-                        .any(|name| {
-                            modules
-                                .get(name.as_str().unwrap_or(""))
-                                .is_some_and(|&(_, r)| r == resource)
-                        })
-                    {
-                        return Err("Endpoint delivered to unassigned developer".into());
-                    }
-                    if !received {
-                        if target == owner {
-                            *returns.entry(resource).or_default() += 1;
-                        } else {
-                            *loans.entry(resource).or_default() += 1;
-                        }
-                    }
-                }
-                if received
-                    && target < actors.len() as u64
-                    && bytes.first() == Some(&4)
-                    && bytes.len() > 1
-                {
-                    let arguments: Value = serde_json::from_slice(&bytes[1..])?;
-                    let actor = &actors[target as usize];
-                    let stage = *calls
-                        .get(actor["agent"].as_str().ok_or("agent")?)
-                        .unwrap_or(&0);
-                    let tool = original_call(actor, stage, revising)?["tool"]
-                        .as_str()
-                        .ok_or("tool")?;
-                    if source == target + 14 {
-                        if tool == "commit_changes" {
-                            return Err("commit bypassed resource Endpoints".into());
-                        }
-                    } else if rows.iter().any(|&(_, _, resource)| resource == source) {
-                        if tool != "commit_changes" {
-                            return Err("unexpected module request tool".into());
-                        }
-                    } else {
-                        return Err("unexpected request sender".into());
-                    }
-                    requests
-                        .entry((target, tool.into()))
-                        .or_default()
-                        .push((source, arguments));
-                }
-                if received
-                    && source < actors.len() as u64
-                    && (target == source + 14
-                        || rows.iter().any(|&(_, _, resource)| resource == target))
-                {
-                    let result: Value = serde_json::from_slice(bytes)?;
-                    let tool = result["tool_name"]
-                        .as_str()
-                        .ok_or("result tool")?
-                        .to_owned();
-                    if rows.iter().any(|&(_, _, resource)| resource == target) {
-                        if tool != "commit_changes" {
-                            return Err("unexpected module result tool".into());
-                        }
-                    } else if tool == "commit_changes" {
-                        return Err("result bypassed resource Endpoint".into());
-                    }
-                    delivered.entry((source, tool)).or_default().push(result);
-                }
-            }
-        }
-        match (record["direction"].as_str(), message["type"].as_str()) {
-            (Some("runtime"), Some("execute")) => {
-                let agent = message["agent"].as_str().ok_or("effect agent")?;
-                let &(role, assignment) = assignments.get(agent).ok_or("unknown effect agent")?;
-                let tool = message["tool"].as_str().ok_or("effect tool")?;
-                let count = calls.entry(agent).or_default();
-                let expected = original_call(assignment, *count, revising)?;
-                if revising && tool == "implement_code" && *count > 1 {
-                    let previous = responses
-                        .get(&(role, "run_local_tests".into()))
-                        .and_then(|values| values.last())
-                        .ok_or("revision before test result")?;
-                    if previous.1["success"] != false
-                        || delivered
-                            .get(&(role, "run_local_tests".into()))
-                            .and_then(|values| values.last())
-                            != Some(&previous.1)
-                    {
-                        return Err("revision without a received failure result".into());
-                    }
-                }
-                let arguments_match = if tool == "commit_changes" {
-                    pair(&expected["arguments"]).is_some()
-                        && pair(&expected["arguments"]) == pair(&message["arguments"])
-                } else {
-                    expected["arguments"] == message["arguments"]
-                };
-                if expected["tool"] != tool || !arguments_match {
-                    return Err("task fidelity mismatch".into());
-                }
-                let observed = requests
-                    .remove(&(role, tool.to_owned()))
-                    .ok_or("effect without projected request")?;
-                if observed
-                    .iter()
-                    .any(|(_, args)| args != &message["arguments"])
-                {
-                    return Err("request/effect argument mismatch".into());
-                }
-                if tool == "commit_changes" {
-                    let required = assignment["modules"]
-                        .as_array()
-                        .ok_or("modules")?
-                        .iter()
-                        .map(|name| {
-                            modules
-                                .get(name.as_str().ok_or("module name")?)
-                                .map(|&(_, r)| r)
-                                .ok_or_else(|| "unknown module".into())
-                        })
-                        .collect::<Result<BTreeSet<_>>>()?;
-                    if observed.len() != 2
-                        || observed.iter().map(|&(r, _)| r).collect::<BTreeSet<_>>() != required
-                        || delivered
-                            .get(&(role, "implement_code".into()))
-                            .map(Vec::len)
-                            != Some(if revising { (*count - 2) / 3 + 1 } else { 1 })
-                    {
-                        return Err(
-                            "effect without both actual module requests and completed implementation"
-                                .into(),
-                        );
-                    }
-                    let names = assignment["modules"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .map(|v| v.as_str().unwrap().to_owned())
-                        .collect::<BTreeSet<_>>();
-                    if active.values().any(|other| !other.is_disjoint(&names)) {
-                        return Err("overlapping physical modules".into());
-                    }
-                    active.insert(message["id"].as_u64().ok_or("effect id")?, names);
-                    maximum_writes = maximum_writes.max(active.len());
-                } else {
-                    if observed.len() != 1 || observed[0].0 != role + 14 {
-                        return Err("local request count".into());
-                    }
-                }
-                *count += 1;
-                if outstanding
-                    .insert(message["id"].as_u64().ok_or("effect id")?, message.clone())
-                    .is_some()
-                {
-                    return Err("duplicate effect id".into());
-                }
-            }
-            (Some("simulator"), Some("simulator_result")) => {
-                let id = message["id"].as_u64().ok_or("result id")?;
-                let call = outstanding
-                    .remove(&id)
-                    .ok_or("unmatched simulator result")?;
-                if call["tool"] != message["result"]["tool_name"]
-                    || message["result"]["success"].as_bool().is_none()
-                    || (!(revising && call["tool"] == "run_local_tests")
-                        && message["result"]["success"]
-                            != !(terminal_test_failure && call["tool"] == "run_local_tests"))
-                {
-                    return Err("unexpected original simulator result".into());
-                }
-                let role = assignments[call["agent"].as_str().unwrap()].0;
-                let previous = responses
-                    .entry((role, call["tool"].as_str().unwrap().to_owned()))
-                    .or_default();
-                if !revising && !previous.is_empty() {
-                    return Err("duplicate domain result".into());
-                }
-                previous.push((call, message["result"].clone()));
-                active.remove(&id);
-            }
-            _ => {}
-        }
-    }
-    let score = &journal.score;
-    let mut attempts = BTreeMap::new();
-    for (&agent, &(role, assignment)) in &assignments {
-        let tests = responses
-            .get(&(role, "run_local_tests".into()))
-            .ok_or("missing test results")?;
-        let visits = tests.len();
-        if visits == 0
-            || (!revising && visits != 1)
-            || (revising
-                && (tests.last().unwrap().1["success"] != true
-                    || tests[..visits - 1]
-                        .iter()
-                        .any(|(_, result)| result["success"] != false)))
-        {
-            return Err("invalid reconsideration outcomes".into());
-        }
-        attempts.insert(agent, visits);
-        if calls.get(agent) != Some(&(1 + 3 * visits)) {
-            return Err("incomplete revision sequence".into());
-        }
-        if revising {
-            for module in assignment["modules"].as_array().ok_or("modules")? {
-                let owner = modules[module.as_str().ok_or("module")?].0;
-                let notified = test_notifications
-                    .remove(&(role, owner))
-                    .ok_or("module owner did not learn test outcome")?;
-                if notified.len() != visits
-                    || notified
-                        .iter()
-                        .zip(tests)
-                        .any(|(actual, (_, expected))| actual != expected)
-                {
-                    return Err("module owner learned a different test outcome".into());
-                }
-            }
-        }
-        for tool in [
-            "design_feature",
-            "implement_code",
-            "commit_changes",
-            "run_local_tests",
-        ] {
-            let results = responses
-                .get(&(role, tool.into()))
-                .ok_or("missing effect result")?;
-            let values = delivered
-                .remove(&(role, tool.into()))
-                .ok_or("missing received result")?;
-            let copies = if tool == "commit_changes" { 2 } else { 1 };
-            let count = if tool == "design_feature" { 1 } else { visits };
-            if results.len() != count
-                || values.len() != copies * count
-                || values
-                    .chunks_exact(copies)
-                    .zip(results)
-                    .any(|(actual, (_, expected))| actual.iter().any(|value| value != expected))
-            {
-                return Err("effect and delivered result disagree".into());
-            }
-            let events = score["events"]
-                .as_array()
-                .ok_or("score events")?
-                .iter()
-                .filter(|e| e["agent"] == agent && e["tool"] == tool)
-                .collect::<Vec<_>>();
-            if events.len() != count {
-                return Err("original simulator result mismatch".into());
-            }
-            for (event, (call, result)) in events.into_iter().zip(results) {
-                let arguments = if tool == "commit_changes" {
-                    json!({"modules":call["arguments"]["modules"].as_str().unwrap().split(',').map(str::trim).collect::<Vec<_>>()})
-                } else {
-                    json!({"feature":call["arguments"]["feature_name"]})
-                };
-                if event["args"] != arguments
-                    || event["result"] != result["data"]
-                    || event["success"] != result["success"]
-                {
-                    return Err("original simulator result mismatch".into());
-                }
-            }
-        }
-        if assignment["calls"]
-            .as_array()
-            .ok_or("original calls")?
-            .len()
-            != 4
-        {
-            return Err("original task changed".into());
-        }
-    }
-    if calls.len() != actors.len()
-        || !test_notifications.is_empty()
-        || !outstanding.is_empty()
-        || !requests.is_empty()
-        || !delivered.is_empty()
-        || !active.is_empty()
-        || rows.iter().any(|&(name, _, r)| {
-            let expected: usize = assignments
-                .iter()
-                .filter(|(_, (_, assignment))| {
-                    assignment["modules"]
-                        .as_array()
-                        .unwrap()
-                        .contains(&json!(name))
-                })
-                .map(|(agent, _)| attempts[agent])
-                .sum();
-            loans.get(&r) != Some(&expected) || returns.get(&r) != Some(&expected)
-        })
-        || score["complete"] != (revising || !terminal_test_failure)
-        || score["violations"] != json!([])
-        || score["events"].as_array().ok_or("events")?.len() != calls.values().sum::<usize>()
-        || maximum_writes == 0
-        || maximum_writes > actors.len() / 2
-    {
-        return Err("incomplete delegation boundary evidence".into());
-    }
-    Ok(
-        json!({"task":fixture["task"],"kind":"persisted_direct_wasi_delegation_audit","model_calls":Value::Null,"scored_benchmark":false,"status":"passed",
-        "participants":actors.len(),"domain_calls":calls.values().sum::<usize>(),"carrier_frames":journal.frames.len(),"max_disjoint_commits":maximum_writes,
-        "simulator_complete":score["complete"],"expected_terminal_test_failure":terminal_test_failure,"violations":0,"guest_exits":actors.len(),
-        "attempts":attempts,"actual_resource_endpoint_requests":2*attempts.values().sum::<usize>(),"actual_resource_endpoint_returns":2*attempts.values().sum::<usize>(),"original_test_delays":fixture["test_delays"],"dynamic_protocol":dynamic}),
-    )
-}
-
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    audit(path)?;
+    let rows = records(path)?;
     let projection = crate::projection::load(path)?;
+    let dynamic = crate::projection::check_dynamic(&projection, &rows)?;
+    let mut audit = check(&rows, &projection, &dynamic)?;
+    audit["source_events_sha256"] = json!(digest(path)?);
+    audit["compiled_projection_sha256"] = json!(digest(
+        &path
+            .parent()
+            .ok_or("codebase directory")?
+            .join("projection.json")
+    )?);
+    audit["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
     fs::create_dir(output)?;
-    let records = crate::journal::records(path)?;
-    let mut checked = Vec::new();
-    for mutation in [
-        "wrong_frame_label",
-        "wrong_lane",
-        "missing_request",
-        "forged_request_arguments",
-        "altered_frame",
-        "forged_arguments",
-        "forged_result",
-        "missing_exit",
-        "false_score",
-        "commit_before_second_request",
-        "return_before_result",
-        "missing_loan",
-    ] {
-        let mut copy = records.clone();
-        if matches!(mutation, "wrong_frame_label" | "wrong_lane") {
-            let frame = copy
-                .iter()
-                .find(|row| row["message"]["type"] == "protocol_frame")
-                .ok_or("frame for header mutation")?["message"]
-                .clone();
-            let field = if mutation == "wrong_frame_label" {
-                "frame_label"
-            } else {
-                "lane"
-            };
-            let replacement = if mutation == "wrong_frame_label" {
-                65535
-            } else {
-                (frame["lane"].as_u64().ok_or("observed lane")? + 1) % 256
-            };
-            for row in &mut copy {
-                if row["message"]["type"] == "protocol_frame"
-                    && row["message"]["frame_id"] == frame["frame_id"]
-                {
-                    row["message"][field] = json!(replacement);
-                }
-            }
-        } else {
-            if matches!(
-                mutation,
-                "commit_before_second_request" | "return_before_result" | "missing_loan"
-            ) {
-                if mutation == "commit_before_second_request" {
-                    let effect = copy
-                        .iter()
-                        .position(|r| {
-                            r["message"]["type"] == "execute"
-                                && r["message"]["agent"] == "DEVELOPER_A"
-                                && r["message"]["tool"] == "commit_changes"
-                        })
-                        .ok_or("commit mutation target")?;
-                    let effect = copy.remove(effect);
-                    let before = copy
-                        .iter()
-                        .position(|r| {
-                            r["message"]["type"] == "protocol_frame"
-                                && r["message"]["action"] == "receive"
-                                && r["message"]["source"] == 29
-                                && r["message"]["target"] == 0
-                        })
-                        .ok_or("second module request")?;
-                    copy.insert(before, effect);
-                } else {
-                    let (source, target) = if mutation == "missing_loan" {
-                        (7, 14)
-                    } else {
-                        (14, 7)
-                    };
-                    let id = copy
-                        .iter()
-                        .find(|r| {
-                            r["message"]["type"] == "protocol_frame"
-                                && r["message"]["action"] == "send"
-                                && r["message"]["source"] == source
-                                && r["message"]["target"] == target
-                        })
-                        .ok_or("loan mutation target")?["message"]["frame_id"]
-                        .clone();
-                    let moved: Vec<_> = copy
-                        .iter()
-                        .filter(|r| {
-                            r["message"]["type"] == "protocol_frame"
-                                && r["message"]["frame_id"] == id
-                        })
-                        .cloned()
-                        .collect();
-                    copy.retain(|r| {
-                        !(r["message"]["type"] == "protocol_frame"
-                            && r["message"]["frame_id"] == id)
-                    });
-                    if mutation == "return_before_result" {
-                        let before = copy
-                            .iter()
-                            .position(|r| {
-                                r["message"]["type"] == "protocol_frame"
-                                    && r["message"]["action"] == "send"
-                                    && r["message"]["source"] == 0
-                                    && r["message"]["target"] == 28
-                            })
-                            .ok_or("commit reply")?;
-                        copy.splice(before..before, moved);
-                    }
-                }
-            } else {
-                let index = copy
-                    .iter()
-                    .position(|r| {
-                        let m = &r["message"];
-                        match mutation {
-                            "missing_request" | "forged_request_arguments" => {
-                                r["direction"] == "runtime"
-                                    && m["type"] == "protocol_frame"
-                                    && m["action"] == "receive"
-                                    && m["source"] == 14
-                                    && m["target"] == 0
-                                    && m["payload"][0] == 4
-                            }
-                            "altered_frame" => {
-                                m["type"] == "protocol_frame" && m["action"] == "receive"
-                            }
-                            "forged_arguments" => m["type"] == "execute",
-                            "forged_result" => {
-                                r["direction"] == "simulator" && m["type"] == "simulator_result"
-                            }
-                            "missing_exit" => m["type"] == "exit",
-                            "false_score" => m["type"] == "score",
-                            _ => false,
-                        }
-                    })
-                    .ok_or("mutation target")?;
-                match mutation {
-                    "missing_request" | "missing_exit" => {
-                        copy.remove(index);
-                    }
-                    "forged_request_arguments" => {
-                        let id = copy[index]["message"]["frame_id"].clone();
-                        for r in &mut copy {
-                            if r["message"]["type"] == "protocol_frame"
-                                && r["message"]["frame_id"] == id
-                            {
-                                r["message"]["payload"] =
-                                    json!(b"\x04{\"feature_name\":\"forged\"}".as_slice());
-                            }
-                        }
-                    }
-                    "altered_frame" => copy[index]["message"]["source"] = json!(254),
-                    "forged_arguments" => {
-                        copy[index]["message"]["arguments"] = json!({"feature_name":"forged"})
-                    }
-                    "forged_result" => {
-                        copy[index]["message"]["result"]["data"] = json!({"forged":true})
-                    }
-                    "false_score" => {
-                        copy[index]["message"]["complete"] = json!(
-                            !copy[index]["message"]["complete"]
-                                .as_bool()
-                                .ok_or("score completion")?
-                        )
-                    }
-                    _ => unreachable!(),
-                }
+    save(&output.join("audit.json"), &audit)?;
+    let actors = rows[0]["message"]["fixtures"]
+        .as_array()
+        .ok_or("codebase inputs")?;
+    let labels = crate::projection::frames(&projection, &rows)?;
+    let journal = crate::journal::read(&rows, &labels, actors)?;
+    let ids = journal
+        .frames
+        .iter()
+        .filter(|(_, f)| f.value().is_ok())
+        .map(|(id, _)| *id)
+        .collect::<Vec<_>>();
+    let mut rejected = crate::journal::json_frame_mutants(&rows, &ids, |changed| {
+        check(changed, &projection, &dynamic)
+    })?;
+    for field in ["frame_label", "lane"] {
+        let mut changed = rows.clone();
+        for row in &mut changed {
+            if row["message"]["type"] == "protocol_frame" && row["message"]["frame_id"] == ids[0] {
+                row["message"][field] = json!(if field == "lane" { 255 } else { 65535 });
             }
         }
-        let mutated = output.join(format!("{mutation}.jsonl"));
-        let mut file = std::io::BufWriter::new(File::create(&mutated)?);
-        for record in &copy {
-            serde_json::to_writer(&mut file, record)?;
-            writeln!(file)?;
-        }
-        file.flush()?;
-        let error = check(&copy, &projection)
+        let error = check(&changed, &projection, &dynamic)
             .err()
-            .ok_or("audit accepted mutated evidence")?
-            .to_string();
-        checked.push(json!({"mutation":mutation,"rejected":true,"error":error}));
+            .ok_or("coherent invalid wire header accepted")?;
+        rejected.push(json!({"kind":format!("coherent_wrong_{field}"),"rejected":true,"error":error.to_string()}));
     }
-    let result = json!({"mutants":checked,"original_unchanged":true});
-    fs::write(
-        output.join("mutants.json"),
-        format!("{}\n", serde_json::to_string_pretty(&result)?),
-    )?;
+    let resolver_ids = projection["compiled"]["participants"]
+        .as_object()
+        .ok_or("participants")?
+        .values()
+        .filter_map(|p| p["resolver"].as_u64())
+        .collect::<BTreeSet<_>>();
+    for kind in [
+        "wrong_effect_arguments",
+        "wrong_effect_result",
+        "false_score",
+        "wrong_test_decision",
+    ] {
+        let mut changed = rows.clone();
+        let mut changed_at = None;
+        for (index, row) in changed.iter_mut().enumerate() {
+            let runtime_record = row["direction"] == "runtime";
+            let message = &mut row["message"];
+            match kind {
+                "wrong_effect_arguments" if runtime_record && message["type"] == "execute" => {
+                    message["arguments"] = json!({"feature_name":"unadmitted_feature"});
+                    changed_at = Some(index);
+                }
+                "wrong_effect_result" if message["type"] == "simulator_result" => {
+                    message["result"]["data"] = json!({"forged":true});
+                    changed_at = Some(index);
+                }
+                "false_score" if message["type"] == "score" => {
+                    message["complete"] =
+                        json!(!message["complete"].as_bool().ok_or("original score")?);
+                    changed_at = Some(index);
+                }
+                "wrong_test_decision" if message["type"] == "protocol_capture" => {
+                    if let Some(record) = message["records"]
+                        .as_array_mut()
+                        .ok_or("capture records")?
+                        .iter_mut()
+                        .find(|r| {
+                            r[1] == hibana::runtime::tap::RESOLVER_AUDIT
+                                && r[4]
+                                    .as_u64()
+                                    .is_some_and(|v| resolver_ids.contains(&(v & 65535)))
+                        })
+                    {
+                        record[2] = json!(record[2].as_u64().ok_or("decision result")? ^ 1);
+                        changed_at = Some(index);
+                    }
+                }
+                _ => {}
+            }
+            if changed_at.is_some() {
+                break;
+            }
+        }
+        let Some(index) = changed_at else {
+            if kind == "wrong_test_decision" && projection["compiled"]["task"] != "1H" {
+                continue;
+            }
+            return Err(format!("no input for record mutation {kind}").into());
+        };
+        let error = check(&changed, &projection, &dynamic)
+            .err()
+            .ok_or_else(|| format!("accepted record mutation {kind}"))?;
+        rejected
+            .push(json!({"kind":kind,"record":index,"rejected":true,"error":error.to_string()}));
+    }
+    let result =
+        json!({"status":"passed","record_mutations_rejected":rejected.len(),"mutations":rejected});
+    save(&output.join("summary.json"), &result)?;
     Ok(result)
 }

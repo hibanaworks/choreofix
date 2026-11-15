@@ -23,19 +23,33 @@ fn response(reply: &Value) -> Result<Value> {
         .ok_or("empty service response")?
         .map_err(Into::into)
 }
-async fn frontend(guest: &process::Guest, visits: usize) -> Result<()> {
-    for _ in 0..visits {
-        let reply = guest.command("FRONTEND_DEV", "echo '{\"api_name\":\"feature_api_spec\"}' > /service/agree_api; cat /service/result".into()).await?;
+async fn frontend(guest: &process::Guest, frontend_first: &[bool]) -> Result<()> {
+    for &first in frontend_first {
+        let contract = guest
+            .command("FRONTEND_DEV", "cat /service/agree_api".into())
+            .await?;
+        assert_eq!(response(&contract)?["tool_name"], "define_api");
+        let first = if first { "FRONTEND_DEV" } else { "BACKEND_DEV" };
+        let command = format!(
+            "echo '{{\"api_name\":\"feature_api_spec\",\"first\":\"{first}\"}}' > /service/agree_api; cat /service/agree_api"
+        );
+        let reply = guest.command("FRONTEND_DEV", command).await?;
         assert_eq!(response(&reply)?["success"], true, "{reply}");
-        let reply = guest.command("FRONTEND_DEV", "echo '{\"feature_name\":\"frontend_component\"}' > /service/implement_feature; cat /service/result".into()).await?;
+        let reply = loop {
+            let reply = guest.command("FRONTEND_DEV", "echo '{\"feature_name\":\"frontend_component\"}' > /service/implement_feature; cat /service/implement_feature".into()).await?;
+            if reply["stdout"]
+                .as_str()
+                .is_some_and(|s| s.contains("Permission denied"))
+            {
+                hibana_runtime::host::sleep(Duration::from_millis(50)).await?;
+                continue;
+            }
+            break reply;
+        };
         assert_eq!(response(&reply)?["success"], true, "{reply}");
     }
     let reply = guest
-        .command(
-            "FRONTEND_DEV",
-            "echo '{\"api_name\":\"feature_api_spec\"}' > /service/agree_api; cat /service/result"
-                .into(),
-        )
+        .command("FRONTEND_DEV", "cat /service/outcome".into())
         .await?;
     assert_eq!(response(&reply)?["tool_name"], "run_tests", "{reply}");
     assert_eq!(
@@ -45,30 +59,57 @@ async fn frontend(guest: &process::Guest, visits: usize) -> Result<()> {
     Ok(())
 }
 async fn backend(guest: &process::Guest, frontend_first: &[bool]) -> Result<()> {
-    for &first in frontend_first {
-        let reply = guest.command("BACKEND_DEV", "echo '{\"api_name\":\"feature_api_spec\"}' > /service/define_api; cat /service/result".into()).await?;
+    let refused = guest
+        .command(
+            "BACKEND_DEV",
+            "echo '{}' > /service/implement_feature".into(),
+        )
+        .await?;
+    assert!(
+        refused["stdout"]
+            .as_str()
+            .is_some_and(|s| s.contains("Permission denied")),
+        "a premature effect must return an error: {refused}"
+    );
+    for (index, &first) in frontend_first.iter().enumerate() {
+        let reply = guest.command("BACKEND_DEV", "echo '{\"api_name\":\"feature_api_spec\"}' > /service/define_api; cat /service/define_api".into()).await?;
         assert_eq!(response(&reply)?["success"], true, "{reply}");
-        if first {
-            let reply = guest.command("BACKEND_DEV", "echo '{\"feature_name\":\"frontend_component\"}' > /service/loan_frontend; cat /service/result".into()).await?;
-            assert_eq!(response(&reply)?["status"], "accepted", "{reply}");
+        let agreement = guest
+            .command("BACKEND_DEV", "cat /service/outcome".into())
+            .await?;
+        assert_eq!(
+            response(&agreement)?["first"],
+            if first { "FRONTEND_DEV" } else { "BACKEND_DEV" }
+        );
+        if index == 0 && !first {
+            let refused = guest
+                .command(
+                    "BACKEND_DEV",
+                    "echo '{}' > /service/implement_feature".into(),
+                )
+                .await?;
+            assert!(
+                refused["stdout"]
+                    .as_str()
+                    .is_some_and(|s| s.contains("wash:")),
+                "bad arguments must return an error: {refused}"
+            );
         }
-        let reply = guest.command("BACKEND_DEV", "echo '{\"feature_name\":\"backend_endpoint\"}' > /service/implement_feature; cat /service/result".into()).await?;
+        let reply = loop {
+            let reply = guest.command("BACKEND_DEV", "echo '{\"feature_name\":\"backend_endpoint\"}' > /service/implement_feature; cat /service/implement_feature".into()).await?;
+            if reply["stdout"]
+                .as_str()
+                .is_some_and(|s| s.contains("Permission denied"))
+            {
+                hibana_runtime::host::sleep(Duration::from_millis(50)).await?;
+                continue;
+            }
+            break reply;
+        };
         assert_eq!(response(&reply)?["success"], true, "{reply}");
     }
     let reply = guest
-        .command(
-            "BACKEND_DEV",
-            "echo '{\"api_name\":\"feature_api_spec\"}' > /service/finalize; cat /service/result"
-                .into(),
-        )
-        .await?;
-    assert_eq!(response(&reply)?["status"], "accepted", "{reply}");
-    let reply = guest
-        .command(
-            "BACKEND_DEV",
-            "echo '{\"suite\":\"integration_tests\"}' > /service/await_tests; cat /service/result"
-                .into(),
-        )
+        .command("BACKEND_DEV", "cat /service/outcome".into())
         .await?;
     assert_eq!(response(&reply)?["tool_name"], "run_tests", "{reply}");
     assert_eq!(
@@ -77,11 +118,22 @@ async fn backend(guest: &process::Guest, frontend_first: &[bool]) -> Result<()> 
     );
     Ok(())
 }
-async fn tester(guest: &process::Guest) -> Result<()> {
+async fn tester(guest: &process::Guest, revisions: usize) -> Result<()> {
+    for _ in 0..revisions {
+        let ready = guest
+            .command("TESTER", "cat /service/run_tests".into())
+            .await?;
+        let candidate = response(&ready)?;
+        assert!(
+            candidate["api"].is_object()
+                && candidate["backend"].is_object()
+                && candidate["frontend"].is_object()
+        );
+    }
     let reply = guest
         .command(
             "TESTER",
-            "echo '{\"suite\":\"integration_tests\"}' > /service/run_tests; cat /service/result"
+            "echo '{\"suite\":\"integration_tests\"}' > /service/run_tests; cat /service/run_tests"
                 .into(),
         )
         .await?;
@@ -95,16 +147,37 @@ async fn tester(guest: &process::Guest) -> Result<()> {
 
 #[hibana_runtime::main]
 #[test]
-#[ignore = "requires the current coordination WASI binary, receipt, wash and original simulator"]
-async fn actual_wasi_coordination_orders_and_repeated_amendments() -> Result<()> {
-    run(vec![
-        (vec![false], 0.01),
-        (vec![true], 0.01),
-        (vec![false, true], 0.01),
-        (vec![true, false, true, false], 0.01),
-        (vec![false], 1.0),
-    ])
-    .await
+#[ignore = "requires current coordination Wasm, receipt, wash and common simulator"]
+async fn backend_first() -> Result<()> {
+    run(vec![(vec![false], 0.01)]).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires current coordination Wasm, receipt, wash and common simulator"]
+async fn frontend_first() -> Result<()> {
+    run(vec![(vec![true], 0.01)]).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires current coordination Wasm, receipt, wash and common simulator"]
+async fn one_amendment() -> Result<()> {
+    run(vec![(vec![false, true], 0.01)]).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires current coordination Wasm, receipt, wash and common simulator"]
+async fn extended_four_amendments() -> Result<()> {
+    run(vec![(vec![true, false, true, false], 0.01)]).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires current coordination Wasm, receipt, wash and common simulator"]
+async fn extended_normal_delay() -> Result<()> {
+    run(vec![(vec![false], 1.0)]).await
 }
 
 #[hibana_runtime::scope]
@@ -155,9 +228,9 @@ async fn run(cases: Vec<(Vec<bool>, f64)>) -> Result<()> {
         let (guest, runtime) = process::guest(&binary, module, &["4E"], &output, trace, simulator)?;
         let ((), (), (), result) = hibana_runtime::race(
             async {
-                async { frontend(&guest, orders.len()).await };
+                async { frontend(&guest, &orders).await };
                 async { backend(&guest, &orders).await };
-                async { tester(&guest).await };
+                async { tester(&guest, orders.len()).await };
                 async { runtime.await };
             },
             hibana_runtime::host::deadline(Duration::from_secs(180)),

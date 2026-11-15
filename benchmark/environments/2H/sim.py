@@ -3,11 +3,11 @@
 import json
 from pathlib import Path
 
-from benchmark.tools.sim_smart_building import (
+from benchmark.tools.sim_writing import (
     DraftStep,
     ReadStep,
     ReviewStep,
-    SmartBuildingSim,
+    PaperWritingSim,
     WriteStep,
 )
 
@@ -59,7 +59,7 @@ _REVIEW_STEPS = [
 ]
 
 
-class ResearchPaperSim(SmartBuildingSim):
+class ResearchPaperSim(PaperWritingSim):
     """2H: Seven researchers co-authoring a paper with 7 sections.
 
     Review is terminal (pass or fail, no retry), so review_own_work is not
@@ -68,7 +68,7 @@ class ResearchPaperSim(SmartBuildingSim):
 
     # No retry loop: review outcome is terminal regardless.
     # Overriding to empty prevents --scenario/--difficulty from injecting
-    # failures that would leave _review_done permanently False.
+    # review outcomes remain terminal domain results.
     _DECISION_TOOLS: dict = {}
 
     def __init__(self) -> None:

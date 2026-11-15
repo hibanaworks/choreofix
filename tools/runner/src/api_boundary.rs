@@ -35,12 +35,15 @@ async fn participant(guest: &process::Guest, actor: Value, depth: u8) -> Result<
     let call = &actor["calls"][0];
     let tool = call["tool"].as_str().ok_or("original tool")?;
     let invalid = guest
-        .command(
-            agent,
-            format!("echo '{{}}' > /service/{tool}; cat /service/result"),
-        )
+        .command(agent, format!("echo '{{}}' > /service/{tool}"))
         .await?;
-    assert_eq!(response(&invalid)?["status"], "invalid_arguments");
+    assert!(
+        invalid["stdout"]
+            .as_str()
+            .ok_or("rejection output")?
+            .contains("wash:"),
+        "{invalid}"
+    );
     let arguments = serde_json::to_string(&call["arguments"])?;
     let quoted = format!(
         "'{}'",
@@ -49,7 +52,7 @@ async fn participant(guest: &process::Guest, actor: Value, depth: u8) -> Result<
     let result = guest
         .command(
             agent,
-            format!("printf '%s' {quoted} > /service/{tool}; cat /service/result"),
+            format!("printf '%s' {quoted} > /service/{tool}; cat /service/{tool}"),
         )
         .await?;
     let result = response(&result)?;
@@ -143,62 +146,70 @@ async fn real_wasi_outcome_metadata_preserves_all_original_results() -> Result<(
                     async {
                         // Hold only the scripted tester input. Both actual WASI reads
                         // must wait at the file owner until the test result exists.
-                        hibana_runtime::race(async {
-                    loop {
-                        let bytes = fs::read(output.join("events.jsonl"))?;
-                        let rows = bytes
-                            .split_inclusive(|&byte| byte == b'\n')
-                            .filter(|row| row.last() == Some(&b'\n'))
-                            .map(serde_json::from_slice::<Value>)
-                            .collect::<std::result::Result<Vec<_>, _>>()?;
-                        if [(13, 11), (14, 12)].iter().all(|&(vm, owner)| {
-                            rows.iter().any(|row| {
-                                let message = &row["message"];
-                                message["type"] == "protocol_frame"
-                                    && message["action"] == "send"
-                                    && message["source"] == vm
-                                    && message["target"] == owner
-                            })
-                        }) {
-                            assert!(!rows.iter().any(|row| {
-                                let message = &row["message"];
-                                message["type"] == "execute"
-                                    && message["tool"] == "run_integration_tests"
-                            }));
-                            for (owner, vm) in [(11, 13), (12, 14)] {
-                                assert!(
-                                    !rows.iter().any(|row| {
-                                        let message = &row["message"];
-                                        message["type"] == "protocol_frame"
-                                            && message["action"] == "send"
-                                            && message["source"] == owner
-                                            && message["target"] == vm
-                                    }),
-                                    "outcome owner replied before the actual test result"
-                                );
-                            }
-                            trace.record(
+                        hibana_runtime::race(
+                            async {
+                                loop {
+                                    let bytes = fs::read(output.join("events.jsonl"))?;
+                                    let rows = bytes
+                                        .split_inclusive(|&byte| byte == b'\n')
+                                        .filter(|row| row.last() == Some(&b'\n'))
+                                        .map(serde_json::from_slice::<Value>)
+                                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                                    if [(13, 11), (14, 12)].iter().all(|&(vm, owner)| {
+                                        rows.iter().any(|row| {
+                                            let message = &row["message"];
+                                            message["type"] == "protocol_frame"
+                                                && message["action"] == "send"
+                                                && message["source"] == vm
+                                                && message["target"] == owner
+                                                && message["payload"].as_array().is_some_and(
+                                                    |bytes| {
+                                                        bytes.len() == 14 + b"service/outcome".len()
+                                                    },
+                                                )
+                                        })
+                                    }) {
+                                        assert!(!rows.iter().any(|row| {
+                                            let message = &row["message"];
+                                            message["type"] == "execute"
+                                                && message["tool"] == "run_integration_tests"
+                                        }));
+                                        for (owner, vm) in [(23, 13), (24, 14)] {
+                                            assert!(
+                                                !rows.iter().any(|row| {
+                                                    let message = &row["message"];
+                                                    message["type"] == "protocol_frame"
+                                                        && message["action"] == "send"
+                                                        && message["source"] == owner
+                                                        && message["target"] == vm
+                                                }),
+                                                "outcome read replied before the actual test result"
+                                            );
+                                        }
+                                        trace.record(
                                 "test_control",
-                                &json!({"type":"both_outcome_reads_pending","model_calls":0}),
+                                &json!({"type":"both_outcome_opens_before_test","model_calls":0}),
                             )?;
-                            break;
-                        }
-                        // Transport observations are flushed with terminal I/O.
-                        // Private work also exercises another guest while both
-                        // outcome reads wait for the withheld test operation.
-                        let private = guest
-                            .command("TESTER", "echo pending-read-observation".into())
-                            .await?;
-                        assert!(
-                            private["stdout"]
-                                .as_str()
-                                .ok_or("private tester output")?
-                                .contains("pending-read-observation")
-                        );
-                    }
-                    Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
-                }, hibana_runtime::host::deadline(Duration::from_secs(10)))
-                .await?;
+                                        break;
+                                    }
+                                    // Transport observations are flushed with terminal I/O.
+                                    // Private work also exercises another guest while both
+                                    // outcome reads wait for the withheld test operation.
+                                    let private = guest
+                                        .command("TESTER", "echo pending-read-observation".into())
+                                        .await?;
+                                    assert!(
+                                        private["stdout"]
+                                            .as_str()
+                                            .ok_or("private tester output")?
+                                            .contains("pending-read-observation")
+                                    );
+                                }
+                                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+                            },
+                            hibana_runtime::host::deadline(Duration::from_secs(10)),
+                        )
+                        .await?;
                         participant(&guest, tester.clone(), depth).await
                     };
                 })
@@ -238,7 +249,7 @@ async fn real_wasi_outcome_metadata_preserves_all_original_results() -> Result<(
             .lines()
             .map(serde_json::from_str)
             .collect::<std::result::Result<_, _>>()?;
-        for (io, owner) in [(8, 11), (9, 12)] {
+        for (io, owner) in [(13, 11), (14, 12)] {
             let forwarded = frames
                 .iter()
                 .filter(|row| {

@@ -79,7 +79,6 @@ pub fn linked(result: &Value, objects: &[Value; 2]) -> ShellResult<()> {
         || data["binary"]["bytes"]
             .as_str()
             .is_none_or(|bytes| decode(bytes.as_bytes()).ok().as_ref() != Some(&inputs))
-        || objects[0]["inputs"]["SHARED_TYPES"] != objects[1]["inputs"]["SHARED_TYPES"]
     {
         return Err(ShellError::message(
             "linked binary differs from the completed current objects",

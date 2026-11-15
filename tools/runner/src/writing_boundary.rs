@@ -1,12 +1,13 @@
 //! Shell stimuli for actual section-delegating Wasm guests and original tasks.
 use crate::{
     evidence::{Result, Trace, archive_build_receipt, digest, save},
-    oracle, process, writing_audit,
+    oracle, process,
 };
 use serde_json::{Value, json};
 use std::{
     fs,
     path::{Path, PathBuf},
+    process::{Command, Stdio},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 fn response(reply: &Value) -> Result<Value> {
@@ -22,10 +23,22 @@ fn response(reply: &Value) -> Result<Value> {
 }
 async fn participant(guest: &process::Guest, actor: Value, terminal: bool) -> Result<()> {
     let agent = actor["agent"].as_str().ok_or("agent")?;
-    let early = guest
-        .command(agent, "echo '{}' > /service/write_to_document".into())
-        .await?;
-    assert!(early["stdout"].as_str().ok_or("stdout")?.contains("wash:"));
+    for call in actor["calls"].as_array().ok_or("calls")?.iter().skip(1) {
+        let early = guest
+            .command(
+                agent,
+                format!(
+                    "echo '{}' > /service/{}",
+                    serde_json::to_string(&call["arguments"])?,
+                    call["tool"].as_str().ok_or("tool")?
+                ),
+            )
+            .await?;
+        assert!(
+            early["stdout"].as_str().ok_or("stdout")?.contains("wash:"),
+            "{early}"
+        );
+    }
     let private = guest
         .command(
             agent,
@@ -36,12 +49,15 @@ async fn participant(guest: &process::Guest, actor: Value, terminal: bool) -> Re
     for call in actor["calls"].as_array().ok_or("calls")? {
         let tool = call["tool"].as_str().ok_or("tool")?;
         let rejected = guest
-            .command(
-                agent,
-                format!("echo '{{}}' > /service/{tool}; cat /service/result"),
-            )
+            .command(agent, format!("echo '{{}}' > /service/{tool}"))
             .await?;
-        assert_eq!(response(&rejected)?["status"], "invalid_arguments");
+        assert!(
+            rejected["stdout"]
+                .as_str()
+                .ok_or("stdout")?
+                .contains("wash:"),
+            "{rejected}"
+        );
         let key = call["arguments"]
             .as_object()
             .ok_or("arguments")?
@@ -50,12 +66,15 @@ async fn participant(guest: &process::Guest, actor: Value, terminal: bool) -> Re
             .ok_or("key")?;
         let wrong = serde_json::to_string(&json!({key:"a_different_object"}))?;
         let rejected = guest
-            .command(
-                agent,
-                format!("echo '{wrong}' > /service/{tool}; cat /service/result"),
-            )
+            .command(agent, format!("echo '{wrong}' > /service/{tool}"))
             .await?;
-        assert_eq!(response(&rejected)?["status"], "invalid_arguments");
+        assert!(
+            rejected["stdout"]
+                .as_str()
+                .ok_or("stdout")?
+                .contains("wash:"),
+            "{rejected}"
+        );
         let mut arguments = call["arguments"].clone();
         if tool == "write_to_document" {
             let duplicate = json!({"sections":format!("{},{}",arguments["sections"].as_str().ok_or("sections")?,actor["sections"][0].as_str().ok_or("section")?)});
@@ -63,12 +82,18 @@ async fn participant(guest: &process::Guest, actor: Value, terminal: bool) -> Re
                 .command(
                     agent,
                     format!(
-                        "echo '{}' > /service/{tool}; cat /service/result",
+                        "echo '{}' > /service/{tool}",
                         serde_json::to_string(&duplicate)?
                     ),
                 )
                 .await?;
-            assert_eq!(response(&rejected)?["status"], "invalid_arguments");
+            assert!(
+                rejected["stdout"]
+                    .as_str()
+                    .ok_or("stdout")?
+                    .contains("wash:"),
+                "{rejected}"
+            );
             let mut names: Vec<_> = arguments["sections"]
                 .as_str()
                 .unwrap()
@@ -83,7 +108,7 @@ async fn participant(guest: &process::Guest, actor: Value, terminal: bool) -> Re
         let reply = guest
             .command(
                 agent,
-                format!("printf '%s' '{encoded}' > /service/{tool}; cat /service/result"),
+                format!("printf '%s' '{encoded}' > /service/{tool}; cat /service/{tool}"),
             )
             .await?;
         assert_eq!(
@@ -101,6 +126,29 @@ async fn participant(guest: &process::Guest, actor: Value, terminal: bool) -> Re
             .await?;
         assert!(duplicate["stdout"].as_str().unwrap().contains("wash:"));
     }
+    for call in actor["calls"].as_array().ok_or("calls")? {
+        let late = guest
+            .command(
+                agent,
+                format!(
+                    "echo '{}' > /service/{}",
+                    serde_json::to_string(&call["arguments"])?,
+                    call["tool"].as_str().ok_or("tool")?
+                ),
+            )
+            .await?;
+        assert!(
+            late["stdout"].as_str().ok_or("stdout")?.contains("wash:"),
+            "{late}"
+        );
+    }
+    let private = guest
+        .command(
+            agent,
+            "expr 8 + 5 > /work/finished; cat /work/finished".into(),
+        )
+        .await?;
+    assert!(private["stdout"].as_str().ok_or("stdout")?.contains("13\n"));
     assert_eq!(
         guest.command(agent, "exit 0".into()).await?["exit_status"],
         0
@@ -112,7 +160,62 @@ async fn inputs<const N: usize>(
     guest: &process::Guest,
     actors: [Value; N],
     terminal: bool,
+    controlled_overlap: bool,
 ) -> Result<()> {
+    if controlled_overlap {
+        // Test stimuli synchronize completed preparation, so rejected-input
+        // processing cannot obscure the actual independent effect intervals.
+        // Production guests and localsides have no test barrier.
+        async {
+            for actor in actors.clone() {
+                async move {
+                    let agent = actor["agent"].as_str().ok_or("agent")?;
+                    for call in actor["calls"].as_array().ok_or("calls")?.iter().take(2) {
+                        let tool = call["tool"].as_str().ok_or("tool")?;
+                        let reply = guest
+                            .command(
+                                agent,
+                                format!(
+                                    "echo '{}' > /service/{tool}; cat /service/{tool}",
+                                    serde_json::to_string(&call["arguments"])?
+                                ),
+                            )
+                            .await?;
+                        assert_eq!(response(&reply)?["success"], true, "{reply}");
+                    }
+                };
+            }
+            Ok(())
+        }
+        .await?;
+        async {
+            for actor in actors {
+                async move {
+                    let agent = actor["agent"].as_str().ok_or("agent")?;
+                    for call in actor["calls"].as_array().ok_or("calls")?.iter().skip(2) {
+                        let tool = call["tool"].as_str().ok_or("tool")?;
+                        let reply = guest
+                            .command(
+                                agent,
+                                format!(
+                                    "echo '{}' > /service/{tool}; cat /service/{tool}",
+                                    serde_json::to_string(&call["arguments"])?
+                                ),
+                            )
+                            .await?;
+                        assert_eq!(response(&reply)?["success"], true, "{reply}");
+                    }
+                    assert_eq!(
+                        guest.command(agent, "exit 0".into()).await?["exit_status"],
+                        0
+                    );
+                };
+            }
+            Ok(())
+        }
+        .await?;
+        return Ok(());
+    }
     for actor in actors {
         async move {
             participant(guest, actor, terminal).await?;
@@ -123,7 +226,7 @@ async fn inputs<const N: usize>(
 
 #[hibana_runtime::main]
 #[test]
-#[ignore = "requires source-qualified writing binary, actual wash and unchanged 3/5/7-person simulators"]
+#[ignore = "requires source-qualified writing binary, actual wash and common 3/5/7-person worlds"]
 async fn all_writing_levels_use_actual_section_endpoints() -> Result<()> {
     std::env::set_current_dir(
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -146,6 +249,8 @@ async fn all_writing_levels_use_actual_section_endpoints() -> Result<()> {
     ));
     fs::create_dir(&directory)?;
     let receipt = archive_build_receipt(&runtime, &receipt_path, &directory)?;
+    let auditor = PathBuf::from(std::env::var_os("CHOREOFIX_AUDITOR").ok_or("writing auditor")?)
+        .canonicalize()?;
     let mut cases = Vec::new();
     for task in ["2E", "2M", "2H"] {
         for (name, depth, delay, terminal) in [
@@ -169,7 +274,8 @@ async fn all_writing_levels_use_actual_section_endpoints() -> Result<()> {
             save(
                 &output.join("case.json"),
                 &json!({"task":task,"depth":depth,"domain_delay_multiplier":delay,"external_failure_specs":failures,
-                "test_barriers":"none","model_calls":0,"scored_benchmark":false,"build":receipt,"wasm_sha256":digest(wasm)?,
+                "test_barriers":if delay == 1.0 { "shell stimuli wait for all actual literature and draft results before submitting writes" } else { "none" },"model_calls":0,"scored_benchmark":false,"build":receipt,"wasm_sha256":digest(wasm)?,
+                "auditor_binary_sha256":digest(&auditor)?,
                 "runtime_binary_sha256":projection["runtime_binary_sha256"],
                 "compiled_projection_sha256":digest(&output.join("projection.json"))?,
                 "harness_binary_sha256":digest(&std::env::current_exe()?)?,"harness_source_sha256":digest(Path::new("tools/runner/src/writing_boundary.rs"))?,
@@ -188,6 +294,7 @@ async fn all_writing_levels_use_actual_section_endpoints() -> Result<()> {
                                     <[Value; 3]>::try_from(actors)
                                         .map_err(|_| "writing actor count")?,
                                     terminal,
+                                    delay == 1.0,
                                 )
                                 .await?
                             }
@@ -197,6 +304,7 @@ async fn all_writing_levels_use_actual_section_endpoints() -> Result<()> {
                                     <[Value; 5]>::try_from(actors)
                                         .map_err(|_| "writing actor count")?,
                                     terminal,
+                                    delay == 1.0,
                                 )
                                 .await?
                             }
@@ -206,6 +314,7 @@ async fn all_writing_levels_use_actual_section_endpoints() -> Result<()> {
                                     <[Value; 7]>::try_from(actors)
                                         .map_err(|_| "writing actor count")?,
                                     terminal,
+                                    delay == 1.0,
                                 )
                                 .await?
                             }
@@ -222,7 +331,25 @@ async fn all_writing_levels_use_actual_section_endpoints() -> Result<()> {
             assert_eq!(result["protocol"]["status"], "complete");
             assert_eq!(result["score"]["complete"], !terminal);
             assert_eq!(result["score"]["violations"], json!([]));
-            let audit = writing_audit::audit(&output.join("events.jsonl"))?;
+            save(&output.join("result.json"), &result)?;
+            let status = Command::new(&auditor)
+                .arg("--check-writing-mutants")
+                .arg(output.join("events.jsonl"))
+                .arg(output.join("mutants"))
+                .stdout(Stdio::from(fs::File::create(output.join("mutants.log"))?))
+                .stderr(Stdio::from(fs::File::create(
+                    output.join("mutants-stderr.log"),
+                )?))
+                .status()?;
+            if !status.success() {
+                return Err(
+                    format!("writing audit failed ({status}): {}", output.display()).into(),
+                );
+            }
+            fs::copy(output.join("mutants/audit.json"), output.join("audit.json"))?;
+            let audit: Value = serde_json::from_slice(&fs::read(output.join("audit.json"))?)?;
+            assert_eq!(audit["status"], "passed");
+            assert_eq!(audit["dynamic_protocol"]["status"], "passed");
             if delay == 1.0 {
                 assert_eq!(
                     audit["max_disjoint_writes"],
@@ -235,12 +362,8 @@ async fn all_writing_levels_use_actual_section_endpoints() -> Result<()> {
                     "{audit}"
                 );
             }
-            let mutants = writing_audit::check_mutants(
-                &output.join("events.jsonl"),
-                &output.join("mutants"),
-            )?;
-            save(&output.join("audit.json"), &audit)?;
-            save(&output.join("result.json"), &result)?;
+            let mutants: Value =
+                serde_json::from_slice(&fs::read(output.join("mutants/summary.json"))?)?;
             cases.push(
                 json!({"task":task,"case":name,"audit":audit,"mutants":mutants,"runtime":result}),
             );
@@ -250,6 +373,11 @@ async fn all_writing_levels_use_actual_section_endpoints() -> Result<()> {
             )?;
         }
     }
+    assert_eq!(cases.len(), 15);
+    save(
+        &directory.join("summary.json"),
+        &json!({"status":"passed","cases":cases,"model_calls":0,"scored_benchmark":false}),
+    )?;
     println!("{}", directory.display());
     Ok(())
 }

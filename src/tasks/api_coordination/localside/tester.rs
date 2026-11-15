@@ -1,146 +1,158 @@
-use super::super::{global::*, imp};
-use crate::shell::{
-    ShellError, ShellResult,
-    global::Exit as IoExit,
-    imp::file_wire::{ClosedFile, ResultChunk, ResultChunkMsg, SERVICE_FD},
+use super::super::{
+    global::*,
+    imp::{self, Arguments},
 };
-use hibana_wasip1_runtime::{FileBoundary, HibanaWasiGuest, WasiImportCompletion, protocol};
-use serde_json::json;
+use crate::shell::{ShellError, ShellResult, imp::file_data::FileData};
+use hibana::Endpoint;
+use hibana_wasip1_runtime::protocol;
 
 #[hibana_runtime::scope]
-pub async fn run(
-    mut guest: &mut HibanaWasiGuest,
-    endpoint: &mut hibana::Endpoint<TESTER>,
-) -> ShellResult<i32> {
-    let [mut task, mut private] = endpoint.par()?;
-    let (_candidate, mut call) = async {
-        async { Ok::<_, ShellError>(task.recv::<Ready>().await?.to_vec()) };
-        async {
-            match guest
-                .next_file::<ClosedFile, TESTER>(&mut private, SERVICE_FD)
-                .await?
-            {
-                FileBoundary::Exit(_) => Err(ShellError::message("tester exited before testing")),
-                call => Ok(call),
-            }
-        };
-    }
-    .await?;
-    loop {
-        match call {
-            FileBoundary::Exit(_) => {
-                return Err(ShellError::message("tester exited before testing"));
-            }
-            FileBoundary::Closed { pending, file } => {
-                let requested = file.arguments(b"service/run_tests", "suite").and_then(|v| {
-                    imp::arguments(
-                        &serde_json::to_vec(&v).map_err(|e| ShellError::message(e.to_string()))?,
-                        "suite",
-                        "integration_tests",
-                    )
-                });
-                let (reply, errno) = match &requested {
-                    Err(error) => (
-                        json!({"status":"invalid_arguments","error":error.to_string()}),
-                        28,
-                    ),
-                    Ok(arguments) => {
-                        let (mut repo, mut environment) = async {
-                            let [mut r, mut e] = task.par()?;
-                            async { Ok::<_, ShellError>(r.recv::<RepoLoan>().await?) };
-                            async { Ok::<_, ShellError>(e.recv::<TestLoan>().await?) };
-                        }
+pub async fn run<'run>(
+    io: &mut Endpoint<'run, TESTER_OWNER>,
+    file: Endpoint<'run, TESTER_FILE>,
+) -> ShellResult<()> {
+    let mut data = FileData::new(TESTER_OBJECT);
+    let mut operation = io.recv::<Loan<TESTER_CLOSE>>().await?;
+    io.send::<Loan<TESTER_FILE>>(file).await?;
+
+    let status = loop {
+        let incoming = hibana_runtime::race(
+            async {
+                Ok::<_, ShellError>(core::ops::ControlFlow::Continue(io.offer().await?.label()))
+            },
+            async {
+                let request = operation.recv::<protocol::FdCloseObjectReqMsg>().await?;
+                Ok::<_, ShellError>(core::ops::ControlFlow::Break(
+                    data.objects().choreofs().fd_close(request),
+                ))
+            },
+        )
+        .await?;
+        match incoming {
+            core::ops::ControlFlow::Continue(label) => match label {
+                241 => break io.recv::<FileExit>().await?,
+                protocol::LABEL_WASI_PATH_OPEN => {
+                    let received = io.recv::<protocol::PathOpenReqMsg>().await?;
+                    let response = data.open(received);
+                    io.send::<protocol::PathOpenRetMsg>(&response).await?;
+                }
+                protocol::LABEL_WASI_FD_WRITE_OBJECT => {
+                    let received = io.recv::<protocol::FdWriteObjectReqMsg>().await?;
+                    let response = data.write(received)?;
+                    io.send::<protocol::FdWriteObjectRetMsg>(&response).await?;
+                }
+
+                protocol::LABEL_WASI_FD_PRESTAT_GET => {
+                    let request = io.recv::<protocol::FdPrestatGetReqMsg>().await?;
+                    let response = protocol::FdPrestatRet(protocol::FdPrestat::new_with_errno(
+                        request.0.fd(),
+                        0,
+                        8,
+                    ));
+                    io.send::<protocol::FdPrestatGetRetMsg>(&response).await?;
+                }
+                protocol::LABEL_WASI_FD_PRESTAT_DIR_NAME => {
+                    let request = io.recv::<protocol::FdPrestatDirNameReqMsg>().await?;
+                    let response = protocol::FdPrestatDirNameRet(
+                        protocol::FdPrestatDirNameDone::new(request.0.fd(), b"", 8)?,
+                    );
+                    io.send::<protocol::FdPrestatDirNameRetMsg>(&response)
                         .await?;
-                        let bytes = serde_json::to_vec(arguments)
-                            .map_err(|e| ShellError::message(e.to_string()))?;
-                        let (from_repo, from_environment) = async {
-                            async {
-                                repo.send::<ReadForTests>(&bytes.as_slice()).await?;
-                                Ok::<_, ShellError>(repo.recv::<RepositoryTested>().await?.to_vec())
-                            };
-                            async {
-                                environment.send::<RunTests>(&bytes.as_slice()).await?;
-                                Ok::<_, ShellError>(
-                                    environment.recv::<EnvironmentTested>().await?.to_vec(),
-                                )
-                            };
-                        }
+                }
+                protocol::LABEL_WASI_FD_READDIR => {
+                    let request = io.recv::<protocol::FdReaddirReqMsg>().await?;
+                    let response = data.objects().choreofs().fd_readdir(request).read_dir()?;
+                    io.send::<protocol::FdReaddirRetMsg>(&response).await?;
+                }
+                protocol::LABEL_WASI_FD_FDSTAT_GET => {
+                    let request = io.recv::<protocol::FdFdstatGetReqMsg>().await?;
+                    let response = data.objects().choreofs().fd_fdstat_get(request);
+                    io.send::<protocol::FdFdstatGetRetMsg>(&response).await?;
+                }
+                protocol::LABEL_WASI_FD_FILESTAT_GET => {
+                    let request = io.recv::<protocol::FdFilestatGetReqMsg>().await?;
+                    let response = data.objects().choreofs().fd_filestat_get(request);
+                    io.send::<protocol::FdFilestatGetRetMsg>(&response).await?;
+                }
+                protocol::LABEL_WASI_PATH_FILESTAT_GET => {
+                    let request = io.recv::<protocol::PathFilestatGetReqMsg>().await?;
+                    let response = data.objects().choreofs().path_filestat_get(request);
+                    io.send::<protocol::PathFilestatGetRetMsg>(&response)
                         .await?;
-                        if from_repo != from_environment {
-                            return Err(ShellError::message("resource test results differ"));
-                        }
-                        async {
-                            let [mut r, mut e] = task.par()?;
-                            async {
-                                r.send::<RepoLoan>(repo).await?;
-                            };
-                            async {
-                                e.send::<TestLoan>(environment).await?;
-                            };
-                            Ok(())
-                        }
-                        .await?;
-                        (
-                            serde_json::from_slice(&from_repo)
-                                .map_err(|e| ShellError::message(e.to_string()))?,
-                            0,
-                        )
+                }
+                protocol::LABEL_WASI_FD_CLOSE => {
+                    let request = io.recv::<protocol::FdCloseReqMsg>().await?;
+                    let response = data.objects().choreofs().fd_close(request);
+                    io.send::<protocol::FdCloseRetMsg>(&response).await?;
+                }
+                label => {
+                    return Err(ShellError::message(format!(
+                        "unexpected file metadata request {label}"
+                    )));
+                }
+            },
+            core::ops::ControlFlow::Break(close) => {
+                let admitted = match if close.0.errno() == 0 {
+                    Arguments::<{ imp::TEST }>::from_bytes(&data.bytes)
+                } else {
+                    Err(ShellError::message("invalid file descriptor"))
+                } {
+                    Ok(value) => value,
+                    Err(_) => {
+                        operation
+                            .send::<protocol::FdCloseRejectedRetMsg>(
+                                &protocol::FdCloseRejectedRet::new(close.0.fd(), 28)?,
+                            )
+                            .await?;
+                        continue;
                     }
                 };
-
-                let bytes =
-                    serde_json::to_vec(&reply).map_err(|e| ShellError::message(e.to_string()))?;
-                for (index, chunk) in bytes.chunks(protocol::WASIP1_IO_CHUNK_CAPACITY).enumerate() {
-                    private
-                        .send::<ResultChunkMsg>(&ResultChunk::new(
-                            index * protocol::WASIP1_IO_CHUNK_CAPACITY,
-                            chunk,
-                        )?)
-                        .await?;
+                let arguments = admitted;
+                operation.send::<TestIntent>(&arguments).await?;
+                let (mut repository, mut environment) = async {
+                    let [mut r, mut e] = operation.par()?;
+                    async { r.recv::<Loan<REPO>>().await };
+                    async { e.recv::<Loan<TEST_ENV>>().await };
                 }
-                guest = pending.complete(WasiImportCompletion::FdClose(protocol::FdClosedRet(
-                    protocol::FdClosed::new_with_errno(SERVICE_FD, errno),
-                )))?;
-
-                if requested.is_ok() {
-                    break;
+                .await?;
+                let (from_repository, from_environment) = async {
+                    async {
+                        repository.send::<ReadForTests>(&arguments).await?;
+                        Ok::<_, ShellError>(repository.recv::<RepositoryTested>().await?.to_vec())
+                    };
+                    async {
+                        environment.send::<RunTests>(&arguments).await?;
+                        Ok::<_, ShellError>(environment.recv::<EnvironmentTested>().await?.to_vec())
+                    };
                 }
+                .await?;
+                if from_repository != from_environment {
+                    return Err(ShellError::message("resource test replies differ"));
+                }
+                async {
+                    let [mut r, mut e] = operation.par()?;
+                    async {
+                        r.send::<Loan<REPO>>(repository).await?;
+                    };
+                    async {
+                        e.send::<Loan<TEST_ENV>>(environment).await?;
+                    };
+                    Ok(())
+                }
+                .await?;
+                data.replace(
+                    serde_json::from_slice(&from_repository)
+                        .map_err(|error| ShellError::message(error.to_string()))?,
+                )?;
+                operation
+                    .send::<protocol::FdCloseObjectRetMsg>(&close)
+                    .await?;
+                operation.send::<Ready>(&from_repository.as_slice()).await?;
             }
         }
-        call = guest
-            .next_file::<ClosedFile, TESTER>(&mut private, SERVICE_FD)
-            .await?;
+    };
+    if status != 0 {
+        return Err(ShellError::message(format!("guest exited with {status}")));
     }
-    drop(task);
-    loop {
-        match guest
-            .next_file::<ClosedFile, TESTER>(&mut private, SERVICE_FD)
-            .await?
-        {
-            FileBoundary::Closed { pending, .. } => {
-                let reply =
-                    json!({"status":"out_of_order","error":"the test Endpoint has completed"});
-                let errno = 8;
-
-                let bytes =
-                    serde_json::to_vec(&reply).map_err(|e| ShellError::message(e.to_string()))?;
-                for (index, chunk) in bytes.chunks(protocol::WASIP1_IO_CHUNK_CAPACITY).enumerate() {
-                    private
-                        .send::<ResultChunkMsg>(&ResultChunk::new(
-                            index * protocol::WASIP1_IO_CHUNK_CAPACITY,
-                            chunk,
-                        )?)
-                        .await?;
-                }
-                guest = pending.complete(WasiImportCompletion::FdClose(protocol::FdClosedRet(
-                    protocol::FdClosed::new_with_errno(SERVICE_FD, errno),
-                )))?;
-            }
-            FileBoundary::Exit(exit) => {
-                let status = exit.status() as i32;
-                private.send::<IoExit>(&status).await?;
-                return Ok(status);
-            }
-        }
-    }
+    Ok(())
 }

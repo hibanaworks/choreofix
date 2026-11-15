@@ -1,13 +1,9 @@
-//! Direct requests and actual results, with independent dishes driven concurrently.
+//! Receive the actual operation-file request and return the real effect.
 use super::super::{global::*, imp};
-use crate::shell::{
-    ShellError, ShellResult,
-    imp::{bus::Bus, service::Domain},
-};
+use crate::shell::{ShellError, ShellResult, imp::service::Domain};
 use hibana::Endpoint;
-
 #[hibana_runtime::scope]
-pub async fn run(endpoint: &mut Endpoint<FINISH>, domain: &Bus) -> ShellResult<()> {
+pub async fn run(endpoint: &mut Endpoint<FINISH>, domain: &impl Domain) -> ShellResult<()> {
     let [mut a, mut b, mut c] = endpoint.par()?;
     async {
         let arguments = a.recv::<CombineA>().await?.value();

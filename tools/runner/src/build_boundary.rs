@@ -22,15 +22,53 @@ fn response(reply: &Value) -> Result<Value> {
         .map_err(Into::into)
 }
 
-async fn builder(
+async fn compile(
     guest: &process::Guest,
     (agent, module): (&str, &str),
     adversarial: bool,
-) -> Result<()> {
+) -> Result<Value> {
+    if agent == "BUILDER_B" {
+        let update = guest
+            .command(agent, "dd if=/service/updates iflag=nonblock".into())
+            .await?;
+        if update["stdout"]
+            .as_str()
+            .ok_or("type update output")?
+            .contains("wash:")
+        {
+            // Before A's actual result exists, the initial B request remains
+            // legal and its old object will require a later real update.
+            assert!(
+                update["stdout"]
+                    .as_str()
+                    .ok_or("type update rejection")?
+                    .contains("(os error 2)")
+                    || update["stdout"]
+                        .as_str()
+                        .ok_or("nonblocking type update output")?
+                        .contains("(os error 6)"),
+                "unexpected update read failure: {update}"
+            );
+        } else {
+            let update = response(&update)?;
+            assert_eq!(update["success"], true);
+            assert_eq!(update["data"]["agent"], "BUILDER_A");
+        }
+    }
     if adversarial {
-        let bad = guest.command(agent,
-            "echo '{\"module_name\":\"outside\"}' > /service/compile_module; cat /service/result".into()).await?;
-        assert_eq!(response(&bad)?["status"], "invalid_arguments");
+        let bad = guest
+            .command(
+                agent,
+                "echo '{\"module_name\":\"outside\"}' > /service/compile_module".into(),
+            )
+            .await?;
+        assert!(
+            bad["stdout"]
+                .as_str()
+                .ok_or("rejected write output")?
+                .contains("wash:"),
+            "{bad}"
+        );
         let private = guest
             .command(
                 agent,
@@ -44,33 +82,47 @@ async fn builder(
                 .contains("private calculation")
         );
     }
+    let arguments = json!({"module_name":module});
+    let reply = guest
+        .command(
+            agent,
+            format!(
+                "printf '%s' '{arguments}' > /service/compile_module; cat /service/compile_module"
+            ),
+        )
+        .await?;
+    let actual = response(&reply)?;
+    assert_eq!(actual["tool_name"], "compile_module");
+    assert_eq!(actual["success"], true, "{reply}");
+    Ok(actual)
+}
+
+async fn builder(
+    guest: &process::Guest,
+    (agent, module, adversarial): (&str, &str, bool),
+    mut actual: Value,
+) -> Result<()> {
     loop {
-        let arguments = json!({"module_name":module});
-        let reply = guest
-            .command(
-                agent,
-                format!("printf '%s' '{arguments}' > /service/compile_module; cat /service/result"),
-            )
-            .await?;
-        let actual = response(&reply)?;
-        assert_eq!(actual["tool_name"], "compile_module");
-        assert_eq!(actual["success"], true, "{reply}");
         // Actual returned type contents distinguish B's old initial object
         // from a current build. There is no simulated participant-stage flag.
         if actual["data"]["object"]["inputs"]["SHARED_TYPES"]["modules"]["module_a"].is_string() {
             break;
         }
         assert_eq!(agent, "BUILDER_B", "A's build must produce the new types");
+        actual = compile(guest, (agent, module), false).await?;
     }
     if adversarial {
         let args = json!({"module_name":module});
         let again = guest
-            .command(
-                agent,
-                format!("echo '{args}' > /service/compile_module; cat /service/result"),
-            )
+            .command(agent, format!("echo '{args}' > /service/compile_module"))
             .await?;
-        assert_eq!(response(&again)?["status"], "out_of_order");
+        assert!(
+            again["stdout"]
+                .as_str()
+                .ok_or("duplicate write output")?
+                .contains("wash:"),
+            "{again}"
+        );
     }
     assert_eq!(
         guest.command(agent, "exit 0".into()).await?["exit_status"],
@@ -81,16 +133,38 @@ async fn builder(
 
 async fn integrator(guest: &process::Guest, adversarial: bool) -> Result<()> {
     if adversarial {
-        let bad = guest.command("INTEGRATOR", "echo '{\"modules\":\"module_a,module_a\"}' > /service/link_modules; cat /service/result".into()).await?;
-        assert_eq!(response(&bad)?["status"], "invalid_arguments");
+        let bad = guest
+            .command(
+                "INTEGRATOR",
+                "echo '{\"modules\":\"module_a,module_a\"}' > /service/link_modules".into(),
+            )
+            .await?;
+        assert!(
+            bad["stdout"]
+                .as_str()
+                .ok_or("rejected link output")?
+                .contains("wash:"),
+            "{bad}"
+        );
     }
-    let reply = guest.command("INTEGRATOR", "echo '{\"modules\":\"module_b,module_a\"}' > /service/link_modules; cat /service/result".into()).await?;
+    let reply = guest.command("INTEGRATOR", "echo '{\"modules\":\"module_b,module_a\"}' > /service/link_modules; cat /service/link_modules".into()).await?;
     let actual = response(&reply)?;
     assert_eq!(actual["success"], true, "{reply}");
     assert_eq!(actual["data"]["status"], "linked");
     if adversarial {
-        let duplicate = guest.command("INTEGRATOR", "echo '{\"modules\":\"module_a,module_b\"}' > /service/link_modules; cat /service/result".into()).await?;
-        assert_eq!(response(&duplicate)?["status"], "out_of_order");
+        let duplicate = guest
+            .command(
+                "INTEGRATOR",
+                "echo '{\"modules\":\"module_a,module_b\"}' > /service/link_modules".into(),
+            )
+            .await?;
+        assert!(
+            duplicate["stdout"]
+                .as_str()
+                .ok_or("duplicate link output")?
+                .contains("wash:"),
+            "{duplicate}"
+        );
     }
     assert_eq!(
         guest.command("INTEGRATOR", "exit 0".into()).await?["exit_status"],
@@ -136,19 +210,32 @@ async fn both_first_builders_rebuild_current_types_and_reject_invalid_or_duplica
             &output.join("case.json"),
             &json!({"task":"10E","depth":depth,"initial_builder":first,
             "adversarial_inputs":adversarial,"model_calls":0,"scored_benchmark":false,
+            "initial_order_control":"actual_shell_commands",
             "build":receipt,"runtime_binary_sha256":digest(&binary)?,"guest_wasm_sha256":digest(module)?,
             "compiled_projection_sha256":digest(&output.join("projection.json"))?,"test_barriers":"none"}),
         )?;
         let trace = Trace::create(&output.join("events.jsonl"))?;
         let (simulator, _) = oracle::Simulator::new("10E", depth, 0.01, trace.clone(), &[])?;
         let (guest, runtime) =
-            process::guest(&binary, module, &["10E", first], &output, trace, simulator)?;
+            process::guest(&binary, module, &["10E"], &output, trace, simulator)?;
         let ((), result) = hibana_runtime::race(
             async {
                 async {
-                    async { builder(&guest, ("BUILDER_A", "module_a"), adversarial).await };
-                    async { builder(&guest, ("BUILDER_B", "module_b"), adversarial).await };
                     async { integrator(&guest, adversarial).await };
+                    // Select the fixture's order with actual shell requests,
+                    // never a runtime argument or resolver override. Both
+                    // initial results exist before B considers a stale rebuild.
+                    let (a, b) = if first == "BUILDER_A" {
+                        let a = compile(&guest, ("BUILDER_A", "module_a"), adversarial).await?;
+                        let b = compile(&guest, ("BUILDER_B", "module_b"), adversarial).await?;
+                        (a, b)
+                    } else {
+                        let b = compile(&guest, ("BUILDER_B", "module_b"), adversarial).await?;
+                        let a = compile(&guest, ("BUILDER_A", "module_a"), adversarial).await?;
+                        (a, b)
+                    };
+                    async { builder(&guest, ("BUILDER_A", "module_a", adversarial), a).await };
+                    async { builder(&guest, ("BUILDER_B", "module_b", adversarial), b).await };
                     Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
                 };
                 async { runtime.await };
@@ -179,6 +266,7 @@ async fn both_first_builders_rebuild_current_types_and_reject_invalid_or_duplica
             &output.join("record-mutants"),
         )?;
         outcomes.push(json!({"case":output,"task":"10E","depth":depth,"initial_builder":first,
+            "initial_order_control":"actual_shell_commands",
             "adversarial_inputs":adversarial,"protocol_complete":true,"common_score_complete":true,
             "audit":checked,"record_mutants_rejected":mutants["checked"].as_array().ok_or("build mutants")?.len()}));
     }

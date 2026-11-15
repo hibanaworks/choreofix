@@ -1,154 +1,134 @@
-//! Physical owners execute only the actual requests carried by their sole Endpoints.
-use super::super::global::*;
+//! Direct receivers own actual report data and apply only admitted requests.
+use super::super::{global::*, imp};
 use crate::shell::{ShellError, ShellResult, imp::service::Domain};
-use hibana::Endpoint;
-use serde_json::Value;
+use hibana::{Endpoint, g::Message};
+use serde_json::{Value, json};
 
-pub async fn document<'r, D: Domain>(
-    endpoint: &mut Endpoint<'r, DOCUMENT_SERVICE>,
-    mut document: Endpoint<'r, DOCUMENT>,
-    domain: &D,
+#[hibana_runtime::scope]
+pub async fn document<'run>(
+    endpoint: &mut Endpoint<'run, DOCUMENT_SERVICE>,
+    document: Endpoint<'run, DOCUMENT>,
+    domain: &impl Domain,
 ) -> ShellResult<()> {
-    let admitted = endpoint.recv::<WriteA>().await?.into_value();
     endpoint.send::<DocumentLoan>(document).await?;
+    let admitted = endpoint.recv::<WriteA>().await?;
+    endpoint.send::<WriteArgumentsA>(&admitted).await?;
+    let arguments = admitted.into_value();
     let request = endpoint.recv::<WriteOnDocument>().await?.into_value();
-    if request != admitted || request["section_name"] != SECTION_A {
-        return Err(ShellError::message("document write arguments differ"));
-    }
+    imp::same(&arguments, &request)?;
     let result = domain
-        .execute("RESEARCHER_A", "write_section", request)
+        .execute("RESEARCHER_A", "write_section", request.clone())
         .await
         .map_err(ShellError::message)?;
-    let bytes =
-        serde_json::to_vec(&result).map_err(|error| ShellError::message(error.to_string()))?;
+    let a = imp::material(&result, &request, ("RESEARCHER_A", "write_section"))?;
+    let bytes = imp::encode(&result)?;
     endpoint.send::<DocumentResult>(&bytes.as_slice()).await?;
-    document = endpoint.recv::<DocumentLoan>().await?;
-
-    let admitted = endpoint.recv::<WriteB>().await?.into_value();
-    endpoint.send::<DocumentLoan>(document).await?;
-    let request = endpoint.recv::<WriteOnDocument>().await?.into_value();
-    if request != admitted || request["section_name"] != SECTION_B {
-        return Err(ShellError::message("document write arguments differ"));
+    let document = endpoint.recv::<DocumentLoan>().await?;
+    let (references_a, (mut document, b)) = async {
+        let [mut references, mut writing] = endpoint.par()?;
+        async {
+            let result = imp::decode(references.recv::<ReferenceMaterialA>().await?)?;
+            imp::material(
+                &result,
+                &json!({"section_name":SECTION_A}),
+                ("RESEARCHER_A", "update_references"),
+            )
+        };
+        async {
+            writing.send::<DocumentLoan>(document).await?;
+            let admitted = writing.recv::<WriteB>().await?;
+            writing.send::<WriteArgumentsB>(&admitted).await?;
+            let arguments = admitted.into_value();
+            let request = writing.recv::<WriteOnDocument>().await?.into_value();
+            imp::same(&arguments, &request)?;
+            let result = domain
+                .execute("RESEARCHER_B", "write_section", request.clone())
+                .await
+                .map_err(ShellError::message)?;
+            let b = imp::material(&result, &request, ("RESEARCHER_B", "write_section"))?;
+            let bytes = imp::encode(&result)?;
+            writing.send::<DocumentResult>(&bytes.as_slice()).await?;
+            let document = writing.recv::<DocumentLoan>().await?;
+            Ok((document, b))
+        };
     }
-    let result = domain
-        .execute("RESEARCHER_B", "write_section", request)
-        .await
-        .map_err(ShellError::message)?;
-    let bytes =
-        serde_json::to_vec(&result).map_err(|error| ShellError::message(error.to_string()))?;
-    endpoint.send::<DocumentResult>(&bytes.as_slice()).await?;
-    document = endpoint.recv::<DocumentLoan>().await?;
-
-    // These are the actual results received from the review services, not flags.
-    let mut review_a = Vec::new();
-    let mut review_b = Vec::new();
-    loop {
+    .await?;
+    let result = imp::decode(endpoint.recv::<ReferenceMaterialB>().await?)?;
+    let references_b = imp::material(
+        &result,
+        &json!({"section_name":SECTION_B}),
+        ("RESEARCHER_B", "update_references"),
+    )?;
+    let mut snapshot = json!({"sections":{SECTION_A:a,SECTION_B:b},"references":{SECTION_A:references_a,SECTION_B:references_b}});
+    let mut review_a = Value::Null;
+    let mut review_b = Value::Null;
+    let admitted = loop {
         let branch = endpoint.offer().await?;
         match branch.label() {
-            76 | 176 => {
-                let (agent, section, admitted, feedback) = match branch.label() {
-                    76 => (
-                        "RESEARCHER_A",
-                        SECTION_A,
-                        branch.recv::<ReviseA>().await?,
-                        &review_a,
-                    ),
-                    176 => (
-                        "RESEARCHER_B",
-                        SECTION_B,
-                        branch.recv::<ReviseB>().await?,
-                        &review_b,
-                    ),
-                    _ => unreachable!(),
+            ReviewA::LOGICAL_LABEL => {
+                branch.recv::<ReviewA>().await?;
+            }
+            ReviewB::LOGICAL_LABEL => {
+                branch.recv::<ReviewB>().await?;
+            }
+            DocumentLoan::LOGICAL_LABEL => {
+                branch.send::<DocumentLoan>(document).await?;
+                let admitted = endpoint.offer().await?;
+                let (arguments, section, agent, feedback) = match admitted.label() {
+                    ReviseA::LOGICAL_LABEL => {
+                        let admitted = admitted.recv::<ReviseA>().await?;
+                        endpoint.send::<RevisionArgumentsA>(&admitted).await?;
+                        let value = admitted.into_value();
+                        (value, SECTION_A, "RESEARCHER_A", &review_a)
+                    }
+                    ReviseB::LOGICAL_LABEL => {
+                        let admitted = admitted.recv::<ReviseB>().await?;
+                        endpoint.send::<RevisionArgumentsB>(&admitted).await?;
+                        let value = admitted.into_value();
+                        (value, SECTION_B, "RESEARCHER_B", &review_b)
+                    }
+                    label => {
+                        return Err(ShellError::message(format!(
+                            "unexpected revision request {label}"
+                        )));
+                    }
                 };
-                let admitted = admitted.into_value();
-                let reviewed: Value = serde_json::from_slice(feedback)
-                    .map_err(|error| ShellError::message(error.to_string()))?;
-                if reviewed["success"] != false {
+                let request = endpoint.recv::<ReviseOnDocument>().await?.into_value();
+                imp::same(&arguments, &request)?;
+                imp::reviewed(feedback, &snapshot, section)?;
+                if feedback["success"] != false {
                     return Err(ShellError::message(
-                        "revision has no actual negative review",
+                        "revision has no current negative review",
                     ));
                 }
-                endpoint.send::<DocumentLoan>(document).await?;
-                let request = endpoint.recv::<ReviseOnDocument>().await?.into_value();
-                if request != admitted || request["section_name"] != section {
-                    return Err(ShellError::message("document revision arguments differ"));
-                }
                 let result = domain
-                    .execute(agent, "revise_section", request)
+                    .execute(agent, "revise_section", request.clone())
                     .await
                     .map_err(ShellError::message)?;
-                let bytes = serde_json::to_vec(&result)
-                    .map_err(|error| ShellError::message(error.to_string()))?;
+                snapshot["sections"][section] =
+                    imp::material(&result, &request, (agent, "revise_section"))?;
+                let bytes = imp::encode(&result)?;
                 endpoint.send::<DocumentResult>(&bytes.as_slice()).await?;
                 document = endpoint.recv::<DocumentLoan>().await?;
             }
-            30 => {
-                review_a = branch.recv::<ApprovedA>().await?.to_vec();
+            ApprovedA::LOGICAL_LABEL => {
+                review_a = imp::decode(branch.recv::<ApprovedA>().await?)?;
+                imp::reviewed(&review_a, &snapshot, SECTION_A)?;
             }
-            31 => {
-                review_a = branch.recv::<RejectedA>().await?.to_vec();
+            RejectedA::LOGICAL_LABEL => {
+                review_a = imp::decode(branch.recv::<RejectedA>().await?)?;
+                imp::reviewed(&review_a, &snapshot, SECTION_A)?;
             }
-            40 => {
-                review_b = branch.recv::<ApprovedB>().await?.to_vec();
+            ApprovedB::LOGICAL_LABEL => {
+                review_b = imp::decode(branch.recv::<ApprovedB>().await?)?;
+                imp::reviewed(&review_b, &snapshot, SECTION_B)?;
             }
-            41 => {
-                review_b = branch.recv::<RejectedB>().await?.to_vec();
+            RejectedB::LOGICAL_LABEL => {
+                review_b = imp::decode(branch.recv::<RejectedB>().await?)?;
+                imp::reviewed(&review_b, &snapshot, SECTION_B)?;
             }
-            224 => {
-                if branch.recv::<ConfirmApprovedA>().await? != review_a {
-                    return Err(ShellError::message(
-                        "section A approval differs from the actual review",
-                    ));
-                }
-                if endpoint.recv::<ConfirmApprovedB>().await? != review_b {
-                    return Err(ShellError::message(
-                        "section B approval differs from the actual review",
-                    ));
-                }
-                break;
-            }
-            80 => {
-                branch.recv::<FirstA>().await?;
-            }
-            81 => {
-                branch.recv::<FirstB>().await?;
-            }
-            82 => {
-                branch.recv::<AgainABeforeB>().await?;
-            }
-            83 => {
-                branch.recv::<BDuringARevision>().await?;
-            }
-            84 => {
-                branch.recv::<BOnly>().await?;
-            }
-            85 => {
-                branch.recv::<AgainAAfterB>().await?;
-            }
-            86 => {
-                branch.recv::<AgainBBeforeA>().await?;
-            }
-            87 => {
-                branch.recv::<ADuringBRevision>().await?;
-            }
-            88 => {
-                branch.recv::<AOnly>().await?;
-            }
-            89 => {
-                branch.recv::<AgainBAfterA>().await?;
-            }
-            92 => {
-                branch.recv::<AgainADuringBRevision>().await?;
-            }
-            93 => {
-                branch.recv::<AgainBDuringARevision>().await?;
-            }
-            94 => {
-                branch.recv::<AgainBBeforeAReview>().await?;
-            }
-            95 => {
-                branch.recv::<AgainABeforeBReview>().await?;
+            Combine::LOGICAL_LABEL => {
+                break branch.recv::<Combine>().await?.into_value();
             }
             label => {
                 return Err(ShellError::message(format!(
@@ -156,107 +136,82 @@ pub async fn document<'r, D: Domain>(
                 )));
             }
         }
-    }
-    let admitted = endpoint.recv::<Combine>().await?.into_value();
+    };
+    let a = imp::decode(endpoint.recv::<ConfirmApprovedA>().await?)?;
+    let b = imp::decode(endpoint.recv::<ConfirmApprovedB>().await?)?;
+    imp::same(&a, &review_a)?;
+    imp::same(&b, &review_b)?;
     endpoint.send::<DocumentLoan>(document).await?;
     let request = endpoint.recv::<CombineOnDocument>().await?.into_value();
-    let sections = request["sections"]
-        .as_str()
-        .unwrap_or("")
-        .split(',')
-        .map(str::trim)
-        .collect::<Vec<_>>();
-    let a: Value = serde_json::from_slice(&review_a)
-        .map_err(|error| ShellError::message(error.to_string()))?;
-    let b: Value = serde_json::from_slice(&review_b)
-        .map_err(|error| ShellError::message(error.to_string()))?;
-    if request != admitted
-        || sections.len() != 2
-        || !sections.contains(&SECTION_A)
-        || !sections.contains(&SECTION_B)
-        || a["success"] != true
-        || b["success"] != true
-    {
-        return Err(ShellError::message(
-            "combine arguments or actual reviews differ",
-        ));
-    }
+    let reviews = [review_a, review_b];
+    imp::combine_inputs(&admitted, &request, (&snapshot, &reviews))?;
     let result = domain
         .execute("EDITOR", "combine_sections", request)
         .await
         .map_err(ShellError::message)?;
-    let bytes =
-        serde_json::to_vec(&result).map_err(|error| ShellError::message(error.to_string()))?;
+    imp::combined(&result, &snapshot, &reviews)?;
+    let bytes = imp::encode(&result)?;
     endpoint.send::<DocumentResult>(&bytes.as_slice()).await?;
-    let _document = endpoint.recv::<DocumentLoan>().await?;
-    endpoint.recv::<DocumentExit>().await?;
     Ok(())
 }
 
-pub async fn database<'r, D: Domain>(
-    endpoint: &mut Endpoint<'r, DATABASE_SERVICE>,
-    mut database: Endpoint<'r, DATABASE>,
-    domain: &D,
-) -> ShellResult<()> {
-    let admitted = endpoint.recv::<ReferencesA>().await?.into_value();
-    endpoint.send::<DatabaseLoan>(database).await?;
-    let request = endpoint.recv::<ReferencesOnDatabase>().await?.into_value();
-    if request != admitted || request["section_name"] != SECTION_A {
-        return Err(ShellError::message("reference arguments differ"));
-    }
-    let result = domain
-        .execute("RESEARCHER_A", "update_references", request)
-        .await
-        .map_err(ShellError::message)?;
-    let bytes =
-        serde_json::to_vec(&result).map_err(|error| ShellError::message(error.to_string()))?;
-    endpoint.send::<DatabaseResult>(&bytes.as_slice()).await?;
-    database = endpoint.recv::<DatabaseLoan>().await?;
-
-    let admitted = endpoint.recv::<ReferencesB>().await?.into_value();
-    endpoint.send::<DatabaseLoan>(database).await?;
-    let request = endpoint.recv::<ReferencesOnDatabase>().await?.into_value();
-    if request != admitted || request["section_name"] != SECTION_B {
-        return Err(ShellError::message("reference arguments differ"));
-    }
-    let result = domain
-        .execute("RESEARCHER_B", "update_references", request)
-        .await
-        .map_err(ShellError::message)?;
-    let bytes =
-        serde_json::to_vec(&result).map_err(|error| ShellError::message(error.to_string()))?;
-    endpoint.send::<DatabaseResult>(&bytes.as_slice()).await?;
-    let _database = endpoint.recv::<DatabaseLoan>().await?;
-    endpoint.recv::<DatabaseExit>().await?;
-    Ok(())
-}
-
-pub async fn research<'r, const ROLE: u8>(
-    endpoint: &mut Endpoint<'r, ROLE>,
+#[hibana_runtime::scope]
+pub async fn database<'run>(
+    endpoint: &mut Endpoint<'run, DATABASE_SERVICE>,
+    database: Endpoint<'run, DATABASE>,
     domain: &impl Domain,
 ) -> ShellResult<()> {
-    let (agent, topic) = match ROLE {
-        RESEARCH_A => ("RESEARCHER_A", "subtopic_a"),
-        RESEARCH_B => ("RESEARCHER_B", "subtopic_b"),
-        _ => return Err(ShellError::message("unknown research service")),
-    };
-    let request = endpoint.recv::<Research>().await?.into_value();
-    if request["topic"] != topic {
-        return Err(ShellError::message(
-            "research topic differs from this participant",
-        ));
-    }
+    endpoint.send::<DatabaseLoan>(database).await?;
+    let admitted = endpoint.recv::<ReferencesA>().await?;
+    endpoint.send::<ReferenceArgumentsA>(&admitted).await?;
+    let arguments = admitted.into_value();
+    let request = endpoint.recv::<ReferencesOnDatabase>().await?.into_value();
+    imp::same(&arguments, &request)?;
     let result = domain
-        .execute(agent, "research_topic", request)
+        .execute("RESEARCHER_A", "update_references", request.clone())
         .await
         .map_err(ShellError::message)?;
-    let bytes =
-        serde_json::to_vec(&result).map_err(|error| ShellError::message(error.to_string()))?;
-    endpoint.send::<ResearchResult>(&bytes.as_slice()).await?;
-    if ROLE == RESEARCH_A {
-        endpoint.recv::<ResearchExitA>().await?;
-    } else {
-        endpoint.recv::<ResearchExitB>().await?;
+    imp::material(&result, &request, ("RESEARCHER_A", "update_references"))?;
+    let bytes = imp::encode(&result)?;
+    async {
+        let [mut returned, mut material] = endpoint.par()?;
+        async {
+            returned.send::<DatabaseResult>(&bytes.as_slice()).await?;
+        };
+        async {
+            material
+                .send::<ReferenceMaterialA>(&bytes.as_slice())
+                .await?;
+        };
+        Ok(())
     }
+    .await?;
+    let database = endpoint.recv::<DatabaseLoan>().await?;
+    endpoint.send::<DatabaseLoan>(database).await?;
+    let admitted = endpoint.recv::<ReferencesB>().await?;
+    endpoint.send::<ReferenceArgumentsB>(&admitted).await?;
+    let arguments = admitted.into_value();
+    let request = endpoint.recv::<ReferencesOnDatabase>().await?.into_value();
+    imp::same(&arguments, &request)?;
+    let result = domain
+        .execute("RESEARCHER_B", "update_references", request.clone())
+        .await
+        .map_err(ShellError::message)?;
+    imp::material(&result, &request, ("RESEARCHER_B", "update_references"))?;
+    let bytes = imp::encode(&result)?;
+    async {
+        let [mut returned, mut material] = endpoint.par()?;
+        async {
+            returned.send::<DatabaseResult>(&bytes.as_slice()).await?;
+        };
+        async {
+            material
+                .send::<ReferenceMaterialB>(&bytes.as_slice())
+                .await?;
+        };
+        Ok(())
+    }
+    .await?;
+    let _database = endpoint.recv::<DatabaseLoan>().await?;
     Ok(())
 }

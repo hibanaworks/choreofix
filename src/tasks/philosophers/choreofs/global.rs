@@ -33,6 +33,7 @@ pub const EAT_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
 pub type Eat<const RESOURCE: u8> = g::Msg<RESOURCE, PhilosopherArguments>;
 pub type Meal<'a, const RESOURCE: u8> = g::Msg<RESOURCE, &'a [u8]>;
 pub type Loan<'r, const RESOURCE: u8> = g::Msg<10, Endpoint<'r, RESOURCE>>;
+pub type CloseAuthority<'run, const RESOURCE: u8> = g::Msg<165, Endpoint<'run, RESOURCE>>;
 pub type FileExit = g::Msg<241, i32>;
 pub const EAT_A_ARGUMENTS: u16 = 700;
 pub const EAT_B_ARGUMENTS: u16 = 701;
@@ -113,6 +114,8 @@ pub struct Programs9E {
     pub resource_a: RoleProgram<{ roles::FORK_A_RESOURCE }>,
     pub a_think_file: RoleProgram<{ roles::A_THINK_FILE }>,
     pub a_eat_file: RoleProgram<{ roles::A_EAT_FILE }>,
+    pub think_close_a: RoleProgram<{ roles::A_THINK_CLOSE }>,
+    pub eat_close_a: RoleProgram<{ roles::A_EAT_CLOSE }>,
     pub b: RoleProgram<{ roles::B }>,
     pub think_b: RoleProgram<{ roles::THINK_B }>,
     pub fork_b: RoleProgram<{ roles::FORK_B }>,
@@ -121,6 +124,8 @@ pub struct Programs9E {
     pub resource_b: RoleProgram<{ roles::FORK_B_RESOURCE }>,
     pub b_think_file: RoleProgram<{ roles::B_THINK_FILE }>,
     pub b_eat_file: RoleProgram<{ roles::B_EAT_FILE }>,
+    pub think_close_b: RoleProgram<{ roles::B_THINK_CLOSE }>,
+    pub eat_close_b: RoleProgram<{ roles::B_EAT_CLOSE }>,
     pub c: RoleProgram<{ roles::C }>,
     pub think_c: RoleProgram<{ roles::THINK_C }>,
     pub fork_c: RoleProgram<{ roles::FORK_C }>,
@@ -129,11 +134,13 @@ pub struct Programs9E {
     pub resource_c: RoleProgram<{ roles::FORK_C_RESOURCE }>,
     pub c_think_file: RoleProgram<{ roles::C_THINK_FILE }>,
     pub c_eat_file: RoleProgram<{ roles::C_EAT_FILE }>,
+    pub think_close_c: RoleProgram<{ roles::C_THINK_CLOSE }>,
+    pub eat_close_c: RoleProgram<{ roles::C_EAT_CLOSE }>,
 }
 impl Programs9E {
     pub fn observation(&self) -> serde_json::Value {
         use crate::imp::projection::rows;
-        serde_json::json!({"type":"compiled_projection","format_version":1,"task":"9E","programs":[rows(&self.a),rows(&self.think_a),rows(&self.fork_a),rows(&self.a_wasi),rows(&self.a_io),rows(&self.resource_a),rows(&self.a_think_file),rows(&self.a_eat_file),rows(&self.b),rows(&self.think_b),rows(&self.fork_b),rows(&self.b_wasi),rows(&self.b_io),rows(&self.resource_b),rows(&self.b_think_file),rows(&self.b_eat_file),rows(&self.c),rows(&self.think_c),rows(&self.fork_c),rows(&self.c_wasi),rows(&self.c_io),rows(&self.resource_c),rows(&self.c_think_file),rows(&self.c_eat_file)]})
+        serde_json::json!({"type":"compiled_projection","format_version":1,"task":"9E","programs":[rows(&self.a),rows(&self.think_a),rows(&self.fork_a),rows(&self.a_wasi),rows(&self.a_io),rows(&self.resource_a),rows(&self.a_think_file),rows(&self.a_eat_file),rows(&self.think_close_a),rows(&self.eat_close_a),rows(&self.b),rows(&self.think_b),rows(&self.fork_b),rows(&self.b_wasi),rows(&self.b_io),rows(&self.resource_b),rows(&self.b_think_file),rows(&self.b_eat_file),rows(&self.think_close_b),rows(&self.eat_close_b),rows(&self.c),rows(&self.think_c),rows(&self.fork_c),rows(&self.c_wasi),rows(&self.c_io),rows(&self.resource_c),rows(&self.c_think_file),rows(&self.c_eat_file),rows(&self.think_close_c),rows(&self.eat_close_c)]})
     }
 }
 pub fn project_9e() -> Programs9E {
@@ -182,10 +189,14 @@ pub fn project_9e() -> Programs9E {
     let thoughts = g::par(
         g::par(
             {
-                let request = g::send::<A_THINK_FILE, THINK_A, protocol::FdCloseObjectReqMsg>();
-                let approved = g::send::<THINK_A, A_THINK_FILE, protocol::FdCloseObjectRetMsg>();
+                let request =
+                    g::send::<A_THINK_FILE, A_THINK_CLOSE, protocol::FdCloseObjectReqMsg>();
+                let approved = g::seq(
+                    g::send::<A_THINK_CLOSE, A_THINK_FILE, protocol::FdCloseObjectRetMsg>(),
+                    g::send::<THINK_A, A_THINK_FILE, CloseAuthority<A_THINK_CLOSE>>(),
+                );
                 let retry = g::seq(
-                    g::send::<THINK_A, A_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
+                    g::send::<A_THINK_CLOSE, A_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
                     request,
                 );
                 g::seq(
@@ -195,10 +206,14 @@ pub fn project_9e() -> Programs9E {
                 )
             },
             {
-                let request = g::send::<B_THINK_FILE, THINK_B, protocol::FdCloseObjectReqMsg>();
-                let approved = g::send::<THINK_B, B_THINK_FILE, protocol::FdCloseObjectRetMsg>();
+                let request =
+                    g::send::<B_THINK_FILE, B_THINK_CLOSE, protocol::FdCloseObjectReqMsg>();
+                let approved = g::seq(
+                    g::send::<B_THINK_CLOSE, B_THINK_FILE, protocol::FdCloseObjectRetMsg>(),
+                    g::send::<THINK_B, B_THINK_FILE, CloseAuthority<B_THINK_CLOSE>>(),
+                );
                 let retry = g::seq(
-                    g::send::<THINK_B, B_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
+                    g::send::<B_THINK_CLOSE, B_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
                     request,
                 );
                 g::seq(
@@ -209,10 +224,13 @@ pub fn project_9e() -> Programs9E {
             },
         ),
         {
-            let request = g::send::<C_THINK_FILE, THINK_C, protocol::FdCloseObjectReqMsg>();
-            let approved = g::send::<THINK_C, C_THINK_FILE, protocol::FdCloseObjectRetMsg>();
+            let request = g::send::<C_THINK_FILE, C_THINK_CLOSE, protocol::FdCloseObjectReqMsg>();
+            let approved = g::seq(
+                g::send::<C_THINK_CLOSE, C_THINK_FILE, protocol::FdCloseObjectRetMsg>(),
+                g::send::<THINK_C, C_THINK_FILE, CloseAuthority<C_THINK_CLOSE>>(),
+            );
             let retry = g::seq(
-                g::send::<THINK_C, C_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
+                g::send::<C_THINK_CLOSE, C_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
                 request,
             );
             g::seq(
@@ -223,20 +241,20 @@ pub fn project_9e() -> Programs9E {
     );
     let meals = g::seq(
         {
-            let request = g::send::<A_EAT_FILE, A, protocol::FdCloseObjectReqMsg>();
-            let left = g::send::<A, FORK_A, Eat<FORK_A_RESOURCE>>();
-            let right = g::send::<A, FORK_C, Eat<FORK_C_RESOURCE>>();
+            let request = g::send::<A_EAT_FILE, A_EAT_CLOSE, protocol::FdCloseObjectReqMsg>();
+            let left = g::send::<A_EAT_CLOSE, FORK_A, Eat<FORK_A_RESOURCE>>();
+            let right = g::send::<A_EAT_CLOSE, FORK_C, Eat<FORK_C_RESOURCE>>();
             let approved = g::seq(
                 g::par(left, right),
                 g::seq(
                     g::par(
                         g::seq(
-                            g::send::<FORK_A_RESOURCE, A, Eat<FORK_A_RESOURCE>>(),
-                            g::send::<FORK_A, A, Loan<FORK_A_RESOURCE>>(),
+                            g::send::<FORK_A_RESOURCE, A_EAT_CLOSE, Eat<FORK_A_RESOURCE>>(),
+                            g::send::<FORK_A, A_EAT_CLOSE, Loan<FORK_A_RESOURCE>>(),
                         ),
                         g::seq(
-                            g::send::<FORK_C_RESOURCE, A, Eat<FORK_C_RESOURCE>>(),
-                            g::send::<FORK_C, A, Loan<FORK_C_RESOURCE>>(),
+                            g::send::<FORK_C_RESOURCE, A_EAT_CLOSE, Eat<FORK_C_RESOURCE>>(),
+                            g::send::<FORK_C, A_EAT_CLOSE, Loan<FORK_C_RESOURCE>>(),
                         ),
                     ),
                     g::seq(
@@ -246,16 +264,19 @@ pub fn project_9e() -> Programs9E {
                         ),
                         g::seq(
                             g::par(
-                                g::send::<A, FORK_A, Loan<FORK_A_RESOURCE>>(),
-                                g::send::<A, FORK_C, Loan<FORK_C_RESOURCE>>(),
+                                g::send::<A_EAT_CLOSE, FORK_A, Loan<FORK_A_RESOURCE>>(),
+                                g::send::<A_EAT_CLOSE, FORK_C, Loan<FORK_C_RESOURCE>>(),
                             ),
-                            g::send::<A, A_EAT_FILE, protocol::FdCloseObjectRetMsg>(),
+                            g::seq(
+                                g::send::<A_EAT_CLOSE, A_EAT_FILE, protocol::FdCloseObjectRetMsg>(),
+                                g::send::<A, A_EAT_FILE, CloseAuthority<A_EAT_CLOSE>>(),
+                            ),
                         ),
                     ),
                 ),
             );
             let retry = g::seq(
-                g::send::<A, A_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
+                g::send::<A_EAT_CLOSE, A_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
                 request,
             );
             g::seq(
@@ -265,20 +286,20 @@ pub fn project_9e() -> Programs9E {
         },
         g::seq(
             {
-                let request = g::send::<B_EAT_FILE, B, protocol::FdCloseObjectReqMsg>();
-                let left = g::send::<B, FORK_B, Eat<FORK_B_RESOURCE>>();
-                let right = g::send::<B, FORK_A, Eat<FORK_A_RESOURCE>>();
+                let request = g::send::<B_EAT_FILE, B_EAT_CLOSE, protocol::FdCloseObjectReqMsg>();
+                let left = g::send::<B_EAT_CLOSE, FORK_B, Eat<FORK_B_RESOURCE>>();
+                let right = g::send::<B_EAT_CLOSE, FORK_A, Eat<FORK_A_RESOURCE>>();
                 let approved = g::seq(
                     g::par(left, right),
                     g::seq(
                         g::par(
                             g::seq(
-                                g::send::<FORK_B_RESOURCE, B, Eat<FORK_B_RESOURCE>>(),
-                                g::send::<FORK_B, B, Loan<FORK_B_RESOURCE>>(),
+                                g::send::<FORK_B_RESOURCE, B_EAT_CLOSE, Eat<FORK_B_RESOURCE>>(),
+                                g::send::<FORK_B, B_EAT_CLOSE, Loan<FORK_B_RESOURCE>>(),
                             ),
                             g::seq(
-                                g::send::<FORK_A_RESOURCE, B, Eat<FORK_A_RESOURCE>>(),
-                                g::send::<FORK_A, B, Loan<FORK_A_RESOURCE>>(),
+                                g::send::<FORK_A_RESOURCE, B_EAT_CLOSE, Eat<FORK_A_RESOURCE>>(),
+                                g::send::<FORK_A, B_EAT_CLOSE, Loan<FORK_A_RESOURCE>>(),
                             ),
                         ),
                         g::seq(
@@ -288,16 +309,20 @@ pub fn project_9e() -> Programs9E {
                             ),
                             g::seq(
                                 g::par(
-                                    g::send::<B, FORK_B, Loan<FORK_B_RESOURCE>>(),
-                                    g::send::<B, FORK_A, Loan<FORK_A_RESOURCE>>(),
+                                    g::send::<B_EAT_CLOSE, FORK_B, Loan<FORK_B_RESOURCE>>(),
+                                    g::send::<B_EAT_CLOSE, FORK_A, Loan<FORK_A_RESOURCE>>(),
                                 ),
-                                g::send::<B, B_EAT_FILE, protocol::FdCloseObjectRetMsg>(),
+                                g::seq(
+                                    g::send::<B_EAT_CLOSE, B_EAT_FILE, protocol::FdCloseObjectRetMsg>(
+                                    ),
+                                    g::send::<B, B_EAT_FILE, CloseAuthority<B_EAT_CLOSE>>(),
+                                ),
                             ),
                         ),
                     ),
                 );
                 let retry = g::seq(
-                    g::send::<B, B_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
+                    g::send::<B_EAT_CLOSE, B_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
                     request,
                 );
                 g::seq(
@@ -306,20 +331,20 @@ pub fn project_9e() -> Programs9E {
                 )
             },
             {
-                let request = g::send::<C_EAT_FILE, C, protocol::FdCloseObjectReqMsg>();
-                let left = g::send::<C, FORK_C, Eat<FORK_C_RESOURCE>>();
-                let right = g::send::<C, FORK_B, Eat<FORK_B_RESOURCE>>();
+                let request = g::send::<C_EAT_FILE, C_EAT_CLOSE, protocol::FdCloseObjectReqMsg>();
+                let left = g::send::<C_EAT_CLOSE, FORK_C, Eat<FORK_C_RESOURCE>>();
+                let right = g::send::<C_EAT_CLOSE, FORK_B, Eat<FORK_B_RESOURCE>>();
                 let approved = g::seq(
                     g::par(left, right),
                     g::seq(
                         g::par(
                             g::seq(
-                                g::send::<FORK_C_RESOURCE, C, Eat<FORK_C_RESOURCE>>(),
-                                g::send::<FORK_C, C, Loan<FORK_C_RESOURCE>>(),
+                                g::send::<FORK_C_RESOURCE, C_EAT_CLOSE, Eat<FORK_C_RESOURCE>>(),
+                                g::send::<FORK_C, C_EAT_CLOSE, Loan<FORK_C_RESOURCE>>(),
                             ),
                             g::seq(
-                                g::send::<FORK_B_RESOURCE, C, Eat<FORK_B_RESOURCE>>(),
-                                g::send::<FORK_B, C, Loan<FORK_B_RESOURCE>>(),
+                                g::send::<FORK_B_RESOURCE, C_EAT_CLOSE, Eat<FORK_B_RESOURCE>>(),
+                                g::send::<FORK_B, C_EAT_CLOSE, Loan<FORK_B_RESOURCE>>(),
                             ),
                         ),
                         g::seq(
@@ -329,16 +354,20 @@ pub fn project_9e() -> Programs9E {
                             ),
                             g::seq(
                                 g::par(
-                                    g::send::<C, FORK_C, Loan<FORK_C_RESOURCE>>(),
-                                    g::send::<C, FORK_B, Loan<FORK_B_RESOURCE>>(),
+                                    g::send::<C_EAT_CLOSE, FORK_C, Loan<FORK_C_RESOURCE>>(),
+                                    g::send::<C_EAT_CLOSE, FORK_B, Loan<FORK_B_RESOURCE>>(),
                                 ),
-                                g::send::<C, C_EAT_FILE, protocol::FdCloseObjectRetMsg>(),
+                                g::seq(
+                                    g::send::<C_EAT_CLOSE, C_EAT_FILE, protocol::FdCloseObjectRetMsg>(
+                                    ),
+                                    g::send::<C, C_EAT_FILE, CloseAuthority<C_EAT_CLOSE>>(),
+                                ),
                             ),
                         ),
                     ),
                 );
                 let retry = g::seq(
-                    g::send::<C, C_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
+                    g::send::<C_EAT_CLOSE, C_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
                     request,
                 );
                 g::seq(
@@ -384,6 +413,8 @@ pub fn project_9e() -> Programs9E {
         resource_a: project(&global),
         a_think_file: project(&global),
         a_eat_file: project(&global),
+        think_close_a: project(&global),
+        eat_close_a: project(&global),
         b: project(&global),
         think_b: project(&global),
         fork_b: project(&global),
@@ -392,6 +423,8 @@ pub fn project_9e() -> Programs9E {
         resource_b: project(&global),
         b_think_file: project(&global),
         b_eat_file: project(&global),
+        think_close_b: project(&global),
+        eat_close_b: project(&global),
         c: project(&global),
         think_c: project(&global),
         fork_c: project(&global),
@@ -400,6 +433,8 @@ pub fn project_9e() -> Programs9E {
         resource_c: project(&global),
         c_think_file: project(&global),
         c_eat_file: project(&global),
+        think_close_c: project(&global),
+        eat_close_c: project(&global),
     }
 }
 
@@ -412,6 +447,8 @@ pub struct Programs9M {
     pub resource_a: RoleProgram<{ roles::FORK_A_RESOURCE }>,
     pub a_think_file: RoleProgram<{ roles::A_THINK_FILE }>,
     pub a_eat_file: RoleProgram<{ roles::A_EAT_FILE }>,
+    pub think_close_a: RoleProgram<{ roles::A_THINK_CLOSE }>,
+    pub eat_close_a: RoleProgram<{ roles::A_EAT_CLOSE }>,
     pub b: RoleProgram<{ roles::B }>,
     pub think_b: RoleProgram<{ roles::THINK_B }>,
     pub fork_b: RoleProgram<{ roles::FORK_B }>,
@@ -420,6 +457,8 @@ pub struct Programs9M {
     pub resource_b: RoleProgram<{ roles::FORK_B_RESOURCE }>,
     pub b_think_file: RoleProgram<{ roles::B_THINK_FILE }>,
     pub b_eat_file: RoleProgram<{ roles::B_EAT_FILE }>,
+    pub think_close_b: RoleProgram<{ roles::B_THINK_CLOSE }>,
+    pub eat_close_b: RoleProgram<{ roles::B_EAT_CLOSE }>,
     pub c: RoleProgram<{ roles::C }>,
     pub think_c: RoleProgram<{ roles::THINK_C }>,
     pub fork_c: RoleProgram<{ roles::FORK_C }>,
@@ -428,6 +467,8 @@ pub struct Programs9M {
     pub resource_c: RoleProgram<{ roles::FORK_C_RESOURCE }>,
     pub c_think_file: RoleProgram<{ roles::C_THINK_FILE }>,
     pub c_eat_file: RoleProgram<{ roles::C_EAT_FILE }>,
+    pub think_close_c: RoleProgram<{ roles::C_THINK_CLOSE }>,
+    pub eat_close_c: RoleProgram<{ roles::C_EAT_CLOSE }>,
     pub d: RoleProgram<{ roles::D }>,
     pub think_d: RoleProgram<{ roles::THINK_D }>,
     pub fork_d: RoleProgram<{ roles::FORK_D }>,
@@ -436,6 +477,8 @@ pub struct Programs9M {
     pub resource_d: RoleProgram<{ roles::FORK_D_RESOURCE }>,
     pub d_think_file: RoleProgram<{ roles::D_THINK_FILE }>,
     pub d_eat_file: RoleProgram<{ roles::D_EAT_FILE }>,
+    pub think_close_d: RoleProgram<{ roles::D_THINK_CLOSE }>,
+    pub eat_close_d: RoleProgram<{ roles::D_EAT_CLOSE }>,
     pub e: RoleProgram<{ roles::E }>,
     pub think_e: RoleProgram<{ roles::THINK_E }>,
     pub fork_e: RoleProgram<{ roles::FORK_E }>,
@@ -444,11 +487,13 @@ pub struct Programs9M {
     pub resource_e: RoleProgram<{ roles::FORK_E_RESOURCE }>,
     pub e_think_file: RoleProgram<{ roles::E_THINK_FILE }>,
     pub e_eat_file: RoleProgram<{ roles::E_EAT_FILE }>,
+    pub think_close_e: RoleProgram<{ roles::E_THINK_CLOSE }>,
+    pub eat_close_e: RoleProgram<{ roles::E_EAT_CLOSE }>,
 }
 impl Programs9M {
     pub fn observation(&self) -> serde_json::Value {
         use crate::imp::projection::rows;
-        serde_json::json!({"type":"compiled_projection","format_version":1,"task":"9M","programs":[rows(&self.a),rows(&self.think_a),rows(&self.fork_a),rows(&self.a_wasi),rows(&self.a_io),rows(&self.resource_a),rows(&self.a_think_file),rows(&self.a_eat_file),rows(&self.b),rows(&self.think_b),rows(&self.fork_b),rows(&self.b_wasi),rows(&self.b_io),rows(&self.resource_b),rows(&self.b_think_file),rows(&self.b_eat_file),rows(&self.c),rows(&self.think_c),rows(&self.fork_c),rows(&self.c_wasi),rows(&self.c_io),rows(&self.resource_c),rows(&self.c_think_file),rows(&self.c_eat_file),rows(&self.d),rows(&self.think_d),rows(&self.fork_d),rows(&self.d_wasi),rows(&self.d_io),rows(&self.resource_d),rows(&self.d_think_file),rows(&self.d_eat_file),rows(&self.e),rows(&self.think_e),rows(&self.fork_e),rows(&self.e_wasi),rows(&self.e_io),rows(&self.resource_e),rows(&self.e_think_file),rows(&self.e_eat_file)]})
+        serde_json::json!({"type":"compiled_projection","format_version":1,"task":"9M","programs":[rows(&self.a),rows(&self.think_a),rows(&self.fork_a),rows(&self.a_wasi),rows(&self.a_io),rows(&self.resource_a),rows(&self.a_think_file),rows(&self.a_eat_file),rows(&self.think_close_a),rows(&self.eat_close_a),rows(&self.b),rows(&self.think_b),rows(&self.fork_b),rows(&self.b_wasi),rows(&self.b_io),rows(&self.resource_b),rows(&self.b_think_file),rows(&self.b_eat_file),rows(&self.think_close_b),rows(&self.eat_close_b),rows(&self.c),rows(&self.think_c),rows(&self.fork_c),rows(&self.c_wasi),rows(&self.c_io),rows(&self.resource_c),rows(&self.c_think_file),rows(&self.c_eat_file),rows(&self.think_close_c),rows(&self.eat_close_c),rows(&self.d),rows(&self.think_d),rows(&self.fork_d),rows(&self.d_wasi),rows(&self.d_io),rows(&self.resource_d),rows(&self.d_think_file),rows(&self.d_eat_file),rows(&self.think_close_d),rows(&self.eat_close_d),rows(&self.e),rows(&self.think_e),rows(&self.fork_e),rows(&self.e_wasi),rows(&self.e_io),rows(&self.resource_e),rows(&self.e_think_file),rows(&self.e_eat_file),rows(&self.think_close_e),rows(&self.eat_close_e)]})
     }
 }
 pub fn project_9m() -> Programs9M {
@@ -528,11 +573,14 @@ pub fn project_9m() -> Programs9M {
         g::par(
             g::par(
                 {
-                    let request = g::send::<A_THINK_FILE, THINK_A, protocol::FdCloseObjectReqMsg>();
-                    let approved =
-                        g::send::<THINK_A, A_THINK_FILE, protocol::FdCloseObjectRetMsg>();
+                    let request =
+                        g::send::<A_THINK_FILE, A_THINK_CLOSE, protocol::FdCloseObjectReqMsg>();
+                    let approved = g::seq(
+                        g::send::<A_THINK_CLOSE, A_THINK_FILE, protocol::FdCloseObjectRetMsg>(),
+                        g::send::<THINK_A, A_THINK_FILE, CloseAuthority<A_THINK_CLOSE>>(),
+                    );
                     let retry = g::seq(
-                        g::send::<THINK_A, A_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
+                        g::send::<A_THINK_CLOSE, A_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
                         request,
                     );
                     g::seq(
@@ -542,11 +590,14 @@ pub fn project_9m() -> Programs9M {
                     )
                 },
                 {
-                    let request = g::send::<B_THINK_FILE, THINK_B, protocol::FdCloseObjectReqMsg>();
-                    let approved =
-                        g::send::<THINK_B, B_THINK_FILE, protocol::FdCloseObjectRetMsg>();
+                    let request =
+                        g::send::<B_THINK_FILE, B_THINK_CLOSE, protocol::FdCloseObjectReqMsg>();
+                    let approved = g::seq(
+                        g::send::<B_THINK_CLOSE, B_THINK_FILE, protocol::FdCloseObjectRetMsg>(),
+                        g::send::<THINK_B, B_THINK_FILE, CloseAuthority<B_THINK_CLOSE>>(),
+                    );
                     let retry = g::seq(
-                        g::send::<THINK_B, B_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
+                        g::send::<B_THINK_CLOSE, B_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
                         request,
                     );
                     g::seq(
@@ -557,10 +608,14 @@ pub fn project_9m() -> Programs9M {
                 },
             ),
             {
-                let request = g::send::<C_THINK_FILE, THINK_C, protocol::FdCloseObjectReqMsg>();
-                let approved = g::send::<THINK_C, C_THINK_FILE, protocol::FdCloseObjectRetMsg>();
+                let request =
+                    g::send::<C_THINK_FILE, C_THINK_CLOSE, protocol::FdCloseObjectReqMsg>();
+                let approved = g::seq(
+                    g::send::<C_THINK_CLOSE, C_THINK_FILE, protocol::FdCloseObjectRetMsg>(),
+                    g::send::<THINK_C, C_THINK_FILE, CloseAuthority<C_THINK_CLOSE>>(),
+                );
                 let retry = g::seq(
-                    g::send::<THINK_C, C_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
+                    g::send::<C_THINK_CLOSE, C_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
                     request,
                 );
                 g::seq(
@@ -572,10 +627,14 @@ pub fn project_9m() -> Programs9M {
         ),
         g::par(
             {
-                let request = g::send::<D_THINK_FILE, THINK_D, protocol::FdCloseObjectReqMsg>();
-                let approved = g::send::<THINK_D, D_THINK_FILE, protocol::FdCloseObjectRetMsg>();
+                let request =
+                    g::send::<D_THINK_FILE, D_THINK_CLOSE, protocol::FdCloseObjectReqMsg>();
+                let approved = g::seq(
+                    g::send::<D_THINK_CLOSE, D_THINK_FILE, protocol::FdCloseObjectRetMsg>(),
+                    g::send::<THINK_D, D_THINK_FILE, CloseAuthority<D_THINK_CLOSE>>(),
+                );
                 let retry = g::seq(
-                    g::send::<THINK_D, D_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
+                    g::send::<D_THINK_CLOSE, D_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
                     request,
                 );
                 g::seq(
@@ -585,10 +644,14 @@ pub fn project_9m() -> Programs9M {
                 )
             },
             {
-                let request = g::send::<E_THINK_FILE, THINK_E, protocol::FdCloseObjectReqMsg>();
-                let approved = g::send::<THINK_E, E_THINK_FILE, protocol::FdCloseObjectRetMsg>();
+                let request =
+                    g::send::<E_THINK_FILE, E_THINK_CLOSE, protocol::FdCloseObjectReqMsg>();
+                let approved = g::seq(
+                    g::send::<E_THINK_CLOSE, E_THINK_FILE, protocol::FdCloseObjectRetMsg>(),
+                    g::send::<THINK_E, E_THINK_FILE, CloseAuthority<E_THINK_CLOSE>>(),
+                );
                 let retry = g::seq(
-                    g::send::<THINK_E, E_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
+                    g::send::<E_THINK_CLOSE, E_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
                     request,
                 );
                 g::seq(
@@ -602,20 +665,20 @@ pub fn project_9m() -> Programs9M {
     let meals = g::seq(
         g::par(
             {
-                let request = g::send::<A_EAT_FILE, A, protocol::FdCloseObjectReqMsg>();
-                let left = g::send::<A, FORK_A, Eat<FORK_A_RESOURCE>>();
-                let right = g::send::<A, FORK_E, Eat<FORK_E_RESOURCE>>();
+                let request = g::send::<A_EAT_FILE, A_EAT_CLOSE, protocol::FdCloseObjectReqMsg>();
+                let left = g::send::<A_EAT_CLOSE, FORK_A, Eat<FORK_A_RESOURCE>>();
+                let right = g::send::<A_EAT_CLOSE, FORK_E, Eat<FORK_E_RESOURCE>>();
                 let approved = g::seq(
                     g::par(left, right),
                     g::seq(
                         g::par(
                             g::seq(
-                                g::send::<FORK_A_RESOURCE, A, Eat<FORK_A_RESOURCE>>(),
-                                g::send::<FORK_A, A, Loan<FORK_A_RESOURCE>>(),
+                                g::send::<FORK_A_RESOURCE, A_EAT_CLOSE, Eat<FORK_A_RESOURCE>>(),
+                                g::send::<FORK_A, A_EAT_CLOSE, Loan<FORK_A_RESOURCE>>(),
                             ),
                             g::seq(
-                                g::send::<FORK_E_RESOURCE, A, Eat<FORK_E_RESOURCE>>(),
-                                g::send::<FORK_E, A, Loan<FORK_E_RESOURCE>>(),
+                                g::send::<FORK_E_RESOURCE, A_EAT_CLOSE, Eat<FORK_E_RESOURCE>>(),
+                                g::send::<FORK_E, A_EAT_CLOSE, Loan<FORK_E_RESOURCE>>(),
                             ),
                         ),
                         g::seq(
@@ -625,16 +688,20 @@ pub fn project_9m() -> Programs9M {
                             ),
                             g::seq(
                                 g::par(
-                                    g::send::<A, FORK_A, Loan<FORK_A_RESOURCE>>(),
-                                    g::send::<A, FORK_E, Loan<FORK_E_RESOURCE>>(),
+                                    g::send::<A_EAT_CLOSE, FORK_A, Loan<FORK_A_RESOURCE>>(),
+                                    g::send::<A_EAT_CLOSE, FORK_E, Loan<FORK_E_RESOURCE>>(),
                                 ),
-                                g::send::<A, A_EAT_FILE, protocol::FdCloseObjectRetMsg>(),
+                                g::seq(
+                                    g::send::<A_EAT_CLOSE, A_EAT_FILE, protocol::FdCloseObjectRetMsg>(
+                                    ),
+                                    g::send::<A, A_EAT_FILE, CloseAuthority<A_EAT_CLOSE>>(),
+                                ),
                             ),
                         ),
                     ),
                 );
                 let retry = g::seq(
-                    g::send::<A, A_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
+                    g::send::<A_EAT_CLOSE, A_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
                     request,
                 );
                 g::seq(
@@ -643,20 +710,20 @@ pub fn project_9m() -> Programs9M {
                 )
             },
             {
-                let request = g::send::<C_EAT_FILE, C, protocol::FdCloseObjectReqMsg>();
-                let left = g::send::<C, FORK_C, Eat<FORK_C_RESOURCE>>();
-                let right = g::send::<C, FORK_B, Eat<FORK_B_RESOURCE>>();
+                let request = g::send::<C_EAT_FILE, C_EAT_CLOSE, protocol::FdCloseObjectReqMsg>();
+                let left = g::send::<C_EAT_CLOSE, FORK_C, Eat<FORK_C_RESOURCE>>();
+                let right = g::send::<C_EAT_CLOSE, FORK_B, Eat<FORK_B_RESOURCE>>();
                 let approved = g::seq(
                     g::par(left, right),
                     g::seq(
                         g::par(
                             g::seq(
-                                g::send::<FORK_C_RESOURCE, C, Eat<FORK_C_RESOURCE>>(),
-                                g::send::<FORK_C, C, Loan<FORK_C_RESOURCE>>(),
+                                g::send::<FORK_C_RESOURCE, C_EAT_CLOSE, Eat<FORK_C_RESOURCE>>(),
+                                g::send::<FORK_C, C_EAT_CLOSE, Loan<FORK_C_RESOURCE>>(),
                             ),
                             g::seq(
-                                g::send::<FORK_B_RESOURCE, C, Eat<FORK_B_RESOURCE>>(),
-                                g::send::<FORK_B, C, Loan<FORK_B_RESOURCE>>(),
+                                g::send::<FORK_B_RESOURCE, C_EAT_CLOSE, Eat<FORK_B_RESOURCE>>(),
+                                g::send::<FORK_B, C_EAT_CLOSE, Loan<FORK_B_RESOURCE>>(),
                             ),
                         ),
                         g::seq(
@@ -666,16 +733,20 @@ pub fn project_9m() -> Programs9M {
                             ),
                             g::seq(
                                 g::par(
-                                    g::send::<C, FORK_C, Loan<FORK_C_RESOURCE>>(),
-                                    g::send::<C, FORK_B, Loan<FORK_B_RESOURCE>>(),
+                                    g::send::<C_EAT_CLOSE, FORK_C, Loan<FORK_C_RESOURCE>>(),
+                                    g::send::<C_EAT_CLOSE, FORK_B, Loan<FORK_B_RESOURCE>>(),
                                 ),
-                                g::send::<C, C_EAT_FILE, protocol::FdCloseObjectRetMsg>(),
+                                g::seq(
+                                    g::send::<C_EAT_CLOSE, C_EAT_FILE, protocol::FdCloseObjectRetMsg>(
+                                    ),
+                                    g::send::<C, C_EAT_FILE, CloseAuthority<C_EAT_CLOSE>>(),
+                                ),
                             ),
                         ),
                     ),
                 );
                 let retry = g::seq(
-                    g::send::<C, C_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
+                    g::send::<C_EAT_CLOSE, C_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
                     request,
                 );
                 g::seq(
@@ -687,20 +758,21 @@ pub fn project_9m() -> Programs9M {
         g::seq(
             g::par(
                 {
-                    let request = g::send::<B_EAT_FILE, B, protocol::FdCloseObjectReqMsg>();
-                    let left = g::send::<B, FORK_B, Eat<FORK_B_RESOURCE>>();
-                    let right = g::send::<B, FORK_A, Eat<FORK_A_RESOURCE>>();
+                    let request =
+                        g::send::<B_EAT_FILE, B_EAT_CLOSE, protocol::FdCloseObjectReqMsg>();
+                    let left = g::send::<B_EAT_CLOSE, FORK_B, Eat<FORK_B_RESOURCE>>();
+                    let right = g::send::<B_EAT_CLOSE, FORK_A, Eat<FORK_A_RESOURCE>>();
                     let approved = g::seq(
                         g::par(left, right),
                         g::seq(
                             g::par(
                                 g::seq(
-                                    g::send::<FORK_B_RESOURCE, B, Eat<FORK_B_RESOURCE>>(),
-                                    g::send::<FORK_B, B, Loan<FORK_B_RESOURCE>>(),
+                                    g::send::<FORK_B_RESOURCE, B_EAT_CLOSE, Eat<FORK_B_RESOURCE>>(),
+                                    g::send::<FORK_B, B_EAT_CLOSE, Loan<FORK_B_RESOURCE>>(),
                                 ),
                                 g::seq(
-                                    g::send::<FORK_A_RESOURCE, B, Eat<FORK_A_RESOURCE>>(),
-                                    g::send::<FORK_A, B, Loan<FORK_A_RESOURCE>>(),
+                                    g::send::<FORK_A_RESOURCE, B_EAT_CLOSE, Eat<FORK_A_RESOURCE>>(),
+                                    g::send::<FORK_A, B_EAT_CLOSE, Loan<FORK_A_RESOURCE>>(),
                                 ),
                             ),
                             g::seq(
@@ -710,16 +782,23 @@ pub fn project_9m() -> Programs9M {
                                 ),
                                 g::seq(
                                     g::par(
-                                        g::send::<B, FORK_B, Loan<FORK_B_RESOURCE>>(),
-                                        g::send::<B, FORK_A, Loan<FORK_A_RESOURCE>>(),
+                                        g::send::<B_EAT_CLOSE, FORK_B, Loan<FORK_B_RESOURCE>>(),
+                                        g::send::<B_EAT_CLOSE, FORK_A, Loan<FORK_A_RESOURCE>>(),
                                     ),
-                                    g::send::<B, B_EAT_FILE, protocol::FdCloseObjectRetMsg>(),
+                                    g::seq(
+                                        g::send::<
+                                            B_EAT_CLOSE,
+                                            B_EAT_FILE,
+                                            protocol::FdCloseObjectRetMsg,
+                                        >(),
+                                        g::send::<B, B_EAT_FILE, CloseAuthority<B_EAT_CLOSE>>(),
+                                    ),
                                 ),
                             ),
                         ),
                     );
                     let retry = g::seq(
-                        g::send::<B, B_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
+                        g::send::<B_EAT_CLOSE, B_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
                         request,
                     );
                     g::seq(
@@ -729,20 +808,21 @@ pub fn project_9m() -> Programs9M {
                     )
                 },
                 {
-                    let request = g::send::<D_EAT_FILE, D, protocol::FdCloseObjectReqMsg>();
-                    let left = g::send::<D, FORK_D, Eat<FORK_D_RESOURCE>>();
-                    let right = g::send::<D, FORK_C, Eat<FORK_C_RESOURCE>>();
+                    let request =
+                        g::send::<D_EAT_FILE, D_EAT_CLOSE, protocol::FdCloseObjectReqMsg>();
+                    let left = g::send::<D_EAT_CLOSE, FORK_D, Eat<FORK_D_RESOURCE>>();
+                    let right = g::send::<D_EAT_CLOSE, FORK_C, Eat<FORK_C_RESOURCE>>();
                     let approved = g::seq(
                         g::par(left, right),
                         g::seq(
                             g::par(
                                 g::seq(
-                                    g::send::<FORK_D_RESOURCE, D, Eat<FORK_D_RESOURCE>>(),
-                                    g::send::<FORK_D, D, Loan<FORK_D_RESOURCE>>(),
+                                    g::send::<FORK_D_RESOURCE, D_EAT_CLOSE, Eat<FORK_D_RESOURCE>>(),
+                                    g::send::<FORK_D, D_EAT_CLOSE, Loan<FORK_D_RESOURCE>>(),
                                 ),
                                 g::seq(
-                                    g::send::<FORK_C_RESOURCE, D, Eat<FORK_C_RESOURCE>>(),
-                                    g::send::<FORK_C, D, Loan<FORK_C_RESOURCE>>(),
+                                    g::send::<FORK_C_RESOURCE, D_EAT_CLOSE, Eat<FORK_C_RESOURCE>>(),
+                                    g::send::<FORK_C, D_EAT_CLOSE, Loan<FORK_C_RESOURCE>>(),
                                 ),
                             ),
                             g::seq(
@@ -752,16 +832,23 @@ pub fn project_9m() -> Programs9M {
                                 ),
                                 g::seq(
                                     g::par(
-                                        g::send::<D, FORK_D, Loan<FORK_D_RESOURCE>>(),
-                                        g::send::<D, FORK_C, Loan<FORK_C_RESOURCE>>(),
+                                        g::send::<D_EAT_CLOSE, FORK_D, Loan<FORK_D_RESOURCE>>(),
+                                        g::send::<D_EAT_CLOSE, FORK_C, Loan<FORK_C_RESOURCE>>(),
                                     ),
-                                    g::send::<D, D_EAT_FILE, protocol::FdCloseObjectRetMsg>(),
+                                    g::seq(
+                                        g::send::<
+                                            D_EAT_CLOSE,
+                                            D_EAT_FILE,
+                                            protocol::FdCloseObjectRetMsg,
+                                        >(),
+                                        g::send::<D, D_EAT_FILE, CloseAuthority<D_EAT_CLOSE>>(),
+                                    ),
                                 ),
                             ),
                         ),
                     );
                     let retry = g::seq(
-                        g::send::<D, D_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
+                        g::send::<D_EAT_CLOSE, D_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
                         request,
                     );
                     g::seq(
@@ -772,20 +859,20 @@ pub fn project_9m() -> Programs9M {
                 },
             ),
             {
-                let request = g::send::<E_EAT_FILE, E, protocol::FdCloseObjectReqMsg>();
-                let left = g::send::<E, FORK_E, Eat<FORK_E_RESOURCE>>();
-                let right = g::send::<E, FORK_D, Eat<FORK_D_RESOURCE>>();
+                let request = g::send::<E_EAT_FILE, E_EAT_CLOSE, protocol::FdCloseObjectReqMsg>();
+                let left = g::send::<E_EAT_CLOSE, FORK_E, Eat<FORK_E_RESOURCE>>();
+                let right = g::send::<E_EAT_CLOSE, FORK_D, Eat<FORK_D_RESOURCE>>();
                 let approved = g::seq(
                     g::par(left, right),
                     g::seq(
                         g::par(
                             g::seq(
-                                g::send::<FORK_E_RESOURCE, E, Eat<FORK_E_RESOURCE>>(),
-                                g::send::<FORK_E, E, Loan<FORK_E_RESOURCE>>(),
+                                g::send::<FORK_E_RESOURCE, E_EAT_CLOSE, Eat<FORK_E_RESOURCE>>(),
+                                g::send::<FORK_E, E_EAT_CLOSE, Loan<FORK_E_RESOURCE>>(),
                             ),
                             g::seq(
-                                g::send::<FORK_D_RESOURCE, E, Eat<FORK_D_RESOURCE>>(),
-                                g::send::<FORK_D, E, Loan<FORK_D_RESOURCE>>(),
+                                g::send::<FORK_D_RESOURCE, E_EAT_CLOSE, Eat<FORK_D_RESOURCE>>(),
+                                g::send::<FORK_D, E_EAT_CLOSE, Loan<FORK_D_RESOURCE>>(),
                             ),
                         ),
                         g::seq(
@@ -795,16 +882,20 @@ pub fn project_9m() -> Programs9M {
                             ),
                             g::seq(
                                 g::par(
-                                    g::send::<E, FORK_E, Loan<FORK_E_RESOURCE>>(),
-                                    g::send::<E, FORK_D, Loan<FORK_D_RESOURCE>>(),
+                                    g::send::<E_EAT_CLOSE, FORK_E, Loan<FORK_E_RESOURCE>>(),
+                                    g::send::<E_EAT_CLOSE, FORK_D, Loan<FORK_D_RESOURCE>>(),
                                 ),
-                                g::send::<E, E_EAT_FILE, protocol::FdCloseObjectRetMsg>(),
+                                g::seq(
+                                    g::send::<E_EAT_CLOSE, E_EAT_FILE, protocol::FdCloseObjectRetMsg>(
+                                    ),
+                                    g::send::<E, E_EAT_FILE, CloseAuthority<E_EAT_CLOSE>>(),
+                                ),
                             ),
                         ),
                     ),
                 );
                 let retry = g::seq(
-                    g::send::<E, E_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
+                    g::send::<E_EAT_CLOSE, E_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
                     request,
                 );
                 g::seq(
@@ -868,6 +959,8 @@ pub fn project_9m() -> Programs9M {
         resource_a: project(&global),
         a_think_file: project(&global),
         a_eat_file: project(&global),
+        think_close_a: project(&global),
+        eat_close_a: project(&global),
         b: project(&global),
         think_b: project(&global),
         fork_b: project(&global),
@@ -876,6 +969,8 @@ pub fn project_9m() -> Programs9M {
         resource_b: project(&global),
         b_think_file: project(&global),
         b_eat_file: project(&global),
+        think_close_b: project(&global),
+        eat_close_b: project(&global),
         c: project(&global),
         think_c: project(&global),
         fork_c: project(&global),
@@ -884,6 +979,8 @@ pub fn project_9m() -> Programs9M {
         resource_c: project(&global),
         c_think_file: project(&global),
         c_eat_file: project(&global),
+        think_close_c: project(&global),
+        eat_close_c: project(&global),
         d: project(&global),
         think_d: project(&global),
         fork_d: project(&global),
@@ -892,6 +989,8 @@ pub fn project_9m() -> Programs9M {
         resource_d: project(&global),
         d_think_file: project(&global),
         d_eat_file: project(&global),
+        think_close_d: project(&global),
+        eat_close_d: project(&global),
         e: project(&global),
         think_e: project(&global),
         fork_e: project(&global),
@@ -900,6 +999,8 @@ pub fn project_9m() -> Programs9M {
         resource_e: project(&global),
         e_think_file: project(&global),
         e_eat_file: project(&global),
+        think_close_e: project(&global),
+        eat_close_e: project(&global),
     }
 }
 
@@ -912,6 +1013,8 @@ pub struct Programs9H {
     pub resource_a: RoleProgram<{ roles::FORK_A_RESOURCE }>,
     pub a_think_file: RoleProgram<{ roles::A_THINK_FILE }>,
     pub a_eat_file: RoleProgram<{ roles::A_EAT_FILE }>,
+    pub think_close_a: RoleProgram<{ roles::A_THINK_CLOSE }>,
+    pub eat_close_a: RoleProgram<{ roles::A_EAT_CLOSE }>,
     pub b: RoleProgram<{ roles::B }>,
     pub think_b: RoleProgram<{ roles::THINK_B }>,
     pub fork_b: RoleProgram<{ roles::FORK_B }>,
@@ -920,6 +1023,8 @@ pub struct Programs9H {
     pub resource_b: RoleProgram<{ roles::FORK_B_RESOURCE }>,
     pub b_think_file: RoleProgram<{ roles::B_THINK_FILE }>,
     pub b_eat_file: RoleProgram<{ roles::B_EAT_FILE }>,
+    pub think_close_b: RoleProgram<{ roles::B_THINK_CLOSE }>,
+    pub eat_close_b: RoleProgram<{ roles::B_EAT_CLOSE }>,
     pub c: RoleProgram<{ roles::C }>,
     pub think_c: RoleProgram<{ roles::THINK_C }>,
     pub fork_c: RoleProgram<{ roles::FORK_C }>,
@@ -928,6 +1033,8 @@ pub struct Programs9H {
     pub resource_c: RoleProgram<{ roles::FORK_C_RESOURCE }>,
     pub c_think_file: RoleProgram<{ roles::C_THINK_FILE }>,
     pub c_eat_file: RoleProgram<{ roles::C_EAT_FILE }>,
+    pub think_close_c: RoleProgram<{ roles::C_THINK_CLOSE }>,
+    pub eat_close_c: RoleProgram<{ roles::C_EAT_CLOSE }>,
     pub d: RoleProgram<{ roles::D }>,
     pub think_d: RoleProgram<{ roles::THINK_D }>,
     pub fork_d: RoleProgram<{ roles::FORK_D }>,
@@ -936,6 +1043,8 @@ pub struct Programs9H {
     pub resource_d: RoleProgram<{ roles::FORK_D_RESOURCE }>,
     pub d_think_file: RoleProgram<{ roles::D_THINK_FILE }>,
     pub d_eat_file: RoleProgram<{ roles::D_EAT_FILE }>,
+    pub think_close_d: RoleProgram<{ roles::D_THINK_CLOSE }>,
+    pub eat_close_d: RoleProgram<{ roles::D_EAT_CLOSE }>,
     pub e: RoleProgram<{ roles::E }>,
     pub think_e: RoleProgram<{ roles::THINK_E }>,
     pub fork_e: RoleProgram<{ roles::FORK_E }>,
@@ -944,6 +1053,8 @@ pub struct Programs9H {
     pub resource_e: RoleProgram<{ roles::FORK_E_RESOURCE }>,
     pub e_think_file: RoleProgram<{ roles::E_THINK_FILE }>,
     pub e_eat_file: RoleProgram<{ roles::E_EAT_FILE }>,
+    pub think_close_e: RoleProgram<{ roles::E_THINK_CLOSE }>,
+    pub eat_close_e: RoleProgram<{ roles::E_EAT_CLOSE }>,
     pub f: RoleProgram<{ roles::F }>,
     pub think_f: RoleProgram<{ roles::THINK_F }>,
     pub fork_f: RoleProgram<{ roles::FORK_F }>,
@@ -952,6 +1063,8 @@ pub struct Programs9H {
     pub resource_f: RoleProgram<{ roles::FORK_F_RESOURCE }>,
     pub f_think_file: RoleProgram<{ roles::F_THINK_FILE }>,
     pub f_eat_file: RoleProgram<{ roles::F_EAT_FILE }>,
+    pub think_close_f: RoleProgram<{ roles::F_THINK_CLOSE }>,
+    pub eat_close_f: RoleProgram<{ roles::F_EAT_CLOSE }>,
     pub g: RoleProgram<{ roles::G }>,
     pub think_g: RoleProgram<{ roles::THINK_G }>,
     pub fork_g: RoleProgram<{ roles::FORK_G }>,
@@ -960,11 +1073,13 @@ pub struct Programs9H {
     pub resource_g: RoleProgram<{ roles::FORK_G_RESOURCE }>,
     pub g_think_file: RoleProgram<{ roles::G_THINK_FILE }>,
     pub g_eat_file: RoleProgram<{ roles::G_EAT_FILE }>,
+    pub think_close_g: RoleProgram<{ roles::G_THINK_CLOSE }>,
+    pub eat_close_g: RoleProgram<{ roles::G_EAT_CLOSE }>,
 }
 impl Programs9H {
     pub fn observation(&self) -> serde_json::Value {
         use crate::imp::projection::rows;
-        serde_json::json!({"type":"compiled_projection","format_version":1,"task":"9H","programs":[rows(&self.a),rows(&self.think_a),rows(&self.fork_a),rows(&self.a_wasi),rows(&self.a_io),rows(&self.resource_a),rows(&self.a_think_file),rows(&self.a_eat_file),rows(&self.b),rows(&self.think_b),rows(&self.fork_b),rows(&self.b_wasi),rows(&self.b_io),rows(&self.resource_b),rows(&self.b_think_file),rows(&self.b_eat_file),rows(&self.c),rows(&self.think_c),rows(&self.fork_c),rows(&self.c_wasi),rows(&self.c_io),rows(&self.resource_c),rows(&self.c_think_file),rows(&self.c_eat_file),rows(&self.d),rows(&self.think_d),rows(&self.fork_d),rows(&self.d_wasi),rows(&self.d_io),rows(&self.resource_d),rows(&self.d_think_file),rows(&self.d_eat_file),rows(&self.e),rows(&self.think_e),rows(&self.fork_e),rows(&self.e_wasi),rows(&self.e_io),rows(&self.resource_e),rows(&self.e_think_file),rows(&self.e_eat_file),rows(&self.f),rows(&self.think_f),rows(&self.fork_f),rows(&self.f_wasi),rows(&self.f_io),rows(&self.resource_f),rows(&self.f_think_file),rows(&self.f_eat_file),rows(&self.g),rows(&self.think_g),rows(&self.fork_g),rows(&self.g_wasi),rows(&self.g_io),rows(&self.resource_g),rows(&self.g_think_file),rows(&self.g_eat_file)]})
+        serde_json::json!({"type":"compiled_projection","format_version":1,"task":"9H","programs":[rows(&self.a),rows(&self.think_a),rows(&self.fork_a),rows(&self.a_wasi),rows(&self.a_io),rows(&self.resource_a),rows(&self.a_think_file),rows(&self.a_eat_file),rows(&self.think_close_a),rows(&self.eat_close_a),rows(&self.b),rows(&self.think_b),rows(&self.fork_b),rows(&self.b_wasi),rows(&self.b_io),rows(&self.resource_b),rows(&self.b_think_file),rows(&self.b_eat_file),rows(&self.think_close_b),rows(&self.eat_close_b),rows(&self.c),rows(&self.think_c),rows(&self.fork_c),rows(&self.c_wasi),rows(&self.c_io),rows(&self.resource_c),rows(&self.c_think_file),rows(&self.c_eat_file),rows(&self.think_close_c),rows(&self.eat_close_c),rows(&self.d),rows(&self.think_d),rows(&self.fork_d),rows(&self.d_wasi),rows(&self.d_io),rows(&self.resource_d),rows(&self.d_think_file),rows(&self.d_eat_file),rows(&self.think_close_d),rows(&self.eat_close_d),rows(&self.e),rows(&self.think_e),rows(&self.fork_e),rows(&self.e_wasi),rows(&self.e_io),rows(&self.resource_e),rows(&self.e_think_file),rows(&self.e_eat_file),rows(&self.think_close_e),rows(&self.eat_close_e),rows(&self.f),rows(&self.think_f),rows(&self.fork_f),rows(&self.f_wasi),rows(&self.f_io),rows(&self.resource_f),rows(&self.f_think_file),rows(&self.f_eat_file),rows(&self.think_close_f),rows(&self.eat_close_f),rows(&self.g),rows(&self.think_g),rows(&self.fork_g),rows(&self.g_wasi),rows(&self.g_io),rows(&self.resource_g),rows(&self.g_think_file),rows(&self.g_eat_file),rows(&self.think_close_g),rows(&self.eat_close_g)]})
     }
 }
 pub fn project_9h() -> Programs9H {
@@ -1074,11 +1189,14 @@ pub fn project_9h() -> Programs9H {
         g::par(
             g::par(
                 {
-                    let request = g::send::<A_THINK_FILE, THINK_A, protocol::FdCloseObjectReqMsg>();
-                    let approved =
-                        g::send::<THINK_A, A_THINK_FILE, protocol::FdCloseObjectRetMsg>();
+                    let request =
+                        g::send::<A_THINK_FILE, A_THINK_CLOSE, protocol::FdCloseObjectReqMsg>();
+                    let approved = g::seq(
+                        g::send::<A_THINK_CLOSE, A_THINK_FILE, protocol::FdCloseObjectRetMsg>(),
+                        g::send::<THINK_A, A_THINK_FILE, CloseAuthority<A_THINK_CLOSE>>(),
+                    );
                     let retry = g::seq(
-                        g::send::<THINK_A, A_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
+                        g::send::<A_THINK_CLOSE, A_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
                         request,
                     );
                     g::seq(
@@ -1088,11 +1206,14 @@ pub fn project_9h() -> Programs9H {
                     )
                 },
                 {
-                    let request = g::send::<B_THINK_FILE, THINK_B, protocol::FdCloseObjectReqMsg>();
-                    let approved =
-                        g::send::<THINK_B, B_THINK_FILE, protocol::FdCloseObjectRetMsg>();
+                    let request =
+                        g::send::<B_THINK_FILE, B_THINK_CLOSE, protocol::FdCloseObjectReqMsg>();
+                    let approved = g::seq(
+                        g::send::<B_THINK_CLOSE, B_THINK_FILE, protocol::FdCloseObjectRetMsg>(),
+                        g::send::<THINK_B, B_THINK_FILE, CloseAuthority<B_THINK_CLOSE>>(),
+                    );
                     let retry = g::seq(
-                        g::send::<THINK_B, B_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
+                        g::send::<B_THINK_CLOSE, B_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
                         request,
                     );
                     g::seq(
@@ -1104,11 +1225,14 @@ pub fn project_9h() -> Programs9H {
             ),
             g::par(
                 {
-                    let request = g::send::<C_THINK_FILE, THINK_C, protocol::FdCloseObjectReqMsg>();
-                    let approved =
-                        g::send::<THINK_C, C_THINK_FILE, protocol::FdCloseObjectRetMsg>();
+                    let request =
+                        g::send::<C_THINK_FILE, C_THINK_CLOSE, protocol::FdCloseObjectReqMsg>();
+                    let approved = g::seq(
+                        g::send::<C_THINK_CLOSE, C_THINK_FILE, protocol::FdCloseObjectRetMsg>(),
+                        g::send::<THINK_C, C_THINK_FILE, CloseAuthority<C_THINK_CLOSE>>(),
+                    );
                     let retry = g::seq(
-                        g::send::<THINK_C, C_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
+                        g::send::<C_THINK_CLOSE, C_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
                         request,
                     );
                     g::seq(
@@ -1118,11 +1242,14 @@ pub fn project_9h() -> Programs9H {
                     )
                 },
                 {
-                    let request = g::send::<D_THINK_FILE, THINK_D, protocol::FdCloseObjectReqMsg>();
-                    let approved =
-                        g::send::<THINK_D, D_THINK_FILE, protocol::FdCloseObjectRetMsg>();
+                    let request =
+                        g::send::<D_THINK_FILE, D_THINK_CLOSE, protocol::FdCloseObjectReqMsg>();
+                    let approved = g::seq(
+                        g::send::<D_THINK_CLOSE, D_THINK_FILE, protocol::FdCloseObjectRetMsg>(),
+                        g::send::<THINK_D, D_THINK_FILE, CloseAuthority<D_THINK_CLOSE>>(),
+                    );
                     let retry = g::seq(
-                        g::send::<THINK_D, D_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
+                        g::send::<D_THINK_CLOSE, D_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
                         request,
                     );
                     g::seq(
@@ -1136,11 +1263,14 @@ pub fn project_9h() -> Programs9H {
         g::par(
             g::par(
                 {
-                    let request = g::send::<E_THINK_FILE, THINK_E, protocol::FdCloseObjectReqMsg>();
-                    let approved =
-                        g::send::<THINK_E, E_THINK_FILE, protocol::FdCloseObjectRetMsg>();
+                    let request =
+                        g::send::<E_THINK_FILE, E_THINK_CLOSE, protocol::FdCloseObjectReqMsg>();
+                    let approved = g::seq(
+                        g::send::<E_THINK_CLOSE, E_THINK_FILE, protocol::FdCloseObjectRetMsg>(),
+                        g::send::<THINK_E, E_THINK_FILE, CloseAuthority<E_THINK_CLOSE>>(),
+                    );
                     let retry = g::seq(
-                        g::send::<THINK_E, E_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
+                        g::send::<E_THINK_CLOSE, E_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
                         request,
                     );
                     g::seq(
@@ -1150,11 +1280,14 @@ pub fn project_9h() -> Programs9H {
                     )
                 },
                 {
-                    let request = g::send::<F_THINK_FILE, THINK_F, protocol::FdCloseObjectReqMsg>();
-                    let approved =
-                        g::send::<THINK_F, F_THINK_FILE, protocol::FdCloseObjectRetMsg>();
+                    let request =
+                        g::send::<F_THINK_FILE, F_THINK_CLOSE, protocol::FdCloseObjectReqMsg>();
+                    let approved = g::seq(
+                        g::send::<F_THINK_CLOSE, F_THINK_FILE, protocol::FdCloseObjectRetMsg>(),
+                        g::send::<THINK_F, F_THINK_FILE, CloseAuthority<F_THINK_CLOSE>>(),
+                    );
                     let retry = g::seq(
-                        g::send::<THINK_F, F_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
+                        g::send::<F_THINK_CLOSE, F_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
                         request,
                     );
                     g::seq(
@@ -1165,10 +1298,14 @@ pub fn project_9h() -> Programs9H {
                 },
             ),
             {
-                let request = g::send::<G_THINK_FILE, THINK_G, protocol::FdCloseObjectReqMsg>();
-                let approved = g::send::<THINK_G, G_THINK_FILE, protocol::FdCloseObjectRetMsg>();
+                let request =
+                    g::send::<G_THINK_FILE, G_THINK_CLOSE, protocol::FdCloseObjectReqMsg>();
+                let approved = g::seq(
+                    g::send::<G_THINK_CLOSE, G_THINK_FILE, protocol::FdCloseObjectRetMsg>(),
+                    g::send::<THINK_G, G_THINK_FILE, CloseAuthority<G_THINK_CLOSE>>(),
+                );
                 let retry = g::seq(
-                    g::send::<THINK_G, G_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
+                    g::send::<G_THINK_CLOSE, G_THINK_FILE, protocol::FdCloseRejectedRetMsg>(),
                     request,
                 );
                 g::seq(
@@ -1183,20 +1320,21 @@ pub fn project_9h() -> Programs9H {
         g::par(
             g::par(
                 {
-                    let request = g::send::<A_EAT_FILE, A, protocol::FdCloseObjectReqMsg>();
-                    let left = g::send::<A, FORK_A, Eat<FORK_A_RESOURCE>>();
-                    let right = g::send::<A, FORK_G, Eat<FORK_G_RESOURCE>>();
+                    let request =
+                        g::send::<A_EAT_FILE, A_EAT_CLOSE, protocol::FdCloseObjectReqMsg>();
+                    let left = g::send::<A_EAT_CLOSE, FORK_A, Eat<FORK_A_RESOURCE>>();
+                    let right = g::send::<A_EAT_CLOSE, FORK_G, Eat<FORK_G_RESOURCE>>();
                     let approved = g::seq(
                         g::par(left, right),
                         g::seq(
                             g::par(
                                 g::seq(
-                                    g::send::<FORK_A_RESOURCE, A, Eat<FORK_A_RESOURCE>>(),
-                                    g::send::<FORK_A, A, Loan<FORK_A_RESOURCE>>(),
+                                    g::send::<FORK_A_RESOURCE, A_EAT_CLOSE, Eat<FORK_A_RESOURCE>>(),
+                                    g::send::<FORK_A, A_EAT_CLOSE, Loan<FORK_A_RESOURCE>>(),
                                 ),
                                 g::seq(
-                                    g::send::<FORK_G_RESOURCE, A, Eat<FORK_G_RESOURCE>>(),
-                                    g::send::<FORK_G, A, Loan<FORK_G_RESOURCE>>(),
+                                    g::send::<FORK_G_RESOURCE, A_EAT_CLOSE, Eat<FORK_G_RESOURCE>>(),
+                                    g::send::<FORK_G, A_EAT_CLOSE, Loan<FORK_G_RESOURCE>>(),
                                 ),
                             ),
                             g::seq(
@@ -1206,16 +1344,23 @@ pub fn project_9h() -> Programs9H {
                                 ),
                                 g::seq(
                                     g::par(
-                                        g::send::<A, FORK_A, Loan<FORK_A_RESOURCE>>(),
-                                        g::send::<A, FORK_G, Loan<FORK_G_RESOURCE>>(),
+                                        g::send::<A_EAT_CLOSE, FORK_A, Loan<FORK_A_RESOURCE>>(),
+                                        g::send::<A_EAT_CLOSE, FORK_G, Loan<FORK_G_RESOURCE>>(),
                                     ),
-                                    g::send::<A, A_EAT_FILE, protocol::FdCloseObjectRetMsg>(),
+                                    g::seq(
+                                        g::send::<
+                                            A_EAT_CLOSE,
+                                            A_EAT_FILE,
+                                            protocol::FdCloseObjectRetMsg,
+                                        >(),
+                                        g::send::<A, A_EAT_FILE, CloseAuthority<A_EAT_CLOSE>>(),
+                                    ),
                                 ),
                             ),
                         ),
                     );
                     let retry = g::seq(
-                        g::send::<A, A_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
+                        g::send::<A_EAT_CLOSE, A_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
                         request,
                     );
                     g::seq(
@@ -1225,20 +1370,21 @@ pub fn project_9h() -> Programs9H {
                     )
                 },
                 {
-                    let request = g::send::<C_EAT_FILE, C, protocol::FdCloseObjectReqMsg>();
-                    let left = g::send::<C, FORK_C, Eat<FORK_C_RESOURCE>>();
-                    let right = g::send::<C, FORK_B, Eat<FORK_B_RESOURCE>>();
+                    let request =
+                        g::send::<C_EAT_FILE, C_EAT_CLOSE, protocol::FdCloseObjectReqMsg>();
+                    let left = g::send::<C_EAT_CLOSE, FORK_C, Eat<FORK_C_RESOURCE>>();
+                    let right = g::send::<C_EAT_CLOSE, FORK_B, Eat<FORK_B_RESOURCE>>();
                     let approved = g::seq(
                         g::par(left, right),
                         g::seq(
                             g::par(
                                 g::seq(
-                                    g::send::<FORK_C_RESOURCE, C, Eat<FORK_C_RESOURCE>>(),
-                                    g::send::<FORK_C, C, Loan<FORK_C_RESOURCE>>(),
+                                    g::send::<FORK_C_RESOURCE, C_EAT_CLOSE, Eat<FORK_C_RESOURCE>>(),
+                                    g::send::<FORK_C, C_EAT_CLOSE, Loan<FORK_C_RESOURCE>>(),
                                 ),
                                 g::seq(
-                                    g::send::<FORK_B_RESOURCE, C, Eat<FORK_B_RESOURCE>>(),
-                                    g::send::<FORK_B, C, Loan<FORK_B_RESOURCE>>(),
+                                    g::send::<FORK_B_RESOURCE, C_EAT_CLOSE, Eat<FORK_B_RESOURCE>>(),
+                                    g::send::<FORK_B, C_EAT_CLOSE, Loan<FORK_B_RESOURCE>>(),
                                 ),
                             ),
                             g::seq(
@@ -1248,16 +1394,23 @@ pub fn project_9h() -> Programs9H {
                                 ),
                                 g::seq(
                                     g::par(
-                                        g::send::<C, FORK_C, Loan<FORK_C_RESOURCE>>(),
-                                        g::send::<C, FORK_B, Loan<FORK_B_RESOURCE>>(),
+                                        g::send::<C_EAT_CLOSE, FORK_C, Loan<FORK_C_RESOURCE>>(),
+                                        g::send::<C_EAT_CLOSE, FORK_B, Loan<FORK_B_RESOURCE>>(),
                                     ),
-                                    g::send::<C, C_EAT_FILE, protocol::FdCloseObjectRetMsg>(),
+                                    g::seq(
+                                        g::send::<
+                                            C_EAT_CLOSE,
+                                            C_EAT_FILE,
+                                            protocol::FdCloseObjectRetMsg,
+                                        >(),
+                                        g::send::<C, C_EAT_FILE, CloseAuthority<C_EAT_CLOSE>>(),
+                                    ),
                                 ),
                             ),
                         ),
                     );
                     let retry = g::seq(
-                        g::send::<C, C_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
+                        g::send::<C_EAT_CLOSE, C_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
                         request,
                     );
                     g::seq(
@@ -1268,20 +1421,20 @@ pub fn project_9h() -> Programs9H {
                 },
             ),
             {
-                let request = g::send::<E_EAT_FILE, E, protocol::FdCloseObjectReqMsg>();
-                let left = g::send::<E, FORK_E, Eat<FORK_E_RESOURCE>>();
-                let right = g::send::<E, FORK_D, Eat<FORK_D_RESOURCE>>();
+                let request = g::send::<E_EAT_FILE, E_EAT_CLOSE, protocol::FdCloseObjectReqMsg>();
+                let left = g::send::<E_EAT_CLOSE, FORK_E, Eat<FORK_E_RESOURCE>>();
+                let right = g::send::<E_EAT_CLOSE, FORK_D, Eat<FORK_D_RESOURCE>>();
                 let approved = g::seq(
                     g::par(left, right),
                     g::seq(
                         g::par(
                             g::seq(
-                                g::send::<FORK_E_RESOURCE, E, Eat<FORK_E_RESOURCE>>(),
-                                g::send::<FORK_E, E, Loan<FORK_E_RESOURCE>>(),
+                                g::send::<FORK_E_RESOURCE, E_EAT_CLOSE, Eat<FORK_E_RESOURCE>>(),
+                                g::send::<FORK_E, E_EAT_CLOSE, Loan<FORK_E_RESOURCE>>(),
                             ),
                             g::seq(
-                                g::send::<FORK_D_RESOURCE, E, Eat<FORK_D_RESOURCE>>(),
-                                g::send::<FORK_D, E, Loan<FORK_D_RESOURCE>>(),
+                                g::send::<FORK_D_RESOURCE, E_EAT_CLOSE, Eat<FORK_D_RESOURCE>>(),
+                                g::send::<FORK_D, E_EAT_CLOSE, Loan<FORK_D_RESOURCE>>(),
                             ),
                         ),
                         g::seq(
@@ -1291,16 +1444,20 @@ pub fn project_9h() -> Programs9H {
                             ),
                             g::seq(
                                 g::par(
-                                    g::send::<E, FORK_E, Loan<FORK_E_RESOURCE>>(),
-                                    g::send::<E, FORK_D, Loan<FORK_D_RESOURCE>>(),
+                                    g::send::<E_EAT_CLOSE, FORK_E, Loan<FORK_E_RESOURCE>>(),
+                                    g::send::<E_EAT_CLOSE, FORK_D, Loan<FORK_D_RESOURCE>>(),
                                 ),
-                                g::send::<E, E_EAT_FILE, protocol::FdCloseObjectRetMsg>(),
+                                g::seq(
+                                    g::send::<E_EAT_CLOSE, E_EAT_FILE, protocol::FdCloseObjectRetMsg>(
+                                    ),
+                                    g::send::<E, E_EAT_FILE, CloseAuthority<E_EAT_CLOSE>>(),
+                                ),
                             ),
                         ),
                     ),
                 );
                 let retry = g::seq(
-                    g::send::<E, E_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
+                    g::send::<E_EAT_CLOSE, E_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
                     request,
                 );
                 g::seq(
@@ -1313,20 +1470,23 @@ pub fn project_9h() -> Programs9H {
             g::par(
                 g::par(
                     {
-                        let request = g::send::<B_EAT_FILE, B, protocol::FdCloseObjectReqMsg>();
-                        let left = g::send::<B, FORK_B, Eat<FORK_B_RESOURCE>>();
-                        let right = g::send::<B, FORK_A, Eat<FORK_A_RESOURCE>>();
+                        let request =
+                            g::send::<B_EAT_FILE, B_EAT_CLOSE, protocol::FdCloseObjectReqMsg>();
+                        let left = g::send::<B_EAT_CLOSE, FORK_B, Eat<FORK_B_RESOURCE>>();
+                        let right = g::send::<B_EAT_CLOSE, FORK_A, Eat<FORK_A_RESOURCE>>();
                         let approved = g::seq(
                             g::par(left, right),
                             g::seq(
                                 g::par(
                                     g::seq(
-                                        g::send::<FORK_B_RESOURCE, B, Eat<FORK_B_RESOURCE>>(),
-                                        g::send::<FORK_B, B, Loan<FORK_B_RESOURCE>>(),
+                                        g::send::<FORK_B_RESOURCE, B_EAT_CLOSE, Eat<FORK_B_RESOURCE>>(
+                                        ),
+                                        g::send::<FORK_B, B_EAT_CLOSE, Loan<FORK_B_RESOURCE>>(),
                                     ),
                                     g::seq(
-                                        g::send::<FORK_A_RESOURCE, B, Eat<FORK_A_RESOURCE>>(),
-                                        g::send::<FORK_A, B, Loan<FORK_A_RESOURCE>>(),
+                                        g::send::<FORK_A_RESOURCE, B_EAT_CLOSE, Eat<FORK_A_RESOURCE>>(
+                                        ),
+                                        g::send::<FORK_A, B_EAT_CLOSE, Loan<FORK_A_RESOURCE>>(),
                                     ),
                                 ),
                                 g::seq(
@@ -1336,16 +1496,23 @@ pub fn project_9h() -> Programs9H {
                                     ),
                                     g::seq(
                                         g::par(
-                                            g::send::<B, FORK_B, Loan<FORK_B_RESOURCE>>(),
-                                            g::send::<B, FORK_A, Loan<FORK_A_RESOURCE>>(),
+                                            g::send::<B_EAT_CLOSE, FORK_B, Loan<FORK_B_RESOURCE>>(),
+                                            g::send::<B_EAT_CLOSE, FORK_A, Loan<FORK_A_RESOURCE>>(),
                                         ),
-                                        g::send::<B, B_EAT_FILE, protocol::FdCloseObjectRetMsg>(),
+                                        g::seq(
+                                            g::send::<
+                                                B_EAT_CLOSE,
+                                                B_EAT_FILE,
+                                                protocol::FdCloseObjectRetMsg,
+                                            >(),
+                                            g::send::<B, B_EAT_FILE, CloseAuthority<B_EAT_CLOSE>>(),
+                                        ),
                                     ),
                                 ),
                             ),
                         );
                         let retry = g::seq(
-                            g::send::<B, B_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
+                            g::send::<B_EAT_CLOSE, B_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
                             request,
                         );
                         g::seq(
@@ -1355,20 +1522,23 @@ pub fn project_9h() -> Programs9H {
                         )
                     },
                     {
-                        let request = g::send::<D_EAT_FILE, D, protocol::FdCloseObjectReqMsg>();
-                        let left = g::send::<D, FORK_D, Eat<FORK_D_RESOURCE>>();
-                        let right = g::send::<D, FORK_C, Eat<FORK_C_RESOURCE>>();
+                        let request =
+                            g::send::<D_EAT_FILE, D_EAT_CLOSE, protocol::FdCloseObjectReqMsg>();
+                        let left = g::send::<D_EAT_CLOSE, FORK_D, Eat<FORK_D_RESOURCE>>();
+                        let right = g::send::<D_EAT_CLOSE, FORK_C, Eat<FORK_C_RESOURCE>>();
                         let approved = g::seq(
                             g::par(left, right),
                             g::seq(
                                 g::par(
                                     g::seq(
-                                        g::send::<FORK_D_RESOURCE, D, Eat<FORK_D_RESOURCE>>(),
-                                        g::send::<FORK_D, D, Loan<FORK_D_RESOURCE>>(),
+                                        g::send::<FORK_D_RESOURCE, D_EAT_CLOSE, Eat<FORK_D_RESOURCE>>(
+                                        ),
+                                        g::send::<FORK_D, D_EAT_CLOSE, Loan<FORK_D_RESOURCE>>(),
                                     ),
                                     g::seq(
-                                        g::send::<FORK_C_RESOURCE, D, Eat<FORK_C_RESOURCE>>(),
-                                        g::send::<FORK_C, D, Loan<FORK_C_RESOURCE>>(),
+                                        g::send::<FORK_C_RESOURCE, D_EAT_CLOSE, Eat<FORK_C_RESOURCE>>(
+                                        ),
+                                        g::send::<FORK_C, D_EAT_CLOSE, Loan<FORK_C_RESOURCE>>(),
                                     ),
                                 ),
                                 g::seq(
@@ -1378,16 +1548,23 @@ pub fn project_9h() -> Programs9H {
                                     ),
                                     g::seq(
                                         g::par(
-                                            g::send::<D, FORK_D, Loan<FORK_D_RESOURCE>>(),
-                                            g::send::<D, FORK_C, Loan<FORK_C_RESOURCE>>(),
+                                            g::send::<D_EAT_CLOSE, FORK_D, Loan<FORK_D_RESOURCE>>(),
+                                            g::send::<D_EAT_CLOSE, FORK_C, Loan<FORK_C_RESOURCE>>(),
                                         ),
-                                        g::send::<D, D_EAT_FILE, protocol::FdCloseObjectRetMsg>(),
+                                        g::seq(
+                                            g::send::<
+                                                D_EAT_CLOSE,
+                                                D_EAT_FILE,
+                                                protocol::FdCloseObjectRetMsg,
+                                            >(),
+                                            g::send::<D, D_EAT_FILE, CloseAuthority<D_EAT_CLOSE>>(),
+                                        ),
                                     ),
                                 ),
                             ),
                         );
                         let retry = g::seq(
-                            g::send::<D, D_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
+                            g::send::<D_EAT_CLOSE, D_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
                             request,
                         );
                         g::seq(
@@ -1398,20 +1575,21 @@ pub fn project_9h() -> Programs9H {
                     },
                 ),
                 {
-                    let request = g::send::<F_EAT_FILE, F, protocol::FdCloseObjectReqMsg>();
-                    let left = g::send::<F, FORK_F, Eat<FORK_F_RESOURCE>>();
-                    let right = g::send::<F, FORK_E, Eat<FORK_E_RESOURCE>>();
+                    let request =
+                        g::send::<F_EAT_FILE, F_EAT_CLOSE, protocol::FdCloseObjectReqMsg>();
+                    let left = g::send::<F_EAT_CLOSE, FORK_F, Eat<FORK_F_RESOURCE>>();
+                    let right = g::send::<F_EAT_CLOSE, FORK_E, Eat<FORK_E_RESOURCE>>();
                     let approved = g::seq(
                         g::par(left, right),
                         g::seq(
                             g::par(
                                 g::seq(
-                                    g::send::<FORK_F_RESOURCE, F, Eat<FORK_F_RESOURCE>>(),
-                                    g::send::<FORK_F, F, Loan<FORK_F_RESOURCE>>(),
+                                    g::send::<FORK_F_RESOURCE, F_EAT_CLOSE, Eat<FORK_F_RESOURCE>>(),
+                                    g::send::<FORK_F, F_EAT_CLOSE, Loan<FORK_F_RESOURCE>>(),
                                 ),
                                 g::seq(
-                                    g::send::<FORK_E_RESOURCE, F, Eat<FORK_E_RESOURCE>>(),
-                                    g::send::<FORK_E, F, Loan<FORK_E_RESOURCE>>(),
+                                    g::send::<FORK_E_RESOURCE, F_EAT_CLOSE, Eat<FORK_E_RESOURCE>>(),
+                                    g::send::<FORK_E, F_EAT_CLOSE, Loan<FORK_E_RESOURCE>>(),
                                 ),
                             ),
                             g::seq(
@@ -1421,16 +1599,23 @@ pub fn project_9h() -> Programs9H {
                                 ),
                                 g::seq(
                                     g::par(
-                                        g::send::<F, FORK_F, Loan<FORK_F_RESOURCE>>(),
-                                        g::send::<F, FORK_E, Loan<FORK_E_RESOURCE>>(),
+                                        g::send::<F_EAT_CLOSE, FORK_F, Loan<FORK_F_RESOURCE>>(),
+                                        g::send::<F_EAT_CLOSE, FORK_E, Loan<FORK_E_RESOURCE>>(),
                                     ),
-                                    g::send::<F, F_EAT_FILE, protocol::FdCloseObjectRetMsg>(),
+                                    g::seq(
+                                        g::send::<
+                                            F_EAT_CLOSE,
+                                            F_EAT_FILE,
+                                            protocol::FdCloseObjectRetMsg,
+                                        >(),
+                                        g::send::<F, F_EAT_FILE, CloseAuthority<F_EAT_CLOSE>>(),
+                                    ),
                                 ),
                             ),
                         ),
                     );
                     let retry = g::seq(
-                        g::send::<F, F_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
+                        g::send::<F_EAT_CLOSE, F_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
                         request,
                     );
                     g::seq(
@@ -1441,20 +1626,20 @@ pub fn project_9h() -> Programs9H {
                 },
             ),
             {
-                let request = g::send::<G_EAT_FILE, G, protocol::FdCloseObjectReqMsg>();
-                let left = g::send::<G, FORK_G, Eat<FORK_G_RESOURCE>>();
-                let right = g::send::<G, FORK_F, Eat<FORK_F_RESOURCE>>();
+                let request = g::send::<G_EAT_FILE, G_EAT_CLOSE, protocol::FdCloseObjectReqMsg>();
+                let left = g::send::<G_EAT_CLOSE, FORK_G, Eat<FORK_G_RESOURCE>>();
+                let right = g::send::<G_EAT_CLOSE, FORK_F, Eat<FORK_F_RESOURCE>>();
                 let approved = g::seq(
                     g::par(left, right),
                     g::seq(
                         g::par(
                             g::seq(
-                                g::send::<FORK_G_RESOURCE, G, Eat<FORK_G_RESOURCE>>(),
-                                g::send::<FORK_G, G, Loan<FORK_G_RESOURCE>>(),
+                                g::send::<FORK_G_RESOURCE, G_EAT_CLOSE, Eat<FORK_G_RESOURCE>>(),
+                                g::send::<FORK_G, G_EAT_CLOSE, Loan<FORK_G_RESOURCE>>(),
                             ),
                             g::seq(
-                                g::send::<FORK_F_RESOURCE, G, Eat<FORK_F_RESOURCE>>(),
-                                g::send::<FORK_F, G, Loan<FORK_F_RESOURCE>>(),
+                                g::send::<FORK_F_RESOURCE, G_EAT_CLOSE, Eat<FORK_F_RESOURCE>>(),
+                                g::send::<FORK_F, G_EAT_CLOSE, Loan<FORK_F_RESOURCE>>(),
                             ),
                         ),
                         g::seq(
@@ -1464,16 +1649,20 @@ pub fn project_9h() -> Programs9H {
                             ),
                             g::seq(
                                 g::par(
-                                    g::send::<G, FORK_G, Loan<FORK_G_RESOURCE>>(),
-                                    g::send::<G, FORK_F, Loan<FORK_F_RESOURCE>>(),
+                                    g::send::<G_EAT_CLOSE, FORK_G, Loan<FORK_G_RESOURCE>>(),
+                                    g::send::<G_EAT_CLOSE, FORK_F, Loan<FORK_F_RESOURCE>>(),
                                 ),
-                                g::send::<G, G_EAT_FILE, protocol::FdCloseObjectRetMsg>(),
+                                g::seq(
+                                    g::send::<G_EAT_CLOSE, G_EAT_FILE, protocol::FdCloseObjectRetMsg>(
+                                    ),
+                                    g::send::<G, G_EAT_FILE, CloseAuthority<G_EAT_CLOSE>>(),
+                                ),
                             ),
                         ),
                     ),
                 );
                 let retry = g::seq(
-                    g::send::<G, G_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
+                    g::send::<G_EAT_CLOSE, G_EAT_FILE, protocol::FdCloseRejectedRetMsg>(),
                     request,
                 );
                 g::seq(
@@ -1555,6 +1744,8 @@ pub fn project_9h() -> Programs9H {
         resource_a: project(&global),
         a_think_file: project(&global),
         a_eat_file: project(&global),
+        think_close_a: project(&global),
+        eat_close_a: project(&global),
         b: project(&global),
         think_b: project(&global),
         fork_b: project(&global),
@@ -1563,6 +1754,8 @@ pub fn project_9h() -> Programs9H {
         resource_b: project(&global),
         b_think_file: project(&global),
         b_eat_file: project(&global),
+        think_close_b: project(&global),
+        eat_close_b: project(&global),
         c: project(&global),
         think_c: project(&global),
         fork_c: project(&global),
@@ -1571,6 +1764,8 @@ pub fn project_9h() -> Programs9H {
         resource_c: project(&global),
         c_think_file: project(&global),
         c_eat_file: project(&global),
+        think_close_c: project(&global),
+        eat_close_c: project(&global),
         d: project(&global),
         think_d: project(&global),
         fork_d: project(&global),
@@ -1579,6 +1774,8 @@ pub fn project_9h() -> Programs9H {
         resource_d: project(&global),
         d_think_file: project(&global),
         d_eat_file: project(&global),
+        think_close_d: project(&global),
+        eat_close_d: project(&global),
         e: project(&global),
         think_e: project(&global),
         fork_e: project(&global),
@@ -1587,6 +1784,8 @@ pub fn project_9h() -> Programs9H {
         resource_e: project(&global),
         e_think_file: project(&global),
         e_eat_file: project(&global),
+        think_close_e: project(&global),
+        eat_close_e: project(&global),
         f: project(&global),
         think_f: project(&global),
         fork_f: project(&global),
@@ -1595,6 +1794,8 @@ pub fn project_9h() -> Programs9H {
         resource_f: project(&global),
         f_think_file: project(&global),
         f_eat_file: project(&global),
+        think_close_f: project(&global),
+        eat_close_f: project(&global),
         g: project(&global),
         think_g: project(&global),
         fork_g: project(&global),
@@ -1603,5 +1804,7 @@ pub fn project_9h() -> Programs9H {
         resource_g: project(&global),
         g_think_file: project(&global),
         g_eat_file: project(&global),
+        think_close_g: project(&global),
+        eat_close_g: project(&global),
     }
 }

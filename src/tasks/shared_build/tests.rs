@@ -1,28 +1,13 @@
-use super::{global::*, imp, localside};
+use super::{global::*, imp, localside, wire::Arguments};
 use crate::shell::{
     ShellError, ShellResult,
     imp::{bus::Bus, service::Domain},
 };
-use hibana::{
-    g::Message,
-    runtime::{
-        SessionKitStorage,
-        ids::SessionId,
-        resolver::{DecisionArm, ResolverRef},
-    },
-};
+use hibana::runtime::{SessionKitStorage, ids::SessionId};
+use hibana_wasip1_runtime::protocol;
 use serde_json::{Value, json};
 use std::cell::Cell;
-#[cfg(miri)]
-#[path = "../handoff/tests/clock.rs"]
-mod clock;
-#[cfg(miri)]
-use clock::deadline;
-#[cfg(not(miri))]
-use hibana_runtime::host::deadline;
-
-// Native data fixture, not the common simulator or an AI performance trial.
-// Its journal is the actual material/effect data; no task or resolver reads it.
+// Native material fixture. Actual Wasm and model runs use the neutral world.
 struct BuildData(Cell<Vec<Value>>);
 impl Domain for BuildData {
     async fn execute(
@@ -35,7 +20,7 @@ impl Domain for BuildData {
         let data = if tool == "compile_module" {
             let module = arguments["module_name"]
                 .as_str()
-                .unwrap()
+                .ok_or("module name")?
                 .trim()
                 .to_lowercase()
                 .replace(' ', "_");
@@ -43,29 +28,27 @@ impl Domain for BuildData {
                 || journal
                     .iter()
                     .any(|entry| entry["data"]["agent"] == "BUILDER_A");
-            let inputs = json!({"CORE_LIB":{"base":"core","modules":{}},
-                "SHARED_TYPES":{"base":"provided types","modules":if changed {
-                    json!({"module_a":"declarations from module_a"}) } else { json!({}) }}});
-            let bytes = imp::encode(&json!({"module":module,"inputs":inputs})).unwrap();
-            json!({"agent":agent,"module":module,"status":"compiled",
-                "object":{"id":format!("object:{}",journal.len()),"bytes":String::from_utf8(bytes).unwrap(),
-                    "content_sha256":"fixture-only-not-a-cryptographic-receipt", "module":module,
-                    "builder":agent,"inputs":inputs}})
+            let inputs = json!({"CORE_LIB":{"base":"core","modules":{}},"SHARED_TYPES":{"base":"provided types","modules":if changed {json!({"module_a":"declarations from module_a"})} else {json!({})}}});
+            let bytes = String::from_utf8(
+                imp::encode(&json!({"module":module,"inputs":inputs}))
+                    .map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+            json!({"agent":agent,"module":module,"status":"compiled","object":{"id":format!("object:{}",journal.len()),"bytes":bytes,"content_sha256":"native-data-fixture","module":module,"builder":agent,"inputs":inputs}})
         } else {
             assert_eq!(tool, "link_modules");
             let a = &journal
                 .iter()
                 .rev()
                 .find(|entry| entry["data"]["agent"] == "BUILDER_A")
-                .unwrap()["data"]["object"];
+                .ok_or("missing A object")?["data"]["object"];
             let b = &journal
                 .iter()
                 .rev()
                 .find(|entry| entry["data"]["agent"] == "BUILDER_B")
-                .unwrap()["data"]["object"];
+                .ok_or("missing B object")?["data"]["object"];
             let inputs = json!({"module_a":a,"module_b":b});
-            json!({"agent":agent,"status":"linked","inputs":inputs,"issues":[],
-                "binary":{"id":"fixture-link","bytes":String::from_utf8(imp::encode(&inputs).unwrap()).unwrap()}})
+            json!({"agent":agent,"status":"linked","inputs":inputs,"issues":[],"binary":{"id":"native-link","bytes":String::from_utf8(imp::encode(&inputs).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?}})
         };
         let result = json!({"tool_name":tool,"success":true,"data":data});
         journal.push(result.clone());
@@ -73,25 +56,71 @@ impl Domain for BuildData {
         Ok(result)
     }
 }
-
 #[test]
-fn the_actual_build_and_private_io_source_is_well_formed() {
+fn the_direct_files_and_resource_handoffs_form_one_valid_global() {
     assert_eq!(hibana::g::diagnose(&source()), None);
-    let observation = programs().observation();
-    assert_eq!(observation["programs"].as_array().unwrap().len(), 9);
+    assert_eq!(
+        programs().observation()["programs"]
+            .as_array()
+            .unwrap()
+            .len(),
+        18
+    );
 }
-
-#[cfg_attr(not(miri), hibana_runtime::main)]
-#[cfg_attr(miri, hibana_runtime::main(clock::Clock))]
 #[test]
-async fn both_first_builders_transfer_the_same_resources_and_only_current_objects_reach_link()
+fn file_payload_validation_preserves_values_and_rejects_wrong_modules_or_extra_fields() {
+    for (role, bytes, valid) in [
+        (BUILDER_A, br#"{"module_name":"Module A"}"#.as_slice(), true),
+        (
+            BUILDER_A,
+            br#"{"module_name":"module_b"}"#.as_slice(),
+            false,
+        ),
+        (BUILDER_B, br#"{"module_name":"module_b"}"#.as_slice(), true),
+        (
+            BUILDER_B,
+            br#"{"module_name":"module_b","extra":true}"#.as_slice(),
+            false,
+        ),
+        (
+            INTEGRATOR,
+            br#"{"modules":"Module B, Module A"}"#.as_slice(),
+            true,
+        ),
+        (
+            INTEGRATOR,
+            br#"{"modules":"module_a,module_a,module_b"}"#.as_slice(),
+            false,
+        ),
+    ] {
+        let result = match role {
+            BUILDER_A => Arguments::<BUILDER_A>::from_bytes(bytes).map(|v| v.into_value()),
+            BUILDER_B => Arguments::<BUILDER_B>::from_bytes(bytes).map(|v| v.into_value()),
+            INTEGRATOR => Arguments::<INTEGRATOR>::from_bytes(bytes).map(|v| v.into_value()),
+            _ => unreachable!(),
+        };
+        assert_eq!(result.is_ok(), valid);
+        if let Ok(value) = result {
+            assert_eq!(value, serde_json::from_slice::<Value>(bytes).unwrap());
+        }
+    }
+}
+#[hibana_runtime::main]
+#[test]
+async fn both_first_builders_use_real_file_and_resource_receives_before_their_effects()
 -> ShellResult<()> {
     let p = programs();
-    for first in [DecisionArm::Left, DecisionArm::Right] {
+    for first in [BUILDER_A, BUILDER_B] {
         let session = SessionId::new(SESSION);
-        let (bus, _io, _terminals) = Bus::open(
+        let (bus, _io, [a_terminal, b_terminal, i_terminal]) = Bus::open(
             ["BUILDER_A", "BUILDER_B", "INTEGRATOR"],
-            [(session, CORE_LIB), (session, SHARED_TYPES)],
+            [
+                (session, CORE_LIB),
+                (session, SHARED_TYPES),
+                (session, A_FILE),
+                (session, B_FILE),
+                (session, INTEGRATOR_FILE),
+            ],
         );
         let mut owner_slab = vec![0; 1024 * 1024];
         let mut caller_slab = vec![0; 1024 * 1024];
@@ -103,166 +132,279 @@ async fn both_first_builders_transfer_the_same_resources_and_only_current_object
         let caller = caller_storage
             .init()
             .rendezvous(&mut caller_slab, &bus.transport)?;
-        owner
-            .set_resolver(
-                &p.service,
-                ResolverRef::<FIRST_BUILDER>::decision_state(&first, |arm| Ok(*arm)),
-            )
-            .map_err(|_| ShellError::message("first builder resolver"))?;
         let mut service = owner.enter(session, &p.service)?;
         let core = owner.enter(session, &p.core)?;
         let types = owner.enter(session, &p.types)?;
-        let mut a = caller.enter(session, &p.a)?;
-        let mut b = caller.enter(session, &p.b)?;
-        let mut integrator = caller.enter(session, &p.integrator)?;
-        let [mut a, _a_private] = a.par()?;
-        let [mut b, _b_private] = b.par()?;
-        let [mut integrator, _i_private] = integrator.par()?;
+        let mut a = owner.enter(session, &p.a)?;
+        let mut b = owner.enter(session, &p.b)?;
+        let mut integrator = owner.enter(session, &p.integrator)?;
+        let mut adata = owner.enter(session, &p.a_data)?;
+        let mut bdata = owner.enter(session, &p.b_data)?;
+        let mut idata = owner.enter(session, &p.integrator_data)?;
+        let mut aio = owner.enter(session, &p.a_io)?;
+        let mut bio = owner.enter(session, &p.b_io)?;
+        let mut iio = owner.enter(session, &p.integrator_io)?;
+        let mut avm = caller.enter(session, &p.a_vm)?;
+        let mut bvm = caller.enter(session, &p.b_vm)?;
+        let mut ivm = caller.enter(session, &p.integrator_vm)?;
+        let afile = owner.enter(session, &p.a_file)?;
+        let bfile = owner.enter(session, &p.b_file)?;
+        let ifile = owner.enter(session, &p.integrator_file)?;
         let effects = BuildData(Cell::new(Vec::new()));
         hibana_runtime::race(
             async {
                 async {
-                    localside::resources::run(&mut service, (core, types), &effects).await?;
+                    crate::shell::localside::file_metadata::run(&mut adata, afile, [FILES[0]])
+                        .await?;
                 };
                 async {
-                    drop(a.offer().await?);
-                    let (mut core, mut types) = async {
-                        let [mut library, mut definitions] = a.par()?;
-                        async { Ok::<_, ShellError>(library.recv::<CoreLoan>().await?) };
-                        async { Ok::<_, ShellError>(definitions.recv::<TypesLoan>().await?) };
-                    }
-                    .await?;
-                    let arguments = br#"{"module_name":"module_a"}"#.as_slice();
-                    a.send::<CompileA>(&arguments).await?;
-                    let (library, definitions) = async {
-                        async {
-                            core.send::<CompileCore>(&arguments).await?;
-                            Ok::<_, ShellError>(core.recv::<CoreCompiled>().await?.to_vec())
-                        };
-                        async {
-                            types.send::<CompileTypes>(&arguments).await?;
-                            Ok::<_, ShellError>(types.recv::<TypesCompiled>().await?.to_vec())
-                        };
-                    }
-                    .await?;
-                    assert_eq!(library, definitions);
-                    async {
-                        let [mut notification, mut handoff] = a.par()?;
-                        async {
-                            notification.send::<BuiltA>(&library.as_slice()).await?;
-                        };
-                        async {
-                            handoff.send::<TypesUpdated>(&library.as_slice()).await?;
-                            let [mut library, mut definitions] = handoff.par()?;
-                            async {
-                                library.send::<CoreLoan>(core).await?;
-                            };
-                            async {
-                                definitions.send::<TypesLoan>(types).await?;
-                            };
-                            Ok::<(), ShellError>(())
-                        };
-                        Ok::<(), ShellError>(())
-                    }
+                    crate::shell::localside::file_metadata::run(
+                        &mut bdata,
+                        bfile,
+                        [FILES[0], FILES[2]],
+                    )
                     .await?;
                 };
                 async {
+                    crate::shell::localside::file_metadata::run(&mut idata, ifile, [FILES[1]])
+                        .await?;
+                };
+                let (mut afile, mut bfile, ifile) = async {
+                    let [mut a, mut b, mut integrator] = service.par()?;
+                    async { a.recv::<Loan<A_FILE>>().await };
+                    async { b.recv::<Loan<B_FILE>>().await };
+                    async { integrator.recv::<Loan<INTEGRATOR_FILE>>().await };
+                }
+                .await?;
+                async {
+                    let io = crate::shell::imp::private_fs::PrivateFs::new(
+                        a_terminal,
+                        &bus,
+                        &FILES[..1],
+                    );
+                    let request = aio
+                        .offer()
+                        .await?
+                        .recv::<protocol::FdFdstatGetReqMsg>()
+                        .await?;
+                    let reply = io.objects().choreofs().fd_fdstat_get(request);
+                    aio.send::<protocol::FdFdstatGetRetMsg>(&reply).await?;
+                    assert_eq!(
+                        aio.offer()
+                            .await?
+                            .recv::<crate::shell::global::Exit>()
+                            .await?,
+                        0
+                    );
+                };
+                async {
+                    let io = crate::shell::imp::private_fs::PrivateFs::new(
+                        b_terminal,
+                        &bus,
+                        &[FILES[0], FILES[2]],
+                    );
+                    let request = bio
+                        .offer()
+                        .await?
+                        .recv::<protocol::FdFdstatGetReqMsg>()
+                        .await?;
+                    let reply = io.objects().choreofs().fd_fdstat_get(request);
+                    bio.send::<protocol::FdFdstatGetRetMsg>(&reply).await?;
+                    assert_eq!(
+                        bio.offer()
+                            .await?
+                            .recv::<crate::shell::global::Exit>()
+                            .await?,
+                        0
+                    );
+                };
+                async {
+                    let io = crate::shell::imp::private_fs::PrivateFs::new(
+                        i_terminal,
+                        &bus,
+                        &FILES[1..2],
+                    );
+                    let request = iio
+                        .offer()
+                        .await?
+                        .recv::<protocol::FdFdstatGetReqMsg>()
+                        .await?;
+                    let reply = io.objects().choreofs().fd_fdstat_get(request);
+                    iio.send::<protocol::FdFdstatGetRetMsg>(&reply).await?;
+                    assert_eq!(
+                        iio.offer()
+                            .await?
+                            .recv::<crate::shell::global::Exit>()
+                            .await?,
+                        0
+                    );
+                };
+                async {
+                    localside::resources::run(&mut service, (core, types))
+                        .await
+                        .map_err(|e| ShellError::message(format!("resources: {e:?}")))?;
+                };
+                async {
+                    localside::builder::run(&mut a, &effects)
+                        .await
+                        .map_err(|e| ShellError::message(format!("builder A: {e:?}")))?;
+                };
+                async {
+                    localside::builder::run(&mut b, &effects)
+                        .await
+                        .map_err(|e| ShellError::message(format!("builder B: {e:?}")))?;
+                };
+                async {
+                    localside::integrator::run(&mut integrator, &effects)
+                        .await
+                        .map_err(|e| ShellError::message(format!("integrator: {e:?}")))?;
+                };
+                match first {
+                    BUILDER_A => {
+                        afile
+                            .send::<CompileA>(&Arguments::from_bytes(
+                                br#"{"module_name":"module_a"}"#,
+                            )?)
+                            .await?
+                    }
+                    BUILDER_B => {
+                        bfile
+                            .send::<CompileB>(&Arguments::from_bytes(
+                                br#"{"module_name":"module_b"}"#,
+                            )?)
+                            .await?
+                    }
+                    _ => unreachable!("two declared first-request fixtures"),
+                }
+                async {
+                    let mut afile = afile;
+                    afile
+                        .send::<protocol::FdFdstatGetReqMsg>(&protocol::FdFdstatGetReq(
+                            protocol::FdRequest::new(4),
+                        ))
+                        .await?;
+                    afile.recv::<protocol::FdFdstatGetRetMsg>().await?;
+                    avm.send::<protocol::FdFdstatGetReqMsg>(&protocol::FdFdstatGetReq(
+                        protocol::FdRequest::new(0),
+                    ))
+                    .await?;
+                    avm.recv::<protocol::FdFdstatGetRetMsg>().await?;
+                    let arguments =
+                        Arguments::<BUILDER_A>::from_bytes(br#"{"module_name":"module_a"}"#)
+                            .unwrap();
+                    if first != BUILDER_A {
+                        afile
+                            .send::<CompileA>(&arguments)
+                            .await
+                            .map_err(|e| ShellError::message(format!("A file request: {e:?}")))?;
+                    }
+                    imp::compiled(
+                        &imp::decode(
+                            afile.recv::<Compiled>().await.map_err(|e| {
+                                ShellError::message(format!("A file result: {e:?}"))
+                            })?,
+                        )?,
+                        "BUILDER_A",
+                        "module_a",
+                    )?;
+                    afile
+                        .send::<FileExit>(&0)
+                        .await
+                        .map_err(|e| ShellError::message(format!("A file close: {e:?}")))?;
+                    avm.send::<crate::shell::global::Exit>(&0)
+                        .await
+                        .map_err(|e| ShellError::message(format!("A root close: {e:?}")))?;
+                    Ok(())
+                };
+                async {
+                    let mut bfile = bfile;
+                    bfile
+                        .send::<protocol::FdFdstatGetReqMsg>(&protocol::FdFdstatGetReq(
+                            protocol::FdRequest::new(4),
+                        ))
+                        .await?;
+                    bfile.recv::<protocol::FdFdstatGetRetMsg>().await?;
+                    bvm.send::<protocol::FdFdstatGetReqMsg>(&protocol::FdFdstatGetReq(
+                        protocol::FdRequest::new(0),
+                    ))
+                    .await?;
+                    bvm.recv::<protocol::FdFdstatGetRetMsg>().await?;
+                    let arguments =
+                        Arguments::<BUILDER_B>::from_bytes(br#"{"module_name":"module_b"}"#)?;
+                    if first != BUILDER_B {
+                        imp::compiled(
+                            &imp::decode(bfile.recv::<TypesUpdated>().await?)?,
+                            "BUILDER_A",
+                            "module_a",
+                        )?;
+                        bfile.send::<CompileB>(&arguments).await?;
+                    }
+                    let mut result = imp::decode(bfile.recv::<Compiled>().await?)?;
                     loop {
-                        let incoming = b.offer().await?;
-                        if incoming.label() == TypesUpdated::LOGICAL_LABEL {
-                            let actual = imp::decode(incoming.recv::<TypesUpdated>().await?)?;
-                            imp::compiled(&actual, "BUILDER_A", "module_a")?;
-                        } else {
-                            drop(incoming);
+                        let object = imp::compiled(&result, "BUILDER_B", "module_b")?;
+                        if object["inputs"]["SHARED_TYPES"]["modules"]["module_a"].is_string() {
+                            break;
                         }
-                        let (mut core, mut types) = async {
-                            let [mut library, mut definitions] = b.par()?;
-                            async { Ok::<_, ShellError>(library.recv::<CoreLoan>().await?) };
-                            async { Ok::<_, ShellError>(definitions.recv::<TypesLoan>().await?) };
-                        }
-                        .await?;
-                        let arguments = br#"{"module_name":"module_b"}"#.as_slice();
-                        b.send::<CompileB>(&arguments).await?;
-                        let (library, definitions) = async {
-                            async {
-                                core.send::<CompileCore>(&arguments).await?;
-                                Ok::<_, ShellError>(core.recv::<CoreCompiled>().await?.to_vec())
-                            };
-                            async {
-                                types.send::<CompileTypes>(&arguments).await?;
-                                Ok::<_, ShellError>(types.recv::<TypesCompiled>().await?.to_vec())
-                            };
-                        }
-                        .await?;
-                        assert_eq!(library, definitions);
-                        let next = b.offer().await?;
-                        match next.label() {
-                            CoreLoan::LOGICAL_LABEL | TypesLoan::LOGICAL_LABEL => {
-                                drop(next);
-                                async {
-                                    let [mut library, mut definitions] = b.par()?;
-                                    async {
-                                        library.send::<CoreLoan>(core).await?;
-                                    };
-                                    async {
-                                        definitions.send::<TypesLoan>(types).await?;
-                                    };
-                                    Ok::<(), ShellError>(())
-                                }
-                                .await?;
-                            }
-                            BuiltB::LOGICAL_LABEL
-                            | ReturnCore::LOGICAL_LABEL
-                            | ReturnTypes::LOGICAL_LABEL => {
-                                drop(next);
-                                async {
-                                    let [mut notification, mut core_return, mut types_return] =
-                                        b.par()?;
-                                    async {
-                                        notification.send::<BuiltB>(&library.as_slice()).await?;
-                                    };
-                                    async {
-                                        core_return.send::<ReturnCore>(core).await?;
-                                    };
-                                    async {
-                                        types_return.send::<ReturnTypes>(types).await?;
-                                    };
-                                    Ok::<(), ShellError>(())
-                                }
-                                .await?;
-                                break;
-                            }
-                            _ => {
-                                return Err(ShellError::message("unexpected builder continuation"));
-                            }
-                        }
+                        imp::compiled(
+                            &imp::decode(bfile.recv::<TypesUpdated>().await?)?,
+                            "BUILDER_A",
+                            "module_a",
+                        )?;
+                        bfile.send::<CompileB>(&arguments).await?;
+                        result = imp::decode(bfile.recv::<Compiled>().await?)?;
                     }
+                    bfile
+                        .send::<FileExit>(&0)
+                        .await
+                        .map_err(|e| ShellError::message(format!("B file close: {e:?}")))?;
+                    bvm.send::<crate::shell::global::Exit>(&0)
+                        .await
+                        .map_err(|e| ShellError::message(format!("B root close: {e:?}")))?;
+                    Ok(())
                 };
                 async {
-                    drop(integrator.offer().await?);
-                    let (a, b) = async {
-                        let [mut a, mut b] = integrator.par()?;
-                        async { imp::decode(a.recv::<BuiltA>().await?) };
-                        async { imp::decode(b.recv::<BuiltB>().await?) };
-                    }
-                    .await?;
-                    let objects = [
-                        imp::compiled(&a, "BUILDER_A", "module_a")?,
-                        imp::compiled(&b, "BUILDER_B", "module_b")?,
-                    ];
-                    integrator
-                        .send::<Link>(&br#"{"modules":"module_a,module_b"}"#.as_slice())
+                    let mut ifile = ifile;
+                    ifile
+                        .send::<protocol::FdFdstatGetReqMsg>(&protocol::FdFdstatGetReq(
+                            protocol::FdRequest::new(4),
+                        ))
                         .await?;
-                    let linked = imp::decode(integrator.recv::<Linked>().await?)?;
-                    imp::linked(&linked, &objects)?;
+                    ifile.recv::<protocol::FdFdstatGetRetMsg>().await?;
+                    ivm.send::<protocol::FdFdstatGetReqMsg>(&protocol::FdFdstatGetReq(
+                        protocol::FdRequest::new(0),
+                    ))
+                    .await?;
+                    ivm.recv::<protocol::FdFdstatGetRetMsg>().await?;
+                    let arguments =
+                        Arguments::<INTEGRATOR>::from_bytes(br#"{"modules":"module_a,module_b"}"#)
+                            .unwrap();
+                    ifile
+                        .send::<Link>(&arguments)
+                        .await
+                        .map_err(|e| ShellError::message(format!("I file request: {e:?}")))?;
+                    assert_eq!(
+                        imp::decode(
+                            ifile
+                                .recv::<Linked>()
+                                .await
+                                .map_err(|e| ShellError::message(format!(
+                                    "I file result: {e:?}"
+                                )))?
+                        )?["data"]["status"],
+                        "linked"
+                    );
+                    ifile
+                        .send::<FileExit>(&0)
+                        .await
+                        .map_err(|e| ShellError::message(format!("I file close: {e:?}")))?;
+                    ivm.send::<crate::shell::global::Exit>(&0)
+                        .await
+                        .map_err(|e| ShellError::message(format!("I root close: {e:?}")))?;
+                    Ok(())
                 };
                 Ok::<(), ShellError>(())
             },
-            deadline(std::time::Duration::from_secs(if cfg!(miri) {
-                120
-            } else {
-                10
-            })),
+            hibana_runtime::host::deadline(std::time::Duration::from_secs(10)),
         )
         .await?;
         let journal = effects.0.take();
@@ -273,11 +415,12 @@ async fn both_first_builders_transfer_the_same_resources_and_only_current_object
         assert_eq!(
             agents,
             match first {
-                DecisionArm::Left => vec!["BUILDER_A", "BUILDER_B", "INTEGRATOR"],
-                DecisionArm::Right => vec!["BUILDER_B", "BUILDER_A", "BUILDER_B", "INTEGRATOR"],
+                BUILDER_A => vec!["BUILDER_A", "BUILDER_B", "INTEGRATOR"],
+                BUILDER_B => vec!["BUILDER_B", "BUILDER_A", "BUILDER_B", "INTEGRATOR"],
+                _ => unreachable!("two declared first-request fixtures"),
             }
         );
-        if first == DecisionArm::Right {
+        if first == BUILDER_B {
             assert_ne!(
                 journal[0]["data"]["object"]["inputs"]["SHARED_TYPES"],
                 journal[2]["data"]["object"]["inputs"]["SHARED_TYPES"]
@@ -287,117 +430,87 @@ async fn both_first_builders_transfer_the_same_resources_and_only_current_object
     Ok(())
 }
 
+#[hibana_runtime::main]
 #[test]
-fn argument_validation_preserves_normalized_names_and_rejects_other_modules_or_extra_fields() {
-    assert!(imp::compile_arguments(json!({"module_name":"Module A"}), "module_a").is_ok());
-    assert!(imp::compile_arguments(json!({"module_name":"module_b"}), "module_a").is_err());
-    assert!(
-        imp::compile_arguments(json!({"module_name":"module_a","ignore":true}), "module_a")
-            .is_err()
-    );
-    assert!(imp::link_arguments(json!({"modules":"Module B, Module A"})).is_ok());
-    assert!(imp::link_arguments(json!({"modules":"module_a,module_a,module_b"})).is_err());
-}
-
-#[cfg_attr(not(miri), hibana_runtime::main)]
-#[cfg_attr(miri, hibana_runtime::main(clock::Clock))]
-#[test]
-async fn the_production_receiver_rejects_wrong_module_or_either_substituted_resource_before_effect()
+async fn a_stale_object_is_rejected_by_the_actual_link_receiver_before_any_link_effect()
 -> ShellResult<()> {
-    let p = programs();
-    let first = DecisionArm::Left;
-    for substituted in [0, 1, 2] {
-        let session = SessionId::new(SESSION);
-        let (bus, _io, _terminals) = Bus::open(
-            ["BUILDER_A", "BUILDER_B", "INTEGRATOR"],
-            [(session, CORE_LIB), (session, SHARED_TYPES)],
-        );
-        let mut owner_slab = vec![0; 1024 * 1024];
-        let mut caller_slab = vec![0; 1024 * 1024];
-        let mut owner_storage = SessionKitStorage::uninit();
-        let mut caller_storage = SessionKitStorage::uninit();
-        let owner = owner_storage
-            .init()
-            .rendezvous(&mut owner_slab, &bus.transport)?;
-        let caller = caller_storage
-            .init()
-            .rendezvous(&mut caller_slab, &bus.transport)?;
-        owner
-            .set_resolver(
-                &p.service,
-                ResolverRef::<FIRST_BUILDER>::decision_state(&first, |arm| Ok(*arm)),
-            )
-            .map_err(|_| ShellError::message("initial builder"))?;
-        let mut service = owner.enter(session, &p.service)?;
-        let core = owner.enter(session, &p.core)?;
-        let types = owner.enter(session, &p.types)?;
-        let mut a = caller.enter(session, &p.a)?;
-        let [mut a, _private] = a.par()?;
-        let effects = BuildData(Cell::new(Vec::new()));
-        let result = hibana_runtime::race(
-            async {
-                async {
-                    localside::resources::run(&mut service, (core, types), &effects).await?;
-                };
-                async {
-                    drop(a.offer().await?);
-                    let (mut core, mut types) = async {
-                        let [mut library, mut definitions] = a.par()?;
-                        async { Ok::<_, ShellError>(library.recv::<CoreLoan>().await?) };
-                        async { Ok::<_, ShellError>(definitions.recv::<TypesLoan>().await?) };
-                    }
-                    .await?;
-                    let correct = br#"{"module_name":"module_a"}"#.as_slice();
-                    let wrong = br#"{"module_name":"module_b"}"#.as_slice();
-                    a.send::<CompileA>(&if substituted == 0 { wrong } else { correct })
-                        .await?;
-                    async {
-                        async {
-                            core.send::<CompileCore>(&if substituted == 1 {
-                                wrong
-                            } else {
-                                correct
-                            })
-                            .await?;
-                        };
-                        async {
-                            types
-                                .send::<CompileTypes>(&if substituted == 2 {
-                                    wrong
-                                } else {
-                                    correct
-                                })
-                                .await?;
-                        };
-                        Ok::<(), ShellError>(())
-                    }
-                    .await?;
-                    core.recv::<CoreCompiled>().await?;
-                };
-                Ok::<(), ShellError>(())
-            },
-            deadline(std::time::Duration::from_secs(if cfg!(miri) {
-                120
-            } else {
-                5
-            })),
+    use hibana::{g, runtime::program::project};
+    let effects = BuildData(Cell::new(Vec::new()));
+    let b = effects
+        .execute(
+            "BUILDER_B",
+            "compile_module",
+            json!({"module_name":"module_b"}),
         )
-        .await;
-        let expected = if substituted == 0 {
-            "build arguments differ from the assigned module"
-        } else {
-            "compile resources differ from admitted arguments"
-        };
-        assert!(
-            result
-                .as_ref()
-                .is_err_and(|error| error.to_string() == expected),
-            "{result:?}"
-        );
-        assert!(
-            effects.0.take().is_empty(),
-            "malformed/substituted input must not reach Domain::execute"
-        );
-    }
+        .await
+        .map_err(ShellError::message)?;
+    let a = effects
+        .execute(
+            "BUILDER_A",
+            "compile_module",
+            json!({"module_name":"module_a"}),
+        )
+        .await
+        .map_err(ShellError::message)?;
+    let global = g::seq(
+        g::par(
+            g::send::<BUILDER_A, INTEGRATOR, BuiltA>(),
+            g::send::<BUILDER_B, INTEGRATOR, BuiltB>(),
+        ),
+        g::seq(
+            g::send::<INTEGRATOR_FILE, INTEGRATOR, Link>(),
+            g::send::<INTEGRATOR, INTEGRATOR_FILE, Linked>(),
+        ),
+    );
+    let pa = project::<BUILDER_A>(&global);
+    let pb = project::<BUILDER_B>(&global);
+    let pi = project::<INTEGRATOR>(&global);
+    let pf = project::<INTEGRATOR_FILE>(&global);
+    let (bus, _io, _terminals) = Bus::open(["BUILDER_A", "BUILDER_B", "INTEGRATOR"], []);
+    let mut slab = vec![0; 64 * 1024];
+    let mut storage = SessionKitStorage::uninit();
+    let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
+    let session = SessionId::new(SESSION);
+    let mut sender_a = rv.enter(session, &pa)?;
+    let mut sender_b = rv.enter(session, &pb)?;
+    let mut receiver = rv.enter(session, &pi)?;
+    let mut file = rv.enter(session, &pf)?;
+    let a = imp::encode(&a)?;
+    let b = imp::encode(&b)?;
+    let request =
+        Arguments::<INTEGRATOR>::from_bytes(br#"{"modules":"module_a,module_b"}"#).unwrap();
+    let result = hibana_runtime::race(
+        async {
+            async {
+                localside::integrator::run(&mut receiver, &effects).await?;
+            };
+            async {
+                sender_a.send::<BuiltA>(&a.as_slice()).await?;
+            };
+            async {
+                sender_b.send::<BuiltB>(&b.as_slice()).await?;
+            };
+            async {
+                file.send::<Link>(&request).await?;
+            };
+            Ok::<(), ShellError>(())
+        },
+        hibana_runtime::host::deadline(std::time::Duration::from_secs(5)),
+    )
+    .await;
+    assert!(result.is_err_and(
+        |error| error.to_string() == "current objects were built against different types"
+    ));
+    let journal = effects.0.take();
+    assert_eq!(
+        journal.len(),
+        2,
+        "only the two material-producing fixture calls may exist"
+    );
+    assert!(
+        journal
+            .iter()
+            .all(|entry| entry["tool_name"] == "compile_module")
+    );
     Ok(())
 }

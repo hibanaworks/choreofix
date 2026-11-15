@@ -1,130 +1,139 @@
-//! Actual result data used by the registered resolvers.
-use crate::shell::imp::review_reply::ReviewReply;
+//! Material values and completed review receipts, independent of coordination.
+use super::global::{SECTION_A, SECTION_B};
 use crate::shell::{ShellError, ShellResult};
-use hibana::runtime::resolver::{DecisionArm, ResolverError};
 use serde_json::Value;
-use std::cell::Cell;
 
-/// The editor owns its actual requested section and replies received from the
-/// review services. This stores input data, not a second protocol cursor.
-pub struct ReviewTarget {
-    requested: Cell<Option<&'static str>>,
-    replies: [Cell<Option<Value>>; 2],
+pub fn decode(bytes: &[u8]) -> ShellResult<Value> {
+    serde_json::from_slice(bytes).map_err(|e| ShellError::message(e.to_string()))
 }
-impl Default for ReviewTarget {
-    fn default() -> Self {
-        Self {
-            requested: Cell::new(None),
-            replies: std::array::from_fn(|_| Cell::new(None)),
-        }
-    }
+pub fn encode(value: &Value) -> ShellResult<Vec<u8>> {
+    serde_json::to_vec(value).map_err(|e| ShellError::message(e.to_string()))
 }
-impl ReviewTarget {
-    pub fn record(&self, section: &'static str) {
-        self.requested.set(Some(section));
+pub fn section(value: &Value) -> ShellResult<&str> {
+    value["section_name"]
+        .as_str()
+        .filter(|name| matches!(*name, SECTION_A | SECTION_B))
+        .ok_or_else(|| ShellError::message("request names a section outside this document"))
+}
+pub fn same(first: &Value, second: &Value) -> ShellResult<()> {
+    if first != second {
+        return Err(ShellError::message(
+            "document request differs from admitted arguments",
+        ));
     }
-    pub fn received(&self, section: &'static str, bytes: &[u8]) -> ShellResult<()> {
-        let index = match section {
-            super::global::SECTION_A => 0,
-            super::global::SECTION_B => 1,
-            _ => return Err(ShellError::message("unassigned reviewed section")),
-        };
-        let reply: Value = serde_json::from_slice(bytes)
-            .map_err(|error| ShellError::message(error.to_string()))?;
-        if !reply["success"].is_boolean() {
-            return Err(ShellError::message("missing review outcome"));
-        }
-        self.replies[index].set(Some(reply));
-        Ok(())
+    Ok(())
+}
+pub fn material(
+    result: &Value,
+    arguments: &Value,
+    (agent, tool): (&str, &str),
+) -> ShellResult<Value> {
+    let section = section(arguments)?;
+    if result["tool_name"] != tool
+        || result["success"] != true
+        || result["data"]["agent"] != agent
+        || result["data"]["section"] != section
+        || !result["data"]["artifact"]["id"].is_string()
+        || !result["data"]["artifact"]["content"].is_string()
+    {
+        return Err(ShellError::message(
+            "effect did not return this section's actual material",
+        ));
     }
-    fn reply(&self, index: usize) -> Option<Value> {
-        let value = self.replies[index].take();
-        let copy = value.clone();
-        self.replies[index].set(value);
-        copy
-    }
-    pub fn approvals(&self) -> ShellResult<(Vec<u8>, Vec<u8>)> {
-        let a = serde_json::to_vec(
-            &self
-                .reply(0)
-                .ok_or_else(|| ShellError::message("missing section A review"))?,
-        )
-        .map_err(|error| ShellError::message(error.to_string()))?;
-        let b = serde_json::to_vec(
-            &self
-                .reply(1)
-                .ok_or_else(|| ShellError::message("missing section B review"))?,
-        )
-        .map_err(|error| ShellError::message(error.to_string()))?;
-        ReviewReply::<true>::from_bytes(&a)?;
-        ReviewReply::<true>::from_bytes(&b)?;
-        Ok((a, b))
-    }
-    pub fn decide(&self) -> Result<DecisionArm, ResolverError> {
-        let (index, arm) = match self.requested.get() {
-            Some(super::global::SECTION_A) => (0, DecisionArm::Left),
-            Some(super::global::SECTION_B) => (1, DecisionArm::Right),
-            _ => return Err(ResolverError::reject()),
-        };
-        if self
-            .reply(index)
-            .is_some_and(|reply| reply["success"] == true)
+    Ok(result["data"]["artifact"].clone())
+}
+pub fn reviewed(result: &Value, snapshot: &Value, scope: &str) -> ShellResult<()> {
+    for category in ["sections", "references"] {
+        if snapshot[category]
+            .as_object()
+            .is_none_or(|rows| rows.len() != 2)
+            || [SECTION_A, SECTION_B].into_iter().any(|section| {
+                !snapshot[category][section]["id"].is_string()
+                    || !snapshot[category][section]["content"].is_string()
+            })
         {
-            return Err(ResolverError::reject());
+            return Err(ShellError::message(
+                "review needs both actual sections and references",
+            ));
         }
-        Ok(arm)
     }
-}
-
-#[derive(Default)]
-pub struct ReviewInput(Cell<Option<Value>>);
-impl ReviewInput {
-    pub fn record(&self, result: Value) {
-        self.0.set(Some(result));
+    if result["tool_name"] != "review_sections"
+        || !result["success"].is_boolean()
+        || result["data"]["agent"] != "EDITOR"
+        || result["data"]["scope"] != scope
+        || result["data"]["input_snapshot"]
+            != serde_json::json!({"sections":{scope:snapshot["sections"][scope]},"references":{scope:snapshot["references"][scope]}})
+        || !result["data"]["review_id"].is_string()
+        || result["data"]["status"]
+            != if result["success"] == true {
+                "reviewed"
+            } else {
+                "needs_revision"
+            }
+    {
+        return Err(ShellError::message(
+            "review differs from the current complete document",
+        ));
     }
+    Ok(())
 }
-pub fn decide(input: &ReviewInput) -> Result<DecisionArm, ResolverError> {
-    let result = input.0.take();
-    let decision = match result.as_ref().and_then(|reply| reply["success"].as_bool()) {
-        Some(true) => Ok(DecisionArm::Left),
-        Some(false) => Ok(DecisionArm::Right),
-        None => Err(ResolverError::reject()),
-    };
-    input.0.set(result);
-    decision
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn final_approvals_come_from_both_actual_received_positive_replies() {
-        let input = ReviewTarget::default();
-        assert!(input.approvals().is_err());
-        input
-            .received(super::super::global::SECTION_A, br#"{"success":true}"#)
-            .unwrap();
-        input
-            .received(super::super::global::SECTION_B, br#"{"success":false}"#)
-            .unwrap();
-        assert!(input.approvals().is_err());
-        input.record(super::super::global::SECTION_A);
-        assert!(input.decide().is_err());
-        input.record(super::super::global::SECTION_B);
-        assert_eq!(input.decide(), Ok(DecisionArm::Right));
-        input
-            .received(super::super::global::SECTION_B, br#"{"success":true}"#)
-            .unwrap();
-        let (a, b) = input.approvals().unwrap();
-        assert_eq!(
-            serde_json::from_slice::<Value>(&a).unwrap()["success"],
-            true
-        );
-        assert_eq!(
-            serde_json::from_slice::<Value>(&b).unwrap()["success"],
-            true
-        );
-        assert!(input.decide().is_err());
+pub fn combine_inputs(
+    admitted: &Value,
+    resource: &Value,
+    (snapshot, reviews): (&Value, &[Value; 2]),
+) -> ShellResult<()> {
+    same(admitted, resource)?;
+    let mut sections: Vec<_> = admitted["sections"]
+        .as_str()
+        .ok_or_else(|| ShellError::message("expected the actual section list"))?
+        .split(',')
+        .map(str::trim)
+        .filter(|section| !section.is_empty())
+        .collect();
+    sections.sort_unstable();
+    if sections != [SECTION_A, SECTION_B] {
+        return Err(ShellError::message(
+            "combination must preserve both actual sections",
+        ));
     }
+    for (review, scope) in reviews.iter().zip([SECTION_A, SECTION_B]) {
+        reviewed(review, snapshot, scope)?;
+        if review["success"] != true {
+            return Err(ShellError::message(
+                "combination needs both actual positive reviews",
+            ));
+        }
+    }
+    if reviews[0]["data"]["review_id"] == reviews[1]["data"]["review_id"] {
+        return Err(ShellError::message(
+            "one review cannot stand for two section reviews",
+        ));
+    }
+    Ok(())
+}
+pub fn combined(result: &Value, snapshot: &Value, reviews: &[Value; 2]) -> ShellResult<()> {
+    let mut sections: Vec<_> = result["data"]["sections"]
+        .as_array()
+        .ok_or_else(|| ShellError::message("combined result is missing its actual section list"))?
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    sections.sort_unstable();
+    if result["tool_name"] != "combine_sections"
+        || result["success"] != true
+        || result["data"]["agent"] != "EDITOR"
+        || result["data"]["input_snapshot"] != *snapshot
+        || !result["data"]["artifact_id"].is_string()
+        || sections != [SECTION_A, SECTION_B]
+        || result["data"]["sections"]
+            .as_array()
+            .is_none_or(|items| items.len() != 2)
+        || result["data"]["review_receipts"][SECTION_A] != reviews[0]["data"]["review_id"]
+        || result["data"]["review_receipts"][SECTION_B] != reviews[1]["data"]["review_id"]
+    {
+        return Err(ShellError::message(
+            "combined material differs from the checked document and reviews",
+        ));
+    }
+    Ok(())
 }

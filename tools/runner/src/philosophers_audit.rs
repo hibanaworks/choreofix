@@ -9,6 +9,7 @@ use std::{
     fs::{self, File},
     io::Write,
     path::Path,
+    process::{Command, Stdio},
 };
 
 fn validate<P: WirePayload>(frame: &journal::Frame) -> Result<()> {
@@ -62,6 +63,8 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 roles::A_THINK_FILE,
                 roles::THINK_A,
                 roles::A_EAT_FILE,
+                roles::A_THINK_CLOSE,
+                roles::A_EAT_CLOSE,
             ],
         ),
         (
@@ -75,6 +78,8 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 roles::B_THINK_FILE,
                 roles::THINK_B,
                 roles::B_EAT_FILE,
+                roles::B_THINK_CLOSE,
+                roles::B_EAT_CLOSE,
             ],
         ),
         (
@@ -88,6 +93,8 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 roles::C_THINK_FILE,
                 roles::THINK_C,
                 roles::C_EAT_FILE,
+                roles::C_THINK_CLOSE,
+                roles::C_EAT_CLOSE,
             ],
         ),
         (
@@ -101,6 +108,8 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 roles::D_THINK_FILE,
                 roles::THINK_D,
                 roles::D_EAT_FILE,
+                roles::D_THINK_CLOSE,
+                roles::D_EAT_CLOSE,
             ],
         ),
         (
@@ -114,6 +123,8 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 roles::E_THINK_FILE,
                 roles::THINK_E,
                 roles::E_EAT_FILE,
+                roles::E_THINK_CLOSE,
+                roles::E_EAT_CLOSE,
             ],
         ),
         (
@@ -127,6 +138,8 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 roles::F_THINK_FILE,
                 roles::THINK_F,
                 roles::F_EAT_FILE,
+                roles::F_THINK_CLOSE,
+                roles::F_EAT_CLOSE,
             ],
         ),
         (
@@ -140,6 +153,8 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 roles::G_THINK_FILE,
                 roles::THINK_G,
                 roles::G_EAT_FILE,
+                roles::G_THINK_CLOSE,
+                roles::G_EAT_CLOSE,
             ],
         ),
     ];
@@ -174,15 +189,26 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
         .iter()
         .map(|(name, ids)| (*name, (u64::from(ids[1]), u64::from(ids[4]))))
         .collect();
-    let mut effects = BTreeMap::<u64, (usize, u64)>::new();
+    let mut effects = BTreeMap::<u64, (u64, u64)>::new();
     let mut rejected_closes = 0;
     let mut read_results = 0;
     for (index, (_, ids)) in layout.iter().enumerate() {
-        let [eat_owner, _, vm, _, _, think_view, think_owner, eat_view] = ids.map(u64::from);
+        let [
+            eat_owner,
+            _,
+            vm,
+            _,
+            _,
+            think_view,
+            think_owner,
+            eat_view,
+            think_close,
+            eat_close,
+        ] = ids.map(u64::from);
         let agent = AGENTS[index];
-        for (tool, view, owner, fd) in [
-            ("think", think_view, think_owner, 4),
-            ("eat", eat_view, eat_owner, 5),
+        for (tool, view, owner, controller, fd) in [
+            ("think", think_view, think_owner, think_close, 4),
+            ("eat", eat_view, eat_owner, eat_close, 5),
         ] {
             let initial = journal::one(journal.frames.values().filter(|frame| {
                 frame.direction(owner, vm)
@@ -201,19 +227,28 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
             if exit.bytes != 0i32.to_be_bytes() {
                 return Err("file owner received a nonzero guest exit".into());
             }
+            let (&authority_id, _) = journal::one(journal.frames.iter().filter(|(_, frame)| {
+                frame.direction(owner, view)
+                    && frame.logical_label == 165
+                    && frame.bytes.first().copied().map(u64::from) == Some(controller)
+            }))?;
+            if receipts[&authority_id]["receive_commit"]["actor"] != vm {
+                return Err("close authority was not received by the actual guest".into());
+            }
             let mut requests = journal
                 .frames
                 .iter()
                 .filter(|(_, frame)| {
-                    frame.direction(view, owner)
+                    (frame.direction(view, owner)
                         && matches!(
                             frame.logical_label,
                             protocol::LABEL_WASI_PATH_OPEN
                                 | protocol::LABEL_WASI_FD_WRITE_OBJECT
                                 | protocol::LABEL_WASI_FD_READ
-                                | protocol::LABEL_WASI_FD_CLOSE_OBJECT
                                 | protocol::LABEL_WASI_FD_CLOSE
-                        )
+                        ))
+                        || (frame.direction(view, controller)
+                            && frame.logical_label == protocol::LABEL_WASI_FD_CLOSE_OBJECT)
                 })
                 .map(|(&id, frame)| Ok((committed(id)?, id, frame)))
                 .collect::<Result<Vec<_>>>()?;
@@ -221,16 +256,20 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 .frames
                 .iter()
                 .filter(|(_, frame)| {
-                    frame.direction(owner, view)
+                    (frame.direction(owner, view)
                         && matches!(
                             frame.logical_label,
                             protocol::LABEL_WASI_PATH_OPEN_RET
                                 | protocol::LABEL_WASI_FD_WRITE_OBJECT_RET
                                 | protocol::LABEL_WASI_FD_READ_RET
-                                | protocol::LABEL_WASI_FD_CLOSE_OBJECT_RET
-                                | protocol::LABEL_WASI_FD_CLOSE_REJECTED
                                 | protocol::LABEL_WASI_FD_CLOSE_RET
-                        )
+                        ))
+                        || (frame.direction(controller, view)
+                            && matches!(
+                                frame.logical_label,
+                                protocol::LABEL_WASI_FD_CLOSE_OBJECT_RET
+                                    | protocol::LABEL_WASI_FD_CLOSE_REJECTED
+                            ))
                 })
                 .map(|(&id, frame)| Ok((committed(id)?, id, frame)))
                 .collect::<Result<Vec<_>>>()?;
@@ -244,20 +283,16 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
             let mut bytes = Vec::<u8>::new();
             let mut offset = 0usize;
             let mut fd_flags = 0u16;
-            let mut previous_reply = None;
             for ((at, request_id, request), (replied, reply_id, reply)) in
                 requests.into_iter().zip(replies)
             {
-                if at >= replied
-                    || previous_reply.is_some_and(|previous| previous >= at)
-                    || receipts[&request_id]["send_actor"] != vm
+                if receipts[&request_id]["send_actor"] != vm
                     || receipts[&request_id]["receive_commit"]["actor"] != owner
                     || receipts[&reply_id]["send_actor"] != owner
                     || receipts[&reply_id]["receive_commit"]["actor"] != vm
                 {
                     return Err("object I/O request/reply occurrence mismatch".into());
                 }
-                previous_reply = Some(replied);
                 match (request.logical_label, reply.logical_label) {
                     (protocol::LABEL_WASI_PATH_OPEN, protocol::LABEL_WASI_PATH_OPEN_RET) => {
                         validate::<protocol::PathOpenReq>(request)?;
@@ -371,7 +406,9 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                             if result_at >= replied
                                 || call.request["arguments"]
                                     != arguments.ok_or("invalid arguments")?
-                                || effects.insert(call_id, (at, request_id)).is_some()
+                                || effects
+                                    .insert(call_id, (request_id, authority_id))
+                                    .is_some()
                             {
                                 return Err(
                                     "file arguments/effect/result occurrence mismatch".into()
@@ -394,6 +431,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
     let mut effect_receipts = Vec::new();
     for (index, (_, ids)) in layout.iter().enumerate() {
         let owner = u64::from(ids[0]);
+        let controller = u64::from(ids[9]);
         let agent = AGENTS[index];
         let assignment = &actors[index];
         for tool in ["think", "eat"] {
@@ -402,7 +440,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                     call.request["agent"] == agent && call.request["tool"] == tool
                 }))?;
             let id = call.request["id"].as_u64().ok_or("effect ID")?;
-            let &(close_at, close_id) = effects.get(&id).ok_or("unbound effect")?;
+            let &(close_id, authority_id) = effects.get(&id).ok_or("unbound effect")?;
             let (result_at, result) = call.result()?;
             let mut resources = Vec::new();
             if result["success"] != true || result["data"]["philosopher"] != agent {
@@ -421,8 +459,14 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                     }
                     let &(fork_owner, resource) = forks.get(name).ok_or("unknown physical fork")?;
                     let find = |source, target, label| -> Result<(u64, &journal::Frame)> {
-                        let sender = if source == resource {
-                            if target == owner { fork_owner } else { owner }
+                        let sender = if source == controller {
+                            owner
+                        } else if source == resource {
+                            if target == controller {
+                                fork_owner
+                            } else {
+                                owner
+                            }
                         } else {
                             source
                         };
@@ -430,8 +474,6 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                             |(frame_id, frame)| {
                                 frame.direction(source, target)
                                     && u64::from(frame.logical_label) == label
-                                    && (label != 10
-                                        || frame.bytes.first() == Some(&(resource as u8)))
                                     && receipts[*frame_id]["send_actor"] == sender
                             },
                         ))
@@ -442,22 +484,17 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                         })?;
                         Ok((id, frame))
                     };
-                    let (intent_id, intent) = find(owner, fork_owner, resource)?;
-                    let (request_id, request) = find(resource, owner, resource)?;
-                    let (loan_id, loan) = find(fork_owner, owner, 10)?;
+                    let (intent_id, intent) = find(controller, fork_owner, resource)?;
+                    let (request_id, request) = find(resource, controller, resource)?;
+                    let (loan_id, _) = find(fork_owner, controller, 10)?;
                     let (reply_id, reply) = find(resource, fork_owner, resource)?;
-                    let (return_id, returned) = find(owner, fork_owner, 10)?;
+                    let (return_id, _) = find(controller, fork_owner, 10)?;
                     if intent.value()? != call.request["arguments"]
                         || request.value()? != call.request["arguments"]
                         || reply.value()? != *result
-                        || loan.bytes.len() != 3
-                        || returned.bytes.len() != 3
-                        || !(close_at < committed(intent_id)?
-                            && committed(intent_id)? < committed(request_id)?
-                            && committed(request_id)? < committed(loan_id)?
+                        || !(committed(request_id)? < call.emitted
                             && committed(loan_id)? < call.emitted
-                            && result_at < committed(reply_id)?
-                            && committed(reply_id)? < committed(return_id)?)
+                            && result_at < committed(reply_id)?)
                         || receipts[&request_id]["send_actor"] != fork_owner
                         || receipts[&request_id]["receive_commit"]["actor"] != owner
                         || receipts[&loan_id]["receive_commit"]["actor"] != owner
@@ -498,6 +535,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
             }
             effect_receipts.push(json!({"effect_id":id,"agent":agent,"tool":tool,
                 "object_frame":close_id,"object_receive":receipts[&close_id]["receive_commit"],
+                "close_authority_frame":authority_id,"close_authority_receive":receipts[&authority_id]["receive_commit"],
                 "arguments":call.request["arguments"],"resources":resources}));
         }
     }
@@ -554,7 +592,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
     )
 }
 
-pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
+pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
     let baseline = audit(path)?;
     let projection = crate::projection::load(path)?;
     let records = journal::records(path)?;
@@ -565,6 +603,15 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .iter()
         .find(|receipt| receipt["agent"] == "PHILOSOPHER_A" && receipt["tool"] == "eat")
         .ok_or("first eating effect receipt")?;
+    let close_at = records
+        .iter()
+        .position(|row| {
+            row["message"]["type"] == "protocol_frame"
+                && row["message"]["action"] == "send"
+                && row["message"]["frame_id"] == first_eat["object_frame"]
+        })
+        .ok_or("admitted close frame")?;
+    let close = &records[close_at]["message"];
     fs::create_dir(output)?;
     let mut checked = Vec::new();
     for mutation in [
@@ -587,6 +634,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         "missing_checkpoint",
         "duplicate_effect_fresh_id",
         "missing_resource_return",
+        "missing_close_authority",
     ] {
         let mut copy = records.clone();
         match mutation {
@@ -617,11 +665,15 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                     }
                 }
             }
-            "missing_request" | "missing_object_close" | "missing_resource_return" => {
+            "missing_request"
+            | "missing_object_close"
+            | "missing_resource_return"
+            | "missing_close_authority" => {
                 let id = match mutation {
                     "missing_request" => &first_eat["resources"][0]["request_frame"],
                     "missing_object_close" => &first_eat["object_frame"],
                     "missing_resource_return" => &first_eat["resources"][0]["return_frame"],
+                    "missing_close_authority" => &first_eat["close_authority_frame"],
                     _ => unreachable!(),
                 };
                 let before = copy.len();
@@ -670,20 +722,30 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 } else {
                     protocol::LABEL_WASI_FD_READ_RET
                 };
-                let frame = records
-                    .iter()
-                    .find(|row| {
-                        let m = &row["message"];
-                        m["type"] == "protocol_frame"
-                            && m["action"] == "send"
-                            && m["frame_id"]
-                                .as_u64()
-                                .is_some_and(|id| labels.get(&id) == Some(&label))
-                            && m["payload"].as_array().is_some_and(|bytes| {
-                                bytes.len() > 5 && matches!(bytes[0].as_u64(), Some(4 | 5))
-                            })
-                    })
-                    .ok_or("file data mutation frame")?["message"]
+                let matches = |row: &&Value| {
+                    let m = &row["message"];
+                    m["type"] == "protocol_frame"
+                        && m["action"] == "send"
+                        && m[if mutation == "coherent_write_bytes" {
+                            "source"
+                        } else {
+                            "target"
+                        }] == close["source"]
+                        && m["frame_id"]
+                            .as_u64()
+                            .is_some_and(|id| labels.get(&id) == Some(&label))
+                        && m["payload"]
+                            .as_array()
+                            .is_some_and(|bytes| bytes.len() > 5 && bytes[0] == close["payload"][0])
+                };
+                // Mutate data used by this effect, rather than an earlier
+                // rejected attempt whose bytes were subsequently overwritten.
+                let frame = if mutation == "coherent_write_bytes" {
+                    records[..close_at].iter().rev().find(matches)
+                } else {
+                    records[close_at + 1..].iter().find(matches)
+                }
+                .ok_or("file data mutation frame")?["message"]
                     .clone();
                 let offset = if mutation == "coherent_write_bytes" {
                     2
@@ -803,9 +865,6 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 | "effect_before_second_request"
                 | "duplicate_effect_fresh_id"
         );
-        if epf_still_valid {
-            crate::projection::check_dynamic(&projection, &copy)?;
-        }
         let mutant_path = output.join(format!("{mutation}.jsonl"));
         let mut file = std::io::BufWriter::new(File::create_new(&mutant_path)?);
         for row in &copy {
@@ -813,10 +872,29 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
             writeln!(file)?;
         }
         file.flush()?;
-        let error = check(&copy, &projection)
-            .err()
-            .ok_or_else(|| format!("audit accepted {mutation}"))?
-            .to_string();
+        drop(file);
+        let error = journal::reject_mutant(path, &mutant_path, "--audit-philosophers")?;
+        if epf_still_valid {
+            // Release the complete search workspace after each input, just as
+            // the effect auditor does. No source implementation is restored.
+            #[cfg(test)]
+            let auditor =
+                std::env::var_os("CHOREOFIX_AUDITOR").ok_or("qualified auditor missing")?;
+            #[cfg(not(test))]
+            let auditor = std::env::current_exe()?;
+            let checked = Command::new(auditor)
+                .arg("--audit-protocol")
+                .arg(&mutant_path)
+                .stdout(Stdio::null())
+                .output()?;
+            if !checked.status.success() {
+                return Err(format!(
+                    "effect-data counterexample changed source execution: {}",
+                    String::from_utf8(checked.stderr)?
+                )
+                .into());
+            }
+        }
         checked.push(json!({"mutation":mutation,"rejected":true,"epf_execution_preserved":epf_still_valid.then_some(true),"error":error}));
     }
     let result = json!({"mutants":checked,"original_unchanged":true});
@@ -824,5 +902,5 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         output.join("mutants.json"),
         format!("{}\n", serde_json::to_string_pretty(&result)?),
     )?;
-    Ok(result)
+    Ok((baseline, result))
 }

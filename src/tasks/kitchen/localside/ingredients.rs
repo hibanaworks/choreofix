@@ -1,13 +1,9 @@
-//! Direct requests and actual results, with independent dishes driven concurrently.
+//! Receive the actual operation-file request and return the real effect.
 use super::super::{global::*, imp};
-use crate::shell::{
-    ShellError, ShellResult,
-    imp::{bus::Bus, service::Domain},
-};
+use crate::shell::{ShellError, ShellResult, imp::service::Domain};
 use hibana::Endpoint;
-
 #[hibana_runtime::scope]
-pub async fn run(endpoint: &mut Endpoint<INGREDIENTS>, domain: &Bus) -> ShellResult<()> {
+pub async fn run(endpoint: &mut Endpoint<INGREDIENTS>, domain: &impl Domain) -> ShellResult<()> {
     let [mut a, mut b, mut c] = endpoint.par()?;
     async {
         let arguments = a.recv::<PrepareSauce>().await?.value();
@@ -18,9 +14,9 @@ pub async fn run(endpoint: &mut Endpoint<INGREDIENTS>, domain: &Bus) -> ShellRes
         imp::completed("prepare_ingredient", "CHEF_A", &arguments, &result)?;
         let bytes = imp::encode(&result)?;
         async {
-            let [mut own, mut consumer] = a.par()?;
+            let [mut file, mut consumer] = a.par()?;
             async {
-                own.send::<SaucePrepared>(&bytes.as_slice()).await?;
+                file.send::<SaucePrepared>(&bytes.as_slice()).await?;
             };
             async {
                 consumer.send::<Sauce>(&bytes.as_slice()).await?;
@@ -38,9 +34,9 @@ pub async fn run(endpoint: &mut Endpoint<INGREDIENTS>, domain: &Bus) -> ShellRes
         imp::completed("prepare_ingredient", "CHEF_B", &arguments, &result)?;
         let bytes = imp::encode(&result)?;
         async {
-            let [mut own, mut consumer] = b.par()?;
+            let [mut file, mut consumer] = b.par()?;
             async {
-                own.send::<GarnishPrepared>(&bytes.as_slice()).await?;
+                file.send::<GarnishPrepared>(&bytes.as_slice()).await?;
             };
             async {
                 consumer.send::<Garnish>(&bytes.as_slice()).await?;
@@ -58,9 +54,9 @@ pub async fn run(endpoint: &mut Endpoint<INGREDIENTS>, domain: &Bus) -> ShellRes
         imp::completed("prepare_ingredient", "CHEF_C", &arguments, &result)?;
         let bytes = imp::encode(&result)?;
         async {
-            let [mut own, mut consumer] = c.par()?;
+            let [mut file, mut consumer] = c.par()?;
             async {
-                own.send::<GlazePrepared>(&bytes.as_slice()).await?;
+                file.send::<GlazePrepared>(&bytes.as_slice()).await?;
             };
             async {
                 consumer.send::<Glaze>(&bytes.as_slice()).await?;

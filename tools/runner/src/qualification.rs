@@ -39,6 +39,52 @@ const FAMILIES: [&str; 23] = [
 
 pub const MULTI_ROUND_DISCOVERY_CASES: usize = 12;
 
+fn dining_reports(reports: &[Value]) -> Result<()> {
+    let mut completed = BTreeSet::new();
+    let mut binaries = BTreeSet::new();
+    for report in reports {
+        let task = report["task"].as_str().ok_or("dining task")?;
+        let count = match task {
+            "9E" => 3,
+            "9M" => 5,
+            "9H" => 7,
+            _ => return Err("unknown dining condition".into()),
+        };
+        let adversarial = report["adversarial_inputs"]
+            .as_bool()
+            .ok_or("dining input condition")?;
+        let audit = &report["audit"];
+        let mutants = report["mutants"]["mutants"]
+            .as_array()
+            .ok_or("dining record-counterexample results")?;
+        if audit["status"] != "passed"
+            || audit["participants"] != count
+            || audit["dynamic_protocol"]["status"] != "passed"
+            || audit["actual_resource_endpoint_returns"] != 2 * count
+            || audit["simulator_complete"] != true
+            || mutants.len() != 20
+            || mutants.iter().any(|result| result["rejected"] != true)
+            || !completed.insert((task.to_owned(), adversarial))
+        {
+            return Err("dining qualification has a missing, failed or duplicate condition".into());
+        }
+        binaries.insert(
+            audit["runtime_binary_sha256"]
+                .as_str()
+                .filter(|hash| hash.len() == 64)
+                .ok_or("dining runtime hash")?,
+        );
+    }
+    let expected = ["9E", "9M", "9H"]
+        .into_iter()
+        .flat_map(|task| [false, true].map(|input| (task.to_owned(), input)))
+        .collect();
+    if completed != expected || binaries.len() != 1 {
+        return Err("dining evidence omits conditions or combines runtime binaries".into());
+    }
+    Ok(())
+}
+
 fn multi_round_discovery_reports(reports: &[Value]) -> Result<()> {
     let mut completed = BTreeSet::new();
     let mut artifacts = BTreeSet::new();
@@ -81,7 +127,7 @@ fn multi_round_discovery_reports(reports: &[Value]) -> Result<()> {
     Ok(())
 }
 
-pub const KITCHEN_CASES: usize = KITCHEN_ORDERS.len() * 2 + 1;
+pub const KITCHEN_CASES: usize = KITCHEN_ORDERS.len() * 8 + 3;
 pub const KITCHEN_ORDERS: [[usize; 3]; 6] = [
     [0, 1, 2],
     [0, 2, 1],
@@ -129,6 +175,60 @@ pub const FEATURE_DELIVERY_RECOVERY_CASES: [(u8, bool, bool, FailureSchedule); 2
 ];
 
 fn boundary_assignments(family: &str, filter: &str) -> Result<Vec<(String, Option<usize>)>> {
+    if family == "cicd" {
+        let assignments = [
+            "adversarial_depth_0",
+            "ordinary_depth_1",
+            "normal_delay_depth_2",
+            "real_wasi_cicd_early_exit_has_no_domain_effect",
+        ]
+        .map(|name| format!("cicd_boundary::{name}"))
+        .into_iter()
+        .filter(|name| name.contains(filter))
+        .map(|name| (name, None))
+        .collect::<Vec<_>>();
+        if assignments.is_empty() {
+            return Err("unknown CI/CD finite assignment filter".into());
+        }
+        return Ok(assignments);
+    }
+    if family == "coordination" {
+        let assignments = [
+            "backend_first",
+            "frontend_first",
+            "one_amendment",
+            "extended_four_amendments",
+            "extended_normal_delay",
+        ]
+        .map(|name| format!("coordination_boundary::{name}"))
+        .into_iter()
+        .filter(|name| name.contains(filter))
+        .map(|name| (name, None))
+        .collect::<Vec<_>>();
+        if assignments.is_empty() {
+            return Err("unknown coordination finite assignment filter".into());
+        }
+        return Ok(assignments);
+    }
+    if family == "philosophers" {
+        let assignments = [
+            "three_philosophers_normal",
+            "five_philosophers_normal",
+            "seven_philosophers_normal",
+            "three_philosophers_adversarial",
+            "five_philosophers_adversarial",
+            "seven_philosophers_adversarial",
+        ]
+        .map(|name| format!("philosophers_boundary::{name}"))
+        .into_iter()
+        .filter(|name| name.contains(filter))
+        .map(|name| (name, None))
+        .collect::<Vec<_>>();
+        if assignments.is_empty() {
+            return Err("unknown dining finite assignment filter".into());
+        }
+        return Ok(assignments);
+    }
     if family == "multi_round_discovery" {
         let name = "multi_round_discovery_boundary::seven_actual_wasm_guests_retest_review_exhaust_and_reconsider";
         if !name.contains(filter) {
@@ -482,6 +582,25 @@ pub fn run(output: &Path, filter: Option<&str>) -> Result<Value> {
         if family == "kitchen" && completed != KITCHEN_CASES as u64 {
             return Err("kitchen qualification omitted a declared condition".into());
         }
+        if family == "philosophers" {
+            if completed != 6 {
+                return Err("dining qualification omitted a declared condition".into());
+            }
+            let mut reports = Vec::new();
+            for entry in fs::read_dir(output.join("evidence"))? {
+                let entry = entry?;
+                if entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("philosophers-rust-boundary-")
+                {
+                    reports.extend(serde_json::from_slice::<Vec<Value>>(&fs::read(
+                        entry.path().join("summary.json"),
+                    )?)?);
+                }
+            }
+            dining_reports(&reports)?;
+        }
         if family == "multi_round_discovery" {
             if completed != MULTI_ROUND_DISCOVERY_CASES as u64 {
                 return Err("scientific qualification omitted a declared condition".into());
@@ -533,7 +652,7 @@ pub fn run(output: &Path, filter: Option<&str>) -> Result<Value> {
         "all_families_passed":filter.is_none(), "source_unchanged":true,
         "diagnostic_filter":filter,
         "test_functions_passed":tests, "model_calls":0, "scored_runs":0,
-        "dynamic_eligibility_replay_complete":false, "qualifier_sha256":digest(&output.join("qualifier"))?
+        "qualifier_sha256":digest(&output.join("qualifier"))?
     });
     save(&output.join("result.json"), &result)?;
     Ok(result)
@@ -596,18 +715,18 @@ mod tests {
                 .iter()
                 .map(|(_, index)| index.unwrap())
                 .collect::<Vec<_>>(),
-            (0..13).collect::<Vec<_>>()
+            (0..KITCHEN_CASES).collect::<Vec<_>>()
         );
         assert!(boundary_assignments("kitchen", "kitchen_boundary::missing").is_err());
-        let reports: Vec<_> = (0..13)
+        let reports: Vec<_> = (0..KITCHEN_CASES)
             .map(|index| {
                 json!({"task":"12E","status":"passed",
-            "declared_conditions":13,"assigned_condition":index,
+            "declared_conditions":KITCHEN_CASES,"assigned_condition":index,
             "cases":[{"case_index":index,"audit":{"status":"passed","domain_calls":9}}]})
             })
             .collect();
         kitchen_reports(&reports).unwrap();
-        assert!(kitchen_reports(&reports[..12]).is_err());
+        assert!(kitchen_reports(&reports[..KITCHEN_CASES - 1]).is_err());
         let mut changed = reports.clone();
         changed[12] = changed[0].clone();
         assert!(kitchen_reports(&changed).is_err());

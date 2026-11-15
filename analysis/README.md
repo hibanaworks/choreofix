@@ -104,7 +104,7 @@ rows retain their actual saved audits, runtime, source and remaining errors.
 This snapshot predates the new 14H model trials; those are not included in its
 27 rows. No scored comparison or statistical pool is established.
 
-The current inventory is `output/experiments/pilot-inventory-rust-v6/verified-v1/`:
+The sixth inventory is `output/experiments/pilot-inventory-rust-v6/verified-v1/`:
 29 distinct streams across 19 task identifiers, adding both 14H trials. The
 143.119385333-second incomplete attempt remains alongside the 193.161955167-second
 successful pilot. Their input/prompt versions differ and are not pooled into a
@@ -118,3 +118,21 @@ runner executables remain explicit. These are integrity/completeness categories,
 not task success rates. No raw stream, historical model call or historical audit
 was rerun by the refresh. Peak scan memory was 79,560,704 bytes. The reference
 map, reader hashes, JSON/CSV/table and qualification receipt remain together.
+
+The November 15 inventory is `output/experiments/pilot-inventory-rust-v7/verified-v1/`:
+51 distinct saved model streams across 29 task identifiers. The unchanged
+reader checks all explicitly referenced raw streams, model usage, source files,
+executables, common-simulator manifests and saved audits. Twenty-one archives
+satisfy those integrity checks; 30 retain explicit incompleteness errors.
+Historical missing executables and source files remain visible. The failed
+direct-file 7E and 3E attempts are included, as is the successful 8E execution
+whose actual domain result is a terminal test failure. These categories are not
+a task success rate or 29 current-path task certifications.
+
+The added references select the exact saved audit and bind its file hash and
+raw-event hash. No historical model or auditor was rerun. Source and simulator
+versions remain separate, with no statistical pooling or scored comparisons.
+The reader source/binary match v6 exactly; the guarded scan peaked at
+166,395,904 bytes. The current 10M mechanism matrix is separate and remains
+unfinished after 18 normal conditions and a private-descriptor collision in
+the following recovery condition. It is not counted as a new model pilot.

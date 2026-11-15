@@ -22,6 +22,7 @@ struct Case {
     repeat_write: bool,
     repeat_references_after_revision: bool,
     large_reply: bool,
+    voluntary_revision: bool,
 }
 
 fn response(reply: &Value) -> Result<Value> {
@@ -38,8 +39,19 @@ fn response(reply: &Value) -> Result<Value> {
 
 async fn writer(guest: &process::Guest, agent: &str, chapter: &str, case: &Case) -> Result<()> {
     if case.adversarial {
-        let reply=guest.command(agent,"echo '{\"section_name\":\"OUTSIDE\"}' > /service/write_section; cat /service/result".into()).await?;
-        assert_eq!(response(&reply)?["status"], "invalid_arguments");
+        let reply = guest
+            .command(
+                agent,
+                "echo '{\"section_name\":\"OUTSIDE\"}' > /service/write_section".into(),
+            )
+            .await?;
+        assert!(
+            reply["stdout"]
+                .as_str()
+                .ok_or("denial output")?
+                .contains("Invalid argument"),
+            "{reply}"
+        );
     }
     let tools = if case.references_first {
         ["update_references", "write_section"]
@@ -55,114 +67,123 @@ async fn writer(guest: &process::Guest, agent: &str, chapter: &str, case: &Case)
         let reply = guest
             .command(
                 agent,
-                format!("printf '%s' '{args}' > /service/{tool}; cat /service/result"),
+                format!("printf '%s' '{args}' > /service/{tool}; cat /service/{tool}"),
             )
             .await?;
+        assert!(
+            !reply["stdout"]
+                .as_str()
+                .ok_or("terminal output")?
+                .contains("wash:"),
+            "{reply}"
+        );
         assert_eq!(response(&reply)?["success"], true, "{reply}");
         if tool == "write_section" && agent == "WRITER_A" && case.repeat_write {
-            let repeated = json!({"section_name":chapter,"content_notes":"a second initial draft before references"});
+            let repeated = json!({"section_name":chapter,"content_notes":"second initial draft"});
             let reply = guest
                 .command(
                     agent,
-                    format!(
-                        "printf '%s' '{repeated}' > /service/write_section; cat /service/result"
-                    ),
+                    format!("printf '%s' '{repeated}' > /service/write_section"),
                 )
                 .await?;
-            assert_eq!(response(&reply)?["status"], "out_of_order", "{reply}");
+            assert!(
+                reply["stdout"]
+                    .as_str()
+                    .ok_or("denial output")?
+                    .contains("Permission denied"),
+                "{reply}"
+            );
         }
     }
     loop {
-        let reply = guest
-            .command(
-                agent,
-                "echo '{}' > /service/feedback; cat /service/result".into(),
-            )
-            .await?;
+        let reply = guest.command(agent, "cat /service/feedback".into()).await?;
         let actual = response(&reply)?;
-        match actual["tool_name"].as_str() {
-            Some("combine_sections") => {
-                assert_eq!(actual["success"], true);
-                break;
+        if actual["tool_name"] == "combine_sections" {
+            assert_eq!(actual["success"], true);
+            break;
+        }
+        assert_eq!(actual["tool_name"], "review_sections");
+        if actual["data"]["scope"] != chapter {
+            continue;
+        }
+        let target = if case.cross_revision {
+            if chapter == "CHAPTER_1" {
+                "CHAPTER_2"
+            } else {
+                "CHAPTER_1"
             }
-            Some("review_sections") => {
-                assert_eq!(actual["success"], false, "{actual}");
-                if actual["data"]["scope"] == chapter {
-                    let target = if case.cross_revision {
-                        if chapter == "CHAPTER_1" {
-                            "CHAPTER_2"
-                        } else {
-                            "CHAPTER_1"
-                        }
-                    } else {
-                        chapter
-                    };
-                    let feedback = actual["message"].as_str().ok_or("actual review feedback")?;
-                    let feedback = if case.large_reply {
-                        format!("{feedback}\n{}", "追記資料".repeat(500))
-                    } else {
-                        feedback.to_owned()
-                    };
-                    let args = json!({"section_name":target,"feedback":feedback});
-                    let revised = if case.large_reply {
-                        guest
-                            .command(agent, "printf '%s' '' > /work/revision.json".into())
-                            .await?;
-                        let encoded = args.to_string();
-                        let mut remaining = encoded.as_str();
-                        while !remaining.is_empty() {
-                            let mut end = remaining.len().min(2048);
-                            while !remaining.is_char_boundary(end) {
-                                end -= 1;
-                            }
-                            let chunk = &remaining[..end];
-                            guest
-                                .command(
-                                    agent,
-                                    format!("printf '%s' '{chunk}' >> /work/revision.json"),
-                                )
-                                .await?;
-                            remaining = &remaining[end..];
-                        }
-                        guest
-                            .command(
-                                agent,
-                                "cat /work/revision.json > /service/revise_section; cat /service/result"
-                                    .into(),
-                            )
-                            .await?
-                    } else {
-                        guest
-                            .command(
-                                agent,
-                                format!(
-                                    "echo '{args}' > /service/revise_section; cat /service/result"
-                                ),
-                            )
-                            .await?
-                    };
-                    let revised = response(&revised)?;
-                    assert_eq!(revised["success"], true, "{revised}");
-                    assert_eq!(revised["data"]["section"], target);
-                    if case.large_reply {
-                        assert_eq!(revised["data"]["artifact"]["feedback"], feedback);
-                        assert!(revised.to_string().len() > 8192);
-                    }
-                    if case.repeat_references_after_revision && agent == "WRITER_A" {
-                        let arguments = json!({"section_name":chapter});
-                        let reply = guest
-                            .command(
-                                agent,
-                                format!(
-                                    "printf '%s' '{arguments}' > /service/update_references; cat /service/result"
-                                ),
-                            )
-                            .await?;
-                        assert_eq!(response(&reply)?["status"], "out_of_order", "{reply}");
-                    }
+        } else {
+            chapter
+        };
+        let feedback = actual["message"]
+            .as_str()
+            .unwrap_or("reconsider the current review");
+        let feedback = if case.large_reply {
+            format!("{feedback}\n{}", "追記資料".repeat(500))
+        } else {
+            feedback.to_owned()
+        };
+        let args = json!({"section_name":target,"feedback":feedback});
+        let revised = if case.large_reply {
+            guest
+                .command(agent, "printf '%s' '' > /work/revision.json".into())
+                .await?;
+            let encoded = args.to_string();
+            let mut remaining = encoded.as_str();
+            while !remaining.is_empty() {
+                let mut end = remaining.len().min(2048);
+                while !remaining.is_char_boundary(end) {
+                    end -= 1;
                 }
+                let chunk = &remaining[..end];
+                let reply = guest
+                    .command(
+                        agent,
+                        format!("printf '%s' '{chunk}' >> /work/revision.json"),
+                    )
+                    .await?;
+                assert!(
+                    !reply["stdout"]
+                        .as_str()
+                        .ok_or("terminal output")?
+                        .contains("wash:"),
+                    "{reply}"
+                );
+                remaining = &remaining[end..];
             }
-            _ => return Err(format!("unexpected document feedback: {actual}").into()),
+            guest.command(agent, "cat /work/revision.json > /service/revise_section; cat /service/revise_section".into()).await?
+        } else {
+            guest.command(agent, format!("printf '%s' '{args}' > /service/revise_section; cat /service/revise_section")).await?
+        };
+        assert!(
+            !revised["stdout"]
+                .as_str()
+                .ok_or("terminal output")?
+                .contains("wash:"),
+            "{revised}"
+        );
+        let revised = response(&revised)?;
+        assert_eq!(revised["success"], true, "{revised}");
+        assert_eq!(revised["data"]["section"], target);
+        if case.large_reply {
+            assert_eq!(revised["data"]["artifact"]["feedback"], feedback);
+            assert!(revised.to_string().len() > 8192);
+        }
+        if case.repeat_references_after_revision && agent == "WRITER_A" {
+            let arguments = json!({"section_name":chapter});
+            let reply = guest
+                .command(
+                    agent,
+                    format!("printf '%s' '{arguments}' > /service/update_references"),
+                )
+                .await?;
+            assert!(
+                reply["stdout"]
+                    .as_str()
+                    .ok_or("denial output")?
+                    .contains("Permission denied"),
+                "{reply}"
+            );
         }
     }
     if !case.adversarial {
@@ -175,45 +196,124 @@ async fn writer(guest: &process::Guest, agent: &str, chapter: &str, case: &Case)
 }
 
 async fn editor(guest: &process::Guest, case: &Case) -> Result<()> {
+    let input = json!({"first_writer":case.first});
+    let selected = guest
+        .command(
+            "EDITOR",
+            format!(
+                "printf '%s' '{input}' > /service/allocate_document; cat /service/allocate_document"
+            ),
+        )
+        .await?;
+    assert!(
+        !selected["stdout"]
+            .as_str()
+            .ok_or("terminal output")?
+            .contains("wash:"),
+        "{selected}"
+    );
     if case.adversarial {
-        let reply=guest.command("EDITOR","echo '{\"section_name\":\"OUTSIDE\"}' > /service/review_sections; cat /service/result".into()).await?;
-        assert_eq!(response(&reply)?["status"], "invalid_arguments");
+        let early = guest
+            .command(
+                "EDITOR",
+                "printf '%s' '{\"sections\":\"CHAPTER_1,CHAPTER_2\"}' > /service/combine_sections"
+                    .into(),
+            )
+            .await?;
+        assert!(
+            early["stdout"]
+                .as_str()
+                .ok_or("early publication output")?
+                .contains("Permission denied"),
+            "{early}"
+        );
+        let reply = guest
+            .command(
+                "EDITOR",
+                "echo '{\"section_name\":\"OUTSIDE\"}' > /service/review_chapter_1".into(),
+            )
+            .await?;
+        assert!(
+            reply["stdout"]
+                .as_str()
+                .ok_or("denial output")?
+                .contains("Invalid argument"),
+            "{reply}"
+        );
     }
-    let second = if case.review == "CHAPTER_1" {
-        "CHAPTER_2"
+    let order = if case.review == "CHAPTER_1" {
+        [1, 2]
     } else {
-        "CHAPTER_1"
+        [2, 1]
     };
+    let mut voluntary = case.voluntary_revision;
     loop {
-        let first = guest
-            .command(
-                "EDITOR",
-                format!(
-                    "echo '{}' > /service/review_sections; cat /service/result",
-                    json!({"section_name":case.review})
-                ),
-            )
-            .await?;
-        let second = guest
-            .command(
-                "EDITOR",
-                format!(
-                    "echo '{}' > /service/review_sections; cat /service/result",
-                    json!({"section_name":second})
-                ),
-            )
-            .await?;
-        if response(&first)?["success"] == true && response(&second)?["success"] == true {
+        // The fixture chooses one of two legal request orders. Both requests
+        // are admitted before either result is read from its operation file.
+        for number in order {
+            let args = json!({"section_name":format!("CHAPTER_{number}")});
+            let reply = guest
+                .command(
+                    "EDITOR",
+                    format!("printf '%s' '{args}' > /service/review_chapter_{number}"),
+                )
+                .await?;
+            assert!(
+                !reply["stdout"]
+                    .as_str()
+                    .ok_or("terminal output")?
+                    .contains("wash:"),
+                "{reply}"
+            );
+        }
+        let mut reviews = Vec::new();
+        for number in [1, 2] {
+            let reply = guest.command("EDITOR", format!("cat /service/review_chapter_{number} > /work/review_{number}.json; cat /work/review_{number}.json")).await?;
+            assert!(
+                !reply["stdout"]
+                    .as_str()
+                    .ok_or("terminal output")?
+                    .contains("wash:"),
+                "{reply}"
+            );
+            reviews.push(response(&reply)?);
+        }
+        let rejected = reviews.iter().position(|review| review["success"] == false);
+        if rejected.is_none() && !voluntary {
             break;
         }
+        let index = rejected.unwrap_or(0);
+        if rejected.is_none() {
+            voluntary = false;
+        }
+        let writer = if index == 0 { "a" } else { "b" };
+        let input = json!({"review_id":reviews[index]["data"]["review_id"]});
+        let reply = guest.command("EDITOR", format!("printf '%s' '{input}' > /service/reconsider_{writer}; cat /service/reconsider_{writer}")).await?;
+        assert!(
+            !reply["stdout"]
+                .as_str()
+                .ok_or("terminal output")?
+                .contains("wash:"),
+            "{reply}"
+        );
+        assert_eq!(response(&reply)?["success"], true);
     }
     let args = json!({"sections":if case.review=="CHAPTER_1" {"CHAPTER_1,CHAPTER_2"} else {"CHAPTER_2,CHAPTER_1"}});
     let reply = guest
         .command(
             "EDITOR",
-            format!("echo '{args}' > /service/combine_sections; cat /service/result"),
+            format!(
+                "printf '%s' '{args}' > /service/combine_sections; cat /service/combine_sections"
+            ),
         )
         .await?;
+    assert!(
+        !reply["stdout"]
+            .as_str()
+            .ok_or("terminal output")?
+            .contains("wash:"),
+        "{reply}"
+    );
     assert_eq!(response(&reply)?["success"], true, "{reply}");
     if !case.adversarial {
         assert_eq!(
@@ -240,6 +340,8 @@ async fn both_initial_writers_and_review_orders_complete_the_real_document() -> 
             repeat_write: false,
             repeat_references_after_revision: false,
             large_reply: false,
+
+            voluntary_revision: false,
         },
         Case {
             depth: 0,
@@ -252,6 +354,8 @@ async fn both_initial_writers_and_review_orders_complete_the_real_document() -> 
             repeat_write: false,
             repeat_references_after_revision: false,
             large_reply: false,
+
+            voluntary_revision: false,
         },
     ])
     .await
@@ -274,6 +378,8 @@ async fn repeated_rejection_cross_chapter_edits_and_post_publication_commands_us
             repeat_write: false,
             repeat_references_after_revision: false,
             large_reply: false,
+
+            voluntary_revision: false,
         },
         Case {
             depth: 2,
@@ -286,6 +392,8 @@ async fn repeated_rejection_cross_chapter_edits_and_post_publication_commands_us
             repeat_write: false,
             repeat_references_after_revision: false,
             large_reply: false,
+
+            voluntary_revision: false,
         },
         Case {
             depth: 0,
@@ -298,6 +406,8 @@ async fn repeated_rejection_cross_chapter_edits_and_post_publication_commands_us
             repeat_write: false,
             repeat_references_after_revision: false,
             large_reply: false,
+
+            voluntary_revision: false,
         },
         Case {
             depth: 0,
@@ -310,6 +420,8 @@ async fn repeated_rejection_cross_chapter_edits_and_post_publication_commands_us
             repeat_write: false,
             repeat_references_after_revision: false,
             large_reply: false,
+
+            voluntary_revision: false,
         },
         Case {
             depth: 0,
@@ -322,6 +434,8 @@ async fn repeated_rejection_cross_chapter_edits_and_post_publication_commands_us
             repeat_write: false,
             repeat_references_after_revision: false,
             large_reply: false,
+
+            voluntary_revision: false,
         },
         Case {
             depth: 2,
@@ -334,6 +448,8 @@ async fn repeated_rejection_cross_chapter_edits_and_post_publication_commands_us
             repeat_write: false,
             repeat_references_after_revision: false,
             large_reply: false,
+
+            voluntary_revision: false,
         },
     ])
     .await
@@ -355,6 +471,8 @@ async fn duplicate_initial_write_returns_an_error_then_preparation_and_review_co
         repeat_write: true,
         repeat_references_after_revision: false,
         large_reply: false,
+
+        voluntary_revision: false,
     }])
     .await
 }
@@ -375,6 +493,8 @@ async fn duplicate_references_after_revision_return_an_error_then_publication_co
         repeat_write: false,
         repeat_references_after_revision: true,
         large_reply: false,
+
+        voluntary_revision: false,
     }])
     .await
 }
@@ -394,6 +514,28 @@ async fn a_large_unicode_revision_reply_survives_chunks_and_publication() -> Res
         repeat_write: false,
         repeat_references_after_revision: false,
         large_reply: true,
+
+        voluntary_revision: false,
+    }])
+    .await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires source-qualified document runtime, actual wash and shared world"]
+async fn an_editor_can_reconsider_a_positive_current_review_before_freezing() -> Result<()> {
+    run(&[Case {
+        depth: 0,
+        first: "WRITER_B",
+        review: "CHAPTER_2",
+        references_first: true,
+        cross_revision: false,
+        failures: &[],
+        adversarial: false,
+        repeat_write: false,
+        repeat_references_after_revision: false,
+        large_reply: false,
+        voluntary_revision: true,
     }])
     .await
 }
@@ -437,7 +579,7 @@ async fn run(cases: &[Case]) -> Result<()> {
             "review_first":case.review,"references_first":case.references_first,"cross_chapter_revision":case.cross_revision,
             "failure_overrides":case.failures,"adversarial_inputs":case.adversarial,
             "duplicate_initial_write":case.repeat_write,"duplicate_references_after_revision":case.repeat_references_after_revision,
-            "large_unicode_reply":case.large_reply,
+            "large_unicode_reply":case.large_reply,"voluntary_positive_review_revision":case.voluntary_revision,
             "model_calls":0,"scored_benchmark":false,
             "build":receipt,"runtime_binary_sha256":digest(&binary)?,"guest_wasm_sha256":digest(module)?,
             "compiled_projection_sha256":digest(&output.join("projection.json"))?,
@@ -452,14 +594,7 @@ async fn run(cases: &[Case]) -> Result<()> {
             .collect::<Vec<_>>();
         let (simulator, _) =
             oracle::Simulator::new("7E", case.depth, 0.01, trace.clone(), &failures)?;
-        let (guest, runtime) = process::guest(
-            &binary,
-            module,
-            &["7E", case.first],
-            &output,
-            trace,
-            simulator,
-        )?;
+        let (guest, runtime) = process::guest(&binary, module, &["7E"], &output, trace, simulator)?;
         let ((),result)=hibana_runtime::race(async {
             async {
                 let guest=&guest;
@@ -472,8 +607,8 @@ async fn run(cases: &[Case]) -> Result<()> {
                 }.await?;
                 if case.adversarial {
                     for (agent,chapter) in [("WRITER_A","CHAPTER_1"),("WRITER_B","CHAPTER_2")] {
-                        let denied=guest.command(agent,format!("echo '{}' > /service/revise_section; cat /service/result",json!({"section_name":chapter,"feedback":"after publication"}))).await?;
-                        assert_eq!(response(&denied)?["status"],"out_of_order","{denied}");
+                        let denied=guest.command(agent,format!("echo '{}' > /service/revise_section",json!({"section_name":chapter,"feedback":"after publication"}))).await?;
+                        assert!(denied["stdout"].as_str().ok_or("denial output")?.contains("Permission denied"),"{denied}");
                     }
                     for agent in ["WRITER_A","WRITER_B","EDITOR"] {
                         assert_eq!(guest.command(agent,"exit 0".into()).await?["exit_status"],0);

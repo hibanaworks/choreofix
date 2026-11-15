@@ -1,168 +1,177 @@
-//! Canonical service requests. Validation reads borrowed bytes without allocating.
-use super::{global::SERVICE_FD, input::assignment};
+//! Actual task arguments and original result bytes, without fd or workflow state.
+use super::input::assignment;
 use crate::shell::{ShellError, ShellResult};
 use hibana::runtime::wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload};
-use hibana_wasip1_runtime::{
-    choreofs::{ChoreoFsObject, ChoreoFsObjectSet, ChoreoFsRequest, FdSpec, ObjectId},
-    protocol,
-};
 use serde_json::Value;
 
-pub const DESIGN: u8 = 1;
-pub const IMPLEMENT: u8 = 2;
-pub const COMMIT: u8 = 3;
-pub const TEST: u8 = 4;
-
-/// Actual fd and normalized input bytes, never an expected step or permission.
-pub struct Close<const TASK: u8, const ROLE: u8, const OPERATION: u8> {
-    fd: u8,
-    arguments: Vec<u8>,
-}
-
-impl<const TASK: u8, const ROLE: u8, const OPERATION: u8> Close<TASK, ROLE, OPERATION> {
-    pub const PATH: &'static [u8] = match OPERATION {
-        DESIGN => b"service/design_feature",
-        IMPLEMENT => b"service/implement_code",
-        COMMIT => b"service/commit_changes",
-        TEST => b"service/run_local_tests",
-        _ => panic!("unknown service request kind"),
-    };
-    pub const KEY: &'static str = if OPERATION == COMMIT {
-        "modules"
-    } else {
-        "feature_name"
-    };
-
-    pub fn objects() -> ChoreoFsObjectSet<'static, 1> {
-        ChoreoFsObjectSet::new([ChoreoFsObject::writable(
-            Self::PATH,
-            ObjectId(SERVICE_FD as u32),
-            FdSpec::new(SERVICE_FD, 1 << 6, 1),
-            protocol::FdBinding::write(protocol::FdWriteRow::Object),
-        )])
+#[derive(Debug, PartialEq, Eq)]
+pub struct Arguments<const ROLE: u8, const OPERATION: u8>(Vec<u8>);
+impl<const ROLE: u8, const OPERATION: u8> Arguments<ROLE, OPERATION> {
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
     }
-
-    /// ABI data conversion happens before sending a projected request. Invalid
-    /// command data returns to the shell without faulting or advancing Endpoint.
-    pub fn new(request: protocol::FdCloseReq, mut arguments: Value) -> ShellResult<Self> {
-        let expected = assignment::<TASK, ROLE>();
-        if request.0.fd() != SERVICE_FD {
-            return Err(ShellError::message("invalid service fd"));
-        }
-        let object = arguments
-            .as_object_mut()
-            .ok_or_else(|| ShellError::message("expected an argument object"))?;
-        if object.len() != 1 {
-            return Err(ShellError::message("expected one argument"));
-        }
-        let value = object
-            .get_mut(Self::KEY)
-            .ok_or_else(|| ShellError::message("incorrect argument name"))?;
-        let text = value
-            .as_str()
-            .ok_or_else(|| ShellError::message("expected a string argument"))?;
-        if OPERATION == COMMIT {
-            let modules: Vec<_> = text.split(',').map(str::trim).collect();
-            if modules.len() != 2
-                || !(modules == expected.modules
-                    || modules == [expected.modules[1], expected.modules[0]])
-            {
-                return Err(ShellError::message("arguments name different task modules"));
-            }
-            *value = Value::String(modules.join(","));
-        } else if text != expected.feature {
-            return Err(ShellError::message(
-                "arguments name a different task feature",
-            ));
-        }
-        let arguments = serde_json::to_vec(&arguments)
-            .map_err(|error| ShellError::message(error.to_string()))?;
-        Ok(Self {
-            fd: request.0.fd(),
-            arguments,
-        })
+    pub fn into_value(self) -> Value {
+        serde_json::from_slice(&self.0).expect("validated codebase arguments")
     }
 }
-
-impl<const TASK: u8, const ROLE: u8, const OPERATION: u8> WireEncode
-    for Close<TASK, ROLE, OPERATION>
-{
-    fn encode_into(&self, out: &mut [u8]) -> Result<usize, CodecError> {
-        let len = self.arguments.len() + 1;
-        if out.len() < len {
-            return Err(CodecError::Truncated);
-        }
-        out[0] = self.fd;
-        out[1..len].copy_from_slice(&self.arguments);
-        Ok(len)
+impl<const ROLE: u8, const OPERATION: u8> WireEncode for Arguments<ROLE, OPERATION> {
+    fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
+        output
+            .get_mut(..self.0.len())
+            .ok_or(CodecError::Truncated)?
+            .copy_from_slice(&self.0);
+        Ok(self.0.len())
     }
 }
-
-impl<const TASK: u8, const ROLE: u8, const OPERATION: u8> WirePayload
-    for Close<TASK, ROLE, OPERATION>
-{
-    const SCHEMA_ID: u32 = {
-        let _ = assignment::<TASK, ROLE>();
-        assert!(
-            OPERATION >= DESIGN && OPERATION <= TEST,
-            "unknown request kind"
-        );
-        // Design, implementation and testing share the same feature-data
-        // format. Their projected message identities enforce their order.
-        let format = if OPERATION == COMMIT { 2 } else { 1 };
-        0xce00_0000 | ((TASK as u32) << 12) | ((ROLE as u32) << 4) | format
-    };
-    type Decoded<'a> = ReceivedPayload<'a, Self>;
-
+impl<const ROLE: u8, const OPERATION: u8> WirePayload for Arguments<ROLE, OPERATION> {
+    const SCHEMA_ID: u32 = 0x4342_0000 | ((ROLE as u32) << 8) | OPERATION as u32;
+    type Decoded<'a> = Self;
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
-        let expected = assignment::<TASK, ROLE>();
-        let (fd, arguments) = input
-            .as_bytes()
-            .split_first()
-            .ok_or(CodecError::Truncated)?;
-        if *fd != SERVICE_FD {
+        let value: Value =
+            serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
+        assert!(OPERATION < 4, "unknown codebase request");
+        let input = assignment(ROLE);
+        let key = if OPERATION == 2 {
+            "modules"
+        } else {
+            "feature_name"
+        };
+        let object = value.as_object().ok_or(CodecError::Malformed)?;
+        let text = value[key].as_str().ok_or(CodecError::Malformed)?;
+        if object.len() != 1 || !object.contains_key(key) {
             return Err(CodecError::Malformed);
         }
-        if OPERATION == COMMIT {
-            let modules = arguments
-                .strip_prefix(b"{\"modules\":\"")
-                .and_then(|value| value.strip_suffix(b"\"}"))
-                .ok_or(CodecError::Malformed)?;
-            let comma = modules
-                .iter()
-                .position(|byte| *byte == b',')
-                .ok_or(CodecError::Malformed)?;
-            let first = &modules[..comma];
-            let second = &modules[comma + 1..];
-            if !((first == expected.modules[0].as_bytes()
-                && second == expected.modules[1].as_bytes())
-                || (first == expected.modules[1].as_bytes()
-                    && second == expected.modules[0].as_bytes()))
-            {
-                return Err(CodecError::Malformed);
-            }
+        let valid = if OPERATION == 2 {
+            let mut actual: Vec<_> = text.split(',').map(str::trim).collect();
+            let mut expected = input.modules;
+            actual.sort_unstable();
+            expected.sort_unstable();
+            actual == expected
         } else {
-            let feature = arguments
-                .strip_prefix(b"{\"feature_name\":\"")
-                .and_then(|value| value.strip_suffix(b"\"}"))
-                .ok_or(CodecError::Malformed)?;
-            if feature != expected.feature.as_bytes() {
-                return Err(CodecError::Malformed);
-            }
+            text == input.feature
+        };
+        if !valid {
+            return Err(CodecError::Malformed);
         }
         Ok(())
     }
-
-    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
-        input
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
+        Self(input.as_bytes().to_vec())
     }
 }
 
-impl<const TASK: u8, const ROLE: u8, const OPERATION: u8> ChoreoFsRequest
-    for Close<TASK, ROLE, OPERATION>
-{
-    type Request = protocol::FdCloseReq;
-    fn request(input: &ReceivedPayload<'_, Self>) -> Self::Request {
-        protocol::FdCloseReq(protocol::FdRequest::new(input.as_bytes()[0]))
+/// The two-module request keeps the original argument bytes.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ModuleArguments(Vec<u8>);
+impl ModuleArguments {
+    pub fn from_bytes(bytes: &[u8]) -> ShellResult<Self> {
+        Self::validate_payload(Payload::new(bytes))
+            .map_err(|_| ShellError::message("invalid module arguments"))?;
+        Ok(Self(bytes.to_vec()))
+    }
+    pub fn into_value(self) -> Value {
+        serde_json::from_slice(&self.0).expect("validated module arguments")
+    }
+}
+impl WireEncode for ModuleArguments {
+    fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
+        output
+            .get_mut(..self.0.len())
+            .ok_or(CodecError::Truncated)?
+            .copy_from_slice(&self.0);
+        Ok(self.0.len())
+    }
+}
+impl WirePayload for ModuleArguments {
+    const SCHEMA_ID: u32 = 0x4342_ff02;
+    type Decoded<'a> = Self;
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        let value: Value =
+            serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
+        if value.as_object().is_none_or(|object| object.len() != 1) || !value["modules"].is_string()
+        {
+            return Err(CodecError::Malformed);
+        }
+        Ok(())
+    }
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
+        Self(input.as_bytes().to_vec())
+    }
+}
+
+pub fn encode(value: &Value) -> ShellResult<Vec<u8>> {
+    serde_json::to_vec(value).map_err(|error| ShellError::message(error.to_string()))
+}
+pub fn result(value: &Value, tool: &str, agent: &str) -> ShellResult<()> {
+    if value["tool_name"] != tool
+        || value["data"]["agent"] != agent
+        || !value["success"].is_boolean()
+    {
+        return Err(ShellError::message(
+            "effect result differs from its actual request",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::global::{roles1e::*, *};
+    use super::*;
+    use crate::imp::transport::InMemoryTransport;
+    use hibana::runtime::{SessionKitStorage, ids::SessionId, transport::EndpointBinding};
+    use std::time::Duration;
+
+    #[hibana_runtime::main]
+    #[test]
+    async fn actual_file_endpoint_refuses_early_commit_then_accepts_its_design() -> ShellResult<()>
+    {
+        let p = project_1e();
+        let session = SessionId::new(SESSION);
+        let bindings = [A_FILE, B_FILE, C_FILE].map(|role| {
+            // SAFETY: these are the sole physical issuers for this test's
+            // three file capabilities, with no remote aliases or old run.
+            #[allow(unsafe_code)]
+            let binding = unsafe { EndpointBinding::new() };
+            (session, role, binding)
+        });
+        let transport = InMemoryTransport::new(bindings);
+        let mut slab = vec![0; 2 * 1024 * 1024];
+        let mut storage = SessionKitStorage::uninit();
+        let rv = storage.init().rendezvous(&mut slab, &transport)?;
+        let mut owner = rv.enter(session, &p.a)?;
+        let mut a_data = rv.enter(session, &p.a_data)?;
+        let file_a = rv.enter(session, &p.a_file)?;
+        let mut a_vm = rv.enter(session, &p.a_vm)?;
+        let mut b_data = rv.enter(session, &p.b_data)?;
+        let file_b = rv.enter(session, &p.b_file)?;
+        let mut b_vm = rv.enter(session, &p.b_vm)?;
+        let mut c_data = rv.enter(session, &p.c_data)?;
+        let file_c = rv.enter(session, &p.c_file)?;
+        let mut c_vm = rv.enter(session, &p.c_vm)?;
+        a_data.send::<Loan<A_FILE>>(file_a).await?;
+        let mut file = a_vm.recv::<Loan<A_FILE>>().await?;
+        b_data.send::<Loan<B_FILE>>(file_b).await?;
+        let _file_b = b_vm.recv::<Loan<B_FILE>>().await?;
+        c_data.send::<Loan<C_FILE>>(file_c).await?;
+        let _file_c = c_vm.recv::<Loan<C_FILE>>().await?;
+
+        let early = Arguments::<A, 2>(br#"{"modules":"AUTH_MODULE,DATABASE_MODULE"}"#.to_vec());
+        let denied = hibana_runtime::race(
+            async { Ok::<_, ShellError>(file.send::<CommitRequest<A>>(&early).await) },
+            hibana_runtime::host::deadline(Duration::from_secs(2)),
+        )
+        .await?;
+        assert!(
+            denied.is_err(),
+            "the projected file accepted a commit before its design"
+        );
+        let design = Arguments::<A, 0>(br#"{"feature_name":"user_authentication"}"#.to_vec());
+        file.send::<DesignRequest<A>>(&design).await?;
+        assert_eq!(
+            owner.recv::<DesignRequest<A>>().await?.into_value(),
+            serde_json::json!({"feature_name":"user_authentication"})
+        );
+        Ok(())
     }
 }

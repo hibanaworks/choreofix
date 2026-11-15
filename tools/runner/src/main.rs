@@ -192,124 +192,36 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
         "/service/prepare_base_dish, /service/prepare_ingredient and /service/combine_dish"
     } else if manufacturing {
         match agent {
-            "TECHNICIAN_A" | "TECHNICIAN_B" => "/service/do_job",
+            "TECHNICIAN_A" | "TECHNICIAN_B" => "/service/do_lathe_job and /service/do_mill_job",
             "SUPERVISOR" => "/service/collect_reports",
             _ => return Err("unknown manufacturing participant".into()),
         }
     } else if build {
         match agent {
+            "BUILDER_A" | "BUILDER_B" | "BUILDER_C" if task == "10M" => {
+                "/service/compile_module; read-only /service/updates, /service/test_result, /service/reconsideration and /service/outcome"
+            }
+            "BUILDER_B" if task == "10E" => "/service/compile_module; read-only /service/updates",
             "BUILDER_A" | "BUILDER_B" | "BUILDER_C" => "/service/compile_module",
-            "TEST_RUNNER" if task == "10M" => "/service/run_build_tests",
+            "TEST_RUNNER" if task == "10M" => {
+                "/service/run_build_tests_a, /service/run_build_tests_b and /service/run_build_tests_c; read-only /service/next_object"
+            }
+            "INTEGRATOR" if task == "10M" => "/service/link_modules; read-only /service/candidate",
             "INTEGRATOR" => "/service/link_modules",
             _ => return Err("unknown shared-build participant".into()),
         }
     } else if document {
         match agent {
             "WRITER_A" | "WRITER_B" => {
-                "/service/write_section, /service/update_references, /service/revise_section and /service/feedback"
+                "/service/write_section, /service/update_references and /service/revise_section; read-only /service/feedback"
             }
-            "EDITOR" => "/service/review_sections and /service/combine_sections",
+            "EDITOR" => {
+                "/service/allocate_document, /service/review_chapter_1, /service/review_chapter_2, /service/reconsider_a, /service/reconsider_b and /service/combine_sections"
+            }
             _ => return Err("unknown document participant".into()),
         }
     } else if report {
-        match agent {
-            "RESEARCHER_A" | "RESEARCHER_B" => {
-                "/service/research_topic, /service/write_section, /service/update_references and /service/revise_section"
-            }
-            "EDITOR" => "/service/review_sections and /service/combine_sections",
-            _ => return Err("unknown report participant".into()),
-        }
-    } else if critical_care {
-        match agent {
-            "ER_DOCTOR_A" | "ER_DOCTOR_B" => {
-                "/service/assess_patient, /service/order_tests and /service/diagnose"
-            }
-            "RADIOLOGIST" => "/service/perform_imaging and /service/interpret_imaging",
-            "SURGEON" => "/service/perform_surgery",
-            "ANESTHESIOLOGIST" => "/service/prepare_anesthesia",
-            "ICU_COORDINATOR" => "/service/manage_icu",
-            "PHARMACIST" => "/service/review_prescriptions",
-            _ => return Err("unknown critical-care participant".into()),
-        }
-    } else if multi_specialty {
-        match agent {
-            "ER_DOCTOR" => {
-                "/service/assess_patient, /service/order_tests and /service/conduct_case_conference"
-            }
-            "CARDIOLOGIST" | "NEUROLOGIST" => "/service/order_tests and /service/diagnose",
-            "RADIOLOGIST" => "/service/perform_imaging and /service/interpret_imaging",
-            "PHARMACIST" => "/service/review_prescriptions",
-            _ => return Err("unknown multi-specialty participant".into()),
-        }
-    } else if medical {
-        match agent {
-            "ER_DOCTOR" => {
-                "/service/assess_patient, /service/order_tests and /service/perform_imaging"
-            }
-            "CARDIOLOGIST" => "/service/order_tests and /service/diagnose",
-            "PHARMACIST" => "/service/review_prescriptions",
-            _ => return Err("unknown consultation participant".into()),
-        }
-    } else if multi_round_discovery {
-        match agent {
-            "CHEMIST" => "/service/run_hplc_analysis and /service/run_mass_spec_analysis",
-            "BIOLOGIST" => {
-                "/service/run_cell_assay, /service/run_hplc_analysis and /service/submit_evidence"
-            }
-            "TOXICOLOGIST" => {
-                "/service/run_mass_spec_analysis, /service/run_hplc_analysis, /service/run_cell_assay and /service/submit_evidence"
-            }
-            "FORMULATION_SCIENTIST" => "/service/prepare_formulation",
-            "CLINICAL_LEAD" => "/service/review_clinical_data",
-            "REGULATORY_SPECIALIST" => {
-                "/service/verify_regulatory_compliance and /service/submit_evidence"
-            }
-            "PROJECT_DIRECTOR" => "/service/submit_project_decision",
-            _ => return Err("unknown multi-round scientist".into()),
-        }
-    } else if regulatory_discovery {
-        match agent {
-            "CHEMIST" => "/service/run_hplc_analysis and /service/run_mass_spec_analysis",
-            "BIOLOGIST" | "TOXICOLOGIST" => {
-                "/service/run_cell_assay, /service/run_hplc_analysis and /service/await_review"
-            }
-            "LEAD_SCIENTIST" => {
-                "/service/run_mass_spec_analysis, /service/run_hplc_analysis, /service/submit_decision and /service/reconsider"
-            }
-            "REGULATORY_SPECIALIST" => "/service/verify_regulatory_compliance",
-            _ => return Err("unknown regulatory-study participant".into()),
-        }
-    } else if lab_quality {
-        match agent {
-            "CHEMIST" => {
-                "/service/run_synthesis, /service/run_analysis and /service/run_separation"
-            }
-            "BIOLOGIST" => {
-                "/service/run_separation, /service/run_analysis and /service/run_bioassay"
-            }
-            "ANALYST" => "/service/run_analysis and /service/run_separation",
-            "QC_CONTROLLER" => "/service/verify_result",
-            _ => return Err("unknown QC laboratory participant".into()),
-        }
-    } else if lab {
-        match agent {
-            "BIOLOGIST" => {
-                "/service/run_separation, /service/run_analysis and /service/run_bioassay"
-            }
-            "CHEMIST" | "ANALYST" => "/service/run_analysis and /service/run_separation",
-            _ => return Err("unknown laboratory participant".into()),
-        }
-    } else if discovery {
-        match agent {
-            "BIOLOGIST" => "/service/run_cell_assay and /service/run_hplc_analysis",
-            "CHEMIST" | "TOXICOLOGIST" => {
-                "/service/run_hplc_analysis, /service/run_mass_spec_analysis and /service/run_cell_assay where assigned"
-            }
-            "LEAD_SCIENTIST" => {
-                "/service/run_mass_spec_analysis, /service/run_hplc_analysis and /service/submit_decision"
-            }
-            _ => return Err("unknown instrument-task participant".into()),
-        }
+        "Each file is a direct choreography projection. Choose shell commands and private calculations freely; an unadmitted request returns an error to the same guest. Researchers use their assigned topic and section. Write the original tool arguments to research_topic, write_section, update_references or revise_section and read the actual result from that same file. Reading feedback receives the next actual review of your section. After a negative review, choose revision text and submit it; a new review checks the current actual section and references. After your section is approved, your research work is complete and you may exit while the editor and other researcher continue. The editor chooses section order by writing original review_sections arguments to review_section_a or review_section_b and reading the result from that file. Either initial section and repeated or alternating rejection schedules are supported. Review of one section can overlap revision of the other. combine_sections submits the actual publication request; it requires both current positive reviews. The choreography then moves editing and review authority before publication. No host chooses the next request, loan or command. There is no generic result mailbox or synthetic coordination envelope. The editor finishes after receiving the actual combine result. No acquire/release or notification commands are needed."
     } else if refactor {
         match agent {
             "ARCHITECT" => "/service/design_proposal",
@@ -320,20 +232,10 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
         }
     } else if coordination {
         match agent {
-            "BACKEND_DEV" => {
-                "/service/define_api, /service/implement_feature, /service/loan_frontend, /service/finalize and /service/await_tests"
-            }
-            "FRONTEND_DEV" => "/service/agree_api and /service/implement_feature",
+            "BACKEND_DEV" => "/service/define_api, /service/implement_feature and /service/outcome",
+            "FRONTEND_DEV" => "/service/agree_api, /service/implement_feature and /service/outcome",
             "TESTER" => "/service/run_tests",
-            _ => return Err("unknown API coordination participant".into()),
-        }
-    } else if feature_delivery {
-        match agent {
-            "DEVELOPER_A" | "DEVELOPER_B" => "/service/implement_feature and /service/merge_code",
-            "REVIEWER" => "/service/code_review",
-            "TEST_WRITER" => "/service/write_tests",
-            "CI_RUNNER" => "/service/run_tests",
-            _ => return Err("unknown feature-delivery participant".into()),
+            _ => return Err("unknown coordination participant".into()),
         }
     } else if review {
         match agent {
@@ -365,15 +267,15 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
         "/service/read_literature, /service/draft_content, /service/write_to_document and /service/review_own_work"
     };
     let coordination = if kitchen {
-        "Each chef prepares its assigned base and outgoing ingredient, choosing either order. The oven and, for chefs A/B only, stovetop Endpoints carry the actual base request/result and return. Ingredient preparation needs no equipment; its completed result goes directly to the assigned recipient. Combine your own dish after its base and required received ingredient exist. A combine request may wait for the actual incoming ingredient while other chefs continue. You do not call acquire/release or notification tools. Each of the three assigned effects runs once. Read actual results, use private shell computation freely and finish your own work. The common world checks completed material inputs and physical conflicts, without prescribing this protocol or a total operation order."
+        "Each operation file owns its actual projected Endpoint. Choose shell commands, private computation and the order of your base/ingredient work freely. Submit the original assigned arguments and read the actual response from that same file. Ordinary redirection is blocking. For nonblocking submission, wash supports pipeline input to dd of=FILE oflag=nonblock; an unprepared operation returns a WASI error so you can choose independent work or retry. The actual oven and, for chefs A/B, stovetop Endpoints carry each base request/result and return. Ingredient preparation needs no equipment; the completed material is delivered directly to its assigned recipient. Combine your dish after its own base and required incoming ingredient exist. Your finished dish need not wait for unrelated bases or your outgoing ingredient. Each assigned effect runs once. Complete all your own assigned work and read its actual results before exiting. Do not invent acquire/release or notification calls. The common world grades completed material inputs and physical conflicts, without prescribing a total command order."
     } else if manufacturing {
-        "Choose your assigned job and your private shell computations freely. Actual workstation and request Endpoints transfer automatically through the global; do not invent acquire/release or notification calls. Write the original do_job arguments to /service/do_job and read /service/result. A busy status means that no job effect ran for that attempt: choose your other assigned job while that workstation is occupied, then retry the pending job. Actual completed job results go to the supervisor automatically. The supervisor writes {} to /service/collect_reports; that call waits for all four actual job results. Exit after your actual assigned work is complete. The common world grades actual completed report contents and machine conflicts, not one prescribed total order."
+        "Each operation file owns its actual projected Endpoint. Choose your shell commands, private computations and assigned job order freely. Submit the original do_job arguments with your assigned job_id to do_lathe_job or do_mill_job and read the actual result from that same file. Ordinary redirection is blocking. For a nonblocking submission, wash supports pipeline input to dd of=FILE oflag=nonblock; an unprepared request returns a WASI error without starting that job. You can then choose the other assigned machine or retry later. Independent machines can work concurrently. Actual workstation Endpoints transfer through the choreography and are returned after use; do not invent acquire/release or notification calls. Actual completed job results reach the supervisor directly. The supervisor submits {} to collect_reports and reads the actual response from that same file; the actual collection waits for all four completed job results. Finish after receiving your actual assigned results. The common world grades actual completed report contents and machine conflicts, not a prescribed total command order."
     } else if task == "10M" {
-        "Each builder uses its assigned module and both actual resource Endpoints, which transfer and return automatically. Compile responses contain the actual test under coordination.test, actual shared updates and a continuation. A continuation naming your module requests a fresh compile even if an earlier test passed: later shared-input changes can make an old object stale. A continuation with tool_name link_modules is the final linked outcome; then finish. TEST_RUNNER tests actual submitted objects. A wrong module returns invalid_arguments with actual_build, so use that actual module rather than guessing a fixed total schedule. Each actual test response contains coordination.next: either the next real compile report with data.module, or the final link_modules result. Continue with those data until the linked outcome. INTEGRATOR requests link_modules for its three assigned modules; it waits for current positive tests and return of all editing Endpoints. No acquire/release, notification or repair command is needed. Private commands and computations remain your choice. The common environment grades real object versions and captured link/test inputs, not one prescribed total invocation order."
+        "Each operation file is a direct choreography projection. Choose shell commands and private computation freely. An unadmitted request returns a recoverable WASI error. Each builder uses compile_module for its assigned module and reads the actual result from that same file. Its read-only updates, test_result, reconsideration and outcome files deliver actual shared-input changes, its test result, reconsideration data, and the final linked outcome respectively. Independent file reads remain available; an unavailable operation is an error rather than permission to invent an effect. A reconsideration names its module and actual old object/test; the builder can compile a fresh object against current inputs. Reopening an incoming file consumes its next actual message. TEST_RUNNER reads next_object for an actual compiled object, submits its original run_build_tests arguments through that module's run_build_tests_a, run_build_tests_b or run_build_tests_c file, and reads the actual test result from that same file. next_object eventually delivers the final linked outcome. The integrator reads its actual candidate (objects and test receipts) from /service/candidate, requests link_modules for its three modules and reads its actual result; publication requires current positive tests and return of all editing Endpoints. Real resource transfers and message delivery follow the global; do not invent acquire/release or notification tools. Work independently and concurrently where permitted; use actual outcomes for reconsideration rather than a fixed attempt count. Exit after your actual final linked outcome. The common world checks actual object versions, test inputs and linked bytes, not a prescribed invocation order."
     } else if build {
-        "The two actual resource Endpoints transfer automatically; no acquisition, release or notification commands are needed. Compile results contain the actual object bytes and shared type inputs. A updates the provided SHARED_TYPES definitions. B may initially compile against the provided old definitions: that object is real but becomes stale when A updates them. B can use the same service to rebuild against the actual new definitions before finishing. A current object's SHARED_TYPES.modules includes module_a's declarations. The integrator's link waits for both current actual build reports. Private commands and computations remain your choice, and the common world scores the actual object and link inputs rather than a prescribed total invocation order."
+        "The two actual resource Endpoints transfer automatically; no acquisition, release or notification commands are needed. Compile results contain the actual object bytes and shared type inputs. A updates the provided SHARED_TYPES definitions. B's read-only /service/updates delivers A's actual completed compile result and changed types. A blocking read can wait for that actual incoming message; nonblocking shell I/O can inspect availability instead. B may initially compile against the provided old definitions: that object is real but becomes stale when A updates them. Use the received update and actual object inputs to decide whether B needs a rebuild through the same compile service. A current object's SHARED_TYPES.modules includes module_a's declarations. The integrator's link waits for both current actual build reports. Private commands and computations remain your choice, and the common world scores the actual object and link inputs rather than a prescribed total invocation order."
     } else if document {
-        "Both writers may revise either chapter. Initially write your assigned chapter and update its references, choosing either order. Then write {} to /service/feedback and read /service/result. An actual negative review reaches both writers. The writer assigned the rejected chapter may revise either chapter to address it, then request feedback again; the other writer waits for the next feedback. The editor reviews both complete-document scopes each round, in either order. After a rejection, request both reviews again after the actual revision; a review request may wait for that material. Combine CHAPTER_1 and CHAPTER_2 only after both current reviews succeed. The actual document Endpoint transfers among writers and editor, then returns before publication. Feedback eventually carries the combined document to both writers. Finish your work and exit after that result. You do not call acquire/release or notification tools, and private shell computation remains free. The common world grades actual contents and completed content-bound receipts, not one total operation order."
+        "Each file is a direct choreography projection. The editor chooses the first writer through allocate_document with {\"first_writer\":\"WRITER_A\"} or WRITER_B. Writers' initial write and references target their assigned chapter; these operations are independent. Both writers may revise either chapter when editing is requested. Reading feedback consumes the next actual reconsideration review or the final combine_sections result; a review scope identifies the assigned writer. Both positive and negative current reviews may be reconsidered before freezing. The editor submits original review_sections arguments to review_chapter_1 or review_chapter_2 and reads the actual result from that same file. Either review order is allowed, including submitting both before reading results. Each successful reopen of an incoming file consumes its next message; private files can retain actual results. To request editing, reconsider_a or reconsider_b takes {\"review_id\":\"the actual current review_id\"}; its response is the actual revised material. Fresh reviews refer to the resulting complete document. combine_sections is the actual publication request and takes the original two-chapter sections argument. Publication requires both actual current reviews to be successful and match current material. The choreography transfers editing authority before the effect; there is no separate approval-submission operation. Writers remain active for reconsideration until feedback delivers the actual combine_sections publication result; completing the initial write and references is not their completion condition. Exiting before that result aborts the run. The editor remains active until it receives the actual publication result from combine_sections. Choose your own commands, calculations, legal request orders and reconsiderations. A refused unadmitted request returns an error to the same guest; no host chooses a next command or workflow step."
     } else if feature_delivery {
         "Use your assigned feature, branch, review target, test target or suite. The reviewer and test writer choose their initial feature order. Actual responses carry coordination data: reviewed candidates, tests, interface-change data and CI outcomes. Rejected reviews and failed CI require fresh implementation, tests and review for that feature; continue from the actual response rather than assuming a fixed retry count. Merge returns the actual CI outcome. A wrong CI suite returns invalid_arguments with the actual publication so it can be corrected. The final responses report both features' CI outcomes. Finish the required work and receive the final coordination outcomes before exiting; independent participants and operations remain concurrent."
     } else if critical_care {
@@ -397,23 +299,34 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
     } else if refactor {
         "The architect chooses which assigned proposal to create first. Each developer refactors its own module and SHARED_LIBRARY, choosing either order, then merges its assigned branch. The actual repository Endpoint is transferred and returned; no acquire/release or notification calls are needed. The tester runs both assigned suites twice: once for each repository snapshot supplied by the choreography, choosing either suite order in each round. Reviews can overlap independent tests and merging: the reviewer chooses either assigned module first and reviews both. Service calls may wait for required data and resources while other participants continue. Read each actual result and finish your own work. Private shell computation remains available independently. These are this implementation's protocol capabilities. The common simulator grades actual published contents and requires completed exact-content review and test results before publication, equally for every method. It does not grade this choreography or one total operation order."
     } else if coordination {
-        "The backend defines the assigned API; its actual result is sent to the frontend for agreement. FRONTEND_DEV writes {\"api_name\":\"feature_api_spec\"} to /service/agree_api and reads /service/result. An API response contains api_contract: implement your assigned frontend feature after agreement. After each frontend implementation, call agree_api again; an actual response with tool_name run_tests is the final test outcome, so finish. BACKEND_DEV defines the API and implements its assigned backend feature; the actual REPO Endpoint then passes to the frontend and returns. To choose frontend-first instead, write {\"feature_name\":\"frontend_component\"} to /service/loan_frontend before implementing the backend; this moves the actual REPO Endpoint, not a domain operation. You may change the API by defining it again after both implementations; the frontend must agree again and both features must be reimplemented. Do not invent changes merely to retry: the original task has no injected failures. When satisfied, the backend writes {\"api_name\":\"feature_api_spec\"} to /service/finalize; this returns the editing Endpoint. Then write {\"suite\":\"integration_tests\"} to /service/await_tests and read the actual final result before finishing. TESTER writes its assigned run_tests request; it waits for finalization, then uses both actual resource Endpoints. You do not acquire locks or send notification tools. Private computation and all guest I/O remain available independently. Read each actual result."
+        "Each service file is a choreography projection. Choose shell commands freely: a refused operation returns an error, so you can correct it or try another operation. BACKEND_DEV defines the assigned API through /service/define_api. FRONTEND_DEV reads its actual contract from /service/agree_api and chooses either implementation order by writing {\"api_name\":\"feature_api_spec\",\"first\":\"BACKEND_DEV\"} or {\"api_name\":\"feature_api_spec\",\"first\":\"FRONTEND_DEV\"} to that file. BACKEND_DEV receives this agreement by reading /service/outcome. Each developer's /service/implement_feature runs its assigned implementation using the actual repository Endpoint. The backend may redefine the API and collaborate on revised implementations before testing. TESTER reads the current candidate from /service/run_tests, submits its assigned suite to the same file, and reads the actual test result there. Testing requires actual REPO and TEST_ENV requests; those resources exclude editing during the effect. Each developer reads the actual final test result from /service/outcome. Reopening an incoming file reads its next actual message. Finish after the required actual work and results; no host command sequence, explicit acquire/release or finalization tool is required."
     } else if review {
         "Hibana delegates the repository Endpoint during implementation and merging; each actual request and result travels through it before it returns. Code review does not hold the repository. You do not call resource acquisition, release or notification tools. A developer's implementation response includes the actual review under coordination.code_review. If review fails, reconsider and implement again; merge your assigned branch after approval. The reviewer chooses the order of the assigned features and may switch to the other feature after a rejection while the developer revises. Review both features until each passes. Reviewing one feature can overlap independent work on the other feature. Read every actual result and finish after your own assigned work is complete."
     } else if cicd {
-        "Hibana passes the build-server or deployment-environment Endpoint to your WASI participant. Your actual request and result travel through that Endpoint before it returns. The developer's build precedes integration testing, which precedes deployment. Hibana sends build-complete, tests-passed and both deployment-complete notifications. You do not call acquire/release or notification tools. Read your actual result, then finish. This original task has no retry loop or injected domain failures."
+        "Your operation file is a choreography projection. Choose shell commands freely; an unadmitted operation returns an error so the same guest can correct it or try another operation. Reading that same file receives an actual message with {kind,result}. DEVELOPER receives compile_result after its operation, then deployment_complete. TESTER receives build_complete, submits its own test request, receives test_result, then deployment_complete. DEPLOYER receives tests_passed, submits its own deployment request, and receives deploy_result. Each successful reopen reads the next actual message. Every result contains the actual shared-environment response. No host chooses your commands or lends a permission in advance; the file close itself is the request. The real build-server or deployment-environment Endpoint carries the exact admitted arguments and actual result before returning. You do not call acquire/release or notification tools. Finish after your assigned work and required actual notifications. This original task has no injected domain failures or business retry loop; malformed or premature shell operations remain recoverable."
     } else if dining {
         "Your think and eat objects are bound to their actual projected Endpoint operations. Eating uses both actual fork Endpoints at the effect owner and returns them afterwards. You do not call acquire/release tools. The philosopher string is caller-supplied display data; it does not change your participant or its physical fork pair. Read each actual result from the same operation object. Both effects run once, then finish."
     } else if task == "1H" {
-        "Hibana passes both module endpoints to your guest. Committing requires requests through both endpoints. You do not call acquire/release tools. This replaces the original sequential acquisition procedure. The feature and module pair must match your assignment. Module endpoints return before testing so that independent developers can continue. Read each actual test result. If it fails, reconsider your implementation, then implement, commit and test again. Finish after your tests pass."
+        "Each operation file owns its actual projected Endpoint. Choose your shell commands and private computations freely. A refused operation returns an error to the same guest, permitting correction or another operation. Design and implement your assigned feature. Committing consumes both actual module requests and returns both module Endpoints before testing. The native localsides drive those Endpoints directly; no host dispatches requests or chooses your next command. Read each actual response from the same operation file. A negative test contains the actual tested source and diagnostic. Reconsider, implement the repair, commit it and test again; either other participants may continue independently. Finish after your actual tests pass. No acquire/release or notification tools are needed."
     } else if coding {
-        "Hibana passes both module endpoints to your guest. Committing requires the requests sent through both endpoints. You do not call acquire/release tools. This replaces the original sequential acquisition procedure. The feature and module pair must match your assignment. For this task the test outcome is terminal, including failure. Do not add retries. Module endpoints are returned before testing so that another developer can commit while your test runs."
+        "Each operation file owns its actual projected Endpoint. Choose shell commands and private computations freely. A refused request returns an error so that you can correct it or choose another operation. Design and implement your assigned feature. The localsides drive both actual module Endpoints for the commit and return them before testing. Read the actual result from the same operation file; no host dispatches requests or chooses your commands. The actual test outcome is terminal, including failure; finish your own work after reading it. No acquire/release or notification commands are needed."
     } else if api {
         "Hibana passes the database or test-environment Endpoint to the WASI participant. The request and actual result travel through that Endpoint before it returns. Migration completion precedes backend work, and backend completion precedes integration testing. You do not call acquire/release or notification tools. Use your assigned arguments. DB_ADMIN and BACKEND_DEV must also read the read-only /service/outcome object, which contains the original test result. That read may wait until the test finishes while other participants continue. A failed integration test is terminal in the task description and simulator. Report its actual result and finish, without adding a revision or retry."
     } else {
-        "Hibana passes both section Endpoints to your WASI guest in parallel. Your actual write request travels through both Endpoints; the actual result comes back through both before they return. You do not call acquire/release tools. This deliberately replaces the original sequential acquisition procedure. The target must match your assigned topic, section or pair of resource names. The review result is terminal, so do not add retries to a failed review."
+        "Each file is a direct choreography projection. Choose shell commands and private computations freely. An unadmitted operation returns an error to the same guest, allowing correction or another operation. read_literature returns actual source material; draft_content uses that completed material; write_to_document uses your actual draft and both assigned section resources; review_own_work examines that actual contribution. The localsides drive the real section Endpoints and return the actual results. No host selects your commands or dispatches accepted files to another workflow. Read each actual response from the same operation file. Use your assigned topic, section or resource pair. Do not invent acquire/release or notification commands. The actual review outcome is terminal, including failure; finish your own work and exit after reading it."
     };
-    let response_object = if dining {
+    let response_object = if kitchen
+        || dining
+        || coding
+        || api
+        || cicd
+        || document
+        || report
+        || task == "4E"
+        || family == 2
+        || build
+        || manufacturing
+    {
         "Read the same operation object for its actual response."
     } else {
         "Read /service/result for the actual response."
@@ -430,7 +343,10 @@ guest. All file I/O uses Hibana Endpoints and ChoreoFS. There is no host
 filesystem or native process execution. Use help to see shell commands and
 syntax. You may use variables, conditions, loops, pipes, redirection, expr,
 private files and saved scripts. Choose your own commands and calculations.
-Private /work files have names you choose, with eight slots of 8192 bytes.
+Normal reads may wait for data. `dd if=PATH iflag=nonblock` requests a nonblocking
+read: if no message has arrived it returns a nonzero status without consuming a
+message, so you may choose another file or retry. It grants no operation rights.
+Private /work files have names you choose, with eight slots bounded by the configured guest memory profile.
 A script has at most 4096 UTF-8 bytes. Each participant has its own persistent
 guest and private files.
 
@@ -601,7 +517,7 @@ async fn main() -> Result<()> {
             serde_json::to_string_pretty(&qualification::run(Path::new(output), Some(filter))?)?
         ),
         [mode, events] if mode == "--audit-philosophers" => println!("{}", serde_json::to_string_pretty(&philosophers_audit::audit(Path::new(events))?)?),
-        [mode, events, output] if mode == "--check-philosophers-mutants" => println!("{}", serde_json::to_string_pretty(&philosophers_audit::check_mutants(Path::new(events), Path::new(output))?)?),
+        [mode, events, output] if mode == "--check-philosophers-mutants" => println!("{}", serde_json::to_string_pretty(&philosophers_audit::check_mutants(Path::new(events), Path::new(output))?.1)?),
         [mode, events] if mode == "--audit-api" => println!("{}", serde_json::to_string_pretty(&api_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-api-mutants" => println!("{}", serde_json::to_string_pretty(&api_audit::check_mutants(Path::new(events), Path::new(output))?)?),
         [mode, events] if mode == "--audit-review" => println!("{}", serde_json::to_string_pretty(&review_audit::audit(Path::new(events))?)?),

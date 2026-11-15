@@ -1,270 +1,1058 @@
-//! Guest, materializer, private I/O and physical modules use one session.
+//! Actual operation files own projected Endpoints; localsides drive effects.
 pub mod global;
 pub(crate) mod input;
 pub(crate) mod localside;
-#[cfg(test)]
-mod tests;
 pub mod wire;
-use crate::{
-    imp::transport::InMemoryTransport,
-    shell::{
-        ShellError, ShellResult,
-        imp::{
-            bus::{Bus, Terminal},
-            private_fs::{PrivateFs, bindings},
-        },
-        localside::private_io,
+use crate::shell::{
+    ShellError, ShellResult,
+    imp::{
+        bus::{Bus, Terminal},
+        private_fs::PrivateFs,
     },
+    localside::{file_metadata, private_io},
 };
+use global::*;
 use hibana::runtime::{SessionKitStorage, ids::SessionId};
-use hibana_wasip1_runtime::{GuestMemory, HibanaWasiGuestStorage};
+use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasiGuestStorage};
 #[hibana_runtime::scope]
 async fn run_1e_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> ShellResult<()> {
-    use global::{roles1e::*, *};
+    use global::roles1e::*;
     let programs = project_1e();
     bus.observe(programs.observation());
+    let capture = |event| {
+        bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,"records":[crate::imp::projection::record(event)]}))
+    };
     let mut slab = vec![0; 2 * 1024 * 1024];
-    let mut storage = SessionKitStorage::<&InMemoryTransport>::uninit();
-    let kit = storage.init();
-    let rv = kit.rendezvous(&mut slab, &bus.transport)?;
-    let session = SessionId::new(20);
-    let mut a = rv.enter(session, &programs.a)?;
-    let mut a_wasi = rv.enter(session, &programs.a_wasi)?;
-    let mut a_io = rv.enter(session, &programs.a_io)?;
-    let mut b = rv.enter(session, &programs.b)?;
-    let mut b_wasi = rv.enter(session, &programs.b_wasi)?;
-    let mut b_io = rv.enter(session, &programs.b_io)?;
-    let mut c = rv.enter(session, &programs.c)?;
-    let mut c_wasi = rv.enter(session, &programs.c_wasi)?;
-    let mut c_io = rv.enter(session, &programs.c_io)?;
-    let mut auth = rv.enter(session, &programs.auth)?;
-    let auth_resource = rv.enter(session, &programs.auth_resource)?;
-    let mut database = rv.enter(session, &programs.database)?;
-    let database_resource = rv.enter(session, &programs.database_resource)?;
-    let mut api = rv.enter(session, &programs.api)?;
-    let api_resource = rv.enter(session, &programs.api_resource)?;
-    let [term_a, term_b, term_c] = terminals;
-    let fs_a = PrivateFs::new(term_a, bus);
-    let mut memory_a = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-    let mut store_a = HibanaWasiGuestStorage::uninit();
-    let guest_a = store_a.init(module, GuestMemory::new(&mut memory_a), bindings())?;
-    let fs_b = PrivateFs::new(term_b, bus);
-    let mut memory_b = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-    let mut store_b = HibanaWasiGuestStorage::uninit();
-    let guest_b = store_b.init(module, GuestMemory::new(&mut memory_b), bindings())?;
-    let fs_c = PrivateFs::new(term_c, bus);
-    let mut memory_c = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-    let mut store_c = HibanaWasiGuestStorage::uninit();
-    let guest_c = store_c.init(module, GuestMemory::new(&mut memory_c), bindings())?;
-    async {
-        localside::developer::run::<EASY, A, AUTH_RESOURCE, DATABASE_RESOURCE>(&mut a, bus).await?;
-    };
-    async {
-        localside::developer::run::<EASY, B, API_RESOURCE, DATABASE_RESOURCE>(&mut b, bus).await?;
-    };
-    async {
-        localside::developer::run::<EASY, C, API_RESOURCE, AUTH_RESOURCE>(&mut c, bus).await?;
-    };
-    async {
-        localside::module::run::<AUTH, AUTH_RESOURCE>(&mut auth, auth_resource).await?;
-    };
-    async {
-        localside::module::run::<DATABASE, DATABASE_RESOURCE>(&mut database, database_resource)
-            .await?;
-    };
-    async {
-        localside::module::run::<API, API_RESOURCE>(&mut api, api_resource).await?;
-    };
-    async {
-        localside::wasi::run::<A_WASI, A, EASY, AUTH_RESOURCE, DATABASE_RESOURCE>(
-            guest_a,
-            &mut a_wasi,
-        )
-        .await?;
-    };
-    async {
-        private_io::run(&mut a_io, fs_a).await?;
-    };
-    async {
-        localside::wasi::run::<B_WASI, B, EASY, API_RESOURCE, DATABASE_RESOURCE>(
-            guest_b,
-            &mut b_wasi,
-        )
-        .await?;
-    };
-    async {
-        private_io::run(&mut b_io, fs_b).await?;
-    };
-    async {
-        localside::wasi::run::<C_WASI, C, EASY, API_RESOURCE, AUTH_RESOURCE>(guest_c, &mut c_wasi)
-            .await?;
-    };
-    async {
-        private_io::run(&mut c_io, fs_c).await?;
-    };
-    Ok(())
+    let incoming_capacity = slab.len();
+    let mut storage = SessionKitStorage::uninit();
+    let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
+    rv.observe(&capture);
+    let observations = rv.tap();
+    let session = SessionId::new(SESSION);
+    let [a_terminal, b_terminal, c_terminal] = terminals;
+    let result = async {
+        let mut a = rv.enter(session, &programs.a)?;
+        let mut a_vm = rv.enter(session, &programs.a_vm)?;
+        let mut a_data = rv.enter(session, &programs.a_data)?;
+        let file_a = rv.enter(session, &programs.a_file)?;
+        let mut a_io = rv.enter(session, &programs.a_io)?;
+        let mut b = rv.enter(session, &programs.b)?;
+        let mut b_vm = rv.enter(session, &programs.b_vm)?;
+        let mut b_data = rv.enter(session, &programs.b_data)?;
+        let file_b = rv.enter(session, &programs.b_file)?;
+        let mut b_io = rv.enter(session, &programs.b_io)?;
+        let mut c = rv.enter(session, &programs.c)?;
+        let mut c_vm = rv.enter(session, &programs.c_vm)?;
+        let mut c_data = rv.enter(session, &programs.c_data)?;
+        let file_c = rv.enter(session, &programs.c_file)?;
+        let mut c_io = rv.enter(session, &programs.c_io)?;
+        let mut auth = rv.enter(session, &programs.auth)?;
+        let auth_resource = rv.enter(session, &programs.auth_resource)?;
+        let mut database = rv.enter(session, &programs.database)?;
+        let database_resource = rv.enter(session, &programs.database_resource)?;
+        let mut api = rv.enter(session, &programs.api)?;
+        let api_resource = rv.enter(session, &programs.api_resource)?;
+        async {
+            file_metadata::run(&mut a_data, file_a, FILES).await?;
+        };
+        async {
+            file_metadata::run(&mut b_data, file_b, FILES).await?;
+        };
+        async {
+            file_metadata::run(&mut c_data, file_c, FILES).await?;
+        };
+        async {
+            localside::developer::run::<A, AUTH_RESOURCE, DATABASE_RESOURCE>(&mut a, bus).await?;
+        };
+        async {
+            localside::developer::run::<B, API_RESOURCE, DATABASE_RESOURCE>(&mut b, bus).await?;
+        };
+        async {
+            localside::developer::run::<C, API_RESOURCE, AUTH_RESOURCE>(&mut c, bus).await?;
+        };
+        async {
+            localside::module::run(&mut auth, auth_resource).await?;
+        };
+        async {
+            localside::module::run(&mut database, database_resource).await?;
+        };
+        async {
+            localside::module::run(&mut api, api_resource).await?;
+        };
+        async {
+            let file = a_vm.recv::<Loan<A_FILE>>().await?;
+            let (mut design, mut implementation, mut commit, mut test) = (
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+            );
+            let (mut designed, mut implemented, mut committed, mut tested) = (
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+            );
+            let files = ChoreoFsFiles::new(a_vm).file(
+                ChoreoFsFile::new(FILES[0], file)
+                    .write_as::<DesignRequest<A>>(&mut design)
+                    .read_as::<DesignCompleted>(&mut designed)
+                    .file(FILES[1])?
+                    .write_as::<ImplementRequest<A>>(&mut implementation)
+                    .read_as::<ImplementCompleted>(&mut implemented)
+                    .file(FILES[2])?
+                    .write_as::<CommitRequest<A>>(&mut commit)
+                    .read_as::<CommitCompleted>(&mut committed)
+                    .file(FILES[3])?
+                    .write_as::<TestRequest<A>>(&mut test)
+                    .read_as::<TestCompleted>(&mut tested),
+            )?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut root, (file, ())) = files.into_parts();
+            let mut file = file.into_endpoint();
+            file.send::<crate::shell::global::FileExit>(&status).await?;
+            root.send::<crate::shell::global::Exit>(&status).await?;
+        };
+        async {
+            private_io::run(&mut a_io, PrivateFs::new(a_terminal, bus, &FILES)).await?;
+        };
+        async {
+            let file = b_vm.recv::<Loan<B_FILE>>().await?;
+            let (mut design, mut implementation, mut commit, mut test) = (
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+            );
+            let (mut designed, mut implemented, mut committed, mut tested) = (
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+            );
+            let files = ChoreoFsFiles::new(b_vm).file(
+                ChoreoFsFile::new(FILES[0], file)
+                    .write_as::<DesignRequest<B>>(&mut design)
+                    .read_as::<DesignCompleted>(&mut designed)
+                    .file(FILES[1])?
+                    .write_as::<ImplementRequest<B>>(&mut implementation)
+                    .read_as::<ImplementCompleted>(&mut implemented)
+                    .file(FILES[2])?
+                    .write_as::<CommitRequest<B>>(&mut commit)
+                    .read_as::<CommitCompleted>(&mut committed)
+                    .file(FILES[3])?
+                    .write_as::<TestRequest<B>>(&mut test)
+                    .read_as::<TestCompleted>(&mut tested),
+            )?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut root, (file, ())) = files.into_parts();
+            let mut file = file.into_endpoint();
+            file.send::<crate::shell::global::FileExit>(&status).await?;
+            root.send::<crate::shell::global::Exit>(&status).await?;
+        };
+        async {
+            private_io::run(&mut b_io, PrivateFs::new(b_terminal, bus, &FILES)).await?;
+        };
+        async {
+            let file = c_vm.recv::<Loan<C_FILE>>().await?;
+            let (mut design, mut implementation, mut commit, mut test) = (
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+            );
+            let (mut designed, mut implemented, mut committed, mut tested) = (
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+            );
+            let files = ChoreoFsFiles::new(c_vm).file(
+                ChoreoFsFile::new(FILES[0], file)
+                    .write_as::<DesignRequest<C>>(&mut design)
+                    .read_as::<DesignCompleted>(&mut designed)
+                    .file(FILES[1])?
+                    .write_as::<ImplementRequest<C>>(&mut implementation)
+                    .read_as::<ImplementCompleted>(&mut implemented)
+                    .file(FILES[2])?
+                    .write_as::<CommitRequest<C>>(&mut commit)
+                    .read_as::<CommitCompleted>(&mut committed)
+                    .file(FILES[3])?
+                    .write_as::<TestRequest<C>>(&mut test)
+                    .read_as::<TestCompleted>(&mut tested),
+            )?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut root, (file, ())) = files.into_parts();
+            let mut file = file.into_endpoint();
+            file.send::<crate::shell::global::FileExit>(&status).await?;
+            root.send::<crate::shell::global::Exit>(&status).await?;
+        };
+        async {
+            private_io::run(&mut c_io, PrivateFs::new(c_terminal, bus, &FILES)).await?;
+        };
+        Ok::<(), ShellError>(())
+    }
+    .await;
+    bus.observe(serde_json::json!({"type":"protocol_checkpoint","producer":0,"session":SESSION,"checkpoint":observations.checkpoint()}));
+    result
 }
 #[hibana_runtime::scope]
 async fn run_1m_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 5]) -> ShellResult<()> {
-    use global::{roles1m::*, *};
+    use global::roles1m::*;
     let programs = project_1m();
     bus.observe(programs.observation());
+    let capture = |event| {
+        bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,"records":[crate::imp::projection::record(event)]}))
+    };
     let mut slab = vec![0; 2 * 1024 * 1024];
-    let mut storage = SessionKitStorage::<&InMemoryTransport>::uninit();
-    let kit = storage.init();
-    let rv = kit.rendezvous(&mut slab, &bus.transport)?;
-    let session = SessionId::new(20);
-    let mut a = rv.enter(session, &programs.a)?;
-    let mut a_wasi = rv.enter(session, &programs.a_wasi)?;
-    let mut a_io = rv.enter(session, &programs.a_io)?;
-    let mut b = rv.enter(session, &programs.b)?;
-    let mut b_wasi = rv.enter(session, &programs.b_wasi)?;
-    let mut b_io = rv.enter(session, &programs.b_io)?;
-    let mut c = rv.enter(session, &programs.c)?;
-    let mut c_wasi = rv.enter(session, &programs.c_wasi)?;
-    let mut c_io = rv.enter(session, &programs.c_io)?;
-    let mut d = rv.enter(session, &programs.d)?;
-    let mut d_wasi = rv.enter(session, &programs.d_wasi)?;
-    let mut d_io = rv.enter(session, &programs.d_io)?;
-    let mut e = rv.enter(session, &programs.e)?;
-    let mut e_wasi = rv.enter(session, &programs.e_wasi)?;
-    let mut e_io = rv.enter(session, &programs.e_io)?;
-    let mut auth = rv.enter(session, &programs.auth)?;
-    let auth_resource = rv.enter(session, &programs.auth_resource)?;
-    let mut database = rv.enter(session, &programs.database)?;
-    let database_resource = rv.enter(session, &programs.database_resource)?;
-    let mut api = rv.enter(session, &programs.api)?;
-    let api_resource = rv.enter(session, &programs.api_resource)?;
-    let mut payment = rv.enter(session, &programs.payment)?;
-    let payment_resource = rv.enter(session, &programs.payment_resource)?;
-    let mut notify = rv.enter(session, &programs.notify)?;
-    let notify_resource = rv.enter(session, &programs.notify_resource)?;
-    let [term_a, term_b, term_c, term_d, term_e] = terminals;
-    let fs_a = PrivateFs::new(term_a, bus);
-    let mut memory_a = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-    let mut store_a = HibanaWasiGuestStorage::uninit();
-    let guest_a = store_a.init(module, GuestMemory::new(&mut memory_a), bindings())?;
-    let fs_b = PrivateFs::new(term_b, bus);
-    let mut memory_b = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-    let mut store_b = HibanaWasiGuestStorage::uninit();
-    let guest_b = store_b.init(module, GuestMemory::new(&mut memory_b), bindings())?;
-    let fs_c = PrivateFs::new(term_c, bus);
-    let mut memory_c = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-    let mut store_c = HibanaWasiGuestStorage::uninit();
-    let guest_c = store_c.init(module, GuestMemory::new(&mut memory_c), bindings())?;
-    let fs_d = PrivateFs::new(term_d, bus);
-    let mut memory_d = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-    let mut store_d = HibanaWasiGuestStorage::uninit();
-    let guest_d = store_d.init(module, GuestMemory::new(&mut memory_d), bindings())?;
-    let fs_e = PrivateFs::new(term_e, bus);
-    let mut memory_e = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-    let mut store_e = HibanaWasiGuestStorage::uninit();
-    let guest_e = store_e.init(module, GuestMemory::new(&mut memory_e), bindings())?;
-    async {
-        localside::developer::run::<MEDIUM, A, AUTH_RESOURCE, DATABASE_RESOURCE>(&mut a, bus)
-            .await?;
-    };
-    async {
-        localside::developer::run::<MEDIUM, B, API_RESOURCE, DATABASE_RESOURCE>(&mut b, bus)
-            .await?;
-    };
-    async {
-        localside::developer::run::<MEDIUM, C, API_RESOURCE, PAYMENT_RESOURCE>(&mut c, bus).await?;
-    };
-    async {
-        localside::developer::run::<MEDIUM, D, NOTIFY_RESOURCE, PAYMENT_RESOURCE>(&mut d, bus)
-            .await?;
-    };
-    async {
-        localside::developer::run::<MEDIUM, E, AUTH_RESOURCE, NOTIFY_RESOURCE>(&mut e, bus).await?;
-    };
-    async {
-        localside::module::run::<AUTH, AUTH_RESOURCE>(&mut auth, auth_resource).await?;
-    };
-    async {
-        localside::module::run::<DATABASE, DATABASE_RESOURCE>(&mut database, database_resource)
-            .await?;
-    };
-    async {
-        localside::module::run::<API, API_RESOURCE>(&mut api, api_resource).await?;
-    };
-    async {
-        localside::module::run::<PAYMENT, PAYMENT_RESOURCE>(&mut payment, payment_resource).await?;
-    };
-    async {
-        localside::module::run::<NOTIFY, NOTIFY_RESOURCE>(&mut notify, notify_resource).await?;
-    };
-    async {
-        localside::wasi::run::<A_WASI, A, MEDIUM, AUTH_RESOURCE, DATABASE_RESOURCE>(
-            guest_a,
-            &mut a_wasi,
-        )
-        .await?;
-    };
-    async {
-        private_io::run(&mut a_io, fs_a).await?;
-    };
-    async {
-        localside::wasi::run::<B_WASI, B, MEDIUM, API_RESOURCE, DATABASE_RESOURCE>(
-            guest_b,
-            &mut b_wasi,
-        )
-        .await?;
-    };
-    async {
-        private_io::run(&mut b_io, fs_b).await?;
-    };
-    async {
-        localside::wasi::run::<C_WASI, C, MEDIUM, API_RESOURCE, PAYMENT_RESOURCE>(
-            guest_c,
-            &mut c_wasi,
-        )
-        .await?;
-    };
-    async {
-        private_io::run(&mut c_io, fs_c).await?;
-    };
-    async {
-        localside::wasi::run::<D_WASI, D, MEDIUM, NOTIFY_RESOURCE, PAYMENT_RESOURCE>(
-            guest_d,
-            &mut d_wasi,
-        )
-        .await?;
-    };
-    async {
-        private_io::run(&mut d_io, fs_d).await?;
-    };
-    async {
-        localside::wasi::run::<E_WASI, E, MEDIUM, AUTH_RESOURCE, NOTIFY_RESOURCE>(
-            guest_e,
-            &mut e_wasi,
-        )
-        .await?;
-    };
-    async {
-        private_io::run(&mut e_io, fs_e).await?;
-    };
-    Ok(())
+    let incoming_capacity = slab.len();
+    let mut storage = SessionKitStorage::uninit();
+    let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
+    rv.observe(&capture);
+    let observations = rv.tap();
+    let session = SessionId::new(SESSION);
+    let [a_terminal, b_terminal, c_terminal, d_terminal, e_terminal] = terminals;
+    let result = async {
+        let mut a = rv.enter(session, &programs.a)?;
+        let mut a_vm = rv.enter(session, &programs.a_vm)?;
+        let mut a_data = rv.enter(session, &programs.a_data)?;
+        let file_a = rv.enter(session, &programs.a_file)?;
+        let mut a_io = rv.enter(session, &programs.a_io)?;
+        let mut b = rv.enter(session, &programs.b)?;
+        let mut b_vm = rv.enter(session, &programs.b_vm)?;
+        let mut b_data = rv.enter(session, &programs.b_data)?;
+        let file_b = rv.enter(session, &programs.b_file)?;
+        let mut b_io = rv.enter(session, &programs.b_io)?;
+        let mut c = rv.enter(session, &programs.c)?;
+        let mut c_vm = rv.enter(session, &programs.c_vm)?;
+        let mut c_data = rv.enter(session, &programs.c_data)?;
+        let file_c = rv.enter(session, &programs.c_file)?;
+        let mut c_io = rv.enter(session, &programs.c_io)?;
+        let mut d = rv.enter(session, &programs.d)?;
+        let mut d_vm = rv.enter(session, &programs.d_vm)?;
+        let mut d_data = rv.enter(session, &programs.d_data)?;
+        let file_d = rv.enter(session, &programs.d_file)?;
+        let mut d_io = rv.enter(session, &programs.d_io)?;
+        let mut e = rv.enter(session, &programs.e)?;
+        let mut e_vm = rv.enter(session, &programs.e_vm)?;
+        let mut e_data = rv.enter(session, &programs.e_data)?;
+        let file_e = rv.enter(session, &programs.e_file)?;
+        let mut e_io = rv.enter(session, &programs.e_io)?;
+        let mut auth = rv.enter(session, &programs.auth)?;
+        let auth_resource = rv.enter(session, &programs.auth_resource)?;
+        let mut database = rv.enter(session, &programs.database)?;
+        let database_resource = rv.enter(session, &programs.database_resource)?;
+        let mut api = rv.enter(session, &programs.api)?;
+        let api_resource = rv.enter(session, &programs.api_resource)?;
+        let mut payment = rv.enter(session, &programs.payment)?;
+        let payment_resource = rv.enter(session, &programs.payment_resource)?;
+        let mut notify = rv.enter(session, &programs.notify)?;
+        let notify_resource = rv.enter(session, &programs.notify_resource)?;
+        async {
+            file_metadata::run(&mut a_data, file_a, FILES).await?;
+        };
+        async {
+            file_metadata::run(&mut b_data, file_b, FILES).await?;
+        };
+        async {
+            file_metadata::run(&mut c_data, file_c, FILES).await?;
+        };
+        async {
+            file_metadata::run(&mut d_data, file_d, FILES).await?;
+        };
+        async {
+            file_metadata::run(&mut e_data, file_e, FILES).await?;
+        };
+        async {
+            localside::developer::run::<A, AUTH_RESOURCE, DATABASE_RESOURCE>(&mut a, bus).await?;
+        };
+        async {
+            localside::developer::run::<B, API_RESOURCE, DATABASE_RESOURCE>(&mut b, bus).await?;
+        };
+        async {
+            localside::developer::run::<C, API_RESOURCE, PAYMENT_RESOURCE>(&mut c, bus).await?;
+        };
+        async {
+            localside::developer::run::<D, NOTIFY_RESOURCE, PAYMENT_RESOURCE>(&mut d, bus).await?;
+        };
+        async {
+            localside::developer::run::<E, AUTH_RESOURCE, NOTIFY_RESOURCE>(&mut e, bus).await?;
+        };
+        async {
+            localside::module::run(&mut auth, auth_resource).await?;
+        };
+        async {
+            localside::module::run(&mut database, database_resource).await?;
+        };
+        async {
+            localside::module::run(&mut api, api_resource).await?;
+        };
+        async {
+            localside::module::run(&mut payment, payment_resource).await?;
+        };
+        async {
+            localside::module::run(&mut notify, notify_resource).await?;
+        };
+        async {
+            let file = a_vm.recv::<Loan<A_FILE>>().await?;
+            let (mut design, mut implementation, mut commit, mut test) = (
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+            );
+            let (mut designed, mut implemented, mut committed, mut tested) = (
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+            );
+            let files = ChoreoFsFiles::new(a_vm).file(
+                ChoreoFsFile::new(FILES[0], file)
+                    .write_as::<DesignRequest<A>>(&mut design)
+                    .read_as::<DesignCompleted>(&mut designed)
+                    .file(FILES[1])?
+                    .write_as::<ImplementRequest<A>>(&mut implementation)
+                    .read_as::<ImplementCompleted>(&mut implemented)
+                    .file(FILES[2])?
+                    .write_as::<CommitRequest<A>>(&mut commit)
+                    .read_as::<CommitCompleted>(&mut committed)
+                    .file(FILES[3])?
+                    .write_as::<TestRequest<A>>(&mut test)
+                    .read_as::<TestCompleted>(&mut tested),
+            )?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut root, (file, ())) = files.into_parts();
+            let mut file = file.into_endpoint();
+            file.send::<crate::shell::global::FileExit>(&status).await?;
+            root.send::<crate::shell::global::Exit>(&status).await?;
+        };
+        async {
+            private_io::run(&mut a_io, PrivateFs::new(a_terminal, bus, &FILES)).await?;
+        };
+        async {
+            let file = b_vm.recv::<Loan<B_FILE>>().await?;
+            let (mut design, mut implementation, mut commit, mut test) = (
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+            );
+            let (mut designed, mut implemented, mut committed, mut tested) = (
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+            );
+            let files = ChoreoFsFiles::new(b_vm).file(
+                ChoreoFsFile::new(FILES[0], file)
+                    .write_as::<DesignRequest<B>>(&mut design)
+                    .read_as::<DesignCompleted>(&mut designed)
+                    .file(FILES[1])?
+                    .write_as::<ImplementRequest<B>>(&mut implementation)
+                    .read_as::<ImplementCompleted>(&mut implemented)
+                    .file(FILES[2])?
+                    .write_as::<CommitRequest<B>>(&mut commit)
+                    .read_as::<CommitCompleted>(&mut committed)
+                    .file(FILES[3])?
+                    .write_as::<TestRequest<B>>(&mut test)
+                    .read_as::<TestCompleted>(&mut tested),
+            )?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut root, (file, ())) = files.into_parts();
+            let mut file = file.into_endpoint();
+            file.send::<crate::shell::global::FileExit>(&status).await?;
+            root.send::<crate::shell::global::Exit>(&status).await?;
+        };
+        async {
+            private_io::run(&mut b_io, PrivateFs::new(b_terminal, bus, &FILES)).await?;
+        };
+        async {
+            let file = c_vm.recv::<Loan<C_FILE>>().await?;
+            let (mut design, mut implementation, mut commit, mut test) = (
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+            );
+            let (mut designed, mut implemented, mut committed, mut tested) = (
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+            );
+            let files = ChoreoFsFiles::new(c_vm).file(
+                ChoreoFsFile::new(FILES[0], file)
+                    .write_as::<DesignRequest<C>>(&mut design)
+                    .read_as::<DesignCompleted>(&mut designed)
+                    .file(FILES[1])?
+                    .write_as::<ImplementRequest<C>>(&mut implementation)
+                    .read_as::<ImplementCompleted>(&mut implemented)
+                    .file(FILES[2])?
+                    .write_as::<CommitRequest<C>>(&mut commit)
+                    .read_as::<CommitCompleted>(&mut committed)
+                    .file(FILES[3])?
+                    .write_as::<TestRequest<C>>(&mut test)
+                    .read_as::<TestCompleted>(&mut tested),
+            )?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut root, (file, ())) = files.into_parts();
+            let mut file = file.into_endpoint();
+            file.send::<crate::shell::global::FileExit>(&status).await?;
+            root.send::<crate::shell::global::Exit>(&status).await?;
+        };
+        async {
+            private_io::run(&mut c_io, PrivateFs::new(c_terminal, bus, &FILES)).await?;
+        };
+        async {
+            let file = d_vm.recv::<Loan<D_FILE>>().await?;
+            let (mut design, mut implementation, mut commit, mut test) = (
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+            );
+            let (mut designed, mut implemented, mut committed, mut tested) = (
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+            );
+            let files = ChoreoFsFiles::new(d_vm).file(
+                ChoreoFsFile::new(FILES[0], file)
+                    .write_as::<DesignRequest<D>>(&mut design)
+                    .read_as::<DesignCompleted>(&mut designed)
+                    .file(FILES[1])?
+                    .write_as::<ImplementRequest<D>>(&mut implementation)
+                    .read_as::<ImplementCompleted>(&mut implemented)
+                    .file(FILES[2])?
+                    .write_as::<CommitRequest<D>>(&mut commit)
+                    .read_as::<CommitCompleted>(&mut committed)
+                    .file(FILES[3])?
+                    .write_as::<TestRequest<D>>(&mut test)
+                    .read_as::<TestCompleted>(&mut tested),
+            )?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut root, (file, ())) = files.into_parts();
+            let mut file = file.into_endpoint();
+            file.send::<crate::shell::global::FileExit>(&status).await?;
+            root.send::<crate::shell::global::Exit>(&status).await?;
+        };
+        async {
+            private_io::run(&mut d_io, PrivateFs::new(d_terminal, bus, &FILES)).await?;
+        };
+        async {
+            let file = e_vm.recv::<Loan<E_FILE>>().await?;
+            let (mut design, mut implementation, mut commit, mut test) = (
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+            );
+            let (mut designed, mut implemented, mut committed, mut tested) = (
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+            );
+            let files = ChoreoFsFiles::new(e_vm).file(
+                ChoreoFsFile::new(FILES[0], file)
+                    .write_as::<DesignRequest<E>>(&mut design)
+                    .read_as::<DesignCompleted>(&mut designed)
+                    .file(FILES[1])?
+                    .write_as::<ImplementRequest<E>>(&mut implementation)
+                    .read_as::<ImplementCompleted>(&mut implemented)
+                    .file(FILES[2])?
+                    .write_as::<CommitRequest<E>>(&mut commit)
+                    .read_as::<CommitCompleted>(&mut committed)
+                    .file(FILES[3])?
+                    .write_as::<TestRequest<E>>(&mut test)
+                    .read_as::<TestCompleted>(&mut tested),
+            )?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut root, (file, ())) = files.into_parts();
+            let mut file = file.into_endpoint();
+            file.send::<crate::shell::global::FileExit>(&status).await?;
+            root.send::<crate::shell::global::Exit>(&status).await?;
+        };
+        async {
+            private_io::run(&mut e_io, PrivateFs::new(e_terminal, bus, &FILES)).await?;
+        };
+        Ok::<(), ShellError>(())
+    }
+    .await;
+    bus.observe(serde_json::json!({"type":"protocol_checkpoint","producer":0,"session":SESSION,"checkpoint":observations.checkpoint()}));
+    result
 }
-pub async fn run_stdio(module: &[u8], task: &str) -> ShellResult<()> {
-    match task {
+#[hibana_runtime::scope]
+async fn run_1h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> ShellResult<()> {
+    use global::roles1h::*;
+    let programs = project_1h();
+    bus.observe(programs.observation());
+    let capture = |event| {
+        bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,"records":[crate::imp::projection::record(event)]}))
+    };
+    let report_a = input::TestResult::default();
+    let report_b = input::TestResult::default();
+    let report_c = input::TestResult::default();
+    let report_d = input::TestResult::default();
+    let report_e = input::TestResult::default();
+    let report_f = input::TestResult::default();
+    let report_g = input::TestResult::default();
+    let mut slab = vec![0; 2 * 1024 * 1024];
+    let incoming_capacity = slab.len();
+    let mut storage = SessionKitStorage::uninit();
+    let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
+    rv.observe(&capture);
+    let observations = rv.tap();
+    let session = SessionId::new(SESSION);
+    rv.set_resolver(
+        &programs.a,
+        hibana::runtime::resolver::ResolverRef::<CHECK_A>::decision_state(
+            &report_a,
+            input::TestResult::decide,
+        ),
+    )
+    .map_err(|e| ShellError::message(format!("{e:?}")))?;
+    rv.set_resolver(
+        &programs.b,
+        hibana::runtime::resolver::ResolverRef::<CHECK_B>::decision_state(
+            &report_b,
+            input::TestResult::decide,
+        ),
+    )
+    .map_err(|e| ShellError::message(format!("{e:?}")))?;
+    rv.set_resolver(
+        &programs.c,
+        hibana::runtime::resolver::ResolverRef::<CHECK_C>::decision_state(
+            &report_c,
+            input::TestResult::decide,
+        ),
+    )
+    .map_err(|e| ShellError::message(format!("{e:?}")))?;
+    rv.set_resolver(
+        &programs.d,
+        hibana::runtime::resolver::ResolverRef::<CHECK_D>::decision_state(
+            &report_d,
+            input::TestResult::decide,
+        ),
+    )
+    .map_err(|e| ShellError::message(format!("{e:?}")))?;
+    rv.set_resolver(
+        &programs.e,
+        hibana::runtime::resolver::ResolverRef::<CHECK_E>::decision_state(
+            &report_e,
+            input::TestResult::decide,
+        ),
+    )
+    .map_err(|e| ShellError::message(format!("{e:?}")))?;
+    rv.set_resolver(
+        &programs.f,
+        hibana::runtime::resolver::ResolverRef::<CHECK_F>::decision_state(
+            &report_f,
+            input::TestResult::decide,
+        ),
+    )
+    .map_err(|e| ShellError::message(format!("{e:?}")))?;
+    rv.set_resolver(
+        &programs.g,
+        hibana::runtime::resolver::ResolverRef::<CHECK_G>::decision_state(
+            &report_g,
+            input::TestResult::decide,
+        ),
+    )
+    .map_err(|e| ShellError::message(format!("{e:?}")))?;
+    let [
+        a_terminal,
+        b_terminal,
+        c_terminal,
+        d_terminal,
+        e_terminal,
+        f_terminal,
+        g_terminal,
+    ] = terminals;
+    let result = async {
+        let mut a = rv.enter(session, &programs.a)?;
+        let mut a_vm = rv.enter(session, &programs.a_vm)?;
+        let mut a_data = rv.enter(session, &programs.a_data)?;
+        let file_a = rv.enter(session, &programs.a_file)?;
+        let mut a_io = rv.enter(session, &programs.a_io)?;
+        let mut b = rv.enter(session, &programs.b)?;
+        let mut b_vm = rv.enter(session, &programs.b_vm)?;
+        let mut b_data = rv.enter(session, &programs.b_data)?;
+        let file_b = rv.enter(session, &programs.b_file)?;
+        let mut b_io = rv.enter(session, &programs.b_io)?;
+        let mut c = rv.enter(session, &programs.c)?;
+        let mut c_vm = rv.enter(session, &programs.c_vm)?;
+        let mut c_data = rv.enter(session, &programs.c_data)?;
+        let file_c = rv.enter(session, &programs.c_file)?;
+        let mut c_io = rv.enter(session, &programs.c_io)?;
+        let mut d = rv.enter(session, &programs.d)?;
+        let mut d_vm = rv.enter(session, &programs.d_vm)?;
+        let mut d_data = rv.enter(session, &programs.d_data)?;
+        let file_d = rv.enter(session, &programs.d_file)?;
+        let mut d_io = rv.enter(session, &programs.d_io)?;
+        let mut e = rv.enter(session, &programs.e)?;
+        let mut e_vm = rv.enter(session, &programs.e_vm)?;
+        let mut e_data = rv.enter(session, &programs.e_data)?;
+        let file_e = rv.enter(session, &programs.e_file)?;
+        let mut e_io = rv.enter(session, &programs.e_io)?;
+        let mut f = rv.enter(session, &programs.f)?;
+        let mut f_vm = rv.enter(session, &programs.f_vm)?;
+        let mut f_data = rv.enter(session, &programs.f_data)?;
+        let file_f = rv.enter(session, &programs.f_file)?;
+        let mut f_io = rv.enter(session, &programs.f_io)?;
+        let mut g = rv.enter(session, &programs.g)?;
+        let mut g_vm = rv.enter(session, &programs.g_vm)?;
+        let mut g_data = rv.enter(session, &programs.g_data)?;
+        let file_g = rv.enter(session, &programs.g_file)?;
+        let mut g_io = rv.enter(session, &programs.g_io)?;
+        let mut auth = rv.enter(session, &programs.auth)?;
+        let auth_resource = rv.enter(session, &programs.auth_resource)?;
+        let mut database = rv.enter(session, &programs.database)?;
+        let database_resource = rv.enter(session, &programs.database_resource)?;
+        let mut api = rv.enter(session, &programs.api)?;
+        let api_resource = rv.enter(session, &programs.api_resource)?;
+        let mut payment = rv.enter(session, &programs.payment)?;
+        let payment_resource = rv.enter(session, &programs.payment_resource)?;
+        let mut notify = rv.enter(session, &programs.notify)?;
+        let notify_resource = rv.enter(session, &programs.notify_resource)?;
+        let mut analytics = rv.enter(session, &programs.analytics)?;
+        let analytics_resource = rv.enter(session, &programs.analytics_resource)?;
+        let mut search = rv.enter(session, &programs.search)?;
+        let search_resource = rv.enter(session, &programs.search_resource)?;
+        async {
+            file_metadata::run(&mut a_data, file_a, FILES).await?;
+        };
+        async {
+            file_metadata::run(&mut b_data, file_b, FILES).await?;
+        };
+        async {
+            file_metadata::run(&mut c_data, file_c, FILES).await?;
+        };
+        async {
+            file_metadata::run(&mut d_data, file_d, FILES).await?;
+        };
+        async {
+            file_metadata::run(&mut e_data, file_e, FILES).await?;
+        };
+        async {
+            file_metadata::run(&mut f_data, file_f, FILES).await?;
+        };
+        async {
+            file_metadata::run(&mut g_data, file_g, FILES).await?;
+        };
+        async {
+            localside::developer_reconsider::run::<A, AUTH_RESOURCE, DATABASE_RESOURCE>(
+                &mut a, bus, &report_a,
+            )
+            .await?;
+        };
+        async {
+            localside::developer_reconsider::run::<B, API_RESOURCE, DATABASE_RESOURCE>(
+                &mut b, bus, &report_b,
+            )
+            .await?;
+        };
+        async {
+            localside::developer_reconsider::run::<C, API_RESOURCE, PAYMENT_RESOURCE>(
+                &mut c, bus, &report_c,
+            )
+            .await?;
+        };
+        async {
+            localside::developer_reconsider::run::<D, NOTIFY_RESOURCE, PAYMENT_RESOURCE>(
+                &mut d, bus, &report_d,
+            )
+            .await?;
+        };
+        async {
+            localside::developer_reconsider::run::<E, ANALYTICS_RESOURCE, NOTIFY_RESOURCE>(
+                &mut e, bus, &report_e,
+            )
+            .await?;
+        };
+        async {
+            localside::developer_reconsider::run::<F, ANALYTICS_RESOURCE, SEARCH_RESOURCE>(
+                &mut f, bus, &report_f,
+            )
+            .await?;
+        };
+        async {
+            localside::developer_reconsider::run::<G, AUTH_RESOURCE, SEARCH_RESOURCE>(
+                &mut g, bus, &report_g,
+            )
+            .await?;
+        };
+        async {
+            localside::module_reconsider::auth(&mut auth, auth_resource).await?;
+        };
+        async {
+            localside::module_reconsider::database(&mut database, database_resource).await?;
+        };
+        async {
+            localside::module_reconsider::api(&mut api, api_resource).await?;
+        };
+        async {
+            localside::module_reconsider::payment(&mut payment, payment_resource).await?;
+        };
+        async {
+            localside::module_reconsider::notify(&mut notify, notify_resource).await?;
+        };
+        async {
+            localside::module_reconsider::analytics(&mut analytics, analytics_resource).await?;
+        };
+        async {
+            localside::module_reconsider::search(&mut search, search_resource).await?;
+        };
+        async {
+            let file = a_vm.recv::<Loan<A_FILE>>().await?;
+            let (mut design, mut implementation, mut commit, mut test) = (
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+            );
+            let (mut designed, mut implemented, mut committed, mut tested) = (
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+            );
+            let files = ChoreoFsFiles::new(a_vm).file(
+                ChoreoFsFile::new(FILES[0], file)
+                    .write_as::<DesignRequest<A>>(&mut design)
+                    .read_as::<DesignCompleted>(&mut designed)
+                    .file(FILES[1])?
+                    .write_as::<ImplementRequest<A>>(&mut implementation)
+                    .read_as::<ImplementCompleted>(&mut implemented)
+                    .file(FILES[2])?
+                    .write_as::<CommitRequest<A>>(&mut commit)
+                    .read_as::<CommitCompleted>(&mut committed)
+                    .file(FILES[3])?
+                    .write_as::<TestRequest<A>>(&mut test)
+                    .read_as::<TestCompleted>(&mut tested),
+            )?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut root, (file, ())) = files.into_parts();
+            let mut file = file.into_endpoint();
+            file.send::<crate::shell::global::FileExit>(&status).await?;
+            root.send::<crate::shell::global::Exit>(&status).await?;
+        };
+        async {
+            private_io::run(&mut a_io, PrivateFs::new(a_terminal, bus, &FILES)).await?;
+        };
+        async {
+            let file = b_vm.recv::<Loan<B_FILE>>().await?;
+            let (mut design, mut implementation, mut commit, mut test) = (
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+            );
+            let (mut designed, mut implemented, mut committed, mut tested) = (
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+            );
+            let files = ChoreoFsFiles::new(b_vm).file(
+                ChoreoFsFile::new(FILES[0], file)
+                    .write_as::<DesignRequest<B>>(&mut design)
+                    .read_as::<DesignCompleted>(&mut designed)
+                    .file(FILES[1])?
+                    .write_as::<ImplementRequest<B>>(&mut implementation)
+                    .read_as::<ImplementCompleted>(&mut implemented)
+                    .file(FILES[2])?
+                    .write_as::<CommitRequest<B>>(&mut commit)
+                    .read_as::<CommitCompleted>(&mut committed)
+                    .file(FILES[3])?
+                    .write_as::<TestRequest<B>>(&mut test)
+                    .read_as::<TestCompleted>(&mut tested),
+            )?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut root, (file, ())) = files.into_parts();
+            let mut file = file.into_endpoint();
+            file.send::<crate::shell::global::FileExit>(&status).await?;
+            root.send::<crate::shell::global::Exit>(&status).await?;
+        };
+        async {
+            private_io::run(&mut b_io, PrivateFs::new(b_terminal, bus, &FILES)).await?;
+        };
+        async {
+            let file = c_vm.recv::<Loan<C_FILE>>().await?;
+            let (mut design, mut implementation, mut commit, mut test) = (
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+            );
+            let (mut designed, mut implemented, mut committed, mut tested) = (
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+            );
+            let files = ChoreoFsFiles::new(c_vm).file(
+                ChoreoFsFile::new(FILES[0], file)
+                    .write_as::<DesignRequest<C>>(&mut design)
+                    .read_as::<DesignCompleted>(&mut designed)
+                    .file(FILES[1])?
+                    .write_as::<ImplementRequest<C>>(&mut implementation)
+                    .read_as::<ImplementCompleted>(&mut implemented)
+                    .file(FILES[2])?
+                    .write_as::<CommitRequest<C>>(&mut commit)
+                    .read_as::<CommitCompleted>(&mut committed)
+                    .file(FILES[3])?
+                    .write_as::<TestRequest<C>>(&mut test)
+                    .read_as::<TestCompleted>(&mut tested),
+            )?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut root, (file, ())) = files.into_parts();
+            let mut file = file.into_endpoint();
+            file.send::<crate::shell::global::FileExit>(&status).await?;
+            root.send::<crate::shell::global::Exit>(&status).await?;
+        };
+        async {
+            private_io::run(&mut c_io, PrivateFs::new(c_terminal, bus, &FILES)).await?;
+        };
+        async {
+            let file = d_vm.recv::<Loan<D_FILE>>().await?;
+            let (mut design, mut implementation, mut commit, mut test) = (
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+            );
+            let (mut designed, mut implemented, mut committed, mut tested) = (
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+            );
+            let files = ChoreoFsFiles::new(d_vm).file(
+                ChoreoFsFile::new(FILES[0], file)
+                    .write_as::<DesignRequest<D>>(&mut design)
+                    .read_as::<DesignCompleted>(&mut designed)
+                    .file(FILES[1])?
+                    .write_as::<ImplementRequest<D>>(&mut implementation)
+                    .read_as::<ImplementCompleted>(&mut implemented)
+                    .file(FILES[2])?
+                    .write_as::<CommitRequest<D>>(&mut commit)
+                    .read_as::<CommitCompleted>(&mut committed)
+                    .file(FILES[3])?
+                    .write_as::<TestRequest<D>>(&mut test)
+                    .read_as::<TestCompleted>(&mut tested),
+            )?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut root, (file, ())) = files.into_parts();
+            let mut file = file.into_endpoint();
+            file.send::<crate::shell::global::FileExit>(&status).await?;
+            root.send::<crate::shell::global::Exit>(&status).await?;
+        };
+        async {
+            private_io::run(&mut d_io, PrivateFs::new(d_terminal, bus, &FILES)).await?;
+        };
+        async {
+            let file = e_vm.recv::<Loan<E_FILE>>().await?;
+            let (mut design, mut implementation, mut commit, mut test) = (
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+            );
+            let (mut designed, mut implemented, mut committed, mut tested) = (
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+            );
+            let files = ChoreoFsFiles::new(e_vm).file(
+                ChoreoFsFile::new(FILES[0], file)
+                    .write_as::<DesignRequest<E>>(&mut design)
+                    .read_as::<DesignCompleted>(&mut designed)
+                    .file(FILES[1])?
+                    .write_as::<ImplementRequest<E>>(&mut implementation)
+                    .read_as::<ImplementCompleted>(&mut implemented)
+                    .file(FILES[2])?
+                    .write_as::<CommitRequest<E>>(&mut commit)
+                    .read_as::<CommitCompleted>(&mut committed)
+                    .file(FILES[3])?
+                    .write_as::<TestRequest<E>>(&mut test)
+                    .read_as::<TestCompleted>(&mut tested),
+            )?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut root, (file, ())) = files.into_parts();
+            let mut file = file.into_endpoint();
+            file.send::<crate::shell::global::FileExit>(&status).await?;
+            root.send::<crate::shell::global::Exit>(&status).await?;
+        };
+        async {
+            private_io::run(&mut e_io, PrivateFs::new(e_terminal, bus, &FILES)).await?;
+        };
+        async {
+            let file = f_vm.recv::<Loan<F_FILE>>().await?;
+            let (mut design, mut implementation, mut commit, mut test) = (
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+            );
+            let (mut designed, mut implemented, mut committed, mut tested) = (
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+            );
+            let files = ChoreoFsFiles::new(f_vm).file(
+                ChoreoFsFile::new(FILES[0], file)
+                    .write_as::<DesignRequest<F>>(&mut design)
+                    .read_as::<DesignCompleted>(&mut designed)
+                    .file(FILES[1])?
+                    .write_as::<ImplementRequest<F>>(&mut implementation)
+                    .read_as::<ImplementCompleted>(&mut implemented)
+                    .file(FILES[2])?
+                    .write_as::<CommitRequest<F>>(&mut commit)
+                    .read_as::<CommitCompleted>(&mut committed)
+                    .file(FILES[3])?
+                    .write_as::<TestRequest<F>>(&mut test)
+                    .read_as::<TestCompleted>(&mut tested),
+            )?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut root, (file, ())) = files.into_parts();
+            let mut file = file.into_endpoint();
+            file.send::<crate::shell::global::FileExit>(&status).await?;
+            root.send::<crate::shell::global::Exit>(&status).await?;
+        };
+        async {
+            private_io::run(&mut f_io, PrivateFs::new(f_terminal, bus, &FILES)).await?;
+        };
+        async {
+            let file = g_vm.recv::<Loan<G_FILE>>().await?;
+            let (mut design, mut implementation, mut commit, mut test) = (
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                vec![0; crate::shell::GUEST_MEMORY_BYTES],
+            );
+            let (mut designed, mut implemented, mut committed, mut tested) = (
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+                vec![0; incoming_capacity],
+            );
+            let files = ChoreoFsFiles::new(g_vm).file(
+                ChoreoFsFile::new(FILES[0], file)
+                    .write_as::<DesignRequest<G>>(&mut design)
+                    .read_as::<DesignCompleted>(&mut designed)
+                    .file(FILES[1])?
+                    .write_as::<ImplementRequest<G>>(&mut implementation)
+                    .read_as::<ImplementCompleted>(&mut implemented)
+                    .file(FILES[2])?
+                    .write_as::<CommitRequest<G>>(&mut commit)
+                    .read_as::<CommitCompleted>(&mut committed)
+                    .file(FILES[3])?
+                    .write_as::<TestRequest<G>>(&mut test)
+                    .read_as::<TestCompleted>(&mut tested),
+            )?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut root, (file, ())) = files.into_parts();
+            let mut file = file.into_endpoint();
+            file.send::<crate::shell::global::FileExit>(&status).await?;
+            root.send::<crate::shell::global::Exit>(&status).await?;
+        };
+        async {
+            private_io::run(&mut g_io, PrivateFs::new(g_terminal, bus, &FILES)).await?;
+        };
+        Ok::<(), ShellError>(())
+    }
+    .await;
+    bus.observe(serde_json::json!({"type":"protocol_checkpoint","producer":0,"session":SESSION,"checkpoint":observations.checkpoint()}));
+    result
+}
+pub async fn run_stdio(module: &[u8], level: &str) -> ShellResult<()> {
+    match level {
         "1E" => {
-            let (bus, mut reader, terminals) = Bus::open(
+            use global::roles1e::*;
+            let (bus, mut io, terminals) = Bus::open(
                 ["DEVELOPER_A", "DEVELOPER_B", "DEVELOPER_C"],
                 [
-                    (SessionId::new(20), global::roles1e::AUTH_RESOURCE),
-                    (SessionId::new(20), global::roles1e::DATABASE_RESOURCE),
-                    (SessionId::new(20), global::roles1e::API_RESOURCE),
+                    (SessionId::new(SESSION), AUTH_RESOURCE),
+                    (SessionId::new(SESSION), DATABASE_RESOURCE),
+                    (SessionId::new(SESSION), API_RESOURCE),
+                    (SessionId::new(SESSION), A_FILE),
+                    (SessionId::new(SESSION), B_FILE),
+                    (SessionId::new(SESSION), C_FILE),
                 ],
             );
             let result =
-                hibana_runtime::race(run_1e_guests(module, &bus, terminals), reader.run(&bus))
-                    .await;
-            match &result{Ok(())=>reader.emit(&bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,Err(e)=>reader.emit(&bus,serde_json::json!({"type":"run_result","status":"failed","error":e.to_string()})).await?}
+                hibana_runtime::race(run_1e_guests(module, &bus, terminals), io.run(&bus)).await;
+            match &result {Ok(())=>io.emit(&bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,Err(error)=>io.emit(&bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,}
             result
         }
         "1M" => {
-            let (bus, mut reader, terminals) = Bus::open(
+            use global::roles1m::*;
+            let (bus, mut io, terminals) = Bus::open(
                 [
                     "DEVELOPER_A",
                     "DEVELOPER_B",
@@ -273,21 +1061,26 @@ pub async fn run_stdio(module: &[u8], task: &str) -> ShellResult<()> {
                     "DEVELOPER_E",
                 ],
                 [
-                    (SessionId::new(20), global::roles1m::AUTH_RESOURCE),
-                    (SessionId::new(20), global::roles1m::DATABASE_RESOURCE),
-                    (SessionId::new(20), global::roles1m::API_RESOURCE),
-                    (SessionId::new(20), global::roles1m::PAYMENT_RESOURCE),
-                    (SessionId::new(20), global::roles1m::NOTIFY_RESOURCE),
+                    (SessionId::new(SESSION), AUTH_RESOURCE),
+                    (SessionId::new(SESSION), DATABASE_RESOURCE),
+                    (SessionId::new(SESSION), API_RESOURCE),
+                    (SessionId::new(SESSION), PAYMENT_RESOURCE),
+                    (SessionId::new(SESSION), NOTIFY_RESOURCE),
+                    (SessionId::new(SESSION), A_FILE),
+                    (SessionId::new(SESSION), B_FILE),
+                    (SessionId::new(SESSION), C_FILE),
+                    (SessionId::new(SESSION), D_FILE),
+                    (SessionId::new(SESSION), E_FILE),
                 ],
             );
             let result =
-                hibana_runtime::race(run_1m_guests(module, &bus, terminals), reader.run(&bus))
-                    .await;
-            match &result{Ok(())=>reader.emit(&bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,Err(e)=>reader.emit(&bus,serde_json::json!({"type":"run_result","status":"failed","error":e.to_string()})).await?}
+                hibana_runtime::race(run_1m_guests(module, &bus, terminals), io.run(&bus)).await;
+            match &result {Ok(())=>io.emit(&bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,Err(error)=>io.emit(&bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,}
             result
         }
         "1H" => {
-            let (bus, mut reader, terminals) = Bus::open(
+            use global::roles1h::*;
+            let (bus, mut io, terminals) = Bus::open(
                 [
                     "DEVELOPER_A",
                     "DEVELOPER_B",
@@ -298,362 +1091,35 @@ pub async fn run_stdio(module: &[u8], task: &str) -> ShellResult<()> {
                     "DEVELOPER_G",
                 ],
                 [
-                    (SessionId::new(20), global::roles1h::AUTH_RESOURCE),
-                    (SessionId::new(20), global::roles1h::DATABASE_RESOURCE),
-                    (SessionId::new(20), global::roles1h::API_RESOURCE),
-                    (SessionId::new(20), global::roles1h::PAYMENT_RESOURCE),
-                    (SessionId::new(20), global::roles1h::NOTIFY_RESOURCE),
-                    (SessionId::new(20), global::roles1h::ANALYTICS_RESOURCE),
-                    (SessionId::new(20), global::roles1h::SEARCH_RESOURCE),
+                    (SessionId::new(SESSION), AUTH_RESOURCE),
+                    (SessionId::new(SESSION), DATABASE_RESOURCE),
+                    (SessionId::new(SESSION), API_RESOURCE),
+                    (SessionId::new(SESSION), PAYMENT_RESOURCE),
+                    (SessionId::new(SESSION), NOTIFY_RESOURCE),
+                    (SessionId::new(SESSION), ANALYTICS_RESOURCE),
+                    (SessionId::new(SESSION), SEARCH_RESOURCE),
+                    (SessionId::new(SESSION), A_FILE),
+                    (SessionId::new(SESSION), B_FILE),
+                    (SessionId::new(SESSION), C_FILE),
+                    (SessionId::new(SESSION), D_FILE),
+                    (SessionId::new(SESSION), E_FILE),
+                    (SessionId::new(SESSION), F_FILE),
+                    (SessionId::new(SESSION), G_FILE),
                 ],
             );
             let result =
-                hibana_runtime::race(run_1h_guests(module, &bus, terminals), reader.run(&bus))
-                    .await;
-            match &result{Ok(())=>reader.emit(&bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,Err(e)=>reader.emit(&bus,serde_json::json!({"type":"run_result","status":"failed","error":e.to_string()})).await?}
+                hibana_runtime::race(run_1h_guests(module, &bus, terminals), io.run(&bus)).await;
+            match &result {Ok(())=>io.emit(&bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,Err(error)=>io.emit(&bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,}
             result
         }
-        _ => Err(ShellError::message("expected codebase task 1E, 1M or 1H")),
+        _ => Err(ShellError::message("expected codebase task 1E,1M or1H")),
     }
 }
-
-#[hibana_runtime::scope]
-async fn run_1h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> ShellResult<()> {
-    use global::{roles1h::*, *};
-    use hibana::runtime::resolver::ResolverRef;
-    let programs = project_1h();
-    bus.observe(programs.observation());
-    let result_a = input::TestResult::default();
-    let result_b = input::TestResult::default();
-    let result_c = input::TestResult::default();
-    let result_d = input::TestResult::default();
-    let result_e = input::TestResult::default();
-    let result_f = input::TestResult::default();
-    let result_g = input::TestResult::default();
-    let mut slab = vec![0; 2 * 1024 * 1024];
-    let mut storage = SessionKitStorage::<&InMemoryTransport>::uninit();
-    let kit = storage.init();
-    let rv = kit.rendezvous(&mut slab, &bus.transport)?;
-    rv.set_resolver(
-        &programs.a,
-        ResolverRef::<CHECK_A>::decision_state(&result_a, input::TestResult::decide),
-    )
-    .map_err(|e| ShellError::message(format!("{e:?}")))?;
-    rv.set_resolver(
-        &programs.b,
-        ResolverRef::<CHECK_B>::decision_state(&result_b, input::TestResult::decide),
-    )
-    .map_err(|e| ShellError::message(format!("{e:?}")))?;
-    rv.set_resolver(
-        &programs.c,
-        ResolverRef::<CHECK_C>::decision_state(&result_c, input::TestResult::decide),
-    )
-    .map_err(|e| ShellError::message(format!("{e:?}")))?;
-    rv.set_resolver(
-        &programs.d,
-        ResolverRef::<CHECK_D>::decision_state(&result_d, input::TestResult::decide),
-    )
-    .map_err(|e| ShellError::message(format!("{e:?}")))?;
-    rv.set_resolver(
-        &programs.e,
-        ResolverRef::<CHECK_E>::decision_state(&result_e, input::TestResult::decide),
-    )
-    .map_err(|e| ShellError::message(format!("{e:?}")))?;
-    rv.set_resolver(
-        &programs.f,
-        ResolverRef::<CHECK_F>::decision_state(&result_f, input::TestResult::decide),
-    )
-    .map_err(|e| ShellError::message(format!("{e:?}")))?;
-    rv.set_resolver(
-        &programs.g,
-        ResolverRef::<CHECK_G>::decision_state(&result_g, input::TestResult::decide),
-    )
-    .map_err(|e| ShellError::message(format!("{e:?}")))?;
-    let session = SessionId::new(20);
-    let mut a = rv.enter(session, &programs.a)?;
-    let mut a_wasi = rv.enter(session, &programs.a_wasi)?;
-    let mut a_io = rv.enter(session, &programs.a_io)?;
-    let mut b = rv.enter(session, &programs.b)?;
-    let mut b_wasi = rv.enter(session, &programs.b_wasi)?;
-    let mut b_io = rv.enter(session, &programs.b_io)?;
-    let mut c = rv.enter(session, &programs.c)?;
-    let mut c_wasi = rv.enter(session, &programs.c_wasi)?;
-    let mut c_io = rv.enter(session, &programs.c_io)?;
-    let mut d = rv.enter(session, &programs.d)?;
-    let mut d_wasi = rv.enter(session, &programs.d_wasi)?;
-    let mut d_io = rv.enter(session, &programs.d_io)?;
-    let mut e = rv.enter(session, &programs.e)?;
-    let mut e_wasi = rv.enter(session, &programs.e_wasi)?;
-    let mut e_io = rv.enter(session, &programs.e_io)?;
-    let mut f = rv.enter(session, &programs.f)?;
-    let mut f_wasi = rv.enter(session, &programs.f_wasi)?;
-    let mut f_io = rv.enter(session, &programs.f_io)?;
-    let mut g = rv.enter(session, &programs.g)?;
-    let mut g_wasi = rv.enter(session, &programs.g_wasi)?;
-    let mut g_io = rv.enter(session, &programs.g_io)?;
-    let mut auth = rv.enter(session, &programs.auth)?;
-    let auth_resource = rv.enter(session, &programs.auth_resource)?;
-    let mut database = rv.enter(session, &programs.database)?;
-    let database_resource = rv.enter(session, &programs.database_resource)?;
-    let mut api = rv.enter(session, &programs.api)?;
-    let api_resource = rv.enter(session, &programs.api_resource)?;
-    let mut payment = rv.enter(session, &programs.payment)?;
-    let payment_resource = rv.enter(session, &programs.payment_resource)?;
-    let mut notify = rv.enter(session, &programs.notify)?;
-    let notify_resource = rv.enter(session, &programs.notify_resource)?;
-    let mut analytics = rv.enter(session, &programs.analytics)?;
-    let analytics_resource = rv.enter(session, &programs.analytics_resource)?;
-    let mut search = rv.enter(session, &programs.search)?;
-    let search_resource = rv.enter(session, &programs.search_resource)?;
-    let [term_a, term_b, term_c, term_d, term_e, term_f, term_g] = terminals;
-    let fs_a = PrivateFs::new(term_a, bus);
-    let mut memory_a = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-    let mut store_a = HibanaWasiGuestStorage::uninit();
-    let guest_a = store_a.init(module, GuestMemory::new(&mut memory_a), bindings())?;
-    let fs_b = PrivateFs::new(term_b, bus);
-    let mut memory_b = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-    let mut store_b = HibanaWasiGuestStorage::uninit();
-    let guest_b = store_b.init(module, GuestMemory::new(&mut memory_b), bindings())?;
-    let fs_c = PrivateFs::new(term_c, bus);
-    let mut memory_c = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-    let mut store_c = HibanaWasiGuestStorage::uninit();
-    let guest_c = store_c.init(module, GuestMemory::new(&mut memory_c), bindings())?;
-    let fs_d = PrivateFs::new(term_d, bus);
-    let mut memory_d = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-    let mut store_d = HibanaWasiGuestStorage::uninit();
-    let guest_d = store_d.init(module, GuestMemory::new(&mut memory_d), bindings())?;
-    let fs_e = PrivateFs::new(term_e, bus);
-    let mut memory_e = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-    let mut store_e = HibanaWasiGuestStorage::uninit();
-    let guest_e = store_e.init(module, GuestMemory::new(&mut memory_e), bindings())?;
-    let fs_f = PrivateFs::new(term_f, bus);
-    let mut memory_f = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-    let mut store_f = HibanaWasiGuestStorage::uninit();
-    let guest_f = store_f.init(module, GuestMemory::new(&mut memory_f), bindings())?;
-    let fs_g = PrivateFs::new(term_g, bus);
-    let mut memory_g = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-    let mut store_g = HibanaWasiGuestStorage::uninit();
-    let guest_g = store_g.init(module, GuestMemory::new(&mut memory_g), bindings())?;
-    async {
-        localside::developer_reconsider::run::<
-            HARD,
-            A,
-            AUTH_RESOURCE,
-            DATABASE_RESOURCE,
-            AUTH,
-            DATABASE,
-        >(&mut a, bus, &result_a)
-        .await?;
-    };
-    async {
-        localside::developer_reconsider::run::<
-            HARD,
-            B,
-            API_RESOURCE,
-            DATABASE_RESOURCE,
-            API,
-            DATABASE,
-        >(&mut b, bus, &result_b)
-        .await?;
-    };
-    async {
-        localside::developer_reconsider::run::<HARD, C, API_RESOURCE, PAYMENT_RESOURCE, API, PAYMENT>(
-        &mut c, bus, &result_c,
-    ).await?;
-    };
-    async {
-        localside::developer_reconsider::run::<
-            HARD,
-            D,
-            NOTIFY_RESOURCE,
-            PAYMENT_RESOURCE,
-            NOTIFY,
-            PAYMENT,
-        >(&mut d, bus, &result_d)
-        .await?;
-    };
-    async {
-        localside::developer_reconsider::run::<
-            HARD,
-            E,
-            ANALYTICS_RESOURCE,
-            NOTIFY_RESOURCE,
-            ANALYTICS,
-            NOTIFY,
-        >(&mut e, bus, &result_e)
-        .await?;
-    };
-    async {
-        localside::developer_reconsider::run::<
-            HARD,
-            F,
-            ANALYTICS_RESOURCE,
-            SEARCH_RESOURCE,
-            ANALYTICS,
-            SEARCH,
-        >(&mut f, bus, &result_f)
-        .await?;
-    };
-    async {
-        localside::developer_reconsider::run::<HARD, G, AUTH_RESOURCE, SEARCH_RESOURCE, AUTH, SEARCH>(
-        &mut g, bus, &result_g,
-    ).await?;
-    };
-    async {
-        localside::module_reconsider::run::<
-            AUTH,
-            AUTH_RESOURCE,
-            DATABASE,
-            DATABASE_RESOURCE,
-            SEARCH,
-            SEARCH_RESOURCE,
-        >(&mut auth, auth_resource)
-        .await?;
-    };
-    async {
-        localside::module_reconsider::run::<
-            DATABASE,
-            DATABASE_RESOURCE,
-            AUTH,
-            AUTH_RESOURCE,
-            API,
-            API_RESOURCE,
-        >(&mut database, database_resource)
-        .await?;
-    };
-    async {
-        localside::module_reconsider::run::<
-            API,
-            API_RESOURCE,
-            PAYMENT,
-            PAYMENT_RESOURCE,
-            DATABASE,
-            DATABASE_RESOURCE,
-        >(&mut api, api_resource)
-        .await?;
-    };
-    async {
-        localside::module_reconsider::run::<
-            PAYMENT,
-            PAYMENT_RESOURCE,
-            API,
-            API_RESOURCE,
-            NOTIFY,
-            NOTIFY_RESOURCE,
-        >(&mut payment, payment_resource)
-        .await?;
-    };
-    async {
-        localside::module_reconsider::run::<
-            NOTIFY,
-            NOTIFY_RESOURCE,
-            ANALYTICS,
-            ANALYTICS_RESOURCE,
-            PAYMENT,
-            PAYMENT_RESOURCE,
-        >(&mut notify, notify_resource)
-        .await?;
-    };
-    async {
-        localside::module_reconsider::run::<
-            ANALYTICS,
-            ANALYTICS_RESOURCE,
-            NOTIFY,
-            NOTIFY_RESOURCE,
-            SEARCH,
-            SEARCH_RESOURCE,
-        >(&mut analytics, analytics_resource)
-        .await?;
-    };
-    async {
-        localside::module_reconsider::run::<
-            SEARCH,
-            SEARCH_RESOURCE,
-            ANALYTICS,
-            ANALYTICS_RESOURCE,
-            AUTH,
-            AUTH_RESOURCE,
-        >(&mut search, search_resource)
-        .await?;
-    };
-    async {
-        localside::wasi_reconsider::run::<A_WASI, A, HARD, AUTH_RESOURCE, DATABASE_RESOURCE>(
-            guest_a,
-            &mut a_wasi,
-        )
-        .await?;
-    };
-    async {
-        private_io::run(&mut a_io, fs_a).await?;
-    };
-    async {
-        localside::wasi_reconsider::run::<B_WASI, B, HARD, API_RESOURCE, DATABASE_RESOURCE>(
-            guest_b,
-            &mut b_wasi,
-        )
-        .await?;
-    };
-    async {
-        private_io::run(&mut b_io, fs_b).await?;
-    };
-    async {
-        localside::wasi_reconsider::run::<C_WASI, C, HARD, API_RESOURCE, PAYMENT_RESOURCE>(
-            guest_c,
-            &mut c_wasi,
-        )
-        .await?;
-    };
-    async {
-        private_io::run(&mut c_io, fs_c).await?;
-    };
-    async {
-        localside::wasi_reconsider::run::<D_WASI, D, HARD, NOTIFY_RESOURCE, PAYMENT_RESOURCE>(
-            guest_d,
-            &mut d_wasi,
-        )
-        .await?;
-    };
-    async {
-        private_io::run(&mut d_io, fs_d).await?;
-    };
-    async {
-        localside::wasi_reconsider::run::<E_WASI, E, HARD, ANALYTICS_RESOURCE, NOTIFY_RESOURCE>(
-            guest_e,
-            &mut e_wasi,
-        )
-        .await?;
-    };
-    async {
-        private_io::run(&mut e_io, fs_e).await?;
-    };
-    async {
-        localside::wasi_reconsider::run::<F_WASI, F, HARD, ANALYTICS_RESOURCE, SEARCH_RESOURCE>(
-            guest_f,
-            &mut f_wasi,
-        )
-        .await?;
-    };
-    async {
-        private_io::run(&mut f_io, fs_f).await?;
-    };
-    async {
-        localside::wasi_reconsider::run::<G_WASI, G, HARD, AUTH_RESOURCE, SEARCH_RESOURCE>(
-            guest_g,
-            &mut g_wasi,
-        )
-        .await?;
-    };
-    async {
-        private_io::run(&mut g_io, fs_g).await?;
-    };
-    Ok(())
-}
-
-pub fn projection(task: &str) -> ShellResult<serde_json::Value> {
-    match task {
+pub fn projection(level: &str) -> ShellResult<serde_json::Value> {
+    match level {
         "1E" => Ok(global::project_1e().observation()),
         "1M" => Ok(global::project_1m().observation()),
         "1H" => Ok(global::project_1h().observation()),
-        _ => Err(ShellError::message("unsupported task projection")),
+        _ => Err(ShellError::message("unknown codebase projection")),
     }
 }

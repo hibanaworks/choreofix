@@ -1,21 +1,23 @@
-//! Typed Endpoint requests exercise the service graph without a Wasm guest.
+//! The production effect receiver rejects a forged actual resource request.
 use super::{global::*, imp::Arguments, localside};
-use crate::{
-    imp::transport::InMemoryTransport,
-    shell::imp::bus::Bus,
-    shell::imp::service::{Domain, Validation},
+use crate::shell::{
+    ShellError, ShellResult,
+    imp::{bus::Bus, service::Domain},
 };
 use hibana::{
-    Endpoint,
-    runtime::{SessionKitStorage, ids::SessionId, resolver::ResolverRef},
+    g,
+    runtime::{
+        SessionKitStorage,
+        ids::SessionId,
+        wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload},
+    },
 };
-use hibana_runtime::host::notification;
 use hibana_wasip1_runtime::protocol;
 use serde_json::{Value, json};
 use std::{cell::Cell, time::Duration};
 
 #[derive(Default)]
-struct Journal(Cell<Vec<(&'static str, &'static str, Value)>>);
+struct Journal(Cell<Vec<Value>>);
 impl Domain for Journal {
     async fn execute(
         &self,
@@ -23,338 +25,144 @@ impl Domain for Journal {
         tool: &'static str,
         arguments: Value,
     ) -> Result<Value, String> {
-        let mut events = self.0.take();
-        events.push((agent, tool, arguments.clone()));
-        self.0.set(events);
-        Ok(json!({"success":true, "tool":tool, "arguments":arguments}))
+        let mut rows = self.0.take();
+        rows.push(json!({"agent":agent,"tool":tool,"arguments":arguments}));
+        self.0.set(rows);
+        Ok(json!({"success":true}))
     }
 }
-async fn write<const VM: u8>(endpoint: &mut Endpoint<'_, VM>, value: Value) {
-    let mut bytes = serde_json::to_vec(&value).unwrap();
-    bytes.extend_from_slice(&[b' '; 256]);
-    for chunk in bytes.chunks(37) {
-        endpoint.recv::<RequestReady>().await.unwrap();
-        let response =
-            protocol::FdWriteObjectReq(protocol::FdWrite::new(SERVICE_FD, chunk).unwrap());
-        endpoint.send::<Write>(&response).await.unwrap();
-        assert_eq!(
-            endpoint.recv::<Written>().await.unwrap().0.written() as usize,
-            chunk.len()
-        );
+// An adversarial sender can claim the source schema. The receiving Endpoint,
+// and not that claim, must validate the actual request before the effect.
+struct Forged;
+impl WireEncode for Forged {
+    fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
+        let bytes = br#"{"component":"unreviewed_candidate"}"#;
+        output
+            .get_mut(..bytes.len())
+            .ok_or(CodecError::Truncated)?
+            .copy_from_slice(bytes);
+        Ok(bytes.len())
     }
 }
-async fn open<const VM: u8>(endpoint: &mut Endpoint<'_, VM>, path: &[u8]) -> u16 {
-    endpoint.recv::<RequestReady>().await.unwrap();
-    let response = protocol::PathOpenReq(
-        protocol::PathOpen::new(3, 1 << 6, path)
-            .unwrap()
-            .with_flags(8, 0)
-            .unwrap(),
+impl WirePayload for Forged {
+    const SCHEMA_ID: u32 = <Arguments<1> as WirePayload>::SCHEMA_ID;
+    type Decoded<'a> = &'a [u8];
+    fn validate_payload(_: Payload<'_>) -> Result<(), CodecError> {
+        Ok(())
+    }
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> &'a [u8] {
+        input.as_bytes()
+    }
+}
+#[hibana_runtime::main]
+#[test]
+async fn forged_compile_target_is_rejected_by_the_production_receiver_before_effect()
+-> ShellResult<()> {
+    let p = programs();
+    let session = SessionId::new(1633);
+    let (bus, _reader, _terminals) = Bus::open(
+        [],
+        [
+            (session, BUILD_SERVER),
+            (session, DEPLOY_ENV),
+            (session, DEV_CLOSE),
+            (session, TEST_CLOSE),
+            (session, DEPLOY_CLOSE),
+            (session, DEV_FILE),
+            (session, TEST_FILE),
+            (session, DEPLOY_FILE),
+        ],
     );
-    endpoint.send::<Open>(&response).await.unwrap();
-    endpoint.recv::<Opened>().await.unwrap().0.errno()
-}
-impl Journal {
-    fn events(&self) -> Vec<(&'static str, &'static str, Value)> {
-        let events = self.0.take();
-        let observed = events.clone();
-        self.0.set(events);
-        observed
-    }
-}
-
-#[hibana_runtime::main]
-#[test]
-async fn replacing_an_admitted_compile_argument_is_rejected_before_the_effect()
--> Result<(), crate::shell::ShellError> {
-    let p = programs();
-    let validation = Validation::new();
-    let journal = Journal::default();
-    let session = SessionId::new(1621);
-    let (bus, _reader, _terminals) = Bus::open([], [(session, BUILD_SERVER)]);
-    let mut slab = vec![0; 1024 * 1024];
+    let mut slab = vec![0; 2 * 1024 * 1024];
     let mut storage = SessionKitStorage::uninit();
-    let rv = storage
-        .init()
-        .rendezvous(&mut slab, &bus.transport)
-        .unwrap();
-    rv.set_resolver(
-        &p.developer,
-        ResolverRef::<COMPILE_CLOSE>::decision_state(&validation, Validation::decide),
-    )
-    .unwrap();
-    let mut developer = rv.enter(session, &p.developer).unwrap();
-    let mut guest = rv.enter(session, &p.dev_wasi).unwrap();
-    let mut owner = rv.enter(session, &p.build_owner).unwrap();
-    let build = rv.enter(session, &p.build_server).unwrap();
-
-    hibana_runtime::race(
-        async {
-            {
-                async {
-                    hibana_runtime::race(
-                        async {
-                            let result =
-                                localside::developer::run(&mut developer, &journal, &validation)
-                                    .await;
-                            {
-                                assert_eq!(
-                                    result.unwrap_err().to_string(),
-                                    "compile arguments differ from the admitted request"
-                                );
-                            };
-                            Ok::<(), crate::shell::ShellError>(())
-                        },
-                        async {
-                            let _ = async {
-                                assert_eq!(open(&mut guest, b"service/compile_and_test").await, 0);
-                                write(&mut guest, json!({"component":"reviewed_candidate"})).await;
-                                guest.recv::<RequestReady>().await.unwrap();
-                                guest
-                                    .send::<Commit>(&protocol::FdCloseReq(
-                                        protocol::FdRequest::new(SERVICE_FD),
-                                    ))
-                                    .await
-                                    .unwrap();
-                                assert_eq!(
-                                    serde_json::from_slice::<Value>(
-                                        guest.recv::<Admitted>().await.unwrap()
-                                    )
-                                    .unwrap(),
-                                    json!({"component":"reviewed_candidate"})
-                                );
-                                owner.send::<Loan<BUILD_SERVER>>(build).await.unwrap();
-                                let mut build = guest.recv::<Loan<BUILD_SERVER>>().await.unwrap();
-                                let substituted = Arguments::<1>::from_bytes(
-                                    br#"{"component":"unreviewed_candidate"}"#,
-                                )
-                                .unwrap();
-                                build.send::<CompileRequest>(&substituted).await.unwrap();
-                                let response = build.recv::<CompileResult>().await.unwrap();
-                                panic!(
-                                    "substituted argument caused an effect: {:?}; reply: {:?}",
-                                    journal.events(),
-                                    response
-                                );
-                            }
-                            .await;
-                            Err::<(), crate::shell::ShellError>(crate::shell::ShellError::message(
-                                "rejected request completed unexpectedly",
-                            ))
-                        },
-                    )
-                    .await
-                    .unwrap();
-                    assert!(journal.events().is_empty());
-                }
-                .await;
-                Ok::<_, std::io::Error>(())
-            }
-        },
-        hibana_runtime::host::deadline(Duration::from_secs(3)),
-    )
-    .await
-    .expect("argument substitution test stalled");
-
-    Ok(())
-}
-
-#[hibana_runtime::main]
-#[test]
-async fn wasi_roles_reach_the_service_owners_only_through_projected_messages()
--> Result<(), crate::shell::ShellError> {
-    let p = programs();
-    let compile = Validation::new();
-    let test = Validation::new();
-    let deploy = Validation::new();
+    let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
+    let mut host = rv.enter(session, &p.build_owner)?;
+    let mut deployment_host = rv.enter(session, &p.deploy_owner)?;
+    let resource = rv.enter(session, &p.build_server)?;
+    let developer_close = rv.enter(session, &p.dev_close)?;
+    let tester_close = rv.enter(session, &p.test_close)?;
+    let deploy_close = rv.enter(session, &p.deploy_close)?;
+    let _environment = rv.enter(session, &p.deploy_env)?;
+    let mut sender = rv.enter(session, &p.developer)?;
+    let developer_file = rv.enter(session, &p.dev_file)?;
+    let mut tester = rv.enter(session, &p.tester)?;
+    let tester_file = rv.enter(session, &p.test_file)?;
+    let mut deployer = rv.enter(session, &p.deployer)?;
+    let deployer_file = rv.enter(session, &p.deploy_file)?;
+    let mut guest = rv.enter(session, &p.dev_wasi)?;
+    let mut test_guest = rv.enter(session, &p.test_wasi)?;
+    let mut deploy_guest = rv.enter(session, &p.deploy_wasi)?;
     let journal = Journal::default();
-    let mut slab = vec![0; 1024 * 1024];
-    let session = SessionId::new(16);
-    let (bus, _, _) = Bus::open([], [(session, BUILD_SERVER), (session, DEPLOY_ENV)]);
-    let mut storage = SessionKitStorage::<&InMemoryTransport>::uninit();
-    let kit = storage.init();
-    let rv = kit.rendezvous(&mut slab, &bus.transport).unwrap();
-    rv.set_resolver(
-        &p.developer,
-        ResolverRef::<COMPILE_CLOSE>::decision_state(&compile, Validation::decide),
-    )
-    .unwrap();
-    rv.set_resolver(
-        &p.tester,
-        ResolverRef::<TEST_CLOSE>::decision_state(&test, Validation::decide),
-    )
-    .unwrap();
-    rv.set_resolver(
-        &p.deployer,
-        ResolverRef::<DEPLOY_CLOSE>::decision_state(&deploy, Validation::decide),
-    )
-    .unwrap();
-    let mut a = rv.enter(session, &p.dev_wasi).unwrap();
-    let mut b = rv.enter(session, &p.test_wasi).unwrap();
-    let mut c = rv.enter(session, &p.deploy_wasi).unwrap();
-    let mut developer = rv.enter(session, &p.developer).unwrap();
-    let mut tester = rv.enter(session, &p.tester).unwrap();
-    let mut deployer = rv.enter(session, &p.deployer).unwrap();
-    let mut build_owner = rv.enter(session, &p.build_owner).unwrap();
-    let build = rv.enter(session, &p.build_server).unwrap();
-    let mut deploy_owner = rv.enter(session, &p.deploy_owner).unwrap();
-    let env = rv.enter(session, &p.deploy_env).unwrap();
-    let (test_requested, mut test_ready) = notification().unwrap();
-    let (developer_closed, mut closed) = notification().unwrap();
-    let clients = async {
-        async {
-            assert_eq!(test_ready.read(&mut [0; 1]).await.unwrap(), 1);
-            assert_ne!(open(&mut a, b"service/deploy_application").await, 0);
-            assert_eq!(open(&mut a, b"service/compile_and_test").await, 0);
-            write(&mut a, json!({"wrong":"application"})).await;
-            a.recv::<RequestReady>().await.unwrap();
-            a.send::<Commit>(&protocol::FdCloseReq(protocol::FdRequest::new(4)))
-                .await
-                .unwrap();
-            let rejected =
-                serde_json::from_slice::<Value>(a.recv::<Rejected>().await.unwrap()).unwrap();
-            assert_eq!(rejected["status"], "invalid_arguments");
-            assert!(journal.events().is_empty());
-            assert_eq!(open(&mut a, b"service/compile_and_test").await, 0);
-            write(&mut a, json!({"component":"application"})).await;
-            a.recv::<RequestReady>().await.unwrap();
-            a.send::<Commit>(&protocol::FdCloseReq(protocol::FdRequest::new(SERVICE_FD)))
-                .await
-                .unwrap();
-            let arguments = {
-                let bytes = a.recv::<Admitted>().await.unwrap();
-                Arguments::<1>::from_bytes(bytes).unwrap()
-            };
-            let mut resource = a.recv::<Loan<BUILD_SERVER>>().await.unwrap();
-            resource.send::<CompileRequest>(&arguments).await.unwrap();
-            let result = resource.recv::<CompileResult>().await.unwrap().to_vec();
-            assert_eq!(
-                serde_json::from_slice::<Value>(&result).unwrap()["success"],
-                true
-            );
-            a.send::<Loan<BUILD_SERVER>>(resource).await.unwrap();
-            assert_eq!(open(&mut a, b"service/compile_and_test").await, 8);
-            // Closed-service errors must not wait for downstream effects.
-            assert_eq!(journal.events().len(), 1);
-            developer_closed.notify().unwrap();
-            a.recv::<RequestReady>().await.unwrap();
-            a.send::<ServiceExit>(&0).await.unwrap();
-
-            Ok(())
-        };
-        async {
-            {
-                let mut ready = std::pin::pin!(b.recv::<RequestReady>());
-                assert!(
-                    hibana_runtime::race(
-                        async { Ok::<_, std::io::Error>((&mut ready).await) },
-                        hibana_runtime::host::deadline(Duration::from_millis(10))
-                    )
-                    .await
-                    .is_err_and(|error| error.kind() == std::io::ErrorKind::TimedOut)
-                );
-                assert!(journal.events().is_empty());
-                test_requested.notify().unwrap();
-                ready.await.unwrap();
-            }
-            b.send::<Open>(&protocol::PathOpenReq(
-                protocol::PathOpen::new(3, 1 << 6, b"service/run_integration_tests")
-                    .unwrap()
-                    .with_flags(8, 0)
-                    .unwrap(),
-            ))
-            .await
-            .unwrap();
-            assert_eq!(b.recv::<Opened>().await.unwrap().0.errno(), 0);
-            assert_eq!(closed.read(&mut [0; 1]).await.unwrap(), 1);
-            write(&mut b, json!({"suite":"integration"})).await;
-            b.recv::<RequestReady>().await.unwrap();
-            b.send::<Commit>(&protocol::FdCloseReq(protocol::FdRequest::new(SERVICE_FD)))
-                .await
-                .unwrap();
-            let arguments = {
-                let bytes = b.recv::<Admitted>().await.unwrap();
-                Arguments::<2>::from_bytes(bytes).unwrap()
-            };
-            let mut resource = b.recv::<Loan<BUILD_SERVER>>().await.unwrap();
-            resource.send::<TestRequest>(&arguments).await.unwrap();
-            let result = resource.recv::<TestResult>().await.unwrap().to_vec();
-            assert_eq!(
-                serde_json::from_slice::<Value>(&result).unwrap()["success"],
-                true
-            );
-            b.send::<Loan<BUILD_SERVER>>(resource).await.unwrap();
-            b.recv::<RequestReady>().await.unwrap();
-            b.send::<ServiceExit>(&0).await.unwrap();
-
-            Ok(())
-        };
-        async {
-            assert_eq!(open(&mut c, b"service/deploy_application").await, 0);
-            write(&mut c, json!({"target":"production"})).await;
-            c.recv::<RequestReady>().await.unwrap();
-            c.send::<Commit>(&protocol::FdCloseReq(protocol::FdRequest::new(SERVICE_FD)))
-                .await
-                .unwrap();
-            let arguments = {
-                let bytes = c.recv::<Admitted>().await.unwrap();
-                Arguments::<3>::from_bytes(bytes).unwrap()
-            };
-            let mut resource = c.recv::<Loan<DEPLOY_ENV>>().await.unwrap();
-            resource.send::<DeployRequest>(&arguments).await.unwrap();
-            let result = resource.recv::<DeployResult>().await.unwrap().to_vec();
-            assert_eq!(
-                serde_json::from_slice::<Value>(&result).unwrap()["success"],
-                true
-            );
-            c.send::<Loan<DEPLOY_ENV>>(resource).await.unwrap();
-            c.recv::<RequestReady>().await.unwrap();
-            c.send::<ServiceExit>(&0).await.unwrap();
-
-            Ok(())
-        };
-        Ok::<(), crate::shell::ShellError>(())
-    };
     hibana_runtime::race(
         async {
-            Ok::<_, std::io::Error>(
+            hibana_runtime::race(
+                async {
+                    let error = localside::infrastructure::build_server(
+                        &mut host,
+                        (resource, developer_close, tester_close),
+                        &journal,
+                    )
+                    .await
+                    .unwrap_err();
+                    assert!(
+                        matches!(&error,ShellError::Endpoint(error) if !error.is_unavailable()),
+                        "{error}"
+                    );
+                    assert!(error.to_string().contains("Codec(Malformed)"), "{error}");
+                    Ok::<(), ShellError>(())
+                },
                 async {
                     async {
-                        clients.await?;
+                        let mut operation = sender.recv::<Loan<DEV_CLOSE>>().await?;
+                        sender.send::<Loan<DEV_FILE>>(developer_file).await?;
+                        operation.recv::<protocol::FdCloseObjectReqMsg>().await?;
+                        let admitted =
+                            Arguments::<1>::from_bytes(br#"{"component":"application"}"#)?;
+                        operation.send::<CompileIntent>(&admitted).await?;
+                        let mut build = operation.recv::<Loan<BUILD_SERVER>>().await?;
+                        build.send::<g::Msg<30, Forged>>(&Forged).await?;
+                        core::future::pending::<ShellResult<()>>().await
                     };
                     async {
-                        localside::developer::run(&mut developer, &journal, &compile).await?;
+                        let _operation = tester.recv::<Loan<TEST_CLOSE>>().await?;
+                        tester.send::<Loan<TEST_FILE>>(tester_file).await?;
+                        core::future::pending::<ShellResult<()>>().await
                     };
                     async {
-                        localside::tester::run(&mut tester, &journal, &test).await?;
+                        let _operation = deployer.recv::<Loan<DEPLOY_CLOSE>>().await?;
+                        deployer.send::<Loan<DEPLOY_FILE>>(deployer_file).await?;
+                        core::future::pending::<ShellResult<()>>().await
                     };
                     async {
-                        localside::deployer::run(&mut deployer, &journal, &deploy).await?;
+                        deployment_host
+                            .send::<Loan<DEPLOY_CLOSE>>(deploy_close)
+                            .await?;
+                        core::future::pending::<ShellResult<()>>().await
                     };
                     async {
-                        localside::infrastructure::build_server(&mut build_owner, build).await?;
+                        let mut file = guest.recv::<Loan<DEV_FILE>>().await?;
+                        file.send::<protocol::FdCloseObjectReqMsg>(&protocol::FdCloseObjectReq(
+                            protocol::FdRequest::new(4),
+                        ))
+                        .await?;
+                        core::future::pending::<ShellResult<()>>().await
                     };
                     async {
-                        localside::infrastructure::deploy_env(&mut deploy_owner, env).await?;
+                        let _file = test_guest.recv::<Loan<TEST_FILE>>().await?;
+                        core::future::pending::<ShellResult<()>>().await
+                    };
+                    async {
+                        let _file = deploy_guest.recv::<Loan<DEPLOY_FILE>>().await?;
+                        core::future::pending::<ShellResult<()>>().await
                     };
                     Ok(())
-                }
-                .await,
+                },
             )
+            .await
         },
         hibana_runtime::host::deadline(Duration::from_secs(3)),
     )
-    .await
-    .unwrap()
-    .unwrap();
-    assert_eq!(
-        journal.events().iter().map(|row| row.1).collect::<Vec<_>>(),
-        [
-            "compile_and_test",
-            "run_integration_tests",
-            "deploy_application"
-        ]
-    );
-
+    .await?;
+    assert!(journal.0.take().is_empty());
     Ok(())
 }

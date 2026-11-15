@@ -62,74 +62,50 @@ async fn researcher(
             ("write_section", json!({"section_name":other})),
         ] {
             let denied = guest
-                .command(
-                    agent,
-                    format!("echo '{arguments}' > /service/{tool}; cat /service/result"),
-                )
+                .command(agent, format!("echo '{arguments}' > /service/{tool}"))
                 .await?;
-            assert_eq!(response(&denied)?["status"], "invalid_arguments");
-        }
-    }
-    let research = guest
-        .command(
-            agent,
-            format!(
-                "echo '{{\"topic\":\"{topic}\"}}' > /service/research_topic; cat /service/result"
-            ),
-        )
-        .await?;
-    assert_eq!(response(&research)?["success"], true);
-    let notes = "independently selected research notes";
-    let write = guest
-        .command(
-            agent,
-            format!(
-                "printf '%s' ' {}' > /service/write_section; cat /service/result",
-                json!({"section_name":section,"content_notes":notes})
-            ),
-        )
-        .await?;
-    assert_eq!(response(&write)?["success"], true);
-    let references = guest.command(agent,format!("echo '{{\"section_name\":\"{section}\"}}' > /service/update_references; cat /service/result")).await?;
-    let mut review = response(&references)?["coordination"]["review_sections"].clone();
-    let mut feedback = Vec::new();
-    loop {
-        let accepted = review["success"].as_bool().ok_or("actual section review")?;
-        feedback.push(review.clone());
-        if accepted {
-            break;
-        }
-        let padding = " ".repeat(512);
-        let revised = guest.command(agent,format!("printf '%s' '{padding}{}' > /service/revise_section; cat /service/result",json!({"section_name":section,"feedback":review["message"].as_str().ok_or("original review feedback")?}))).await?;
-        let revised = response(&revised)?;
-        assert_eq!(revised["success"], true);
-        review = revised["coordination"]["review_sections"].clone();
-    }
-    if adversarial_inputs {
-        for (tool, arguments) in [
-            ("research_topic", json!({"topic":topic})),
-            ("write_section", json!({"section_name":section})),
-            ("update_references", json!({"section_name":section})),
-            (
-                "revise_section",
-                json!({"section_name":section,"feedback":"after approval"}),
-            ),
-        ] {
-            let denied = hibana_runtime::race(
-                guest.command(agent, format!("echo '{arguments}' > /service/{tool}")),
-                hibana_runtime::host::deadline(Duration::from_secs(3)),
-            )
-            .await?;
             assert!(
                 denied["stdout"]
                     .as_str()
-                    .ok_or("post-approval stdout")?
-                    .contains("wash:"),
-                "approved section accepted another revision: {denied}"
+                    .ok_or("invalid input output")?
+                    .contains("Invalid argument"),
+                "{denied}"
             );
-            let result = guest.command(agent, "cat /service/result".into()).await?;
-            assert_eq!(response(&result)?["status"], "out_of_order");
         }
+    }
+    for (tool, arguments) in [
+        ("research_topic", json!({"topic":topic})),
+        (
+            "write_section",
+            json!({"section_name":section,"content_notes":"independently selected research notes"}),
+        ),
+        ("update_references", json!({"section_name":section})),
+    ] {
+        let reply = guest
+            .command(
+                agent,
+                format!("printf '%s' ' {arguments}' > /service/{tool}; cat /service/{tool}"),
+            )
+            .await?;
+        assert_eq!(response(&reply)?["success"], true, "{reply}");
+    }
+    let mut reviews = Vec::new();
+    loop {
+        let reply = guest.command(agent, "cat /service/feedback".into()).await?;
+        let result = response(&reply)?;
+        assert_eq!(result["tool_name"], "review_sections", "{result}");
+        assert_eq!(result["data"]["scope"], section, "{result}");
+        let accepted = result["success"]
+            .as_bool()
+            .ok_or("actual section review verdict")?;
+        reviews.push(result.clone());
+        if accepted {
+            break;
+        }
+        let arguments = json!({"section_name":section,"feedback":result["message"].as_str().ok_or("actual negative review feedback")?});
+        let padding = " ".repeat(512);
+        let reply=guest.command(agent,format!("printf '%s' '{padding}{arguments}' > /service/revise_section; cat /service/revise_section")).await?;
+        assert_eq!(response(&reply)?["success"], true, "{reply}");
     }
     if !adversarial_inputs {
         assert_eq!(
@@ -137,7 +113,7 @@ async fn researcher(
             0
         );
     }
-    Ok(feedback)
+    Ok(reviews)
 }
 
 async fn editor(
@@ -147,8 +123,21 @@ async fn editor(
     adversarial_inputs: bool,
 ) -> Result<()> {
     if adversarial_inputs {
-        let denied = guest.command("EDITOR", "echo '{\"sections\":\"section_a,section_b\"}' > /service/combine_sections; cat /service/result".into()).await?;
-        assert_eq!(response(&denied)?["status"], "out_of_order");
+        let denied = hibana_runtime::race(
+            guest.command(
+                "EDITOR",
+                "echo '{\"sections\":\"section_a,section_b\"}' > /service/combine_sections".into(),
+            ),
+            hibana_runtime::host::deadline(Duration::from_secs(3)),
+        )
+        .await?;
+        assert!(
+            denied["stdout"]
+                .as_str()
+                .ok_or("early publication output")?
+                .contains("wash:"),
+            "{denied}"
+        );
     }
     let other = if first == "section_a" {
         "section_b"
@@ -158,9 +147,27 @@ async fn editor(
     let mut requests = VecDeque::from([first, other]);
     let mut results = Vec::new();
     while let Some(section) = requests.pop_front() {
-        let reply = guest.command("EDITOR",format!("echo '{{\"section_name\":\"{section}\"}}' > /service/review_sections; cat /service/result")).await?;
+        let reply = guest.command("EDITOR",format!("echo '{{\"section_name\":\"{section}\"}}' > /service/review_{section}; cat /service/review_{section}")).await?;
         let reply = response(&reply)?;
         let accepted = reply["success"].as_bool().ok_or("original review result")?;
+        if adversarial_inputs && !accepted {
+            let denied = hibana_runtime::race(
+                guest.command(
+                    "EDITOR",
+                    "echo '{\"sections\":\"section_a,section_b\"}' > /service/combine_sections"
+                        .into(),
+                ),
+                hibana_runtime::host::deadline(Duration::from_secs(3)),
+            )
+            .await?;
+            assert!(
+                denied["stdout"]
+                    .as_str()
+                    .ok_or("rejected-review publication output")?
+                    .contains("wash:"),
+                "publication was admitted after a negative review: {denied}"
+            );
+        }
         results.push((section, accepted));
         if !accepted {
             match schedule {
@@ -196,7 +203,7 @@ async fn editor(
                 .1
         );
     }
-    let result = guest.command("EDITOR","echo '{\"sections\":\" section_b, section_a \"}' > /service/combine_sections; cat /service/result".into()).await?;
+    let result = guest.command("EDITOR","echo '{\"sections\":\" section_b, section_a \"}' > /service/combine_sections; cat /service/combine_sections".into()).await?;
     assert_eq!(response(&result)?["success"], true);
     if !adversarial_inputs {
         assert_eq!(
@@ -408,15 +415,15 @@ async fn run(cases: Vec<Case>) -> Result<()> {
                                 async { researcher(&guest, "RESEARCHER_B", "section_b", true).await };
                                 async { editor(&guest, case.first, case.schedule, true).await };
                             }.await?;
-                            // All three real replies have arrived, including combine.
+                            // Both researchers received their actual approval;
+                            // the editor also received the actual publication.
                             for (agent, section) in [("RESEARCHER_A", "section_a"), ("RESEARCHER_B", "section_b")] {
                                 let denied = hibana_runtime::race(
                                     guest.command(agent, format!("echo '{}' > /service/revise_section", json!({"section_name":section,"feedback":"after the combined report completed"}))),
                                     hibana_runtime::host::deadline(Duration::from_secs(3)),
                                 ).await?;
                                 assert!(denied["stdout"].as_str().ok_or("post-combine stdout")?.contains("wash:"), "completed report accepted another edit: {denied}");
-                                let reply = guest.command(agent, "cat /service/result".into()).await?;
-                                assert_eq!(response(&reply)?["status"], "out_of_order");
+
                             }
                             async {
                                 let guest = &guest;
@@ -491,22 +498,6 @@ async fn run(cases: Vec<Case>) -> Result<()> {
             9 + 2 * rejected
         );
         let status = Command::new(&auditor)
-            .arg("--audit-report")
-            .arg(output.join("events.jsonl"))
-            .stdout(Stdio::from(fs::File::create(output.join("audit.json"))?))
-            .stderr(Stdio::from(fs::File::create(
-                output.join("audit-stderr.log"),
-            )?))
-            .status()?;
-        if !status.success() {
-            return Err(format!("report audit failed ({status}): {}", output.display()).into());
-        }
-        let audit: Value = serde_json::from_slice(&fs::read(output.join("audit.json"))?)?;
-        assert_eq!(audit["status"], "passed");
-        assert_eq!(audit["dynamic_protocol"]["status"], "passed");
-        assert_eq!(audit["actual_resource_endpoint_requests"], 5 + rejected);
-        assert_eq!(audit["actual_review_requests"], 2 + rejected);
-        let status = Command::new(&auditor)
             .arg("--check-report-mutants")
             .arg(output.join("events.jsonl"))
             .arg(output.join("resource-mutants"))
@@ -518,10 +509,23 @@ async fn run(cases: Vec<Case>) -> Result<()> {
         if !status.success() {
             return Err(format!("report mutations failed ({status}): {}", output.display()).into());
         }
+        fs::copy(
+            output.join("resource-mutants/audit.json"),
+            output.join("audit.json"),
+        )?;
+        let audit: Value = serde_json::from_slice(&fs::read(output.join("audit.json"))?)?;
+        assert_eq!(audit["status"], "passed");
+        assert_eq!(audit["dynamic_protocol"]["status"], "passed");
+        assert_eq!(audit["actual_resource_endpoint_requests"], 5 + rejected);
+        assert_eq!(audit["actual_review_requests"], 2 + rejected);
         let mutants: Value =
             serde_json::from_slice(&fs::read(output.join("resource-mutants/summary.json"))?)?;
         assert_eq!(mutants["status"], "passed");
-        assert!(mutants["count"].as_u64().is_some_and(|count| count > 0));
+        assert!(
+            mutants["record_mutations_rejected"]
+                .as_u64()
+                .is_some_and(|count| count > 0)
+        );
         if case.delay == 1.0 {
             for kind in [
                 "research_topic+research_topic",
@@ -543,7 +547,7 @@ async fn run(cases: Vec<Case>) -> Result<()> {
             }
         }
         outcomes.push(
-            json!({"case":output.file_name().and_then(|name| name.to_str()).ok_or("report case name")?,"audit":audit,"record_mutants":mutants["count"],"original_score":result["score"]}),
+            json!({"case":output.file_name().and_then(|name| name.to_str()).ok_or("report case name")?,"audit":audit,"record_mutants":mutants["record_mutations_rejected"],"original_score":result["score"]}),
         );
     }
     assert_eq!(outcomes.len(), assignments.len());

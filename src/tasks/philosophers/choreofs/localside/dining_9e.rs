@@ -1,6 +1,6 @@
 //! Endpoint operations remain visible in each scoped participant body.
 use super::super::{global, identity, imp::PhilosopherArguments};
-use super::{fork, wasi};
+use super::fork;
 use crate::{
     imp::transport::InMemoryTransport,
     shell::{
@@ -15,7 +15,9 @@ use crate::{
     },
 };
 use hibana::runtime::{SessionKitStorage, ids::SessionId};
-use hibana_wasip1_runtime::protocol;
+use hibana_wasip1_runtime::{
+    ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasiGuestStorage, protocol,
+};
 
 #[hibana_runtime::scope]
 pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> ShellResult<()> {
@@ -40,7 +42,7 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
     let session = SessionId::new(identity::SESSION);
     let result = async {
         rv.set_resolver(
-            &programs.a,
+            &programs.eat_close_a,
             hibana::runtime::resolver::ResolverRef::<EAT_A_ARGUMENTS>::decision_state(
                 &a_input,
                 crate::shell::imp::service::Validation::decide,
@@ -48,7 +50,7 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
         )
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
         rv.set_resolver(
-            &programs.think_a,
+            &programs.think_close_a,
             hibana::runtime::resolver::ResolverRef::<THINK_A_ARGUMENTS>::decision_state(
                 &think_a_input,
                 crate::shell::imp::service::Validation::decide,
@@ -57,6 +59,8 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
         let mut a = rv.enter(session, &programs.a)?;
         let mut think_a = rv.enter(session, &programs.think_a)?;
+        let think_close_a = rv.enter(session, &programs.think_close_a)?;
+        let eat_close_a = rv.enter(session, &programs.eat_close_a)?;
         let mut fork_a = rv.enter(session, &programs.fork_a)?;
         let resource_a = rv.enter(session, &programs.resource_a)?;
         let think_file_a = rv.enter(session, &programs.a_think_file)?;
@@ -65,7 +69,7 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
         let mut a_io = rv.enter(session, &programs.a_io)?;
 
         rv.set_resolver(
-            &programs.b,
+            &programs.eat_close_b,
             hibana::runtime::resolver::ResolverRef::<EAT_B_ARGUMENTS>::decision_state(
                 &b_input,
                 crate::shell::imp::service::Validation::decide,
@@ -73,7 +77,7 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
         )
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
         rv.set_resolver(
-            &programs.think_b,
+            &programs.think_close_b,
             hibana::runtime::resolver::ResolverRef::<THINK_B_ARGUMENTS>::decision_state(
                 &think_b_input,
                 crate::shell::imp::service::Validation::decide,
@@ -82,6 +86,8 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
         let mut b = rv.enter(session, &programs.b)?;
         let mut think_b = rv.enter(session, &programs.think_b)?;
+        let think_close_b = rv.enter(session, &programs.think_close_b)?;
+        let eat_close_b = rv.enter(session, &programs.eat_close_b)?;
         let mut fork_b = rv.enter(session, &programs.fork_b)?;
         let resource_b = rv.enter(session, &programs.resource_b)?;
         let think_file_b = rv.enter(session, &programs.b_think_file)?;
@@ -90,7 +96,7 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
         let mut b_io = rv.enter(session, &programs.b_io)?;
 
         rv.set_resolver(
-            &programs.c,
+            &programs.eat_close_c,
             hibana::runtime::resolver::ResolverRef::<EAT_C_ARGUMENTS>::decision_state(
                 &c_input,
                 crate::shell::imp::service::Validation::decide,
@@ -98,7 +104,7 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
         )
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
         rv.set_resolver(
-            &programs.think_c,
+            &programs.think_close_c,
             hibana::runtime::resolver::ResolverRef::<THINK_C_ARGUMENTS>::decision_state(
                 &think_c_input,
                 crate::shell::imp::service::Validation::decide,
@@ -107,6 +113,8 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
         let mut c = rv.enter(session, &programs.c)?;
         let mut think_c = rv.enter(session, &programs.think_c)?;
+        let think_close_c = rv.enter(session, &programs.think_close_c)?;
+        let eat_close_c = rv.enter(session, &programs.eat_close_c)?;
         let mut fork_c = rv.enter(session, &programs.fork_c)?;
         let resource_c = rv.enter(session, &programs.resource_c)?;
         let think_file_c = rv.enter(session, &programs.c_think_file)?;
@@ -119,78 +127,108 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
             let mut data = FileData::new(THINK_OBJECT);
             think_a.send::<Loan<A_THINK_FILE>>(think_file_a).await?;
             let status = {
-                let [mut io, mut operation] = think_a.par()?;
+                let mut authority = Some(think_close_a);
+                let io = &mut think_a;
                 loop {
-                    let branch = hibana_runtime::race(io.offer(), operation.offer()).await?;
-                    match branch.label() {
-                        protocol::LABEL_WASI_PATH_OPEN => {
-                            let received = branch.recv::<protocol::PathOpenReqMsg>().await?;
-                            let response = data.open(received);
-                            io.send::<protocol::PathOpenRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_WRITE_OBJECT => {
-                            let received = branch.recv::<protocol::FdWriteObjectReqMsg>().await?;
-                            let response = data.write(received)?;
-                            io.send::<protocol::FdWriteObjectRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_PRESTAT_GET => {
-                            let request = branch.recv::<protocol::FdPrestatGetReqMsg>().await?;
-                            let response = protocol::FdPrestatRet(
-                                protocol::FdPrestat::new_with_errno(request.0.fd(), 0, 8),
-                            );
-                            io.send::<protocol::FdPrestatGetRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_PRESTAT_DIR_NAME => {
-                            let request = branch.recv::<protocol::FdPrestatDirNameReqMsg>().await?;
-                            let response = protocol::FdPrestatDirNameRet(
-                                protocol::FdPrestatDirNameDone::new(request.0.fd(), b"", 8)?,
-                            );
-                            io.send::<protocol::FdPrestatDirNameRetMsg>(&response)
-                                .await?;
-                        }
-                        protocol::LABEL_WASI_FD_READDIR => {
-                            let request = branch.recv::<protocol::FdReaddirReqMsg>().await?;
-                            let response =
-                                data.objects().choreofs().fd_readdir(request).read_dir()?;
-                            io.send::<protocol::FdReaddirRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_READ => {
-                            let received = branch.recv::<protocol::FdReadReqMsg>().await?;
-                            let response = data.read(received)?;
-                            io.send::<protocol::FdReadRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_FDSTAT_GET => {
-                            let request = branch.recv::<protocol::FdFdstatGetReqMsg>().await?;
-                            let response = data.objects().choreofs().fd_fdstat_get(request);
-                            io.send::<protocol::FdFdstatGetRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_FILESTAT_GET => {
-                            let request = branch.recv::<protocol::FdFilestatGetReqMsg>().await?;
-                            let response = data.objects().choreofs().fd_filestat_get(request);
-                            io.send::<protocol::FdFilestatGetRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_PATH_FILESTAT_GET => {
-                            let request = branch.recv::<protocol::PathFilestatGetReqMsg>().await?;
-                            let response = data.objects().choreofs().path_filestat_get(request);
-                            io.send::<protocol::PathFilestatGetRetMsg>(&response)
-                                .await?;
-                        }
-                        protocol::LABEL_WASI_FD_CLOSE => {
-                            let request = branch.recv::<protocol::FdCloseReqMsg>().await?;
-                            let response = data.objects().choreofs().fd_close(request);
-                            io.send::<protocol::FdCloseRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_CLOSE_OBJECT => {
-                            let request = branch.recv::<protocol::FdCloseObjectReqMsg>().await?;
+                    let incoming = if let Some(operation) = authority.as_mut() {
+                        hibana_runtime::race(
+                            async {
+                                let branch = io.offer().await?;
+                                Ok(core::ops::ControlFlow::Continue(branch.label()))
+                            },
+                            async {
+                                operation
+                                    .recv::<protocol::FdCloseObjectReqMsg>()
+                                    .await
+                                    .map(core::ops::ControlFlow::Break)
+                            },
+                        )
+                        .await?
+                    } else {
+                        core::ops::ControlFlow::Continue(io.offer().await?.label())
+                    };
+                    match incoming {
+                        core::ops::ControlFlow::Continue(label) => match label {
+                            protocol::LABEL_WASI_PATH_OPEN => {
+                                let received = io.recv::<protocol::PathOpenReqMsg>().await?;
+                                let response = data.open(received);
+                                io.send::<protocol::PathOpenRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_WRITE_OBJECT => {
+                                let received = io.recv::<protocol::FdWriteObjectReqMsg>().await?;
+                                let response = data.write(received)?;
+                                io.send::<protocol::FdWriteObjectRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_PRESTAT_GET => {
+                                let request = io.recv::<protocol::FdPrestatGetReqMsg>().await?;
+                                let response = protocol::FdPrestatRet(
+                                    protocol::FdPrestat::new_with_errno(request.0.fd(), 0, 8),
+                                );
+                                io.send::<protocol::FdPrestatGetRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_PRESTAT_DIR_NAME => {
+                                let request = io.recv::<protocol::FdPrestatDirNameReqMsg>().await?;
+                                let response = protocol::FdPrestatDirNameRet(
+                                    protocol::FdPrestatDirNameDone::new(request.0.fd(), b"", 8)?,
+                                );
+                                io.send::<protocol::FdPrestatDirNameRetMsg>(&response)
+                                    .await?;
+                            }
+                            protocol::LABEL_WASI_FD_READDIR => {
+                                let request = io.recv::<protocol::FdReaddirReqMsg>().await?;
+                                let response =
+                                    data.objects().choreofs().fd_readdir(request).read_dir()?;
+                                io.send::<protocol::FdReaddirRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_READ => {
+                                let received = io.recv::<protocol::FdReadReqMsg>().await?;
+                                let response = data.read(received)?;
+                                io.send::<protocol::FdReadRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_FDSTAT_GET => {
+                                let request = io.recv::<protocol::FdFdstatGetReqMsg>().await?;
+                                let response = data.objects().choreofs().fd_fdstat_get(request);
+                                io.send::<protocol::FdFdstatGetRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_FILESTAT_GET => {
+                                let request = io.recv::<protocol::FdFilestatGetReqMsg>().await?;
+                                let response = data.objects().choreofs().fd_filestat_get(request);
+                                io.send::<protocol::FdFilestatGetRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_PATH_FILESTAT_GET => {
+                                let request = io.recv::<protocol::PathFilestatGetReqMsg>().await?;
+                                let response = data.objects().choreofs().path_filestat_get(request);
+                                io.send::<protocol::PathFilestatGetRetMsg>(&response)
+                                    .await?;
+                            }
+                            protocol::LABEL_WASI_FD_CLOSE => {
+                                let request = io.recv::<protocol::FdCloseReqMsg>().await?;
+                                let response = data.objects().choreofs().fd_close(request);
+                                io.send::<protocol::FdCloseRetMsg>(&response).await?;
+                            }
+
+                            241 => {
+                                let status = io.recv::<FileExit>().await?;
+                                break status;
+                            }
+                            label => {
+                                return Err(ShellError::message(format!(
+                                    "unexpected think-file request {label}"
+                                )));
+                            }
+                        },
+                        core::ops::ControlFlow::Break(request) => {
                             let close = data.objects().choreofs().fd_close(request);
+                            let operation = authority.as_mut().ok_or_else(|| {
+                                ShellError::message("missing owned close Endpoint")
+                            })?;
                             think_a_input.record(if close.0.errno() == 0 {
                                 PhilosopherArguments::from_bytes(&data.bytes)
                                     .map(PhilosopherArguments::into_value)
                             } else {
                                 Err(ShellError::message("invalid file descriptor"))
                             });
-                            // par borrows a selected branch. The resolver reads the
-                            // actual decoded think_a_input; the preview publishes no effect.
+                            // Resolve from the actual decoded request before replying.
                             drop(operation.offer().await?);
                             let arguments = think_a_input
                                 .take()
@@ -215,17 +253,14 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
                                     operation
                                         .send::<protocol::FdCloseObjectRetMsg>(&close)
                                         .await?;
+                                    io.send::<CloseAuthority<A_THINK_CLOSE>>(
+                                        authority.take().ok_or_else(|| {
+                                            ShellError::message("missing owned close Endpoint")
+                                        })?,
+                                    )
+                                    .await?;
                                 }
                             }
-                        }
-                        241 => {
-                            let status = branch.recv::<FileExit>().await?;
-                            break status;
-                        }
-                        label => {
-                            return Err(ShellError::message(format!(
-                                "unexpected think-file request {label}"
-                            )));
                         }
                     }
                 }
@@ -238,78 +273,108 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
             let mut data = FileData::new(EAT_OBJECT);
             a.send::<Loan<A_EAT_FILE>>(eat_file_a).await?;
             let status = {
-                let [mut io, mut operation] = a.par()?;
+                let mut authority = Some(eat_close_a);
+                let io = &mut a;
                 loop {
-                    let branch = hibana_runtime::race(io.offer(), operation.offer()).await?;
-                    match branch.label() {
-                        protocol::LABEL_WASI_PATH_OPEN => {
-                            let received = branch.recv::<protocol::PathOpenReqMsg>().await?;
-                            let response = data.open(received);
-                            io.send::<protocol::PathOpenRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_WRITE_OBJECT => {
-                            let received = branch.recv::<protocol::FdWriteObjectReqMsg>().await?;
-                            let response = data.write(received)?;
-                            io.send::<protocol::FdWriteObjectRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_PRESTAT_GET => {
-                            let request = branch.recv::<protocol::FdPrestatGetReqMsg>().await?;
-                            let response = protocol::FdPrestatRet(
-                                protocol::FdPrestat::new_with_errno(request.0.fd(), 0, 8),
-                            );
-                            io.send::<protocol::FdPrestatGetRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_PRESTAT_DIR_NAME => {
-                            let request = branch.recv::<protocol::FdPrestatDirNameReqMsg>().await?;
-                            let response = protocol::FdPrestatDirNameRet(
-                                protocol::FdPrestatDirNameDone::new(request.0.fd(), b"", 8)?,
-                            );
-                            io.send::<protocol::FdPrestatDirNameRetMsg>(&response)
-                                .await?;
-                        }
-                        protocol::LABEL_WASI_FD_READDIR => {
-                            let request = branch.recv::<protocol::FdReaddirReqMsg>().await?;
-                            let response =
-                                data.objects().choreofs().fd_readdir(request).read_dir()?;
-                            io.send::<protocol::FdReaddirRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_READ => {
-                            let received = branch.recv::<protocol::FdReadReqMsg>().await?;
-                            let response = data.read(received)?;
-                            io.send::<protocol::FdReadRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_FDSTAT_GET => {
-                            let request = branch.recv::<protocol::FdFdstatGetReqMsg>().await?;
-                            let response = data.objects().choreofs().fd_fdstat_get(request);
-                            io.send::<protocol::FdFdstatGetRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_FILESTAT_GET => {
-                            let request = branch.recv::<protocol::FdFilestatGetReqMsg>().await?;
-                            let response = data.objects().choreofs().fd_filestat_get(request);
-                            io.send::<protocol::FdFilestatGetRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_PATH_FILESTAT_GET => {
-                            let request = branch.recv::<protocol::PathFilestatGetReqMsg>().await?;
-                            let response = data.objects().choreofs().path_filestat_get(request);
-                            io.send::<protocol::PathFilestatGetRetMsg>(&response)
-                                .await?;
-                        }
-                        protocol::LABEL_WASI_FD_CLOSE => {
-                            let request = branch.recv::<protocol::FdCloseReqMsg>().await?;
-                            let response = data.objects().choreofs().fd_close(request);
-                            io.send::<protocol::FdCloseRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_CLOSE_OBJECT => {
-                            let request = branch.recv::<protocol::FdCloseObjectReqMsg>().await?;
+                    let incoming = if let Some(operation) = authority.as_mut() {
+                        hibana_runtime::race(
+                            async {
+                                let branch = io.offer().await?;
+                                Ok(core::ops::ControlFlow::Continue(branch.label()))
+                            },
+                            async {
+                                operation
+                                    .recv::<protocol::FdCloseObjectReqMsg>()
+                                    .await
+                                    .map(core::ops::ControlFlow::Break)
+                            },
+                        )
+                        .await?
+                    } else {
+                        core::ops::ControlFlow::Continue(io.offer().await?.label())
+                    };
+                    match incoming {
+                        core::ops::ControlFlow::Continue(label) => match label {
+                            protocol::LABEL_WASI_PATH_OPEN => {
+                                let received = io.recv::<protocol::PathOpenReqMsg>().await?;
+                                let response = data.open(received);
+                                io.send::<protocol::PathOpenRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_WRITE_OBJECT => {
+                                let received = io.recv::<protocol::FdWriteObjectReqMsg>().await?;
+                                let response = data.write(received)?;
+                                io.send::<protocol::FdWriteObjectRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_PRESTAT_GET => {
+                                let request = io.recv::<protocol::FdPrestatGetReqMsg>().await?;
+                                let response = protocol::FdPrestatRet(
+                                    protocol::FdPrestat::new_with_errno(request.0.fd(), 0, 8),
+                                );
+                                io.send::<protocol::FdPrestatGetRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_PRESTAT_DIR_NAME => {
+                                let request = io.recv::<protocol::FdPrestatDirNameReqMsg>().await?;
+                                let response = protocol::FdPrestatDirNameRet(
+                                    protocol::FdPrestatDirNameDone::new(request.0.fd(), b"", 8)?,
+                                );
+                                io.send::<protocol::FdPrestatDirNameRetMsg>(&response)
+                                    .await?;
+                            }
+                            protocol::LABEL_WASI_FD_READDIR => {
+                                let request = io.recv::<protocol::FdReaddirReqMsg>().await?;
+                                let response =
+                                    data.objects().choreofs().fd_readdir(request).read_dir()?;
+                                io.send::<protocol::FdReaddirRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_READ => {
+                                let received = io.recv::<protocol::FdReadReqMsg>().await?;
+                                let response = data.read(received)?;
+                                io.send::<protocol::FdReadRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_FDSTAT_GET => {
+                                let request = io.recv::<protocol::FdFdstatGetReqMsg>().await?;
+                                let response = data.objects().choreofs().fd_fdstat_get(request);
+                                io.send::<protocol::FdFdstatGetRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_FILESTAT_GET => {
+                                let request = io.recv::<protocol::FdFilestatGetReqMsg>().await?;
+                                let response = data.objects().choreofs().fd_filestat_get(request);
+                                io.send::<protocol::FdFilestatGetRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_PATH_FILESTAT_GET => {
+                                let request = io.recv::<protocol::PathFilestatGetReqMsg>().await?;
+                                let response = data.objects().choreofs().path_filestat_get(request);
+                                io.send::<protocol::PathFilestatGetRetMsg>(&response)
+                                    .await?;
+                            }
+                            protocol::LABEL_WASI_FD_CLOSE => {
+                                let request = io.recv::<protocol::FdCloseReqMsg>().await?;
+                                let response = data.objects().choreofs().fd_close(request);
+                                io.send::<protocol::FdCloseRetMsg>(&response).await?;
+                            }
+
+                            241 => {
+                                let status = io.recv::<FileExit>().await?;
+                                break status;
+                            }
+                            label => {
+                                return Err(ShellError::message(format!(
+                                    "unexpected eat-file request {label}"
+                                )));
+                            }
+                        },
+                        core::ops::ControlFlow::Break(request) => {
                             let close = data.objects().choreofs().fd_close(request);
+                            let operation = authority.as_mut().ok_or_else(|| {
+                                ShellError::message("missing owned close Endpoint")
+                            })?;
                             a_input.record(if close.0.errno() == 0 {
                                 PhilosopherArguments::from_bytes(&data.bytes)
                                     .map(PhilosopherArguments::into_value)
                             } else {
                                 Err(ShellError::message("invalid file descriptor"))
                             });
-                            // par borrows a selected branch. The resolver reads the
-                            // actual decoded a_input; the preview publishes no effect.
+                            // Resolve from the actual decoded request before replying.
                             drop(operation.offer().await?);
                             let arguments =
                                 a_input.take().and_then(PhilosopherArguments::from_value);
@@ -394,15 +459,10 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
                             operation
                                 .send::<protocol::FdCloseObjectRetMsg>(&close)
                                 .await?;
-                        }
-                        241 => {
-                            let status = branch.recv::<FileExit>().await?;
-                            break status;
-                        }
-                        label => {
-                            return Err(ShellError::message(format!(
-                                "unexpected eat-file request {label}"
-                            )));
+                            io.send::<CloseAuthority<A_EAT_CLOSE>>(authority.take().ok_or_else(
+                                || ShellError::message("missing owned close Endpoint"),
+                            )?)
+                            .await?;
                         }
                     }
                 }
@@ -415,7 +475,34 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
             fork::run(&mut fork_a, resource_a).await?;
         };
         async {
-            wasi::run::<A_WASI, A_THINK_FILE, A_EAT_FILE>(module, a_wasi).await?;
+            let mut endpoint = a_wasi;
+            let (think, eat) = async {
+                let [mut think, mut eat] = endpoint.par()?;
+                async { think.recv::<Loan<A_THINK_FILE>>().await };
+                async { eat.recv::<Loan<A_EAT_FILE>>().await };
+            }
+            .await?;
+            let files = ChoreoFsFiles::new(endpoint)
+                .file(
+                    ChoreoFsFile::new(THINK_OBJECT, think)
+                        .close_with::<CloseAuthority<A_THINK_CLOSE>>(),
+                )?
+                .file(
+                    ChoreoFsFile::new(EAT_OBJECT, eat).close_with::<CloseAuthority<A_EAT_CLOSE>>(),
+                )?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut endpoint, (eat, (think, ()))) = files.into_parts();
+            let mut think = think.into_endpoint();
+            let mut eat = eat.into_endpoint();
+            think.send::<FileExit>(&status).await?;
+            eat.send::<FileExit>(&status).await?;
+            drop(think);
+            drop(eat);
+            endpoint.send::<crate::shell::global::Exit>(&status).await?;
         };
         async {
             private_io::run(
@@ -429,78 +516,108 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
             let mut data = FileData::new(THINK_OBJECT);
             think_b.send::<Loan<B_THINK_FILE>>(think_file_b).await?;
             let status = {
-                let [mut io, mut operation] = think_b.par()?;
+                let mut authority = Some(think_close_b);
+                let io = &mut think_b;
                 loop {
-                    let branch = hibana_runtime::race(io.offer(), operation.offer()).await?;
-                    match branch.label() {
-                        protocol::LABEL_WASI_PATH_OPEN => {
-                            let received = branch.recv::<protocol::PathOpenReqMsg>().await?;
-                            let response = data.open(received);
-                            io.send::<protocol::PathOpenRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_WRITE_OBJECT => {
-                            let received = branch.recv::<protocol::FdWriteObjectReqMsg>().await?;
-                            let response = data.write(received)?;
-                            io.send::<protocol::FdWriteObjectRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_PRESTAT_GET => {
-                            let request = branch.recv::<protocol::FdPrestatGetReqMsg>().await?;
-                            let response = protocol::FdPrestatRet(
-                                protocol::FdPrestat::new_with_errno(request.0.fd(), 0, 8),
-                            );
-                            io.send::<protocol::FdPrestatGetRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_PRESTAT_DIR_NAME => {
-                            let request = branch.recv::<protocol::FdPrestatDirNameReqMsg>().await?;
-                            let response = protocol::FdPrestatDirNameRet(
-                                protocol::FdPrestatDirNameDone::new(request.0.fd(), b"", 8)?,
-                            );
-                            io.send::<protocol::FdPrestatDirNameRetMsg>(&response)
-                                .await?;
-                        }
-                        protocol::LABEL_WASI_FD_READDIR => {
-                            let request = branch.recv::<protocol::FdReaddirReqMsg>().await?;
-                            let response =
-                                data.objects().choreofs().fd_readdir(request).read_dir()?;
-                            io.send::<protocol::FdReaddirRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_READ => {
-                            let received = branch.recv::<protocol::FdReadReqMsg>().await?;
-                            let response = data.read(received)?;
-                            io.send::<protocol::FdReadRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_FDSTAT_GET => {
-                            let request = branch.recv::<protocol::FdFdstatGetReqMsg>().await?;
-                            let response = data.objects().choreofs().fd_fdstat_get(request);
-                            io.send::<protocol::FdFdstatGetRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_FILESTAT_GET => {
-                            let request = branch.recv::<protocol::FdFilestatGetReqMsg>().await?;
-                            let response = data.objects().choreofs().fd_filestat_get(request);
-                            io.send::<protocol::FdFilestatGetRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_PATH_FILESTAT_GET => {
-                            let request = branch.recv::<protocol::PathFilestatGetReqMsg>().await?;
-                            let response = data.objects().choreofs().path_filestat_get(request);
-                            io.send::<protocol::PathFilestatGetRetMsg>(&response)
-                                .await?;
-                        }
-                        protocol::LABEL_WASI_FD_CLOSE => {
-                            let request = branch.recv::<protocol::FdCloseReqMsg>().await?;
-                            let response = data.objects().choreofs().fd_close(request);
-                            io.send::<protocol::FdCloseRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_CLOSE_OBJECT => {
-                            let request = branch.recv::<protocol::FdCloseObjectReqMsg>().await?;
+                    let incoming = if let Some(operation) = authority.as_mut() {
+                        hibana_runtime::race(
+                            async {
+                                let branch = io.offer().await?;
+                                Ok(core::ops::ControlFlow::Continue(branch.label()))
+                            },
+                            async {
+                                operation
+                                    .recv::<protocol::FdCloseObjectReqMsg>()
+                                    .await
+                                    .map(core::ops::ControlFlow::Break)
+                            },
+                        )
+                        .await?
+                    } else {
+                        core::ops::ControlFlow::Continue(io.offer().await?.label())
+                    };
+                    match incoming {
+                        core::ops::ControlFlow::Continue(label) => match label {
+                            protocol::LABEL_WASI_PATH_OPEN => {
+                                let received = io.recv::<protocol::PathOpenReqMsg>().await?;
+                                let response = data.open(received);
+                                io.send::<protocol::PathOpenRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_WRITE_OBJECT => {
+                                let received = io.recv::<protocol::FdWriteObjectReqMsg>().await?;
+                                let response = data.write(received)?;
+                                io.send::<protocol::FdWriteObjectRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_PRESTAT_GET => {
+                                let request = io.recv::<protocol::FdPrestatGetReqMsg>().await?;
+                                let response = protocol::FdPrestatRet(
+                                    protocol::FdPrestat::new_with_errno(request.0.fd(), 0, 8),
+                                );
+                                io.send::<protocol::FdPrestatGetRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_PRESTAT_DIR_NAME => {
+                                let request = io.recv::<protocol::FdPrestatDirNameReqMsg>().await?;
+                                let response = protocol::FdPrestatDirNameRet(
+                                    protocol::FdPrestatDirNameDone::new(request.0.fd(), b"", 8)?,
+                                );
+                                io.send::<protocol::FdPrestatDirNameRetMsg>(&response)
+                                    .await?;
+                            }
+                            protocol::LABEL_WASI_FD_READDIR => {
+                                let request = io.recv::<protocol::FdReaddirReqMsg>().await?;
+                                let response =
+                                    data.objects().choreofs().fd_readdir(request).read_dir()?;
+                                io.send::<protocol::FdReaddirRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_READ => {
+                                let received = io.recv::<protocol::FdReadReqMsg>().await?;
+                                let response = data.read(received)?;
+                                io.send::<protocol::FdReadRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_FDSTAT_GET => {
+                                let request = io.recv::<protocol::FdFdstatGetReqMsg>().await?;
+                                let response = data.objects().choreofs().fd_fdstat_get(request);
+                                io.send::<protocol::FdFdstatGetRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_FILESTAT_GET => {
+                                let request = io.recv::<protocol::FdFilestatGetReqMsg>().await?;
+                                let response = data.objects().choreofs().fd_filestat_get(request);
+                                io.send::<protocol::FdFilestatGetRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_PATH_FILESTAT_GET => {
+                                let request = io.recv::<protocol::PathFilestatGetReqMsg>().await?;
+                                let response = data.objects().choreofs().path_filestat_get(request);
+                                io.send::<protocol::PathFilestatGetRetMsg>(&response)
+                                    .await?;
+                            }
+                            protocol::LABEL_WASI_FD_CLOSE => {
+                                let request = io.recv::<protocol::FdCloseReqMsg>().await?;
+                                let response = data.objects().choreofs().fd_close(request);
+                                io.send::<protocol::FdCloseRetMsg>(&response).await?;
+                            }
+
+                            241 => {
+                                let status = io.recv::<FileExit>().await?;
+                                break status;
+                            }
+                            label => {
+                                return Err(ShellError::message(format!(
+                                    "unexpected think-file request {label}"
+                                )));
+                            }
+                        },
+                        core::ops::ControlFlow::Break(request) => {
                             let close = data.objects().choreofs().fd_close(request);
+                            let operation = authority.as_mut().ok_or_else(|| {
+                                ShellError::message("missing owned close Endpoint")
+                            })?;
                             think_b_input.record(if close.0.errno() == 0 {
                                 PhilosopherArguments::from_bytes(&data.bytes)
                                     .map(PhilosopherArguments::into_value)
                             } else {
                                 Err(ShellError::message("invalid file descriptor"))
                             });
-                            // par borrows a selected branch. The resolver reads the
-                            // actual decoded think_b_input; the preview publishes no effect.
+                            // Resolve from the actual decoded request before replying.
                             drop(operation.offer().await?);
                             let arguments = think_b_input
                                 .take()
@@ -525,17 +642,14 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
                                     operation
                                         .send::<protocol::FdCloseObjectRetMsg>(&close)
                                         .await?;
+                                    io.send::<CloseAuthority<B_THINK_CLOSE>>(
+                                        authority.take().ok_or_else(|| {
+                                            ShellError::message("missing owned close Endpoint")
+                                        })?,
+                                    )
+                                    .await?;
                                 }
                             }
-                        }
-                        241 => {
-                            let status = branch.recv::<FileExit>().await?;
-                            break status;
-                        }
-                        label => {
-                            return Err(ShellError::message(format!(
-                                "unexpected think-file request {label}"
-                            )));
                         }
                     }
                 }
@@ -548,78 +662,108 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
             let mut data = FileData::new(EAT_OBJECT);
             b.send::<Loan<B_EAT_FILE>>(eat_file_b).await?;
             let status = {
-                let [mut io, mut operation] = b.par()?;
+                let mut authority = Some(eat_close_b);
+                let io = &mut b;
                 loop {
-                    let branch = hibana_runtime::race(io.offer(), operation.offer()).await?;
-                    match branch.label() {
-                        protocol::LABEL_WASI_PATH_OPEN => {
-                            let received = branch.recv::<protocol::PathOpenReqMsg>().await?;
-                            let response = data.open(received);
-                            io.send::<protocol::PathOpenRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_WRITE_OBJECT => {
-                            let received = branch.recv::<protocol::FdWriteObjectReqMsg>().await?;
-                            let response = data.write(received)?;
-                            io.send::<protocol::FdWriteObjectRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_PRESTAT_GET => {
-                            let request = branch.recv::<protocol::FdPrestatGetReqMsg>().await?;
-                            let response = protocol::FdPrestatRet(
-                                protocol::FdPrestat::new_with_errno(request.0.fd(), 0, 8),
-                            );
-                            io.send::<protocol::FdPrestatGetRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_PRESTAT_DIR_NAME => {
-                            let request = branch.recv::<protocol::FdPrestatDirNameReqMsg>().await?;
-                            let response = protocol::FdPrestatDirNameRet(
-                                protocol::FdPrestatDirNameDone::new(request.0.fd(), b"", 8)?,
-                            );
-                            io.send::<protocol::FdPrestatDirNameRetMsg>(&response)
-                                .await?;
-                        }
-                        protocol::LABEL_WASI_FD_READDIR => {
-                            let request = branch.recv::<protocol::FdReaddirReqMsg>().await?;
-                            let response =
-                                data.objects().choreofs().fd_readdir(request).read_dir()?;
-                            io.send::<protocol::FdReaddirRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_READ => {
-                            let received = branch.recv::<protocol::FdReadReqMsg>().await?;
-                            let response = data.read(received)?;
-                            io.send::<protocol::FdReadRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_FDSTAT_GET => {
-                            let request = branch.recv::<protocol::FdFdstatGetReqMsg>().await?;
-                            let response = data.objects().choreofs().fd_fdstat_get(request);
-                            io.send::<protocol::FdFdstatGetRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_FILESTAT_GET => {
-                            let request = branch.recv::<protocol::FdFilestatGetReqMsg>().await?;
-                            let response = data.objects().choreofs().fd_filestat_get(request);
-                            io.send::<protocol::FdFilestatGetRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_PATH_FILESTAT_GET => {
-                            let request = branch.recv::<protocol::PathFilestatGetReqMsg>().await?;
-                            let response = data.objects().choreofs().path_filestat_get(request);
-                            io.send::<protocol::PathFilestatGetRetMsg>(&response)
-                                .await?;
-                        }
-                        protocol::LABEL_WASI_FD_CLOSE => {
-                            let request = branch.recv::<protocol::FdCloseReqMsg>().await?;
-                            let response = data.objects().choreofs().fd_close(request);
-                            io.send::<protocol::FdCloseRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_CLOSE_OBJECT => {
-                            let request = branch.recv::<protocol::FdCloseObjectReqMsg>().await?;
+                    let incoming = if let Some(operation) = authority.as_mut() {
+                        hibana_runtime::race(
+                            async {
+                                let branch = io.offer().await?;
+                                Ok(core::ops::ControlFlow::Continue(branch.label()))
+                            },
+                            async {
+                                operation
+                                    .recv::<protocol::FdCloseObjectReqMsg>()
+                                    .await
+                                    .map(core::ops::ControlFlow::Break)
+                            },
+                        )
+                        .await?
+                    } else {
+                        core::ops::ControlFlow::Continue(io.offer().await?.label())
+                    };
+                    match incoming {
+                        core::ops::ControlFlow::Continue(label) => match label {
+                            protocol::LABEL_WASI_PATH_OPEN => {
+                                let received = io.recv::<protocol::PathOpenReqMsg>().await?;
+                                let response = data.open(received);
+                                io.send::<protocol::PathOpenRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_WRITE_OBJECT => {
+                                let received = io.recv::<protocol::FdWriteObjectReqMsg>().await?;
+                                let response = data.write(received)?;
+                                io.send::<protocol::FdWriteObjectRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_PRESTAT_GET => {
+                                let request = io.recv::<protocol::FdPrestatGetReqMsg>().await?;
+                                let response = protocol::FdPrestatRet(
+                                    protocol::FdPrestat::new_with_errno(request.0.fd(), 0, 8),
+                                );
+                                io.send::<protocol::FdPrestatGetRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_PRESTAT_DIR_NAME => {
+                                let request = io.recv::<protocol::FdPrestatDirNameReqMsg>().await?;
+                                let response = protocol::FdPrestatDirNameRet(
+                                    protocol::FdPrestatDirNameDone::new(request.0.fd(), b"", 8)?,
+                                );
+                                io.send::<protocol::FdPrestatDirNameRetMsg>(&response)
+                                    .await?;
+                            }
+                            protocol::LABEL_WASI_FD_READDIR => {
+                                let request = io.recv::<protocol::FdReaddirReqMsg>().await?;
+                                let response =
+                                    data.objects().choreofs().fd_readdir(request).read_dir()?;
+                                io.send::<protocol::FdReaddirRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_READ => {
+                                let received = io.recv::<protocol::FdReadReqMsg>().await?;
+                                let response = data.read(received)?;
+                                io.send::<protocol::FdReadRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_FDSTAT_GET => {
+                                let request = io.recv::<protocol::FdFdstatGetReqMsg>().await?;
+                                let response = data.objects().choreofs().fd_fdstat_get(request);
+                                io.send::<protocol::FdFdstatGetRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_FILESTAT_GET => {
+                                let request = io.recv::<protocol::FdFilestatGetReqMsg>().await?;
+                                let response = data.objects().choreofs().fd_filestat_get(request);
+                                io.send::<protocol::FdFilestatGetRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_PATH_FILESTAT_GET => {
+                                let request = io.recv::<protocol::PathFilestatGetReqMsg>().await?;
+                                let response = data.objects().choreofs().path_filestat_get(request);
+                                io.send::<protocol::PathFilestatGetRetMsg>(&response)
+                                    .await?;
+                            }
+                            protocol::LABEL_WASI_FD_CLOSE => {
+                                let request = io.recv::<protocol::FdCloseReqMsg>().await?;
+                                let response = data.objects().choreofs().fd_close(request);
+                                io.send::<protocol::FdCloseRetMsg>(&response).await?;
+                            }
+
+                            241 => {
+                                let status = io.recv::<FileExit>().await?;
+                                break status;
+                            }
+                            label => {
+                                return Err(ShellError::message(format!(
+                                    "unexpected eat-file request {label}"
+                                )));
+                            }
+                        },
+                        core::ops::ControlFlow::Break(request) => {
                             let close = data.objects().choreofs().fd_close(request);
+                            let operation = authority.as_mut().ok_or_else(|| {
+                                ShellError::message("missing owned close Endpoint")
+                            })?;
                             b_input.record(if close.0.errno() == 0 {
                                 PhilosopherArguments::from_bytes(&data.bytes)
                                     .map(PhilosopherArguments::into_value)
                             } else {
                                 Err(ShellError::message("invalid file descriptor"))
                             });
-                            // par borrows a selected branch. The resolver reads the
-                            // actual decoded b_input; the preview publishes no effect.
+                            // Resolve from the actual decoded request before replying.
                             drop(operation.offer().await?);
                             let arguments =
                                 b_input.take().and_then(PhilosopherArguments::from_value);
@@ -704,15 +848,10 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
                             operation
                                 .send::<protocol::FdCloseObjectRetMsg>(&close)
                                 .await?;
-                        }
-                        241 => {
-                            let status = branch.recv::<FileExit>().await?;
-                            break status;
-                        }
-                        label => {
-                            return Err(ShellError::message(format!(
-                                "unexpected eat-file request {label}"
-                            )));
+                            io.send::<CloseAuthority<B_EAT_CLOSE>>(authority.take().ok_or_else(
+                                || ShellError::message("missing owned close Endpoint"),
+                            )?)
+                            .await?;
                         }
                     }
                 }
@@ -725,7 +864,34 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
             fork::run(&mut fork_b, resource_b).await?;
         };
         async {
-            wasi::run::<B_WASI, B_THINK_FILE, B_EAT_FILE>(module, b_wasi).await?;
+            let mut endpoint = b_wasi;
+            let (think, eat) = async {
+                let [mut think, mut eat] = endpoint.par()?;
+                async { think.recv::<Loan<B_THINK_FILE>>().await };
+                async { eat.recv::<Loan<B_EAT_FILE>>().await };
+            }
+            .await?;
+            let files = ChoreoFsFiles::new(endpoint)
+                .file(
+                    ChoreoFsFile::new(THINK_OBJECT, think)
+                        .close_with::<CloseAuthority<B_THINK_CLOSE>>(),
+                )?
+                .file(
+                    ChoreoFsFile::new(EAT_OBJECT, eat).close_with::<CloseAuthority<B_EAT_CLOSE>>(),
+                )?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut endpoint, (eat, (think, ()))) = files.into_parts();
+            let mut think = think.into_endpoint();
+            let mut eat = eat.into_endpoint();
+            think.send::<FileExit>(&status).await?;
+            eat.send::<FileExit>(&status).await?;
+            drop(think);
+            drop(eat);
+            endpoint.send::<crate::shell::global::Exit>(&status).await?;
         };
         async {
             private_io::run(
@@ -739,78 +905,108 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
             let mut data = FileData::new(THINK_OBJECT);
             think_c.send::<Loan<C_THINK_FILE>>(think_file_c).await?;
             let status = {
-                let [mut io, mut operation] = think_c.par()?;
+                let mut authority = Some(think_close_c);
+                let io = &mut think_c;
                 loop {
-                    let branch = hibana_runtime::race(io.offer(), operation.offer()).await?;
-                    match branch.label() {
-                        protocol::LABEL_WASI_PATH_OPEN => {
-                            let received = branch.recv::<protocol::PathOpenReqMsg>().await?;
-                            let response = data.open(received);
-                            io.send::<protocol::PathOpenRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_WRITE_OBJECT => {
-                            let received = branch.recv::<protocol::FdWriteObjectReqMsg>().await?;
-                            let response = data.write(received)?;
-                            io.send::<protocol::FdWriteObjectRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_PRESTAT_GET => {
-                            let request = branch.recv::<protocol::FdPrestatGetReqMsg>().await?;
-                            let response = protocol::FdPrestatRet(
-                                protocol::FdPrestat::new_with_errno(request.0.fd(), 0, 8),
-                            );
-                            io.send::<protocol::FdPrestatGetRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_PRESTAT_DIR_NAME => {
-                            let request = branch.recv::<protocol::FdPrestatDirNameReqMsg>().await?;
-                            let response = protocol::FdPrestatDirNameRet(
-                                protocol::FdPrestatDirNameDone::new(request.0.fd(), b"", 8)?,
-                            );
-                            io.send::<protocol::FdPrestatDirNameRetMsg>(&response)
-                                .await?;
-                        }
-                        protocol::LABEL_WASI_FD_READDIR => {
-                            let request = branch.recv::<protocol::FdReaddirReqMsg>().await?;
-                            let response =
-                                data.objects().choreofs().fd_readdir(request).read_dir()?;
-                            io.send::<protocol::FdReaddirRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_READ => {
-                            let received = branch.recv::<protocol::FdReadReqMsg>().await?;
-                            let response = data.read(received)?;
-                            io.send::<protocol::FdReadRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_FDSTAT_GET => {
-                            let request = branch.recv::<protocol::FdFdstatGetReqMsg>().await?;
-                            let response = data.objects().choreofs().fd_fdstat_get(request);
-                            io.send::<protocol::FdFdstatGetRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_FILESTAT_GET => {
-                            let request = branch.recv::<protocol::FdFilestatGetReqMsg>().await?;
-                            let response = data.objects().choreofs().fd_filestat_get(request);
-                            io.send::<protocol::FdFilestatGetRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_PATH_FILESTAT_GET => {
-                            let request = branch.recv::<protocol::PathFilestatGetReqMsg>().await?;
-                            let response = data.objects().choreofs().path_filestat_get(request);
-                            io.send::<protocol::PathFilestatGetRetMsg>(&response)
-                                .await?;
-                        }
-                        protocol::LABEL_WASI_FD_CLOSE => {
-                            let request = branch.recv::<protocol::FdCloseReqMsg>().await?;
-                            let response = data.objects().choreofs().fd_close(request);
-                            io.send::<protocol::FdCloseRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_CLOSE_OBJECT => {
-                            let request = branch.recv::<protocol::FdCloseObjectReqMsg>().await?;
+                    let incoming = if let Some(operation) = authority.as_mut() {
+                        hibana_runtime::race(
+                            async {
+                                let branch = io.offer().await?;
+                                Ok(core::ops::ControlFlow::Continue(branch.label()))
+                            },
+                            async {
+                                operation
+                                    .recv::<protocol::FdCloseObjectReqMsg>()
+                                    .await
+                                    .map(core::ops::ControlFlow::Break)
+                            },
+                        )
+                        .await?
+                    } else {
+                        core::ops::ControlFlow::Continue(io.offer().await?.label())
+                    };
+                    match incoming {
+                        core::ops::ControlFlow::Continue(label) => match label {
+                            protocol::LABEL_WASI_PATH_OPEN => {
+                                let received = io.recv::<protocol::PathOpenReqMsg>().await?;
+                                let response = data.open(received);
+                                io.send::<protocol::PathOpenRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_WRITE_OBJECT => {
+                                let received = io.recv::<protocol::FdWriteObjectReqMsg>().await?;
+                                let response = data.write(received)?;
+                                io.send::<protocol::FdWriteObjectRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_PRESTAT_GET => {
+                                let request = io.recv::<protocol::FdPrestatGetReqMsg>().await?;
+                                let response = protocol::FdPrestatRet(
+                                    protocol::FdPrestat::new_with_errno(request.0.fd(), 0, 8),
+                                );
+                                io.send::<protocol::FdPrestatGetRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_PRESTAT_DIR_NAME => {
+                                let request = io.recv::<protocol::FdPrestatDirNameReqMsg>().await?;
+                                let response = protocol::FdPrestatDirNameRet(
+                                    protocol::FdPrestatDirNameDone::new(request.0.fd(), b"", 8)?,
+                                );
+                                io.send::<protocol::FdPrestatDirNameRetMsg>(&response)
+                                    .await?;
+                            }
+                            protocol::LABEL_WASI_FD_READDIR => {
+                                let request = io.recv::<protocol::FdReaddirReqMsg>().await?;
+                                let response =
+                                    data.objects().choreofs().fd_readdir(request).read_dir()?;
+                                io.send::<protocol::FdReaddirRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_READ => {
+                                let received = io.recv::<protocol::FdReadReqMsg>().await?;
+                                let response = data.read(received)?;
+                                io.send::<protocol::FdReadRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_FDSTAT_GET => {
+                                let request = io.recv::<protocol::FdFdstatGetReqMsg>().await?;
+                                let response = data.objects().choreofs().fd_fdstat_get(request);
+                                io.send::<protocol::FdFdstatGetRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_FILESTAT_GET => {
+                                let request = io.recv::<protocol::FdFilestatGetReqMsg>().await?;
+                                let response = data.objects().choreofs().fd_filestat_get(request);
+                                io.send::<protocol::FdFilestatGetRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_PATH_FILESTAT_GET => {
+                                let request = io.recv::<protocol::PathFilestatGetReqMsg>().await?;
+                                let response = data.objects().choreofs().path_filestat_get(request);
+                                io.send::<protocol::PathFilestatGetRetMsg>(&response)
+                                    .await?;
+                            }
+                            protocol::LABEL_WASI_FD_CLOSE => {
+                                let request = io.recv::<protocol::FdCloseReqMsg>().await?;
+                                let response = data.objects().choreofs().fd_close(request);
+                                io.send::<protocol::FdCloseRetMsg>(&response).await?;
+                            }
+
+                            241 => {
+                                let status = io.recv::<FileExit>().await?;
+                                break status;
+                            }
+                            label => {
+                                return Err(ShellError::message(format!(
+                                    "unexpected think-file request {label}"
+                                )));
+                            }
+                        },
+                        core::ops::ControlFlow::Break(request) => {
                             let close = data.objects().choreofs().fd_close(request);
+                            let operation = authority.as_mut().ok_or_else(|| {
+                                ShellError::message("missing owned close Endpoint")
+                            })?;
                             think_c_input.record(if close.0.errno() == 0 {
                                 PhilosopherArguments::from_bytes(&data.bytes)
                                     .map(PhilosopherArguments::into_value)
                             } else {
                                 Err(ShellError::message("invalid file descriptor"))
                             });
-                            // par borrows a selected branch. The resolver reads the
-                            // actual decoded think_c_input; the preview publishes no effect.
+                            // Resolve from the actual decoded request before replying.
                             drop(operation.offer().await?);
                             let arguments = think_c_input
                                 .take()
@@ -835,17 +1031,14 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
                                     operation
                                         .send::<protocol::FdCloseObjectRetMsg>(&close)
                                         .await?;
+                                    io.send::<CloseAuthority<C_THINK_CLOSE>>(
+                                        authority.take().ok_or_else(|| {
+                                            ShellError::message("missing owned close Endpoint")
+                                        })?,
+                                    )
+                                    .await?;
                                 }
                             }
-                        }
-                        241 => {
-                            let status = branch.recv::<FileExit>().await?;
-                            break status;
-                        }
-                        label => {
-                            return Err(ShellError::message(format!(
-                                "unexpected think-file request {label}"
-                            )));
                         }
                     }
                 }
@@ -858,78 +1051,108 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
             let mut data = FileData::new(EAT_OBJECT);
             c.send::<Loan<C_EAT_FILE>>(eat_file_c).await?;
             let status = {
-                let [mut io, mut operation] = c.par()?;
+                let mut authority = Some(eat_close_c);
+                let io = &mut c;
                 loop {
-                    let branch = hibana_runtime::race(io.offer(), operation.offer()).await?;
-                    match branch.label() {
-                        protocol::LABEL_WASI_PATH_OPEN => {
-                            let received = branch.recv::<protocol::PathOpenReqMsg>().await?;
-                            let response = data.open(received);
-                            io.send::<protocol::PathOpenRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_WRITE_OBJECT => {
-                            let received = branch.recv::<protocol::FdWriteObjectReqMsg>().await?;
-                            let response = data.write(received)?;
-                            io.send::<protocol::FdWriteObjectRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_PRESTAT_GET => {
-                            let request = branch.recv::<protocol::FdPrestatGetReqMsg>().await?;
-                            let response = protocol::FdPrestatRet(
-                                protocol::FdPrestat::new_with_errno(request.0.fd(), 0, 8),
-                            );
-                            io.send::<protocol::FdPrestatGetRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_PRESTAT_DIR_NAME => {
-                            let request = branch.recv::<protocol::FdPrestatDirNameReqMsg>().await?;
-                            let response = protocol::FdPrestatDirNameRet(
-                                protocol::FdPrestatDirNameDone::new(request.0.fd(), b"", 8)?,
-                            );
-                            io.send::<protocol::FdPrestatDirNameRetMsg>(&response)
-                                .await?;
-                        }
-                        protocol::LABEL_WASI_FD_READDIR => {
-                            let request = branch.recv::<protocol::FdReaddirReqMsg>().await?;
-                            let response =
-                                data.objects().choreofs().fd_readdir(request).read_dir()?;
-                            io.send::<protocol::FdReaddirRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_READ => {
-                            let received = branch.recv::<protocol::FdReadReqMsg>().await?;
-                            let response = data.read(received)?;
-                            io.send::<protocol::FdReadRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_FDSTAT_GET => {
-                            let request = branch.recv::<protocol::FdFdstatGetReqMsg>().await?;
-                            let response = data.objects().choreofs().fd_fdstat_get(request);
-                            io.send::<protocol::FdFdstatGetRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_FILESTAT_GET => {
-                            let request = branch.recv::<protocol::FdFilestatGetReqMsg>().await?;
-                            let response = data.objects().choreofs().fd_filestat_get(request);
-                            io.send::<protocol::FdFilestatGetRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_PATH_FILESTAT_GET => {
-                            let request = branch.recv::<protocol::PathFilestatGetReqMsg>().await?;
-                            let response = data.objects().choreofs().path_filestat_get(request);
-                            io.send::<protocol::PathFilestatGetRetMsg>(&response)
-                                .await?;
-                        }
-                        protocol::LABEL_WASI_FD_CLOSE => {
-                            let request = branch.recv::<protocol::FdCloseReqMsg>().await?;
-                            let response = data.objects().choreofs().fd_close(request);
-                            io.send::<protocol::FdCloseRetMsg>(&response).await?;
-                        }
-                        protocol::LABEL_WASI_FD_CLOSE_OBJECT => {
-                            let request = branch.recv::<protocol::FdCloseObjectReqMsg>().await?;
+                    let incoming = if let Some(operation) = authority.as_mut() {
+                        hibana_runtime::race(
+                            async {
+                                let branch = io.offer().await?;
+                                Ok(core::ops::ControlFlow::Continue(branch.label()))
+                            },
+                            async {
+                                operation
+                                    .recv::<protocol::FdCloseObjectReqMsg>()
+                                    .await
+                                    .map(core::ops::ControlFlow::Break)
+                            },
+                        )
+                        .await?
+                    } else {
+                        core::ops::ControlFlow::Continue(io.offer().await?.label())
+                    };
+                    match incoming {
+                        core::ops::ControlFlow::Continue(label) => match label {
+                            protocol::LABEL_WASI_PATH_OPEN => {
+                                let received = io.recv::<protocol::PathOpenReqMsg>().await?;
+                                let response = data.open(received);
+                                io.send::<protocol::PathOpenRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_WRITE_OBJECT => {
+                                let received = io.recv::<protocol::FdWriteObjectReqMsg>().await?;
+                                let response = data.write(received)?;
+                                io.send::<protocol::FdWriteObjectRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_PRESTAT_GET => {
+                                let request = io.recv::<protocol::FdPrestatGetReqMsg>().await?;
+                                let response = protocol::FdPrestatRet(
+                                    protocol::FdPrestat::new_with_errno(request.0.fd(), 0, 8),
+                                );
+                                io.send::<protocol::FdPrestatGetRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_PRESTAT_DIR_NAME => {
+                                let request = io.recv::<protocol::FdPrestatDirNameReqMsg>().await?;
+                                let response = protocol::FdPrestatDirNameRet(
+                                    protocol::FdPrestatDirNameDone::new(request.0.fd(), b"", 8)?,
+                                );
+                                io.send::<protocol::FdPrestatDirNameRetMsg>(&response)
+                                    .await?;
+                            }
+                            protocol::LABEL_WASI_FD_READDIR => {
+                                let request = io.recv::<protocol::FdReaddirReqMsg>().await?;
+                                let response =
+                                    data.objects().choreofs().fd_readdir(request).read_dir()?;
+                                io.send::<protocol::FdReaddirRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_READ => {
+                                let received = io.recv::<protocol::FdReadReqMsg>().await?;
+                                let response = data.read(received)?;
+                                io.send::<protocol::FdReadRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_FDSTAT_GET => {
+                                let request = io.recv::<protocol::FdFdstatGetReqMsg>().await?;
+                                let response = data.objects().choreofs().fd_fdstat_get(request);
+                                io.send::<protocol::FdFdstatGetRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_FD_FILESTAT_GET => {
+                                let request = io.recv::<protocol::FdFilestatGetReqMsg>().await?;
+                                let response = data.objects().choreofs().fd_filestat_get(request);
+                                io.send::<protocol::FdFilestatGetRetMsg>(&response).await?;
+                            }
+                            protocol::LABEL_WASI_PATH_FILESTAT_GET => {
+                                let request = io.recv::<protocol::PathFilestatGetReqMsg>().await?;
+                                let response = data.objects().choreofs().path_filestat_get(request);
+                                io.send::<protocol::PathFilestatGetRetMsg>(&response)
+                                    .await?;
+                            }
+                            protocol::LABEL_WASI_FD_CLOSE => {
+                                let request = io.recv::<protocol::FdCloseReqMsg>().await?;
+                                let response = data.objects().choreofs().fd_close(request);
+                                io.send::<protocol::FdCloseRetMsg>(&response).await?;
+                            }
+
+                            241 => {
+                                let status = io.recv::<FileExit>().await?;
+                                break status;
+                            }
+                            label => {
+                                return Err(ShellError::message(format!(
+                                    "unexpected eat-file request {label}"
+                                )));
+                            }
+                        },
+                        core::ops::ControlFlow::Break(request) => {
                             let close = data.objects().choreofs().fd_close(request);
+                            let operation = authority.as_mut().ok_or_else(|| {
+                                ShellError::message("missing owned close Endpoint")
+                            })?;
                             c_input.record(if close.0.errno() == 0 {
                                 PhilosopherArguments::from_bytes(&data.bytes)
                                     .map(PhilosopherArguments::into_value)
                             } else {
                                 Err(ShellError::message("invalid file descriptor"))
                             });
-                            // par borrows a selected branch. The resolver reads the
-                            // actual decoded c_input; the preview publishes no effect.
+                            // Resolve from the actual decoded request before replying.
                             drop(operation.offer().await?);
                             let arguments =
                                 c_input.take().and_then(PhilosopherArguments::from_value);
@@ -1014,15 +1237,10 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
                             operation
                                 .send::<protocol::FdCloseObjectRetMsg>(&close)
                                 .await?;
-                        }
-                        241 => {
-                            let status = branch.recv::<FileExit>().await?;
-                            break status;
-                        }
-                        label => {
-                            return Err(ShellError::message(format!(
-                                "unexpected eat-file request {label}"
-                            )));
+                            io.send::<CloseAuthority<C_EAT_CLOSE>>(authority.take().ok_or_else(
+                                || ShellError::message("missing owned close Endpoint"),
+                            )?)
+                            .await?;
                         }
                     }
                 }
@@ -1035,7 +1253,34 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
             fork::run(&mut fork_c, resource_c).await?;
         };
         async {
-            wasi::run::<C_WASI, C_THINK_FILE, C_EAT_FILE>(module, c_wasi).await?;
+            let mut endpoint = c_wasi;
+            let (think, eat) = async {
+                let [mut think, mut eat] = endpoint.par()?;
+                async { think.recv::<Loan<C_THINK_FILE>>().await };
+                async { eat.recv::<Loan<C_EAT_FILE>>().await };
+            }
+            .await?;
+            let files = ChoreoFsFiles::new(endpoint)
+                .file(
+                    ChoreoFsFile::new(THINK_OBJECT, think)
+                        .close_with::<CloseAuthority<C_THINK_CLOSE>>(),
+                )?
+                .file(
+                    ChoreoFsFile::new(EAT_OBJECT, eat).close_with::<CloseAuthority<C_EAT_CLOSE>>(),
+                )?;
+            let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+            let mut storage = HibanaWasiGuestStorage::uninit();
+            let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut endpoint, (eat, (think, ()))) = files.into_parts();
+            let mut think = think.into_endpoint();
+            let mut eat = eat.into_endpoint();
+            think.send::<FileExit>(&status).await?;
+            eat.send::<FileExit>(&status).await?;
+            drop(think);
+            drop(eat);
+            endpoint.send::<crate::shell::global::Exit>(&status).await?;
         };
         async {
             private_io::run(

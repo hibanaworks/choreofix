@@ -1,4 +1,7 @@
-//! 7E: one document authority, actual chapter material and fresh full reviews.
+//! Direct file projections, document custody and actual effects for 7E.
+use crate::shell::global::{FileExit, Loan};
+#[cfg(test)]
+mod allocation_tests;
 pub mod global;
 pub(crate) mod imp;
 pub mod localside;
@@ -6,114 +9,149 @@ pub mod localside;
 mod tests;
 
 use crate::shell::{ShellError, ShellResult};
-use hibana::runtime::{
-    SessionKitStorage,
-    ids::SessionId,
-    resolver::{DecisionArm, ResolverRef},
-};
+use hibana::runtime::{SessionKitStorage, ids::SessionId};
 
 #[hibana_runtime::scope]
-pub async fn run_stdio(module: &[u8], first: DecisionArm) -> ShellResult<()> {
+pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
     use crate::shell::{
-        imp::{
-            bus::Bus,
-            private_fs::{PrivateFs, bindings},
-        },
+        imp::{bus::Bus, private_fs::PrivateFs},
         localside::private_io,
     };
     use global::*;
-    use hibana_wasip1_runtime::{GuestMemory, HibanaWasiGuestStorage};
-
+    use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasiGuestStorage};
     let (bus, mut io, [a_terminal, b_terminal, editor_terminal]) = Bus::open(
         ["WRITER_A", "WRITER_B", "EDITOR"],
-        [(SessionId::new(SESSION), DOCUMENT)],
+        [
+            (SessionId::new(SESSION), WRITER_A),
+            (SessionId::new(SESSION), WRITER_B),
+            (SessionId::new(SESSION), EDITOR),
+            (SessionId::new(SESSION), DOCUMENT),
+            (SessionId::new(SESSION), A_FILE),
+            (SessionId::new(SESSION), B_FILE),
+            (SessionId::new(SESSION), ALLOCATION_FILE),
+        ],
     );
-    let result = hibana_runtime::race(
-        async {
-            let p = programs();
-            bus.observe(p.observation());
-            let capture = |row| {
-                bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,
-            "records":[crate::imp::projection::record(row)]}))
+    let result = hibana_runtime::race(async {
+        let p = programs();
+        bus.observe(p.observation());
+        let capture = |event| bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,"records":[crate::imp::projection::record(event)]}));
+        let mut slab = vec![0; 1024 * 1024];
+        let incoming_capacity = slab.len();
+        let mut storage = SessionKitStorage::uninit();
+        let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
+        rv.observe(&capture);
+        let observations = rv.tap();
+        let session = SessionId::new(SESSION);
+        let result = async {
+            let mut service = rv.enter(session, &p.service)?;
+            let a = rv.enter(session, &p.a)?;
+            let b = rv.enter(session, &p.b)?;
+            let editor = rv.enter(session, &p.editor)?;
+            let document = rv.enter(session, &p.document)?;
+            let mut a_vm = rv.enter(session, &p.a_vm)?;
+            let mut b_vm = rv.enter(session, &p.b_vm)?;
+            let mut editor_vm = rv.enter(session, &p.editor_vm)?;
+            // Initial view transfer is unconditional; it does not select an AI operation.
+            let (mut a, mut b, mut editor) = async {
+                let [mut a_owner, mut b_owner, mut editor_owner] = service.par()?;
+                async { a_owner.send::<Loan<WRITER_A>>(a).await?; a_vm.recv::<Loan<WRITER_A>>().await };
+                async { b_owner.send::<Loan<WRITER_B>>(b).await?; b_vm.recv::<Loan<WRITER_B>>().await };
+                async { editor_owner.send::<Loan<EDITOR>>(editor).await?; editor_vm.recv::<Loan<EDITOR>>().await };
+            }.await?;
+            let mut a_data = rv.enter(session, &p.a_data)?;
+            let a_file = rv.enter(session, &p.a_file)?;
+            let mut b_data = rv.enter(session, &p.b_data)?;
+            let b_file = rv.enter(session, &p.b_file)?;
+            let mut allocation_data = rv.enter(session, &p.allocation_data)?;
+            let allocation_file = rv.enter(session, &p.allocation_file)?;
+            let mut a_io = rv.enter(session, &p.a_io)?;
+            let mut b_io = rv.enter(session, &p.b_io)?;
+            let mut editor_io = rv.enter(session, &p.editor_io)?;
+            async { crate::shell::localside::file_metadata::run(&mut a_data, a_file, WRITER_FILES).await?; };
+            async { crate::shell::localside::file_metadata::run(&mut b_data, b_file, WRITER_FILES).await?; };
+            async { crate::shell::localside::file_metadata::run(&mut allocation_data, allocation_file, EDITOR_FILES).await?; };
+            async { let _document = localside::document::run(&mut service, document, &bus).await?; };
+            async { localside::writer::run(&mut a).await?; };
+            async { localside::writer::run(&mut b).await?; };
+            async { localside::editor::run(&mut editor).await?; };
+            async {
+                let file = a_vm.recv::<Loan<A_FILE>>().await?;
+                let (mut write, mut references, mut revision) = (
+                    vec![0; crate::shell::GUEST_MEMORY_BYTES], vec![0; crate::shell::GUEST_MEMORY_BYTES], vec![0; crate::shell::GUEST_MEMORY_BYTES]);
+                let (mut written, mut referenced, mut revised, mut feedback) = (
+                    vec![0; incoming_capacity], vec![0; incoming_capacity], vec![0; incoming_capacity], vec![0; incoming_capacity]);
+                let files = ChoreoFsFiles::new(a_vm).file(
+                    ChoreoFsFile::new(WRITER_FILES[0], file).write_as::<WriteA>(&mut write).read_as::<WriteResultA>(&mut written)
+                        .file(WRITER_FILES[1])?.write_as::<ReferencesA>(&mut references).read_as::<ReferencedA>(&mut referenced)
+                        .file(WRITER_FILES[2])?.write_as::<ReviseA>(&mut revision).read_as::<RevisionResultA>(&mut revised)
+                        .file(WRITER_FILES[3])?.read_as::<FeedbackA>(&mut feedback),
+                )?;
+                let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+                let mut storage = HibanaWasiGuestStorage::uninit();
+                let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+                let (exit, files) = guest.run().await?;
+                let status = exit.status() as i32;
+                let (mut root, (file, ())) = files.into_parts();
+                let mut file = file.into_endpoint();
+                file.send::<FileExit>(&status).await?;
+                root.send::<crate::shell::global::Exit>(&status).await?;
             };
-            let mut slab = vec![0; 1024 * 1024];
-            let mut storage = SessionKitStorage::uninit();
-            let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
-            rv.observe(&capture);
-            let observations = rv.tap();
-            let session = SessionId::new(SESSION);
-            let result = async {
-                let mut a = rv.enter(session, &p.a)?;
-                let mut b = rv.enter(session, &p.b)?;
-                let mut editor = rv.enter(session, &p.editor)?;
-                let mut service = rv.enter(session, &p.service)?;
-                let document = rv.enter(session, &p.document)?;
-                let mut a_io = rv.enter(session, &p.a_io)?;
-                let mut b_io = rv.enter(session, &p.b_io)?;
-                let mut editor_io = rv.enter(session, &p.editor_io)?;
-                rv.set_resolver(
-                    &p.service,
-                    ResolverRef::<FIRST_WRITER>::decision_state(&first, |arm| Ok(*arm)),
-                )
-                .map_err(|_| {
-                    ShellError::message("could not bind the initial document allocation")
-                })?;
-                let a_fs = PrivateFs::new(a_terminal, &bus);
-                let b_fs = PrivateFs::new(b_terminal, &bus);
-                let editor_fs = PrivateFs::new(editor_terminal, &bus);
-                let mut a_memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-                let mut b_memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-                let mut editor_memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
-                let mut a_store = HibanaWasiGuestStorage::uninit();
-                let mut b_store = HibanaWasiGuestStorage::uninit();
-                let mut editor_store = HibanaWasiGuestStorage::uninit();
-                let a_guest = a_store.init(module, GuestMemory::new(&mut a_memory), bindings())?;
-                let b_guest = b_store.init(module, GuestMemory::new(&mut b_memory), bindings())?;
-                let editor_guest =
-                    editor_store.init(module, GuestMemory::new(&mut editor_memory), bindings())?;
-                async {
-                    let _document = localside::document::run(&mut service, (document, first), &bus)
-                        .await
-                        .map_err(|error| {
-                            ShellError::message(format!("document service: {error}"))
-                        })?;
-                };
-                async {
-                    localside::writer::run(a_guest, &mut a)
-                        .await
-                        .map_err(|error| ShellError::message(format!("writer A: {error}")))?;
-                };
-                async {
-                    localside::writer::run(b_guest, &mut b)
-                        .await
-                        .map_err(|error| ShellError::message(format!("writer B: {error}")))?;
-                };
-                async {
-                    localside::editor::run(editor_guest, &mut editor)
-                        .await
-                        .map_err(|error| ShellError::message(format!("editor: {error}")))?;
-                };
-                async {
-                    private_io::run(&mut a_io, a_fs).await?;
-                };
-                async {
-                    private_io::run(&mut b_io, b_fs).await?;
-                };
-                async {
-                    private_io::run(&mut editor_io, editor_fs).await?;
-                };
-                Ok::<(), ShellError>(())
-            }
-            .await;
-            bus.observe(
-                serde_json::json!({"type":"protocol_checkpoint","producer":0,
-            "session":SESSION,"checkpoint":observations.checkpoint()}),
-            );
-            result
-        },
-        io.run(&bus),
-    )
-    .await;
+            async {
+                let file = b_vm.recv::<Loan<B_FILE>>().await?;
+                let (mut write, mut references, mut revision) = (
+                    vec![0; crate::shell::GUEST_MEMORY_BYTES], vec![0; crate::shell::GUEST_MEMORY_BYTES], vec![0; crate::shell::GUEST_MEMORY_BYTES]);
+                let (mut written, mut referenced, mut revised, mut feedback) = (
+                    vec![0; incoming_capacity], vec![0; incoming_capacity], vec![0; incoming_capacity], vec![0; incoming_capacity]);
+                let files = ChoreoFsFiles::new(b_vm).file(
+                    ChoreoFsFile::new(WRITER_FILES[0], file).write_as::<WriteB>(&mut write).read_as::<WriteResultB>(&mut written)
+                        .file(WRITER_FILES[1])?.write_as::<ReferencesB>(&mut references).read_as::<ReferencedB>(&mut referenced)
+                        .file(WRITER_FILES[2])?.write_as::<ReviseB>(&mut revision).read_as::<RevisionResultB>(&mut revised)
+                        .file(WRITER_FILES[3])?.read_as::<FeedbackB>(&mut feedback),
+                )?;
+                let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+                let mut storage = HibanaWasiGuestStorage::uninit();
+                let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+                let (exit, files) = guest.run().await?;
+                let status = exit.status() as i32;
+                let (mut root, (file, ())) = files.into_parts();
+                let mut file = file.into_endpoint();
+                file.send::<FileExit>(&status).await?;
+                root.send::<crate::shell::global::Exit>(&status).await?;
+            };
+            async {
+                let file = editor_vm.recv::<Loan<ALLOCATION_FILE>>().await?;
+                let (mut allocate, mut review_a, mut review_b, mut reconsider_a, mut reconsider_b, mut combine) = (
+                    vec![0; crate::shell::GUEST_MEMORY_BYTES],vec![0; crate::shell::GUEST_MEMORY_BYTES],vec![0; crate::shell::GUEST_MEMORY_BYTES],
+                    vec![0; crate::shell::GUEST_MEMORY_BYTES],vec![0; crate::shell::GUEST_MEMORY_BYTES],vec![0; crate::shell::GUEST_MEMORY_BYTES]);
+                let (mut allocated, mut reviewed_a, mut reviewed_b, mut revised_a, mut revised_b, mut combined) = (
+                    vec![0; incoming_capacity],vec![0; incoming_capacity],vec![0; incoming_capacity],
+                    vec![0; incoming_capacity],vec![0; incoming_capacity],vec![0; incoming_capacity]);
+                let files = ChoreoFsFiles::new(editor_vm).file(
+                    ChoreoFsFile::new(EDITOR_FILES[0], file).write_as::<Allocate>(&mut allocate).read_as::<AllocationAccepted>(&mut allocated)
+                        .file(EDITOR_FILES[1])?.write_as::<ReviewA>(&mut review_a).read_as::<ReviewedA>(&mut reviewed_a)
+                        .file(EDITOR_FILES[2])?.write_as::<ReviewB>(&mut review_b).read_as::<ReviewedB>(&mut reviewed_b)
+                        .file(EDITOR_FILES[3])?.write_as::<RequestReconsiderA>(&mut reconsider_a).read_as::<RevisionAckA>(&mut revised_a)
+                        .file(EDITOR_FILES[4])?.write_as::<RequestReconsiderB>(&mut reconsider_b).read_as::<RevisionAckB>(&mut revised_b)
+                        .file(EDITOR_FILES[5])?.write_as::<CombineInput>(&mut combine).read_as::<CombinedReply>(&mut combined),
+                )?;
+                let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
+                let mut storage = HibanaWasiGuestStorage::uninit();
+                let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
+                let (exit, files) = guest.run().await?;
+                let status = exit.status() as i32;
+                let (mut root, (file, ())) = files.into_parts();
+                let mut file = file.into_endpoint();
+                file.send::<FileExit>(&status).await?;
+                root.send::<crate::shell::global::Exit>(&status).await?;
+            };
+            async { private_io::run(&mut a_io, PrivateFs::new(a_terminal, &bus, &WRITER_FILES)).await?; };
+            async { private_io::run(&mut b_io, PrivateFs::new(b_terminal, &bus, &WRITER_FILES)).await?; };
+            async { private_io::run(&mut editor_io, PrivateFs::new(editor_terminal, &bus, &EDITOR_FILES)).await?; };
+            Ok::<(), ShellError>(())
+        }.await;
+        bus.observe(serde_json::json!({"type":"protocol_checkpoint","producer":0,"session":SESSION,"checkpoint":observations.checkpoint()}));
+        result
+    }, io.run(&bus)).await;
     match &result {
         Ok(()) => io.emit(&bus, serde_json::json!({"type":"run_result","status":"complete"})).await?,
         Err(error) => io.emit(&bus, serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,

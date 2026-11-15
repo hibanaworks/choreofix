@@ -1,7 +1,7 @@
 //! Offline actual-data/receipt correspondence; EPF alone interprets the source.
 use crate::{
     evidence::{Result, digest, save},
-    journal::{check_close_pairs, close_arguments, records},
+    journal::records,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -11,7 +11,7 @@ use std::{
     path::Path,
 };
 
-fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
+fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty build record")?["message"];
     if compiled["task"] != "10M" || fixture["task"] != "10M" || fixture["type"] != "fixtures" {
@@ -63,11 +63,13 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         ["ConfigBuilt", "ModelsBuilt"],
     ];
     let frame_labels = crate::projection::frames(artifact, rows)?;
+    let mut journal = crate::journal::read(rows, &frame_labels, actors)?;
+    journal.bind_receives(dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
         score,
-    } = crate::journal::read(rows, &frame_labels, actors)?;
+    } = journal;
     if calls.is_empty()
         || score["complete"] != true
         || score["violations"] != json!([])
@@ -77,16 +79,8 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
     {
         return Err("incomplete cascading build execution".into());
     }
-    let io_names = ["A_IO", "B_IO", "C_IO", "TESTER_IO", "INTEGRATOR_IO"];
-    let pairs = [agents[0], agents[1], agents[2], "TEST_RUNNER", "INTEGRATOR"]
-        .into_iter()
-        .zip(io_names)
-        .map(|(agent, io)| Ok((role(agent)?, role(io)?)))
-        .collect::<Result<Vec<_>>>()?;
-    check_close_pairs(&frames, &pairs)?;
     let mut used = BTreeSet::new();
-    let mut closes = BTreeSet::new();
-    let mut delivered_results = BTreeMap::new();
+    let mut file_requests = 0;
     let mut scored = score["events"]
         .as_array()
         .ok_or("build score events")?
@@ -123,15 +117,15 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         {
             return Err("build effect arguments or actual result differ".into());
         }
-        let (source, target, request, io, index) = match (agent, tool) {
+        let (source, target, request, file_role, index) = match (agent, tool) {
             ("BUILDER_A", "compile_module") => {
-                (role(agent)?, compiler, "CompileA", "A_IO", Some(0))
+                (role(agent)?, compiler, "CompileA", "A_FILE", Some(0))
             }
             ("BUILDER_B", "compile_module") => {
-                (role(agent)?, compiler, "CompileB", "B_IO", Some(1))
+                (role(agent)?, compiler, "CompileB", "B_FILE", Some(1))
             }
             ("BUILDER_C", "compile_module") => {
-                (role(agent)?, compiler, "CompileC", "C_IO", Some(2))
+                (role(agent)?, compiler, "CompileC", "C_FILE", Some(2))
             }
             ("TEST_RUNNER", "run_build_tests") => {
                 let index = modules
@@ -146,11 +140,13 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
                     tester,
                     service,
                     ["TestA", "TestB", "TestC"][index],
-                    "TESTER_IO",
+                    "TESTER_FILE",
                     Some(index),
                 )
             }
-            ("INTEGRATOR", "link_modules") => (integrator, compiler, "Link", "INTEGRATOR_IO", None),
+            ("INTEGRATOR", "link_modules") => {
+                (integrator, compiler, "Link", "INTEGRATOR_FILE", None)
+            }
             _ => return Err("unassigned cascading build effect".into()),
         };
         let request_label = label(request)?;
@@ -166,21 +162,49 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         if !used.insert(*id) {
             return Err("effect reuses an earlier admitted request".into());
         }
-        let previous_closes = closes.clone();
-        close_arguments(
-            &frames,
-            &mut closes,
-            source,
-            role(io)?,
-            admitted.sent,
-            &format!("service/{tool}"),
-            args,
-        )?;
-        let close = *closes
-            .difference(&previous_closes)
-            .next()
-            .ok_or("missing unique close occurrence")?;
-        delivered_results.insert(close, result.clone());
+        let file = role(file_role)?;
+        let (file_request, file_reply) = match tool {
+            "compile_module" => (
+                ["CompileFileA", "CompileFileB", "CompileFileC"][index.ok_or("compile index")?],
+                "FileCompiled",
+            ),
+            "run_build_tests" => (
+                ["TestFileA", "TestFileB", "TestFileC"][index.ok_or("test index")?],
+                "FileTested",
+            ),
+            "link_modules" => ("LinkFile", "FileLinked"),
+            _ => return Err("unknown actual file operation".into()),
+        };
+        let request_label = label(file_request)?;
+        let (file_id, file_input) = frames
+            .iter()
+            .filter(|(id, frame)| {
+                !used.contains(*id)
+                    && frame.direction(file, source)
+                    && frame.logical_label == request_label
+                    && frame.received.is_some_and(|before| before < admitted.sent)
+            })
+            .max_by_key(|(_, frame)| frame.received)
+            .ok_or("effect lacks its typed file input")?;
+        if file_input.value()? != *args || !used.insert(*file_id) {
+            return Err("typed file arguments changed or reused".into());
+        }
+        file_requests += 1;
+        let reply_label = label(file_reply)?;
+        let (id, reply) = frames
+            .iter()
+            .filter(|(id, frame)| {
+                !used.contains(*id)
+                    && frame.direction(source, file)
+                    && frame.logical_label == reply_label
+                    && frame.sent > at
+            })
+            .min_by_key(|(_, frame)| frame.sent)
+            .ok_or("actual file result missing")?;
+        if reply.value()? != *result || !used.insert(*id) {
+            return Err("actual operation file result changed or reused".into());
+        }
+        reply.received()?;
         let admitted_value = admitted.value()?;
         if tool == "compile_module" {
             let index = index.ok_or("compile module index")?;
@@ -552,6 +576,33 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         return Err("ready candidate missing or duplicated".into());
     }
     let ready = ready[0];
+    let file_ready = label("FileReady")?;
+    let file_link = label("LinkFile")?;
+    let integrator_file = role("INTEGRATOR_FILE")?;
+    let candidates = frames
+        .iter()
+        .filter(|(_, frame)| {
+            frame.direction(integrator, integrator_file) && frame.logical_label == file_ready
+        })
+        .collect::<Vec<_>>();
+    let (id, candidate) = *candidates.first().ok_or("actual candidate file missing")?;
+    let request = frames
+        .values()
+        .find(|frame| {
+            frame.direction(integrator_file, integrator) && frame.logical_label == file_link
+        })
+        .ok_or("link file input missing")?;
+    if candidates.len() != 1
+        || candidate.value()? != ready.value()?
+        || candidate.sent <= ready.received()?
+        || candidate.received()? >= request.sent
+        || !used.insert(*id)
+    {
+        return Err(
+            "candidate file differs from the actual checked data or request occurrence".into(),
+        );
+    }
+
     let finish_label = label("FinishChecks")?;
     let (id, finish) = frames
         .iter()
@@ -578,62 +629,103 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
             return Err("link begins before actual editing Endpoint return".into());
         }
     }
-    // Argument-file closes may legitimately be rejected. Every accepted tool
-    // call must return its actual result bytes; unmatched closes must return a
-    // recoverable rejection, never an invented success or missing response.
-    let mut result_chunks = BTreeSet::new();
-    for &(vm, io) in &pairs {
-        let mut closed: Vec<_> = frames
-            .values()
-            .filter(|f| {
-                f.direction(io, vm)
-                    && f.logical_label == hibana_wasip1_runtime::protocol::LABEL_WASI_FD_CLOSE_RET
-                    && f.bytes.first() == Some(&4)
-            })
-            .collect();
-        closed.sort_by_key(|f| f.sent);
-        for (index, close) in closed.iter().enumerate() {
-            let until = closed.get(index + 1).map_or(usize::MAX, |f| f.sent);
-            let mut chunks: Vec<_> = frames
+    let update = label("FileUpdated")?;
+    let feedback = label("FileFeedback")?;
+    let reconsidered = label("FileReconsidered")?;
+    let finished = label("FileFinished")?;
+    let object_notice = label("ObjectForTesting")?;
+    let builder_roles = agents
+        .iter()
+        .map(|agent| role(agent))
+        .collect::<Result<Vec<_>>>()?;
+    let notice_inputs = [
+        "UpdateA",
+        "UpdateB",
+        "UpdateC",
+        "Feedback",
+        "RetryA",
+        "RetryB",
+        "RetryC",
+        "RetryAToB",
+        "RetryAToC",
+        "RetryBToA",
+        "RetryBToC",
+        "RetryCToA",
+        "RetryCToB",
+        "FinishedA",
+        "FinishedB",
+        "FinishedC",
+    ]
+    .into_iter()
+    .map(label)
+    .collect::<Result<BTreeSet<_>>>()?;
+    let object_inputs = [
+        "TestObjectA",
+        "TestObjectB",
+        "TestObjectC",
+        "FinishedTester",
+    ]
+    .into_iter()
+    .map(label)
+    .collect::<Result<BTreeSet<_>>>()?;
+    for frame in frames.values() {
+        let source = frame.identity["source"].as_u64().ok_or("frame source")?;
+        let target = frame.identity["target"].as_u64().ok_or("frame target")?;
+        let forwarded = if notice_inputs.contains(&frame.logical_label)
+            && [compiler, service, integrator].contains(&source)
+            && builder_roles.contains(&target)
+        {
+            let index = builder_roles
                 .iter()
-                .filter(|(_, f)| {
-                    f.direction(vm, io)
-                        && f.logical_label == 241
-                        && f.sent > close.received.unwrap_or(close.sent)
-                        && f.sent < until
-                })
-                .collect();
-            chunks.sort_by_key(|(_, f)| f.sent);
-            let mut bytes = Vec::new();
-            for (id, chunk) in chunks {
-                let offset = chunk.bytes.get(..8).ok_or("result chunk offset missing")?;
-                if u64::from_be_bytes(offset.try_into()?) != bytes.len() as u64
-                    || !result_chunks.insert(*id)
+                .position(|role| *role == target)
+                .ok_or("builder")?;
+            Some((
+                target,
+                role(["A_FILE", "B_FILE", "C_FILE"][index])?,
+                if frame.logical_label == label("Feedback")? {
+                    feedback
+                } else if [label("RetryA")?, label("RetryB")?, label("RetryC")?]
+                    .contains(&frame.logical_label)
                 {
-                    return Err("result bytes missing, reordered or reused".into());
-                }
-                bytes.extend_from_slice(&chunk.bytes[8..]);
+                    reconsidered
+                } else if [
+                    label("FinishedA")?,
+                    label("FinishedB")?,
+                    label("FinishedC")?,
+                ]
+                .contains(&frame.logical_label)
+                {
+                    finished
+                } else {
+                    update
+                },
+            ))
+        } else if object_inputs.contains(&frame.logical_label)
+            && [compiler, integrator].contains(&source)
+            && target == tester
+        {
+            Some((tester, role("TESTER_FILE")?, object_notice))
+        } else {
+            None
+        };
+        if let Some((source, target, label)) = forwarded {
+            let value = frame.value()?;
+            let received = frame.received()?;
+            let (id, reply) = frames
+                .iter()
+                .filter(|(id, reply)| {
+                    !used.contains(*id)
+                        && reply.direction(source, target)
+                        && reply.logical_label == label
+                        && reply.sent > received
+                        && reply.value().ok().as_ref() == Some(&value)
+                })
+                .min_by_key(|(_, reply)| reply.sent)
+                .ok_or("actual incoming file data missing")?;
+            reply.received()?;
+            if !used.insert(*id) {
+                return Err("incoming file data reused".into());
             }
-            let mut actual: Value = serde_json::from_slice(&bytes)?;
-            if let Some(expected) = delivered_results.get(&close.sent) {
-                actual
-                    .as_object_mut()
-                    .ok_or("result must be an object")?
-                    .remove("coordination");
-                if actual != *expected {
-                    return Err("guest result differs from actual effect".into());
-                }
-            } else if !matches!(
-                actual["status"].as_str(),
-                Some("invalid_arguments" | "out_of_order")
-            ) {
-                return Err("unmatched argument close produced a non-rejection".into());
-            }
-        }
-        if frames.iter().any(|(id, f)| {
-            f.direction(vm, io) && f.logical_label == 241 && !result_chunks.contains(id)
-        }) {
-            return Err("unmatched result bytes".into());
         }
     }
     let json_labels = compiled["labels"]
@@ -661,6 +753,11 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         "CORE_LIB",
         "CONFIG",
         "DATA_MODELS",
+        "A_FILE",
+        "B_FILE",
+        "C_FILE",
+        "INTEGRATOR_FILE",
+        "TESTER_FILE",
     ]
     .into_iter()
     .map(role)
@@ -690,7 +787,7 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
     Ok(
         json!({"status":"passed","task":"10M","domain_calls":calls.len(),"violations":0,
         "simulator_complete":score["complete"],
-        "matched_effect_frame_ids":ids,"matched_wasi_closes":closes.len(),
+        "matched_effect_frame_ids":ids,"matched_typed_file_requests":file_requests,"dynamic_protocol":dynamic,
         "effect_scope":"unique actual admitted, resource, test, candidate and link occurrences; editing Endpoint return before link"}),
     )
 }
@@ -698,7 +795,8 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
 pub fn audit(path: &Path) -> Result<Value> {
     let artifact = crate::projection::load(path)?;
     let rows = records(path)?;
-    let mut result = check(&rows, &artifact)?;
+    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
+    let mut result = check(&rows, &artifact, &dynamic)?;
     result["source_events_sha256"] = json!(digest(path)?);
     result["runtime_binary_sha256"] = artifact["runtime_binary_sha256"].clone();
     result["compiled_projection_sha256"] = json!(digest(
@@ -707,22 +805,26 @@ pub fn audit(path: &Path) -> Result<Value> {
             .ok_or("record directory")?
             .join("projection.json")
     )?);
-    result["dynamic_protocol_checked_separately"] = json!(true);
+    result["dynamic_protocol_checked"] = json!(true);
     Ok(result)
 }
 
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
+    // Establish the complete baseline once. Mutations retain this checked
+    // source execution and independently challenge effect/argument matching.
+    let baseline = audit(path)?;
     let artifact = crate::projection::load(path)?;
     let rows = records(path)?;
-    let baseline = check(&rows, &artifact)?;
+    let dynamic = &baseline["dynamic_protocol"];
     let ids = baseline["matched_effect_frame_ids"]
         .as_array()
         .ok_or("effect frame IDs")?
         .iter()
         .map(|id| id.as_u64().ok_or("effect frame ID".into()))
         .collect::<Result<Vec<_>>>()?;
-    let mut checked =
-        crate::journal::json_frame_mutants(&rows, &ids, |changed| check(changed, &artifact))?;
+    let mut checked = crate::journal::json_frame_mutants(&rows, &ids, |changed| {
+        check(changed, &artifact, dynamic)
+    })?;
     let labels = crate::projection::frames(&artifact, &rows)?;
     let sends = rows
         .iter()
@@ -786,36 +888,11 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 row["message"]["payload"] = json!(serde_json::to_vec(&value)?);
             }
         }
-        let error = check(&changed, &artifact)
+        let error = check(&changed, &artifact, dynamic)
             .err()
             .ok_or_else(|| format!("accepted {kind}"))?;
         checked.push(json!({"kind":kind,"rejected":true,"error":error.to_string()}));
     }
-    let chunk = sends
-        .iter()
-        .find(|m| {
-            m["frame_id"]
-                .as_u64()
-                .is_some_and(|id| labels.get(&id) == Some(&241))
-        })
-        .ok_or("actual guest result chunk")?;
-    let mut changed = rows.clone();
-    for row in &mut changed {
-        if row["message"]["type"] == "protocol_frame"
-            && row["message"]["frame_id"] == chunk["frame_id"]
-        {
-            let bytes = row["message"]["payload"]
-                .as_array_mut()
-                .ok_or("result chunk bytes")?;
-            bytes[8] = json!(b'[');
-        }
-    }
-    let error = check(&changed, &artifact)
-        .err()
-        .ok_or("accepted altered guest result bytes")?;
-    checked.push(
-        json!({"kind":"coherent_guest_result_change","rejected":true,"error":error.to_string()}),
-    );
     for field in ["frame_label", "lane"] {
         let mut changed = rows.clone();
         for row in &mut changed {
@@ -823,7 +900,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 row["message"][field] = json!(65535);
             }
         }
-        let error = check(&changed, &artifact)
+        let error = check(&changed, &artifact, dynamic)
             .err()
             .ok_or("accepted coherently changed header")?;
         checked.push(json!({"kind":format!("coherent_wrong_{field}"),"rejected":true,"error":error.to_string()}));

@@ -1,7 +1,7 @@
 //! Actual document requests, material and receipts; EPF checks source execution.
 use crate::{
     evidence::{Result, digest, save},
-    journal::{Call, check_close_pairs, close_arguments, json_frame_mutants, records},
+    journal::{Call, json_frame_mutants, records},
 };
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, fs, path::Path};
@@ -67,6 +67,7 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
     let document = name("roles", "DOCUMENT")?;
     let editor = name("roles", "EDITOR")?;
     let writer_a = name("roles", "WRITER_A")?;
+    let editor_file = name("roles", "ALLOCATION_FILE")?;
     let session = compiled["session"].as_u64().ok_or("document session")?;
     let labels = crate::projection::frames(artifact, rows)?;
     let crate::journal::Journal {
@@ -81,16 +82,9 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
     {
         return Err("document session or completion differs".into());
     }
-    let pairs = [
-        (name("roles", "WRITER_A")?, name("roles", "A_IO")?),
-        (name("roles", "WRITER_B")?, name("roles", "B_IO")?),
-        (editor, name("roles", "EDITOR_IO")?),
-    ];
-    check_close_pairs(&frames, &pairs)?;
     let mut ordered = calls.values().collect::<Vec<_>>();
     ordered.sort_by_key(|call| call.emitted);
     let mut used = BTreeSet::new();
-    let mut closes = BTreeSet::new();
     let mut originals = score["events"]
         .as_array()
         .ok_or("document score events")?
@@ -108,12 +102,13 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         let args = &call.request["arguments"];
         let (result_at, result) = call.result()?;
         let actor = name("roles", agent)?;
-        let (io, chapter) = match agent {
-            "WRITER_A" => ("A_IO", CHAPTERS[0]),
-            "WRITER_B" => ("B_IO", CHAPTERS[1]),
-            "EDITOR" => ("EDITOR_IO", ""),
+        let (file, chapter) = match agent {
+            "WRITER_A" => ("A_FILE", CHAPTERS[0]),
+            "WRITER_B" => ("B_FILE", CHAPTERS[1]),
+            "EDITOR" => ("ALLOCATION_FILE", ""),
             _ => return Err("unassigned document actor".into()),
         };
+        let file = name("roles", file)?;
         let object = args.as_object().ok_or("document arguments")?;
         let primary = if tool == "combine_sections" {
             "sections"
@@ -147,16 +142,16 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
                 (Some("ReviseB"), "ReviseOnDocument", "Revised", document)
             }
             ("WRITER_A", "update_references") if scope == chapter => {
-                (None, "ReferencesA", "ReferencedA", actor)
+                (None, "ReferencesA", "ReferencedA", file)
             }
             ("WRITER_B", "update_references") if scope == chapter => {
-                (None, "ReferencesB", "ReferencedB", actor)
+                (None, "ReferencesB", "ReferencedB", file)
             }
             ("EDITOR", "review_sections") if scope == CHAPTERS[0] => {
-                (None, "ReviewA", "ReviewedA", editor)
+                (None, "ReviewA", "ReviewedA", file)
             }
             ("EDITOR", "review_sections") if scope == CHAPTERS[1] => {
-                (None, "ReviewB", "ReviewedB", editor)
+                (None, "ReviewB", "ReviewedB", file)
             }
             ("EDITOR", "combine_sections") => {
                 (Some("Combine"), "CombineOnDocument", "Combined", document)
@@ -176,15 +171,20 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         if request.value()? != *args || !used.insert(*id) {
             return Err("document request altered or reused".into());
         }
-        let mut before = request.sent;
         if let Some(admission) = admission {
             resources += 1;
             let label = name("labels", admission)? as u8;
             let (id, admitted) = frames
                 .iter()
                 .filter(|(_, frame)| {
-                    frame.direction(actor, service)
-                        && frame.logical_label == label
+                    frame.direction(
+                        if tool == "combine_sections" {
+                            actor
+                        } else {
+                            file
+                        },
+                        service,
+                    ) && frame.logical_label == label
                         && frame.sent < request.sent
                         && frame.received.is_some_and(|at| at < call.emitted)
                 })
@@ -193,17 +193,94 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
             if admitted.value()? != *args || !used.insert(*id) {
                 return Err("admitted document arguments altered or reused".into());
             }
-            before = before.min(admitted.sent);
+            if tool == "revise_section" {
+                let labels = if agent == "WRITER_A" {
+                    ["RequestReconsiderA", "ReconsiderA"]
+                } else {
+                    ["RequestReconsiderB", "ReconsiderB"]
+                };
+                let label = name("labels", labels[0])? as u8;
+                let (id, chosen) = frames
+                    .iter()
+                    .filter(|(_, frame)| {
+                        frame.direction(editor_file, editor)
+                            && frame.logical_label == label
+                            && frame.received.is_some_and(|at| at < admitted.sent)
+                    })
+                    .max_by_key(|(_, frame)| frame.received)
+                    .ok_or("revision lacks an actual reconsideration request")?;
+                let actual_review = ordered
+                    .iter()
+                    .filter(|review| {
+                        review.request["tool"] == "review_sections"
+                            && review.request["arguments"]["section_name"] == chapter
+                            && review
+                                .result
+                                .as_ref()
+                                .is_some_and(|(at, _)| *at < chosen.sent)
+                    })
+                    .max_by_key(|review| review.result.as_ref().map(|(at, _)| *at))
+                    .ok_or("reconsideration lacks its actual review")?;
+                let (_, actual_review) = actual_review.result()?;
+                if chosen.value()? != json!({"review_id":actual_review["data"]["review_id"]})
+                    || actual_review["data"]["input_snapshot"] != snapshot(&ordered, call.emitted)?
+                    || !used.insert(*id)
+                {
+                    return Err("reconsideration reused or altered its current review".into());
+                }
+                let label = name("labels", labels[1])? as u8;
+                let (id, delivered) = frames
+                    .iter()
+                    .filter(|(_, frame)| {
+                        frame.direction(editor, service)
+                            && frame.logical_label == label
+                            && frame.sent > chosen.received.unwrap()
+                            && frame.received.is_some_and(|at| at < admitted.sent)
+                    })
+                    .max_by_key(|(_, frame)| frame.received)
+                    .ok_or("actual reconsidered review was not delivered")?;
+                if delivered.value()? != *actual_review || !used.insert(*id) {
+                    return Err("reconsidered review altered or reused".into());
+                }
+            }
+            if matches!(tool, "write_section" | "revise_section") {
+                let message = match (agent, tool) {
+                    ("WRITER_A", "write_section") => "WriteArgumentsA",
+                    ("WRITER_B", "write_section") => "WriteArgumentsB",
+                    ("WRITER_A", "revise_section") => "RevisionArgumentsA",
+                    ("WRITER_B", "revise_section") => "RevisionArgumentsB",
+                    _ => unreachable!(),
+                };
+                let label = name("labels", message)? as u8;
+                let (id, forwarded) = frames
+                    .iter()
+                    .filter(|(_, frame)| {
+                        frame.direction(service, actor)
+                            && frame.logical_label == label
+                            && frame.sent > admitted.received.unwrap()
+                            && frame.received.is_some_and(|at| at < request.sent)
+                    })
+                    .max_by_key(|(_, frame)| frame.received)
+                    .ok_or("missing actual worker arguments")?;
+                if forwarded.value()? != *args || !used.insert(*id) {
+                    return Err("worker arguments altered or reused".into());
+                }
+            } else {
+                let label = name("labels", "CombineInput")? as u8;
+                let (id, input) = frames
+                    .iter()
+                    .filter(|(_, frame)| {
+                        frame.direction(editor_file, editor)
+                            && frame.logical_label == label
+                            && frame.received.is_some_and(|at| at < admitted.sent)
+                    })
+                    .max_by_key(|(_, frame)| frame.received)
+                    .ok_or("missing actual editor file input")?;
+                if input.value()? != *args || !used.insert(*id) {
+                    return Err("editor file input altered or reused".into());
+                }
+            }
         }
-        close_arguments(
-            &frames,
-            &mut closes,
-            actor,
-            name("roles", io)?,
-            before,
-            &format!("service/{tool}"),
-            args,
-        )?;
         let label = name("labels", reply)? as u8;
         let (id, reply) = frames
             .iter()
@@ -217,7 +294,39 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         if reply.value()? != *result || !used.insert(*id) {
             return Err("document reply altered or reused".into());
         }
-        reply.received()?;
+        let reply_at = reply.received()?;
+        let copied = match (agent, tool) {
+            ("WRITER_A", "write_section") => Some((actor, file, "WriteResultA")),
+            ("WRITER_B", "write_section") => Some((actor, file, "WriteResultB")),
+            ("WRITER_A", "revise_section") => Some((actor, file, "RevisionResultA")),
+            ("WRITER_B", "revise_section") => Some((actor, file, "RevisionResultB")),
+            ("EDITOR", "review_sections") if scope == CHAPTERS[0] => {
+                Some((service, editor, "ReviewEvidenceA"))
+            }
+            ("EDITOR", "review_sections") => Some((service, editor, "ReviewEvidenceB")),
+            _ => None,
+        };
+        if let Some((from, to, message)) = copied {
+            let label = name("labels", message)? as u8;
+            let (id, copy) = frames
+                .iter()
+                .filter(|(_, frame)| {
+                    frame.direction(from, to)
+                        && frame.logical_label == label
+                        && frame.sent
+                            > if tool == "review_sections" {
+                                result_at
+                            } else {
+                                reply_at
+                            }
+                })
+                .min_by_key(|(_, frame)| frame.sent)
+                .ok_or("missing actual result delivery")?;
+            if copy.value()? != *result || !used.insert(*id) {
+                return Err("actual result delivery altered or reused".into());
+            }
+            copy.received()?;
+        }
         let index = originals
             .iter()
             .position(|event| {
@@ -363,10 +472,18 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
     let required = [
         "WriteA",
         "WriteB",
+        "WriteArgumentsA",
+        "WriteArgumentsB",
+        "WriteResultA",
+        "WriteResultB",
         "WriteOnDocument",
         "Written",
         "ReviseA",
         "ReviseB",
+        "RevisionArgumentsA",
+        "RevisionArgumentsB",
+        "RevisionResultA",
+        "RevisionResultB",
         "ReviseOnDocument",
         "Revised",
         "ReferencesA",
@@ -375,23 +492,53 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         "ReferencedB",
         "ReviewA",
         "ReviewB",
+        "ReviewEvidenceA",
+        "ReviewEvidenceB",
         "ReviewedA",
         "ReviewedB",
+        "CombineInput",
         "Combine",
         "CombineForward",
         "CombineOnDocument",
         "Combined",
         "FinalApprovedA",
         "FinalApprovedB",
+        "RequestReconsiderA",
+        "RequestReconsiderB",
+        "ReconsiderA",
+        "ReconsiderB",
     ]
     .into_iter()
     .map(|label| name("labels", label).map(|n| n as u8))
     .collect::<Result<BTreeSet<_>>>()?;
-    if frames
-        .iter()
-        .any(|(id, frame)| required.contains(&frame.logical_label) && !used.contains(id))
-    {
-        return Err("unused document request, receipt or result".into());
+    // Logical labels are scoped to their communication contract. In particular,
+    // engine memory growth uses the same label bytes as revision results.
+    // Static wire matching and EPF check the I/O edges independently.
+    let business_roles = BTreeSet::from([
+        document,
+        service,
+        editor,
+        writer_a,
+        name("roles", "WRITER_B")?,
+        editor_file,
+        name("roles", "A_FILE")?,
+        name("roles", "B_FILE")?,
+    ]);
+    if let Some((id, frame)) = frames.iter().find(|(id, frame)| {
+        required.contains(&frame.logical_label)
+            && frame.identity["source"]
+                .as_u64()
+                .is_some_and(|role| business_roles.contains(&role))
+            && frame.identity["target"]
+                .as_u64()
+                .is_some_and(|role| business_roles.contains(&role))
+            && !used.contains(id)
+    }) {
+        return Err(format!(
+            "unused document request, receipt or result: frame {id}, identity {}",
+            frame.identity
+        )
+        .into());
     }
     Ok(
         json!({"status":"passed","task":"7E","domain_calls":calls.len(),

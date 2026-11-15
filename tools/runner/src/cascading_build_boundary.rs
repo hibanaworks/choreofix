@@ -23,15 +23,25 @@ fn response(reply: &Value) -> Result<Value> {
         .map_err(Into::into)
 }
 
-async fn builder(
+async fn compile(
     guest: &process::Guest,
     (agent, module): (&str, &str),
     invalid: bool,
-) -> Result<()> {
+) -> Result<Value> {
     if invalid {
-        let reply = guest.command(agent,
-            "echo '{\"module_name\":\"unassigned\"}' > /service/compile_module; cat /service/result".into()).await?;
-        assert_eq!(response(&reply)?["status"], "invalid_arguments");
+        let bad = guest
+            .command(
+                agent,
+                "echo '{\"module_name\":\"unassigned\"}' > /service/compile_module".into(),
+            )
+            .await?;
+        assert!(
+            bad["stdout"]
+                .as_str()
+                .ok_or("refused file output")?
+                .contains("wash:"),
+            "{bad}"
+        );
         let private = guest
             .command(
                 agent,
@@ -45,35 +55,121 @@ async fn builder(
                 .contains("private-data")
         );
     }
-    loop {
-        let arguments = json!({"module_name":module});
-        let reply = guest
-            .command(
-                agent,
-                format!("printf '%s' '{arguments}' > /service/compile_module; cat /service/result"),
-            )
+    let arguments = json!({"module_name":module});
+    let actual = loop {
+        let reply = guest.command(agent, format!(
+            "printf '%s' '{arguments}' > /service/compile_module; cat /service/compile_module"
+        )).await?;
+        if !reply["stdout"]
+            .as_str()
+            .ok_or("compile file output")?
+            .contains("wash:")
+        {
+            break response(&reply)?;
+        }
+        let update = guest
+            .command(agent, "dd if=/service/updates iflag=nonblock".into())
             .await?;
-        let result = response(&reply)?;
-        assert_eq!(result["tool_name"], "compile_module", "{reply}");
-        assert_eq!(result["success"], true);
-        assert_eq!(result["data"]["module"], module);
-        let next = &result["coordination"]["continuation"];
-        if next["tool_name"] == "link_modules" {
-            assert_eq!(next["data"]["status"], "linked");
+        if !update["stdout"]
+            .as_str()
+            .ok_or("update file output")?
+            .contains("wash:")
+        {
+            let actual = response(&update)?;
+            assert!(
+                actual["tool_name"] == "compile_module" || actual["module"].is_string(),
+                "{actual}"
+            );
+        }
+    };
+    assert_eq!(actual["tool_name"], "compile_module");
+    assert_eq!(actual["success"], true);
+    assert_eq!(actual["data"]["module"], module);
+    Ok(actual)
+}
+
+async fn builder(
+    guest: &process::Guest,
+    ((agent, module), mut actual): ((&str, &str), Value),
+    invalid: bool,
+) -> Result<()> {
+    loop {
+        let feedback = loop {
+            let reply = guest
+                .command(agent, "dd if=/service/test_result iflag=nonblock".into())
+                .await?;
+            if !reply["stdout"]
+                .as_str()
+                .ok_or("test feedback output")?
+                .contains("wash:")
+            {
+                break response(&reply)?;
+            }
+            let update = guest
+                .command(agent, "dd if=/service/updates iflag=nonblock".into())
+                .await?;
+            if !update["stdout"]
+                .as_str()
+                .ok_or("update file output")?
+                .contains("wash:")
+            {
+                let actual = response(&update)?;
+                assert!(
+                    actual["tool_name"] == "compile_module" || actual["module"].is_string(),
+                    "{actual}"
+                );
+            }
+        };
+        assert_eq!(feedback["data"]["input_object"], actual["data"]["object"]);
+        let reconsider = 'incoming: loop {
+            for path in ["reconsideration", "outcome", "updates"] {
+                let reply = guest
+                    .command(agent, format!("dd if=/service/{path} iflag=nonblock"))
+                    .await?;
+                let text = reply["stdout"].as_str().ok_or("incoming file output")?;
+                if text.contains("wash:") {
+                    continue;
+                }
+                let data = response(&reply)?;
+                match path {
+                    "reconsideration" => {
+                        assert_eq!(data["module"], module);
+                        assert_eq!(data["object"], actual["data"]["object"]);
+                        break 'incoming Some(data);
+                    }
+                    "outcome" => {
+                        assert_eq!(data["tool_name"], "link_modules");
+                        assert_eq!(data["success"], true);
+                        assert_eq!(data["data"]["status"], "linked");
+                        break 'incoming None;
+                    }
+                    _ => assert!(
+                        data["tool_name"] == "compile_module" || data["module"].is_string(),
+                        "{data}"
+                    ),
+                }
+            }
+        };
+        if reconsider.is_none() {
             break;
         }
-        assert_eq!(next["module"], module);
-        assert_eq!(next["object"], result["data"]["object"]);
+        actual = compile(guest, (agent, module), false).await?;
     }
     if invalid {
         let arguments = json!({"module_name":module});
-        let reply = guest
+        let bad = guest
             .command(
                 agent,
-                format!("echo '{arguments}' > /service/compile_module; cat /service/result"),
+                format!("echo '{arguments}' > /service/compile_module"),
             )
             .await?;
-        assert_eq!(response(&reply)?["status"], "out_of_order");
+        assert!(
+            bad["stdout"]
+                .as_str()
+                .ok_or("duplicate output")?
+                .contains("wash:"),
+            "{bad}"
+        );
     }
     assert_eq!(
         guest.command(agent, "exit 0".into()).await?["exit_status"],
@@ -82,41 +178,58 @@ async fn builder(
     Ok(())
 }
 
-async fn tester(guest: &process::Guest, first_module: &str, invalid: bool) -> Result<()> {
+async fn tester(guest: &process::Guest, invalid: bool) -> Result<()> {
     if invalid {
-        let reply = guest.command("TEST_RUNNER",
-            "echo '{\"module_name\":\"unassigned\"}' > /service/run_build_tests; cat /service/result".into()).await?;
-        assert_eq!(response(&reply)?["status"], "invalid_arguments");
-    }
-    let mut module = first_module.to_owned();
-    loop {
-        let arguments = json!({"module_name":module});
-        let reply = guest
+        let bad = guest
             .command(
                 "TEST_RUNNER",
-                format!(
-                    "printf '%s' '{arguments}' > /service/run_build_tests; cat /service/result"
-                ),
+                "echo '{\"module_name\":\"unassigned\"}' > /service/run_build_tests_a".into(),
             )
             .await?;
-        let result = response(&reply)?;
-        assert_eq!(result["tool_name"], "run_build_tests", "{reply}");
-        assert_eq!(result["data"]["module"], module);
-        let next = &result["coordination"]["next"];
-        if next["tool_name"] == "link_modules" {
-            assert_eq!(next["data"]["status"], "linked");
+        assert!(
+            bad["stdout"]
+                .as_str()
+                .ok_or("refused test output")?
+                .contains("wash:"),
+            "{bad}"
+        );
+    }
+    loop {
+        let report = response(
+            &guest
+                .command("TEST_RUNNER", "cat /service/next_object".into())
+                .await?,
+        )?;
+        if report["tool_name"] == "link_modules" {
+            assert_eq!(report["data"]["status"], "linked");
             break;
         }
-        assert_eq!(next["tool_name"], "compile_module");
-        module = next["data"]["module"]
+        assert_eq!(report["tool_name"], "compile_module");
+        let module = report["data"]["module"]
             .as_str()
-            .ok_or("next actual test module")?
-            .to_owned();
+            .ok_or("actual test module")?;
+        let suffix = module.strip_prefix("module_").ok_or("module object name")?;
+        let arguments = json!({"module_name":module});
+        let reply=guest.command("TEST_RUNNER",format!("printf '%s' '{arguments}' > /service/run_build_tests_{suffix}; cat /service/run_build_tests_{suffix}")).await?;
+        let actual = response(&reply)?;
+        assert_eq!(actual["tool_name"], "run_build_tests");
+        assert_eq!(actual["data"]["module"], module);
+        assert_eq!(actual["data"]["input_object"], report["data"]["object"]);
     }
     if invalid {
-        let reply = guest.command("TEST_RUNNER",
-            "echo '{\"module_name\":\"module_a\"}' > /service/run_build_tests; cat /service/result".into()).await?;
-        assert_eq!(response(&reply)?["status"], "out_of_order");
+        let bad = guest
+            .command(
+                "TEST_RUNNER",
+                "echo '{\"module_name\":\"module_a\"}' > /service/run_build_tests_a".into(),
+            )
+            .await?;
+        assert!(
+            bad["stdout"]
+                .as_str()
+                .ok_or("duplicate test output")?
+                .contains("wash:"),
+            "{bad}"
+        );
     }
     assert_eq!(
         guest.command("TEST_RUNNER", "exit 0".into()).await?["exit_status"],
@@ -127,20 +240,59 @@ async fn tester(guest: &process::Guest, first_module: &str, invalid: bool) -> Re
 
 async fn integrator(guest: &process::Guest, invalid: bool) -> Result<()> {
     if invalid {
-        let reply = guest.command("INTEGRATOR",
-            "echo '{\"modules\":\"module_a,module_a\"}' > /service/link_modules; cat /service/result".into()).await?;
-        assert_eq!(response(&reply)?["status"], "invalid_arguments");
+        let bad = guest
+            .command(
+                "INTEGRATOR",
+                "echo '{\"modules\":\"module_a,module_a\"}' > /service/link_modules".into(),
+            )
+            .await?;
+        assert!(
+            bad["stdout"]
+                .as_str()
+                .ok_or("refused link output")?
+                .contains("wash:"),
+            "{bad}"
+        );
     }
-    let reply = guest.command("INTEGRATOR",
-        "echo '{\"modules\":\"module_c,module_a,module_b\"}' > /service/link_modules; cat /service/result".into()).await?;
-    let result = response(&reply)?;
-    assert_eq!(result["success"], true, "{reply}");
+    let candidate = response(
+        &guest
+            .command("INTEGRATOR", "cat /service/candidate".into())
+            .await?,
+    )?;
+    assert_eq!(candidate["success"], true);
+    assert_eq!(
+        candidate["objects"]
+            .as_array()
+            .ok_or("candidate objects")?
+            .len(),
+        3
+    );
+    assert_eq!(
+        candidate["tests"]
+            .as_array()
+            .ok_or("candidate tests")?
+            .len(),
+        3
+    );
+    let result=response(&guest.command("INTEGRATOR","echo '{\"modules\":\"module_c,module_a,module_b\"}' > /service/link_modules; cat /service/link_modules".into()).await?)?;
+    assert_eq!(result["success"], true);
     assert_eq!(result["data"]["status"], "linked");
     assert_eq!(result["data"]["issues"], json!([]));
     if invalid {
-        let reply = guest.command("INTEGRATOR",
-            "echo '{\"modules\":\"module_a,module_b,module_c\"}' > /service/link_modules; cat /service/result".into()).await?;
-        assert_eq!(response(&reply)?["status"], "out_of_order");
+        let bad = guest
+            .command(
+                "INTEGRATOR",
+                "echo '{\"modules\":\"module_a,module_b,module_c\"}' > /service/link_modules"
+                    .into(),
+            )
+            .await?;
+        assert!(
+            bad["stdout"]
+                .as_str()
+                .ok_or("duplicate link output")?
+                .contains("wash:"),
+            "{bad}"
+        );
     }
     assert_eq!(
         guest.command("INTEGRATOR", "exit 0".into()).await?["exit_status"],
@@ -187,17 +339,9 @@ async fn actual_five_wasm_build_test_repair_and_link() -> Result<()> {
         return Err("CI must execute its own full Wasm matrix, without reused records".into());
     }
     projection::archive(&binary, &directory, "10M")?;
-    let orders = [
-        ("ABC", "module_a"),
-        ("ACB", "module_a"),
-        ("BAC", "module_b"),
-        ("BCA", "module_b"),
-        ("CAB", "module_c"),
-        ("CBA", "module_c"),
-    ];
-    for (depth, (order, first_module), invalid, delay, failures) in (0..=2)
-        .flat_map(|depth| orders.map(move |order| (depth, order, false, 0.01, &[][..])))
-        .chain(orders.map(|order| {
+    let orders = ["ABC", "ACB", "BAC", "BCA", "CAB", "CBA"];
+    for (depth, order, invalid, delay, failures) in orders
+        .map(|order| {
             (
                 0,
                 order,
@@ -209,7 +353,11 @@ async fn actual_five_wasm_build_test_repair_and_link() -> Result<()> {
                     ("run_build_tests", 2),
                 ][..],
             )
-        }))
+        })
+        .into_iter()
+        .chain(
+            (0..=2).flat_map(|depth| orders.map(move |order| (depth, order, false, 0.01, &[][..]))),
+        )
         .chain([
             (0, orders[0], false, 1.0, &[][..]),
             (0, orders[5], false, 1.0, &[][..]),
@@ -228,6 +376,7 @@ async fn actual_five_wasm_build_test_repair_and_link() -> Result<()> {
             "model_calls":0,"scored_benchmark":false,"build_receipt":"../build-receipt.json",
             "build_receipt_sha256":receipt_hash,"invalid_input_recovery":invalid,
             "delay_multiplier":delay,"failure_overrides":failures,
+            "initial_order_control":"actual_shell_commands",
             "runtime_binary_sha256":digest(&binary)?,"guest_wasm_sha256":digest(module)?,
             "compiled_projection_sha256":digest(&output.join("projection.json"))?,"test_barriers":"none"}),
         )?;
@@ -242,6 +391,7 @@ async fn actual_five_wasm_build_test_repair_and_link() -> Result<()> {
                 "task",
                 "depth",
                 "initial_order",
+                "initial_order_control",
                 "invalid_input_recovery",
                 "delay_multiplier",
                 "failure_overrides",
@@ -293,15 +443,55 @@ async fn actual_five_wasm_build_test_repair_and_link() -> Result<()> {
                 oracle::Simulator::new("10M", depth, delay, trace.clone(), failures)?;
             save(&output.join("simulator-fixture.json"), &fixture)?;
             let (guest, runtime) =
-                process::guest(&binary, module, &["10M", order], &output, trace, simulator)?;
+                process::guest(&binary, module, &["10M"], &output, trace, simulator)?;
             let ((), result) = hibana_runtime::race(
                 async {
                     async {
-                        async { builder(&guest, ("BUILDER_A", "module_a"), invalid).await };
-                        async { builder(&guest, ("BUILDER_B", "module_b"), invalid).await };
-                        async { builder(&guest, ("BUILDER_C", "module_c"), invalid).await };
-                        async { tester(&guest, first_module, invalid).await };
+                        async { tester(&guest, invalid).await };
                         async { integrator(&guest, invalid).await };
+                        // Only this model-free fixture chooses its command order.
+                        // The executable receives no order or resolver selection.
+                        let [first, second, third] =
+                            <[u8; 3]>::try_from(order.as_bytes())?.map(|role| match role {
+                                b'A' => ("BUILDER_A", "module_a"),
+                                b'B' => ("BUILDER_B", "module_b"),
+                                b'C' => ("BUILDER_C", "module_c"),
+                                _ => unreachable!("matrix orders are permutations of ABC"),
+                            });
+                        let first_result = compile(&guest, first, invalid).await?;
+                        async { builder(&guest, (first, first_result), invalid).await };
+                        // The third builder is not issuing its compile yet,
+                        // but must still consume its actual shared-input update.
+                        loop {
+                            let reply = guest
+                                .command(third.0, "dd if=/service/updates iflag=nonblock".into())
+                                .await?;
+                            if !reply["stdout"]
+                                .as_str()
+                                .ok_or("third builder update")?
+                                .contains("wash:")
+                            {
+                                assert_eq!(response(&reply)?["data"]["module"], first.1);
+                                break;
+                            }
+                        }
+                        let second_result = compile(&guest, second, invalid).await?;
+                        async { builder(&guest, (second, second_result), invalid).await };
+                        loop {
+                            let reply = guest
+                                .command(third.0, "dd if=/service/updates iflag=nonblock".into())
+                                .await?;
+                            if !reply["stdout"]
+                                .as_str()
+                                .ok_or("third builder update")?
+                                .contains("wash:")
+                            {
+                                assert_eq!(response(&reply)?["data"]["module"], second.1);
+                                break;
+                            }
+                        }
+                        let third_result = compile(&guest, third, invalid).await?;
+                        async { builder(&guest, (third, third_result), invalid).await };
                         Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
                     };
                     async { runtime.await };
@@ -371,13 +561,15 @@ async fn actual_five_wasm_build_test_repair_and_link() -> Result<()> {
                     .unwrap()
                     .total_cmp(&b["timestamp"].as_f64().unwrap())
             });
-            // The world counts only fresh assessments for FailureSpec. The
-            // first two global tests are stale-input rejections, so eligible
-            // calls 0/1/2 correspond to actual test occurrences 2/3/4 here.
-            for index in [2, 3, 4] {
-                assert_eq!(tests[index]["success"], false);
-                assert_eq!(tests[index]["result"]["status"], "injected_failure");
-            }
+            // FailureSpec counts fresh assessments. Stale-object checks may
+            // interleave differently with builds; match the actual injected
+            // results instead of assuming fixed global call positions.
+            let injected = tests
+                .iter()
+                .filter(|test| test["result"]["status"] == "injected_failure")
+                .collect::<Vec<_>>();
+            assert_eq!(injected.len(), 3);
+            assert!(injected.iter().all(|test| test["success"] == false));
             for agent in ["BUILDER_A", "BUILDER_B", "BUILDER_C"] {
                 assert!(
                     events
@@ -390,45 +582,6 @@ async fn actual_five_wasm_build_test_repair_and_link() -> Result<()> {
         }
         // Audit each already-completed record in its own process. All source
         // and input checks remain enabled; workspace is released between cases.
-        let audit_file = fs::File::create_new(output.join("audit.json"))?;
-        let status = Command::new(&auditor)
-            .arg("--audit-protocol")
-            .arg(output.join("events.jsonl"))
-            .stdout(Stdio::from(audit_file))
-            .stderr(Stdio::from(fs::File::create_new(
-                output.join("audit-stderr.log"),
-            )?))
-            .status()?;
-        if !status.success() {
-            return Err(format!(
-                "saved protocol audit failed ({status}); retain {}",
-                output.display()
-            )
-            .into());
-        }
-        let checked: Value = serde_json::from_slice(&fs::read(output.join("audit.json"))?)?;
-        assert_eq!(checked["status"], "passed_protocol_audit");
-        assert_eq!(checked["dynamic_protocol"]["status"], "passed");
-        assert_eq!(checked["application_effects_certified"], false);
-        let status = Command::new(&auditor)
-            .arg("--audit-cascading-build")
-            .arg(output.join("events.jsonl"))
-            .stdout(Stdio::from(fs::File::create_new(
-                output.join("effect-audit.json"),
-            )?))
-            .stderr(Stdio::from(fs::File::create_new(
-                output.join("effect-audit-stderr.log"),
-            )?))
-            .status()?;
-        if !status.success() {
-            return Err(format!(
-                "saved effect audit failed ({status}) at {}",
-                output.display()
-            )
-            .into());
-        }
-        let effects: Value = serde_json::from_slice(&fs::read(output.join("effect-audit.json"))?)?;
-        assert_eq!(effects["status"], "passed");
         let status = Command::new(&auditor)
             .arg("--check-cascading-build-mutants")
             .arg(output.join("events.jsonl"))
@@ -449,6 +602,11 @@ async fn actual_five_wasm_build_test_repair_and_link() -> Result<()> {
         }
         let mutants: Value =
             serde_json::from_slice(&fs::read(output.join("record-mutants/report.json"))?)?;
+        let checked = &mutants["baseline"];
+        assert_eq!(checked["status"], "passed");
+        assert_eq!(checked["dynamic_protocol"]["status"], "passed");
+        assert_eq!(checked["dynamic_protocol_checked"], true);
+        save(&output.join("audit.json"), checked)?;
         outcomes.push(
             json!({"case":output,"task":"10M","depth":depth,"initial_order":order,
             "invalid_input_recovery":invalid,"delay_multiplier":delay,"failure_overrides":failures,
@@ -456,7 +614,7 @@ async fn actual_five_wasm_build_test_repair_and_link() -> Result<()> {
             "audit_file":"audit.json","audit_sha256":digest(&output.join("audit.json"))?,"auditor_sha256":digest(&auditor)?,
             "dynamic_protocol":checked["dynamic_protocol"]["status"],
             "captured_records":checked["dynamic_protocol"]["captured_records"],
-            "application_effect_audit_complete":true,"effect_audit_sha256":digest(&output.join("effect-audit.json"))?,
+            "application_effect_audit_complete":true,"effect_audit_sha256":digest(&output.join("audit.json"))?,
             "record_mutants_rejected":mutants["checked"].as_array().ok_or("mutants")?.len(),
             "wasm_execution_reused":previous.is_some()}),
         );

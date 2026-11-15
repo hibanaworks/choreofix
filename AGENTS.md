@@ -17,6 +17,13 @@ input should return a recoverable error where the real protocol permits retry.
 An unauthorized effect, missing resource or stale approval must be rejected
 before the effect, not merely detected by a later log audit.
 
+ChoreoFS is a projection of the choreography into file operations that the shell
+freely chooses. It is not shared storage or a host workflow engine. A refused
+unadmitted operation returns a WASI error to that same guest, so the agent can
+choose another operation or retry without a host-selected command or loan.
+Keep accepted-I/O failures separate: returning an error must not pretend that
+an accepted request or transferred Endpoint never happened.
+
 Qualify each task through the real model shell -> Wasm import -> Endpoint
 request -> ChoreoFS -> physical effect -> reply path. Use actual Wasm runs,
 real-model pilots, complete EPF captures and independent request/effect audits;
@@ -47,6 +54,9 @@ request-argument, effect, reply and simulator-score correspondence. A transport
 preview is not a committed request. Missing capture or receive evidence is not
 permission to fall back to the former auditor, and a valid finite source prefix
 alone does not establish a complete application effect.
+Do not repeat EPF's operation-to-operation ordering or delegation-envelope
+checks in effect auditors. Check the actual request/effect/result boundary,
+file data, physical integration identities and completion evidence instead.
 Use the checked Endpoint receive commit for effect chronology, rather than a
 transport preview or the arrival order of queued transport logs. Reordering
 transport observations alone does not demonstrate overlapping custody or an
@@ -116,6 +126,20 @@ Preserve atomicity and safety; do not weaken checks or tests to simplify a desig
 
 **No helper/wrapper hiding of localside flow. No separate state machine. No
 task progress flags. No duplicate coordination or completion management.**
+
+Do not compensate for missing wash features with a host-side command recipe,
+command classifier, workflow adapter or predetermined tool calls. Check the
+actual wash implementation and real WASI behavior first. Implement missing shell
+semantics in wash; implement syscall/Endpoint ownership in the WASI runtime.
+Neither layer acquires an application progress table. In particular, a host
+must not preselect a loan and wait for an agent to follow it when that agent
+is meant to choose reconsideration versus finalization from its actual results.
+Compilation of such a global is not evidence of autonomous agent execution.
+There is no separate host coordination layer. Choreography defines coordination;
+its localsides receive the actual requests, use their Endpoints and apply the
+actual effects. Host execution supplies storage, transport and physical I/O,
+not another workflow. A localside's route match or validation of actual input
+must not be described or implemented as a host choosing the next agent action.
 
 Do not add extra structs, enums, managers, registries or wrappers to coordinate
 the application. A new type needs a concrete data-ownership responsibility that
@@ -500,6 +524,10 @@ implementation. Shell variables and syntax are computation, not task authority.
 ChoreoFS is the object interface to projected communication. It is not a second
 authorization engine. A pathname, fd fact, rights mask, directory listing, or
 successful open does not authorize a task effect.
+The shell chooses its actual operations. A pre-admission refusal is returned
+as a WASI error so the shell can select another legal operation or retry later;
+it must not require a host-selected next loan, command recipe or progress flag.
+Keep failures after accepted I/O distinct from these recoverable refusals.
 Do not describe or implement ChoreoFS as shared storage. A participant's file
 view represents projected operations; its contents need not be shared with
 another participant. "Shared operation" refers to an effect on shared resources,
@@ -636,9 +664,10 @@ unchecked, and strengthen that boundary. Individual proofs or fixtures are not a
 successful complete gate.
 
 Audit every effect entry: WASI imports, host APIs, argument codecs and physical
-bindings. `Domain::execute` is ordinary host Rust. Its agreement with the
-received request, exact arguments and required resource Endpoints is an explicit
-adapter trust boundary. Record-mutation rejection only tests the auditor;
+bindings. The receiver localside invokes `Domain::execute` only after its actual
+Endpoint receives. Agreement with the received request, exact arguments and
+required resource Endpoints is that receiver's explicit effect-I/O trust boundary,
+not a separate host workflow or authority. Record-mutation rejection only tests the auditor;
 test runtime rejection at the effect boundary separately. A local I/O error or
 deadline does not revoke remote ownership or authorize reissuance.
 

@@ -1,191 +1,280 @@
-//! The physical owner receives actual resource requests before executing effects.
+//! Resource owners apply only the exact request received from the operation file.
 use super::super::{global::*, imp};
 use crate::shell::{ShellError, ShellResult, imp::service::Domain};
 use hibana::Endpoint;
-use serde_json::Value;
 
 #[hibana_runtime::scope]
-pub async fn repository<'r, D: Domain>(
-    endpoint: &mut Endpoint<'r, STORE>,
-    resources: (Endpoint<'r, REPO>, Endpoint<'r, TEST_ENV>),
-    domain: &D,
+pub async fn repository<'run>(
+    endpoint: &mut Endpoint<'run, STORE>,
+    (mut repo, mut environment, controls): (
+        Endpoint<'run, REPO>,
+        Endpoint<'run, TEST_ENV>,
+        (
+            Endpoint<'run, DEFINE_CLOSE>,
+            Endpoint<'run, BACKEND_CLOSE>,
+            Endpoint<'run, FRONTEND_CLOSE>,
+            Endpoint<'run, AGREEMENT_CLOSE>,
+            Endpoint<'run, TESTER_CLOSE>,
+        ),
+    ),
+    domain: &impl Domain,
 ) -> ShellResult<()> {
-    let (repo, test_env) = resources;
-    endpoint.send::<RepoLoan>(repo).await?;
-    let mut define = endpoint.recv::<DefineApi>().await?.to_vec();
-    let candidate = loop {
-        let request = imp::arguments(&define, "api_name", "feature_api_spec")?;
-        let api = domain
-            .execute("BACKEND_DEV", "define_api", request)
-            .await
-            .map_err(ShellError::message)?;
-        let bytes =
-            serde_json::to_vec(&api).map_err(|error| ShellError::message(error.to_string()))?;
-        endpoint.send::<ApiDefined>(&bytes.as_slice()).await?;
-
-        let branch = endpoint.offer().await?;
-        let (backend, frontend) = match branch.label() {
+    let (define, backend, frontend, agreement, tester) = controls;
+    async {
+        let [mut d, mut b, mut f, mut a, mut t] = endpoint.par()?;
+        async {
+            d.send::<Loan<DEFINE_CLOSE>>(define).await?;
+        };
+        async {
+            b.send::<Loan<BACKEND_CLOSE>>(backend).await?;
+        };
+        async {
+            f.send::<Loan<FRONTEND_CLOSE>>(frontend).await?;
+        };
+        async {
+            a.send::<Loan<AGREEMENT_CLOSE>>(agreement).await?;
+        };
+        async {
+            t.send::<Loan<TESTER_CLOSE>>(tester).await?;
+        };
+        Ok(())
+    }
+    .await?;
+    loop {
+        let operation = endpoint.offer().await?;
+        match operation.label() {
             20 => {
-                let admitted = imp::arguments(
-                    branch.recv::<BackendIntent>().await?,
-                    "feature_name",
-                    "backend_endpoint",
-                )?;
-                let request = imp::arguments(
-                    endpoint.recv::<ImplementBackend>().await?,
-                    "feature_name",
-                    "backend_endpoint",
-                )?;
-                if request != admitted {
+                let admitted = operation.recv::<DefineIntent>().await?.into_value();
+                endpoint.send::<Loan<REPO>>(repo).await?;
+                let actual = endpoint.recv::<DefineApi>().await?.into_value();
+                if actual != admitted {
                     return Err(ShellError::message(
-                        "backend resource arguments differ from the accepted request",
+                        "API request differs from the admitted file",
                     ));
                 }
-                let backend = domain
-                    .execute("BACKEND_DEV", "implement_feature", request)
+                let result = domain
+                    .execute("BACKEND_DEV", "define_api", actual)
                     .await
                     .map_err(ShellError::message)?;
-                let bytes = serde_json::to_vec(&backend)
-                    .map_err(|error| ShellError::message(error.to_string()))?;
-                endpoint
-                    .send::<BackendImplemented>(&bytes.as_slice())
-                    .await?;
-                let request = imp::arguments(
-                    endpoint.recv::<ImplementFrontend>().await?,
-                    "feature_name",
-                    "frontend_component",
-                )?;
-                let frontend = domain
-                    .execute("FRONTEND_DEV", "implement_feature", request)
-                    .await
-                    .map_err(ShellError::message)?;
-                let bytes = serde_json::to_vec(&frontend)
-                    .map_err(|error| ShellError::message(error.to_string()))?;
-                endpoint
-                    .send::<FrontendImplemented>(&bytes.as_slice())
-                    .await?;
-                (backend, frontend)
-            }
-            7 => {
-                let request = imp::arguments(
-                    branch.recv::<ImplementFrontend>().await?,
-                    "feature_name",
-                    "frontend_component",
-                )?;
-                let frontend = domain
-                    .execute("FRONTEND_DEV", "implement_feature", request)
-                    .await
-                    .map_err(ShellError::message)?;
-                let bytes = serde_json::to_vec(&frontend)
-                    .map_err(|error| ShellError::message(error.to_string()))?;
-                endpoint
-                    .send::<FrontendImplemented>(&bytes.as_slice())
-                    .await?;
-                let admitted = imp::arguments(
-                    endpoint.recv::<BackendIntent>().await?,
-                    "feature_name",
-                    "backend_endpoint",
-                )?;
-                let request = imp::arguments(
-                    endpoint.recv::<ImplementBackend>().await?,
-                    "feature_name",
-                    "backend_endpoint",
-                )?;
-                if request != admitted {
-                    return Err(ShellError::message(
-                        "backend resource arguments differ from the accepted request",
-                    ));
-                }
-                let backend = domain
-                    .execute("BACKEND_DEV", "implement_feature", request)
-                    .await
-                    .map_err(ShellError::message)?;
-                let bytes = serde_json::to_vec(&backend)
-                    .map_err(|error| ShellError::message(error.to_string()))?;
-                endpoint
-                    .send::<BackendImplemented>(&bytes.as_slice())
-                    .await?;
-                (backend, frontend)
-            }
-            _ => return Err(ShellError::message("unexpected implementation order")),
-        };
+                let bytes =
+                    serde_json::to_vec(&result).map_err(|e| ShellError::message(e.to_string()))?;
+                let api = result;
+                endpoint.send::<ApiDefined>(&bytes.as_slice()).await?;
+                repo = endpoint.recv::<Loan<REPO>>().await?;
+                endpoint.send::<Contract>(&bytes.as_slice()).await?;
 
-        let branch = endpoint.offer().await?;
-        match branch.label() {
-            1 => define = branch.recv::<DefineApi>().await?.to_vec(),
-            12 => {
-                let actual: Value = serde_json::from_slice(branch.recv::<Finalize>().await?)
-                    .map_err(|error| ShellError::message(error.to_string()))?;
-                if actual != imp::candidate(&api, &backend, &frontend) {
+                let choice = endpoint.offer().await?;
+                let (backend, frontend) = match choice.label() {
+                    21 => {
+                        let encoded = choice.recv::<BackendFirst>().await?.to_vec();
+                        let admitted = imp::agreement(&encoded)?;
+                        if admitted["first"] != "BACKEND_DEV" {
+                            return Err(ShellError::message("agreement differs from its branch"));
+                        }
+                        let accepted = serde_json::json!({"success":true,"api_contract":api,"first":"BACKEND_DEV"});
+                        let bytes = serde_json::to_vec(&accepted)
+                            .map_err(|e| ShellError::message(e.to_string()))?;
+                        endpoint
+                            .send::<AgreementAccepted>(&bytes.as_slice())
+                            .await?;
+                        let backend = {
+                            let admitted = endpoint.recv::<BackendIntent>().await?.into_value();
+                            endpoint.send::<Loan<REPO>>(repo).await?;
+                            let actual = endpoint.recv::<ImplementBackend>().await?.into_value();
+                            if actual != admitted {
+                                return Err(ShellError::message(
+                                    "backend request differs from the admitted file",
+                                ));
+                            }
+                            let result = domain
+                                .execute("BACKEND_DEV", "implement_feature", actual)
+                                .await
+                                .map_err(ShellError::message)?;
+                            let bytes = serde_json::to_vec(&result)
+                                .map_err(|e| ShellError::message(e.to_string()))?;
+                            endpoint
+                                .send::<BackendImplemented>(&bytes.as_slice())
+                                .await?;
+                            repo = endpoint.recv::<Loan<REPO>>().await?;
+
+                            result
+                        };
+                        let frontend = {
+                            let admitted = endpoint.recv::<FrontendIntent>().await?.into_value();
+                            endpoint.send::<Loan<REPO>>(repo).await?;
+                            let actual = endpoint.recv::<ImplementFrontend>().await?.into_value();
+                            if actual != admitted {
+                                return Err(ShellError::message(
+                                    "frontend request differs from the admitted file",
+                                ));
+                            }
+                            let result = domain
+                                .execute("FRONTEND_DEV", "implement_feature", actual)
+                                .await
+                                .map_err(ShellError::message)?;
+                            let bytes = serde_json::to_vec(&result)
+                                .map_err(|e| ShellError::message(e.to_string()))?;
+                            endpoint
+                                .send::<FrontendImplemented>(&bytes.as_slice())
+                                .await?;
+                            repo = endpoint.recv::<Loan<REPO>>().await?;
+
+                            result
+                        };
+                        (backend, frontend)
+                    }
+                    22 => {
+                        let encoded = choice.recv::<FrontendFirst>().await?.to_vec();
+                        let admitted = imp::agreement(&encoded)?;
+                        if admitted["first"] != "FRONTEND_DEV" {
+                            return Err(ShellError::message("agreement differs from its branch"));
+                        }
+                        let accepted = serde_json::json!({"success":true,"api_contract":api,"first":"FRONTEND_DEV"});
+                        let bytes = serde_json::to_vec(&accepted)
+                            .map_err(|e| ShellError::message(e.to_string()))?;
+                        endpoint
+                            .send::<AgreementAccepted>(&bytes.as_slice())
+                            .await?;
+                        let frontend = {
+                            let admitted = endpoint.recv::<FrontendIntent>().await?.into_value();
+                            endpoint.send::<Loan<REPO>>(repo).await?;
+                            let actual = endpoint.recv::<ImplementFrontend>().await?.into_value();
+                            if actual != admitted {
+                                return Err(ShellError::message(
+                                    "frontend request differs from the admitted file",
+                                ));
+                            }
+                            let result = domain
+                                .execute("FRONTEND_DEV", "implement_feature", actual)
+                                .await
+                                .map_err(ShellError::message)?;
+                            let bytes = serde_json::to_vec(&result)
+                                .map_err(|e| ShellError::message(e.to_string()))?;
+                            endpoint
+                                .send::<FrontendImplemented>(&bytes.as_slice())
+                                .await?;
+                            repo = endpoint.recv::<Loan<REPO>>().await?;
+
+                            result
+                        };
+                        let backend = {
+                            let admitted = endpoint.recv::<BackendIntent>().await?.into_value();
+                            endpoint.send::<Loan<REPO>>(repo).await?;
+                            let actual = endpoint.recv::<ImplementBackend>().await?.into_value();
+                            if actual != admitted {
+                                return Err(ShellError::message(
+                                    "backend request differs from the admitted file",
+                                ));
+                            }
+                            let result = domain
+                                .execute("BACKEND_DEV", "implement_feature", actual)
+                                .await
+                                .map_err(ShellError::message)?;
+                            let bytes = serde_json::to_vec(&result)
+                                .map_err(|e| ShellError::message(e.to_string()))?;
+                            endpoint
+                                .send::<BackendImplemented>(&bytes.as_slice())
+                                .await?;
+                            repo = endpoint.recv::<Loan<REPO>>().await?;
+
+                            result
+                        };
+                        (backend, frontend)
+                    }
+                    label => {
+                        return Err(ShellError::message(format!("unexpected agreement {label}")));
+                    }
+                };
+                let candidate = imp::candidate(&api, &backend, &frontend);
+                let bytes = serde_json::to_vec(&candidate)
+                    .map_err(|e| ShellError::message(e.to_string()))?;
+                endpoint.send::<Ready>(&bytes.as_slice()).await?;
+            }
+            26 => {
+                let admitted = operation.recv::<TestIntent>().await?.into_value();
+                async {
+                    let [mut r, mut e] = endpoint.par()?;
+                    async {
+                        r.send::<Loan<REPO>>(repo).await?;
+                    };
+                    async {
+                        e.send::<Loan<TEST_ENV>>(environment).await?;
+                    };
+                    Ok(())
+                }
+                .await?;
+                let (from_repository, from_environment) = async {
+                    let [mut r, mut e] = endpoint.par()?;
+                    async { r.recv::<ReadForTests>().await };
+                    async { e.recv::<RunTests>().await };
+                }
+                .await?;
+                if from_repository.into_value() != admitted
+                    || from_environment.into_value() != admitted
+                {
                     return Err(ShellError::message(
-                        "test candidate differs from the actual implementations",
+                        "test resource requests differ from the admitted file",
                     ));
                 }
-                break actual;
+                // Both exclusive resources remain with this request until the
+                // actual test and its replies finish. Editing cannot race it.
+                let result = domain
+                    .execute("TESTER", "run_tests", admitted)
+                    .await
+                    .map_err(ShellError::message)?;
+                let bytes =
+                    serde_json::to_vec(&result).map_err(|e| ShellError::message(e.to_string()))?;
+                async {
+                    let [mut r, mut e] = endpoint.par()?;
+                    async {
+                        r.send::<RepositoryTested>(&bytes.as_slice()).await?;
+                    };
+                    async {
+                        e.send::<EnvironmentTested>(&bytes.as_slice()).await?;
+                    };
+                    Ok(())
+                }
+                .await?;
+                (repo, environment) = async {
+                    let [mut r, mut e] = endpoint.par()?;
+                    async { r.recv::<Loan<REPO>>().await };
+                    async { e.recv::<Loan<TEST_ENV>>().await };
+                }
+                .await?;
+                async {
+                    let [mut b, mut f] = endpoint.par()?;
+                    async {
+                        b.send::<BackendResult>(&bytes.as_slice()).await?;
+                    };
+                    async {
+                        f.send::<FrontendResult>(&bytes.as_slice()).await?;
+                    };
+                    Ok(())
+                }
+                .await?;
             }
-            _ => return Err(ShellError::message("unexpected API coordination operation")),
+            242..=244 => {
+                drop(operation);
+                let (backend, frontend, tester) = async {
+                    let [mut b, mut f, mut t] = endpoint.par()?;
+                    async { b.recv::<BackendExit>().await };
+                    async { f.recv::<FrontendExit>().await };
+                    async { t.recv::<TesterExit>().await };
+                }
+                .await?;
+                if [backend, frontend, tester]
+                    .into_iter()
+                    .any(|code| code != 0)
+                {
+                    return Err(ShellError::message("an agent exited with an error"));
+                }
+                return Ok(());
+            }
+            label => {
+                return Err(ShellError::message(format!(
+                    "unexpected repository operation {label}"
+                )));
+            }
         }
-    };
-    let repo = endpoint.recv::<RepoLoan>().await?;
-    let bytes =
-        serde_json::to_vec(&candidate).map_err(|error| ShellError::message(error.to_string()))?;
-    endpoint.send::<Ready>(&bytes.as_slice()).await?;
-    async {
-        let [mut repository, mut environment] = endpoint.par()?;
-        async {
-            repository.send::<RepoLoan>(repo).await?;
-        };
-        async {
-            environment.send::<TestLoan>(test_env).await?;
-        };
-        Ok(())
     }
-    .await?;
-    // Each borrow covers its source par. The next par starts after its join.
-    let (repo_request, test_request) = async {
-        let [mut repository, mut environment] = endpoint.par()?;
-        async { Ok::<_, ShellError>(repository.recv::<ReadForTests>().await?.to_vec()) };
-        async { Ok::<_, ShellError>(environment.recv::<RunTests>().await?.to_vec()) };
-    }
-    .await?;
-    let repo_request = imp::arguments(&repo_request, "suite", "integration_tests")?;
-    let test_request = imp::arguments(&test_request, "suite", "integration_tests")?;
-    if repo_request != test_request {
-        return Err(ShellError::message("test resource requests differ"));
-    }
-    let result = domain
-        .execute("TESTER", "run_tests", test_request)
-        .await
-        .map_err(ShellError::message)?;
-    let bytes =
-        serde_json::to_vec(&result).map_err(|error| ShellError::message(error.to_string()))?;
-    async {
-        let [mut repository, mut environment] = endpoint.par()?;
-        async {
-            repository
-                .send::<RepositoryTested>(&bytes.as_slice())
-                .await?;
-        };
-        async {
-            environment
-                .send::<EnvironmentTested>(&bytes.as_slice())
-                .await?;
-        };
-        Ok(())
-    }
-    .await?;
-    let (_repo, _test_env) = async {
-        let [mut repository, mut environment] = endpoint.par()?;
-        async { Ok::<_, ShellError>(repository.recv::<RepoLoan>().await?) };
-        async { Ok::<_, ShellError>(environment.recv::<TestLoan>().await?) };
-    }
-    .await?;
-    let [mut backend, mut frontend] = endpoint.par()?;
-    async {
-        backend.send::<BackendResult>(&bytes.as_slice()).await?;
-    };
-    async {
-        frontend.send::<FrontendResult>(&bytes.as_slice()).await?;
-    };
-    Ok(())
 }
