@@ -48,9 +48,9 @@ It supports `1E`, `1M`, `1H`, `2E`, `2M`, `2H`, `3E`, `4E`, `4M`, `5E`, `5M`, `5
 `6E`, `6M`, `7E`, `8E`, `9E`, `9M`, `9H`, `10E`, `10M`, `11E`, `12E`, `13E`, `13M`, `14E`,
 `14M`, `14H` and `16E`, with the original failure conditions `0`, `1` and `2`. Each qualification
 retains its exact source and simulator version. The 29 historical task entries
-are not acceptance of their current file/Endpoint boundary. Twenty source-bound
+are not acceptance of their current file/Endpoint boundary. Twenty-one source-bound
 tasks have completed the direct-projection mechanism and live-model checks;
-the remaining 28 still require that qualification. The rewritten 7E passes
+the remaining 27 still require that qualification. The rewritten 7E passes
 twelve real-wash mechanism cases, EPF/effect audits and 1,503 record mutations.
 Three Luna/xhigh participants also completed depth 2 on the same runtime binary;
 the same run passes the model, EPF, effect and common-world audits. Its actual
@@ -224,11 +224,15 @@ every dynamic/effect audit and the record mutations. Interrupted audit work
 does not erase completed guest evidence or turn it into a qualified case.
 
 `5H` uses `CRITICAL_CARE` build variables and seven independent Wasm guests.
-`critical_care_boundary::` runs eight conditions through common scoring, EPF and
-the actual-effect auditor, including both real ICU resource requests and the
-anesthesia-to-surgery OR handoff. `--audit-critical-care EVENTS` independently
-checks the saved record. Its actual seven-model qualification is documented in
-`benchmark/ports/5H.md`; it is not a scored comparison.
+`critical_care_boundary::` runs eleven direct-file conditions through common
+scoring, complete EPF and the actual-effect auditor. Nine matrix cases cover CT
+orders, partial panels, rejection recovery and actual concurrent CT/MRI effects;
+two schedules demonstrate each patient's care finishing before the other's assessment.
+Both real ICU resource requests and the anesthesia-to-surgery OR handoff remain
+in the global. `--audit-critical-care EVENTS` independently checks the saved
+record. The same-binary seven-model qualification completes in 68.85 seconds
+with zero violations. Scope and evidence are in `benchmark/ports/5H.md`; this
+is not a scored comparison.
 
 Run all declared families' scripted WASI regressions from one source
 snapshot with a new output directory:

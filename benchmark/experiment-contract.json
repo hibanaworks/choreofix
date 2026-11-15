@@ -17,7 +17,7 @@
     "first_technical_gate": "T3/T4: compose unique resource ownership and its remaining protocol with actual effects; define the adapter trust boundary and test old owners, duplicate transfers and argument substitution before scored comparisons",
     "theorem_scope_and_milestones": "plan.md",
     "effect_boundary_contract_and_inventory": "benchmark/effect-boundaries.md",
-    "effect_boundary_status": "Twenty source-bound tasks now have direct-file mechanism and live-model evidence; 28 remain, with the exact list in migration_status. Latest 5M passes nine actual-Wasm cases and one five-Luna/xhigh pilot on the same runtime binary, with complete EPF, one-use request/effect/reply matching and neutral common scoring. The pilot completes in 75.243086458 seconds, 776651 inclusive tokens, twelve effects and zero violations. Premature own-work reads return recoverable errors rather than blocking the guest; 360 effect-record and eleven run-record mutations are rejected. An earlier timed-out seven-view pilot is not counted or pooled. Minimum T3/T4 composition remains under its consuming receiver contract; this is not general Rust refinement, clinical validation, final-source all-family certification, a success-rate estimate or comparative superiority. Canonical sibling worktrees remain the dependencies. Current core ordinary Rust, required Miri, Lean/model and runtime-work gates passed locally; the full generated normal population remains unfinished. Comparison-connection development stays deferred.",
+    "effect_boundary_status": "Twenty-one source-bound tasks have direct-file mechanism and live-model evidence; 27 remain, with the exact list in migration_status. Latest 5H passes eleven actual-Wasm conditions and one seven-Luna/xhigh pilot on the same runtime binary, with complete EPF, one-use request/effect/reply matching and neutral common scoring. The pilot completes in 68.851604666 seconds, 1081788 inclusive tokens, sixteen effects and zero violations. Both patient-independence schedules pass; actual concurrent CT/MRI effects are observed in a separate mechanism case. 354 effect-record and eleven run-record mutations are rejected. Earlier failed local attempts are not counted or pooled. Core, runtime, WASI and EPF production source are unchanged for this port. Minimum T3/T4 composition remains under its consuming receiver contract; this is not general Rust refinement, clinical validation, final-source all-family certification, a success-rate estimate or comparative superiority. Canonical sibling worktrees remain the dependencies. Current core ordinary Rust, required Miri, Lean/model and runtime-work gates passed locally; the full generated normal population remains unfinished. Comparison-connection development stays deferred.",
     "minimum_handoff_case": {
       "source": "src/tasks/handoff",
       "scope": "Native hibana-runtime mechanism fixture with two independent runtimes and the application's actual Endpoint transport; not a remote-network, Wasm or model experiment",
@@ -756,6 +756,7 @@
       "4E",
       "5E",
       "5M",
+      "5H",
       "7E",
       "8E",
       "9E",
@@ -767,22 +768,22 @@
       "12E",
       "16E"
     ],
-    "count": 20,
-    "remaining": 28,
-    "qualified_direct_families": 14,
+    "count": 21,
+    "remaining": 27,
+    "qualified_direct_families": 15,
     "final_source_all_family_certification": false,
     "scored_comparisons": 0,
     "latest_source_bound_port": {
       "tasks": [
-        "5M"
+        "5H"
       ],
       "simulator_contract": "common-environment-v23",
-      "evidence": "output/experiments/multi-specialty-direct-files-20261115/qualification-v9.json"
+      "evidence": "output/experiments/critical-care-direct-files-20261115/qualification-v14.json"
     },
     "direct_choreofs_boundary": {
       "status": "migration_in_progress",
-      "strengthened_boundary_qualified_tasks": 20,
-      "remaining_tasks": 28,
+      "strengthened_boundary_qualified_tasks": 21,
+      "remaining_tasks": 27,
       "unsafe_application_miri_required": false,
       "scored_runs": 0,
       "full_48_task_goal_unchanged": true,
@@ -1426,118 +1427,75 @@
       "pooled_for_performance_comparison": false
     },
     "pending": [
-      "remaining 28 direct-file task qualifications",
-      "final-source all-family and core gates",
-      "scored experiments"
+      "Remaining direct-file task qualifications; exact count/list in migration_status.",
+      "Final-source all-family and core gates.",
+      "Scored experiments."
     ],
     "scored_runs": 0,
     "scope": "Finite direct-file Wasm cases and one audited live-model pilot on the captured sources. Does not certify clinical correctness, absent prescribing/administration effects, all interleavings, current full core gates, final-source all-family certification, success rates or comparison superiority."
   },
   "critical_care_procedure": {
+    "status": "source_bound_direct_file_qualified",
     "task": "5H",
-    "status": "historical_generic_close_source_only_direct_file_rewrite_unqualified",
-    "migrated": true,
-    "global": "src/tasks/critical_care/global.rs",
-    "core_changed": false,
-    "library_check": {
-      "exit_code": 0,
-      "elapsed_seconds": 9.95,
-      "maximum_descendant_bytes": 1334411264
-    },
-    "native": {
-      "test_functions": 6,
-      "complete_conditions": 92,
-      "imaging_orders": 90,
-      "patient_independence_conditions": 2,
-      "effects_each": 16,
-      "elapsed_seconds": 1.24,
-      "maximum_descendant_bytes": 625917952,
-      "source": "receiver-miri-v1/source.sha256",
-      "guard": "endpoint-v8/guard.log",
-      "rejected_substitution_cases": 12
-    },
-    "common_world": {
-      "contract": "common-environment-v4",
-      "tests": 73,
-      "elapsed_seconds": 1.546,
-      "input_tests": 16,
-      "changed_task": "5H",
-      "only_changed_world_input": "benchmark/descriptions/5H/metadata.json",
-      "effect_and_scorer_code_changed": false,
-      "manifest_sha256": "2be4a5d780d5f9f4e2cd43265883ea656b3ee7818af4a493fd0e89bceaa389af",
-      "icu_beds": 2,
-      "ventilators": 1
-    },
-    "remaining": [
-      "final source all-family certification",
-      "scored experiment matrix"
-    ],
-    "scored_runs": 0,
-    "receiver_miri": {
-      "test_functions": 5,
-      "rejected_substitution_cases": 12,
-      "elapsed_seconds": 79.31,
-      "maximum_descendant_bytes": 606453760,
-      "guard": "receiver-miri-v1/guard.log"
-    },
+    "source_qualification": "output/experiments/critical-care-direct-files-20261115/qualification-v14.json",
+    "current_boundary": "Twenty-three actual operation/data files use seven affine Endpoint views loaned explicitly to seven guest VMs. Typed file requests, resource custody, actual replies and terminal results are in the single global. Completed panels pass to their own ER, prepared OR passes from anesthesia to surgery, both ICU requests precede its effect, and either patient can complete before the other assessment. No generic-close dispatcher or second workflow.",
+    "core_source_changed_for_port": false,
+    "runtime_binary_sha256": "c40de4b6f8d8c1ce6d14328690ee723dfd4d02d752a841ce4e4e44538501bc7c",
+    "projected_roles": 50,
+    "operation_files": 23,
     "guest_localsides": 7,
-    "ordinary_runner_tests_passed": 40,
-    "strict_clippy": "application_and_runner_passed",
-    "actual_wasm_execution": {
-      "status": "all_eight_runtime_common_dynamic_and_effect_audits_passed",
-      "output": "../critical-care-wasi-v1",
-      "test": "critical_care_boundary::actual_wasi_two_patient_care_and_all_ct_orders",
-      "completed_conditions": 8,
-      "effects": [
-        19,
-        19,
-        19,
-        19,
-        19,
-        19,
-        16,
-        21
-      ],
-      "violations": 0,
-      "model_calls": 0,
-      "guard_session": 50274,
-      "guard_log": "wasi-qualification-v1-guard.log",
-      "source_fixed": true,
-      "all_audits_passed": true,
-      "elapsed_test_seconds": 626.24,
-      "maximum_descendant_bytes": 2459451392,
-      "record_mutants_rejected": 219,
-      "normal_delay_effect_overlap_pairs": 18,
-      "guard_exit_code": 0
-    },
+    "wasm_conditions": 11,
+    "matrix_conditions": 9,
+    "patient_independence_conditions": 2,
+    "saved_effect_record_mutants_rejected": 354,
+    "run_record_mutants_rejected": 11,
+    "native_data_tests": 2,
+    "runner_tests": 54,
+    "application_miri_required": false,
     "live_model": {
-      "status": "runtime_common_score_dynamic_and_effect_audits_passed",
-      "output": "../model-qualification/current-core-critical-care-5H-v1/subscription-5H-1794191523709141000",
-      "guard_log": "live-model-v1-guard.log",
-      "guard_session": 6296,
-      "participants": 7,
+      "run": "output/experiments/critical-care-direct-files-20261115/live-v12",
+      "result": {
+        "path": "output/experiments/critical-care-direct-files-20261115/live-v12/result.json",
+        "sha256": "63058f8bf4bb53fc25493484b325d96e8f84c47d7b635f5e582e5d335bc15f7c"
+      },
+      "audit": {
+        "path": "output/experiments/critical-care-direct-files-20261115/live-v12/audit.json",
+        "sha256": "7b2f61d51357dfe7e8600005407d468f5f06ecaa877e84da11b248c2c90b37c3"
+      },
+      "versions": {
+        "path": "output/experiments/critical-care-direct-files-20261115/live-v12/versions.json",
+        "sha256": "3ab909478f70b7f2a0cb332de77124d50411fc1c41d0f2fd644e7da6869585ba"
+      },
       "model": "gpt-6-luna",
       "effort": "xhigh",
-      "elapsed_seconds": 48.162432792,
-      "inclusive_total_tokens": 679177,
-      "domain_calls": 16,
+      "authentication": "existing ChatGPT subscription",
+      "participants": 7,
+      "elapsed_seconds": 68.851604666,
+      "inclusive_tokens": 1081788,
+      "shell_calls": 43,
+      "actual_effects": 16,
+      "captured_records": 8803,
+      "independent_effect_overlaps": 7,
+      "cross_scanner_effect_overlaps": 0,
+      "maximum_simultaneous_model_turns": 7,
       "violations": 0,
-      "model_participants_completed": 7,
-      "runtime_exit_code": 0,
-      "protocol_complete": true,
-      "independent_audit_passed": true,
-      "model_calls_repeated": 0,
+      "simulator_contract": "common-environment-v23",
+      "simulator_manifest_sha256": "90c71ae26686bed3365453d97ed76ffd08b3d8eb2001103de9ba04675a8ba59f",
       "scored_benchmark": false,
-      "captured_records": 10073,
-      "independent_effect_overlap_pairs": 7,
-      "max_simultaneous_model_turns": 7,
-      "test_and_audit_seconds": 276,
-      "maximum_descendant_bytes": 1343782912,
-      "guard_exit_code": 0,
-      "runtime_binary_sha256": "858ebcceb75824079aac719de4bb85b340a6086cc0066a26ddbef476942a56e1"
+      "maximum_descendant_bytes": 1398833152,
+      "run_record_mutants_rejected": 11,
+      "run_record_mutants": {
+        "path": "output/experiments/critical-care-direct-files-20261115/live-v12-run-mutants/report.json",
+        "sha256": "bd0ea34068e27d944a20e9572f3c6582f0c5c024942ea060a0e7139dc8dc41dc"
+      }
     },
-    "scripted_model_calls": 0,
-    "model_participants": 7
+    "pending": [
+      "Remaining direct-file task qualifications; exact count/list in migration_status.",
+      "Final-source all-family and core gates.",
+      "Scored experiments."
+    ],
+    "scored_runs": 0,
+    "scope": "Finite direct-file Wasm cases and one audited live-model pilot on captured sources. Does not certify clinical correctness, absent medication/monitoring/discharge effects, all ninety imaging interleavings, current full core gates, final-source all-family certification, success rates or comparison superiority."
   },
   "manufacturing_procedure": {
     "task": "11E",

@@ -1,23 +1,10 @@
 //! Patient/result codecs and actual data validation; no protocol operations.
 use crate::shell::{ShellError, ShellResult};
+use hibana::runtime::wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload};
 use serde_json::Value;
 use std::cell::Cell;
 
 pub use crate::imp::json::{decode, encode, same};
-
-pub fn file_arguments(
-    file: &crate::shell::imp::file_wire::ClosedFile,
-    assigned: (&[u8], &str),
-) -> ShellResult<Value> {
-    if file.completion.0.errno() != 0 || file.path != assigned.0 {
-        return Err(ShellError::message(
-            "file close does not match the requested service",
-        ));
-    }
-    let arguments = decode(&file.bytes)?;
-    patient(&arguments, assigned.1)?;
-    Ok(arguments)
-}
 
 pub fn patient(arguments: &Value, expected: &str) -> ShellResult<()> {
     if !arguments.is_object() || arguments["patient_id"] != expected {
@@ -158,4 +145,69 @@ pub fn panel_arm(
         .map_err(|_| ResolverError::reject());
     input.set(value);
     result
+}
+
+/// Own the actual request bytes; the contract selects patient and argument shape.
+#[derive(Debug)]
+pub struct Arguments<const OPERATION: u8>(Vec<u8>);
+impl<const OPERATION: u8> Arguments<OPERATION> {
+    #[cfg(test)]
+    pub fn from_bytes(bytes: &[u8]) -> ShellResult<Self> {
+        Self::validate_payload(Payload::new(bytes))
+            .map_err(|_| ShellError::message("invalid patient operation arguments"))?;
+        Ok(Self(bytes.to_vec()))
+    }
+    pub fn into_value(self) -> Value {
+        serde_json::from_slice(&self.0).expect("validated patient operation")
+    }
+}
+impl<const OPERATION: u8> WireEncode for Arguments<OPERATION> {
+    fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
+        output
+            .get_mut(..self.0.len())
+            .ok_or(CodecError::Truncated)?
+            .copy_from_slice(&self.0);
+        Ok(self.0.len())
+    }
+}
+impl<const OPERATION: u8> WirePayload for Arguments<OPERATION> {
+    const SCHEMA_ID: u32 = 0xac05_2000 | OPERATION as u32;
+    type Decoded<'a> = Self;
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        let arguments: Value =
+            serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
+        let assigned = match OPERATION {
+            0 | 2 | 4 | 5 | 10 | 11 | 14 => "patient_a",
+            1 | 3 | 6 | 7 | 8 | 9 | 12 | 15 => "patient_b",
+            13 => "patient_A_and_B",
+            _ => return Err(CodecError::Malformed),
+        };
+        patient(&arguments, assigned).map_err(|_| CodecError::Malformed)?;
+        let valid = match OPERATION {
+            0 | 1 | 12 => true,
+            2 => tests(
+                &arguments,
+                (assigned, &["trauma_panel", "blood_type", "coag"]),
+            )
+            .is_ok(),
+            3 => tests(&arguments, (assigned, &["stroke_panel", "ct_angio"])).is_ok(),
+            4..=7 => imaging(&arguments, (assigned, "CT")).is_ok(),
+            8 | 9 => imaging(&arguments, (assigned, "MRI")).is_ok(),
+            10 => optional_text(&arguments, "type").is_ok(),
+            11 => arguments["procedure"]
+                .as_str()
+                .is_some_and(|s| s == "trauma_surgery"),
+            13 => optional_text(&arguments, "medications").is_ok(),
+            14 | 15 => optional_text(&arguments, "symptoms").is_ok(),
+            _ => false,
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err(CodecError::Malformed)
+        }
+    }
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
+        Self(input.as_bytes().to_vec())
+    }
 }

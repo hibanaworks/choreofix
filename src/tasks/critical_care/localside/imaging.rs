@@ -19,16 +19,15 @@ pub async fn ct<'r, D: Domain>(
         let branch = endpoint.offer().await?;
         match branch.label() {
             CtPerformIntentA::LOGICAL_LABEL => {
-                let admitted = imp::decode(branch.recv::<CtPerformIntentA>().await?)?;
-                imp::imaging(&admitted, ("patient_a", "CT"))?;
-                let bytes = imp::encode(&admitted)?;
-                endpoint
-                    .send::<CtAssessmentQueryA>(&bytes.as_slice())
-                    .await?;
+                let admitted = branch.recv::<CtPerformIntentA>().await?;
+
+                endpoint.send::<CtAssessmentQueryA>(&admitted).await?;
                 assessment_a = imp::decode(endpoint.recv::<CtAssessmentA>().await?)?;
                 imp::actual_result(&assessment_a, "patient_a")?;
+                endpoint.send::<CtPerformAdmittedA>(&admitted).await?;
+                let admitted = admitted.into_value();
                 endpoint.send::<CtLoan>(instrument).await?;
-                let arguments = imp::decode(endpoint.recv::<CtPerformRequestA>().await?)?;
+                let arguments = endpoint.recv::<CtPerformRequestA>().await?.into_value();
                 imp::same(&arguments, &admitted)?;
                 let result = domain
                     .execute("RADIOLOGIST", "perform_imaging", arguments)
@@ -40,16 +39,28 @@ pub async fn ct<'r, D: Domain>(
                     &assessment_a["data"]["artifact_id"],
                 )?;
                 let bytes = imp::encode(&result)?;
-                endpoint.send::<CtImageA>(&bytes.as_slice()).await?;
+                async {
+                    let [mut resource, mut file] = endpoint.par()?;
+                    async {
+                        resource.send::<CtImageA>(&bytes.as_slice()).await?;
+                    };
+                    async {
+                        file.send::<FileCtImageA>(&bytes.as_slice()).await?;
+                    };
+                    Ok::<(), ShellError>(())
+                }
+                .await?;
                 instrument = endpoint.recv::<CtLoan>().await?;
                 image_a = result;
             }
             CtInterpretIntentA::LOGICAL_LABEL => {
-                let admitted = imp::decode(branch.recv::<CtInterpretIntentA>().await?)?;
-                imp::imaging(&admitted, ("patient_a", "CT"))?;
+                let admitted = branch.recv::<CtInterpretIntentA>().await?;
+
                 imp::actual_result(&image_a, "patient_a")?;
+                endpoint.send::<CtInterpretAdmittedA>(&admitted).await?;
+                let admitted = admitted.into_value();
                 endpoint.send::<CtLoan>(instrument).await?;
-                let arguments = imp::decode(endpoint.recv::<CtInterpretRequestA>().await?)?;
+                let arguments = endpoint.recv::<CtInterpretRequestA>().await?.into_value();
                 imp::same(&arguments, &admitted)?;
                 let result = domain
                     .execute("RADIOLOGIST", "interpret_imaging", arguments)
@@ -65,21 +76,30 @@ pub async fn ct<'r, D: Domain>(
                     &image_a["data"]["artifact_id"],
                 )?;
                 let bytes = imp::encode(&result)?;
-                endpoint.send::<CtReportA>(&bytes.as_slice()).await?;
+                async {
+                    let [mut resource, mut file] = endpoint.par()?;
+                    async {
+                        resource.send::<CtReportA>(&bytes.as_slice()).await?;
+                    };
+                    async {
+                        file.send::<FileCtReportA>(&bytes.as_slice()).await?;
+                    };
+                    Ok::<(), ShellError>(())
+                }
+                .await?;
                 instrument = endpoint.recv::<CtLoan>().await?;
                 endpoint.send::<CtFindingsA>(&bytes.as_slice()).await?;
             }
             CtPerformIntentB::LOGICAL_LABEL => {
-                let admitted = imp::decode(branch.recv::<CtPerformIntentB>().await?)?;
-                imp::imaging(&admitted, ("patient_b", "CT"))?;
-                let bytes = imp::encode(&admitted)?;
-                endpoint
-                    .send::<CtAssessmentQueryB>(&bytes.as_slice())
-                    .await?;
+                let admitted = branch.recv::<CtPerformIntentB>().await?;
+
+                endpoint.send::<CtAssessmentQueryB>(&admitted).await?;
                 assessment_b = imp::decode(endpoint.recv::<CtAssessmentB>().await?)?;
                 imp::actual_result(&assessment_b, "patient_b")?;
+                endpoint.send::<CtPerformAdmittedB>(&admitted).await?;
+                let admitted = admitted.into_value();
                 endpoint.send::<CtLoan>(instrument).await?;
-                let arguments = imp::decode(endpoint.recv::<CtPerformRequestB>().await?)?;
+                let arguments = endpoint.recv::<CtPerformRequestB>().await?.into_value();
                 imp::same(&arguments, &admitted)?;
                 let result = domain
                     .execute("RADIOLOGIST", "perform_imaging", arguments)
@@ -91,16 +111,28 @@ pub async fn ct<'r, D: Domain>(
                     &assessment_b["data"]["artifact_id"],
                 )?;
                 let bytes = imp::encode(&result)?;
-                endpoint.send::<CtImageB>(&bytes.as_slice()).await?;
+                async {
+                    let [mut resource, mut file] = endpoint.par()?;
+                    async {
+                        resource.send::<CtImageB>(&bytes.as_slice()).await?;
+                    };
+                    async {
+                        file.send::<FileCtImageB>(&bytes.as_slice()).await?;
+                    };
+                    Ok::<(), ShellError>(())
+                }
+                .await?;
                 instrument = endpoint.recv::<CtLoan>().await?;
                 image_b = result;
             }
             CtInterpretIntentB::LOGICAL_LABEL => {
-                let admitted = imp::decode(branch.recv::<CtInterpretIntentB>().await?)?;
-                imp::imaging(&admitted, ("patient_b", "CT"))?;
+                let admitted = branch.recv::<CtInterpretIntentB>().await?;
+
                 imp::actual_result(&image_b, "patient_b")?;
+                endpoint.send::<CtInterpretAdmittedB>(&admitted).await?;
+                let admitted = admitted.into_value();
                 endpoint.send::<CtLoan>(instrument).await?;
-                let arguments = imp::decode(endpoint.recv::<CtInterpretRequestB>().await?)?;
+                let arguments = endpoint.recv::<CtInterpretRequestB>().await?.into_value();
                 imp::same(&arguments, &admitted)?;
                 let result = domain
                     .execute("RADIOLOGIST", "interpret_imaging", arguments)
@@ -116,7 +148,17 @@ pub async fn ct<'r, D: Domain>(
                     &image_b["data"]["artifact_id"],
                 )?;
                 let bytes = imp::encode(&result)?;
-                endpoint.send::<CtReportB>(&bytes.as_slice()).await?;
+                async {
+                    let [mut resource, mut file] = endpoint.par()?;
+                    async {
+                        resource.send::<CtReportB>(&bytes.as_slice()).await?;
+                    };
+                    async {
+                        file.send::<FileCtReportB>(&bytes.as_slice()).await?;
+                    };
+                    Ok::<(), ShellError>(())
+                }
+                .await?;
                 instrument = endpoint.recv::<CtLoan>().await?;
                 endpoint.send::<CtFindingsB>(&bytes.as_slice()).await?;
             }
@@ -132,16 +174,15 @@ pub async fn mri<'r, D: Domain>(
     mut instrument: Endpoint<'r, MRI>,
     domain: &D,
 ) -> ShellResult<()> {
-    let admitted = imp::decode(endpoint.recv::<MriPerformIntent>().await?)?;
-    imp::imaging(&admitted, ("patient_b", "MRI"))?;
-    let bytes = imp::encode(&admitted)?;
-    endpoint
-        .send::<MriAssessmentQuery>(&bytes.as_slice())
-        .await?;
+    let admitted = endpoint.recv::<MriPerformIntent>().await?;
+
+    endpoint.send::<MriAssessmentQuery>(&admitted).await?;
     let assessment = imp::decode(endpoint.recv::<MriAssessment>().await?)?;
     imp::actual_result(&assessment, "patient_b")?;
+    endpoint.send::<MriPerformAdmitted>(&admitted).await?;
+    let admitted = admitted.into_value();
     endpoint.send::<MriLoan>(instrument).await?;
-    let arguments = imp::decode(endpoint.recv::<MriPerformRequest>().await?)?;
+    let arguments = endpoint.recv::<MriPerformRequest>().await?.into_value();
     imp::same(&arguments, &admitted)?;
     let image = domain
         .execute("RADIOLOGIST", "perform_imaging", arguments)
@@ -153,13 +194,25 @@ pub async fn mri<'r, D: Domain>(
         &assessment["data"]["artifact_id"],
     )?;
     let bytes = imp::encode(&image)?;
-    endpoint.send::<MriImage>(&bytes.as_slice()).await?;
+    async {
+        let [mut resource, mut file] = endpoint.par()?;
+        async {
+            resource.send::<MriImage>(&bytes.as_slice()).await?;
+        };
+        async {
+            file.send::<FileMriImage>(&bytes.as_slice()).await?;
+        };
+        Ok::<(), ShellError>(())
+    }
+    .await?;
     instrument = endpoint.recv::<MriLoan>().await?;
 
-    let admitted = imp::decode(endpoint.recv::<MriInterpretIntent>().await?)?;
-    imp::imaging(&admitted, ("patient_b", "MRI"))?;
+    let admitted = endpoint.recv::<MriInterpretIntent>().await?;
+
+    endpoint.send::<MriInterpretAdmitted>(&admitted).await?;
+    let admitted = admitted.into_value();
     endpoint.send::<MriLoan>(instrument).await?;
-    let arguments = imp::decode(endpoint.recv::<MriInterpretRequest>().await?)?;
+    let arguments = endpoint.recv::<MriInterpretRequest>().await?.into_value();
     imp::same(&arguments, &admitted)?;
     let report = domain
         .execute("RADIOLOGIST", "interpret_imaging", arguments)
@@ -175,7 +228,17 @@ pub async fn mri<'r, D: Domain>(
         &image["data"]["artifact_id"],
     )?;
     let bytes = imp::encode(&report)?;
-    endpoint.send::<MriReport>(&bytes.as_slice()).await?;
+    async {
+        let [mut resource, mut file] = endpoint.par()?;
+        async {
+            resource.send::<MriReport>(&bytes.as_slice()).await?;
+        };
+        async {
+            file.send::<FileMriReport>(&bytes.as_slice()).await?;
+        };
+        Ok::<(), ShellError>(())
+    }
+    .await?;
     let _instrument = endpoint.recv::<MriLoan>().await?;
     endpoint.send::<MriFindingsB>(&bytes.as_slice()).await?;
     Ok(())

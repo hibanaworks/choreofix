@@ -133,7 +133,7 @@ implemented; applying it to every effect entry and completing the remaining
 task ports are still required. These obligations do not depend on developing a
 comparison client.
 
-The twenty-eight migrated tasks have actual Wasm qualifications for
+Historical source-bound Wasm qualification records cover
 three/five/seven-person Dining, seven-person collaborative
 coding with reconsideration, collaborative writing at three/five/seven participants,
 the three-person API, API-coordination, CI/CD, code-review and research-report tasks,
@@ -157,8 +157,8 @@ probes, five actual-Wasm conditions and one five-model pilot. The pilot passed
 the common published-content outcome and EPF/effect audits in 61.07 seconds,
 using 660,689 inclusive tokens. Its 14 actual effects and 7,191 captured records
 are bound to the saved binary and source. This revised common task is identified
-separately from the upstream task; these are unscored qualifications. Twenty
-task ports and final-source certification remain unfinished.
+separately from the upstream task; these are unscored historical qualifications.
+Current direct-file qualification is tracked separately in the experiment contract.
 
 Regulatory discovery (`14M`) passes twelve actual-Wasm conditions with 231
 effects, dynamic EPF/effect audits and 1,890 rejected record mutations. One
@@ -224,11 +224,14 @@ The subsequent common-world version 4 corrects 5H's ICU bed capacity from the
 default one to the specified two. All 73 world tests pass, including 90 legal
 5H image orders and actual overlapping ICU calls. Effect/scorer code is unchanged;
 earlier pilot records keep their original contracts and hashes.
-The historical pre-direct-file 5H port passed eight real-Wasm conditions and a seven-model pilot through
-common scoring, dynamic EPF and actual-effect audits. The pilot takes 48.16
-seconds, 679,177 inclusive tokens and completes 16 effects with zero violations.
-Its actual effects have seven overlapping pairs. Source-bound scope and limits
-are recorded in [the 5H port](benchmark/ports/5H.md).
+The direct-file `5H` port passes eleven real-Wasm conditions and a seven-model
+pilot through common scoring, complete dynamic EPF and actual-effect audits.
+The pilot takes 68.85 seconds, 1,081,788 inclusive tokens and completes 16 effects
+with zero violations and seven overlapping effect pairs. Both patient-independence
+schedules finish one patient's care before the other patient's assessment starts.
+The mechanism suite also observes concurrent CT/MRI imaging and interpretation.
+This is the 21st qualified direct-file task; 27 remain. Source-bound scope and
+limits are recorded in [the 5H port](benchmark/ports/5H.md).
 
 Multi-specialty care (`5M`) passes nine direct-file real-Wasm conditions and
 one five-model pilot on the same runtime. The pilot completes in 75.24 seconds

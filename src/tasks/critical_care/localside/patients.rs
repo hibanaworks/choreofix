@@ -11,7 +11,7 @@ pub async fn patient_a<'r, D: Domain>(
     (mut panel, actual): (Endpoint<'r, PANEL_A>, &Cell<Value>),
     domain: &D,
 ) -> ShellResult<()> {
-    let arguments = imp::decode(endpoint.recv::<AssessmentRequestA>().await?)?;
+    let arguments = endpoint.recv::<AssessmentRequestA>().await?.into_value();
     imp::patient(&arguments, "patient_a")?;
     let assessment = domain
         .execute("ER_DOCTOR_A", "assess_patient", arguments)
@@ -19,15 +19,28 @@ pub async fn patient_a<'r, D: Domain>(
         .map_err(ShellError::message)?;
     imp::actual_result(&assessment, "patient_a")?;
     let bytes = imp::encode(&assessment)?;
-    endpoint
-        .send::<AssessmentResultA>(&bytes.as_slice())
-        .await?;
+    async {
+        let [mut clinical, mut file] = endpoint.par()?;
+        async {
+            clinical
+                .send::<AssessmentResultA>(&bytes.as_slice())
+                .await?;
+        };
+        async {
+            file.send::<FileAssessmentA>(&bytes.as_slice()).await?;
+        };
+        Ok::<(), ShellError>(())
+    }
+    .await?;
     let (receipts, ct) = async {
         let [mut tests, mut ct] = endpoint.par()?;
         async {
             loop {
                 tests.send::<PanelLoan<PANEL_A>>(panel).await?;
-                let arguments = imp::decode(tests.recv::<TestRequest>().await?)?;
+                let admitted = tests.recv::<PanelFileRequestA>().await?;
+                tests.send::<PanelAdmittedA>(&admitted).await?;
+                let arguments = tests.recv::<TestRequest<2>>().await?.into_value();
+                imp::same(&arguments, &admitted.into_value())?;
                 imp::tests(
                     &arguments,
                     ("patient_a", &["trauma_panel", "blood_type", "coag"]),
@@ -61,11 +74,13 @@ pub async fn patient_a<'r, D: Domain>(
                     tests.send::<PanelComplete>(&bytes.as_slice()).await?;
                     break Ok(receipts);
                 }
+                let attempt = imp::encode(&result)?;
+                tests.send::<FilePanelResultA>(&attempt.as_slice()).await?;
                 tests.send::<PanelPartial>(&bytes.as_slice()).await?;
             }
         };
         async {
-            let query = imp::decode(ct.recv::<CtAssessmentQueryA>().await?)?;
+            let query = ct.recv::<CtAssessmentQueryA>().await?.into_value();
             imp::imaging(&query, ("patient_a", "CT"))?;
             let bytes = imp::encode(&assessment)?;
             ct.send::<CtAssessmentA>(&bytes.as_slice()).await?;
@@ -82,7 +97,7 @@ pub async fn patient_a<'r, D: Domain>(
     let findings = json!({"assessment":assessment, "tests":receipts, "ct":ct});
     let bytes = imp::encode(&findings)?;
     endpoint.send::<FindingsA>(&bytes.as_slice()).await?;
-    let arguments = imp::decode(endpoint.recv::<DiagnosisRequestA>().await?)?;
+    let arguments = endpoint.recv::<DiagnosisRequestA>().await?.into_value();
     imp::patient(&arguments, "patient_a")?;
     imp::optional_text(&arguments, "symptoms")?;
     let result = domain
@@ -104,22 +119,47 @@ pub async fn patient_a<'r, D: Domain>(
         &result["data"]["inputs"]["imaging:CT"],
         &ct["data"]["artifact_id"],
     )?;
-    let bytes = imp::encode(&result)?;
-    endpoint.send::<DiagnosisResultA>(&bytes.as_slice()).await?;
-    let bytes = imp::encode(&json!({"result":result, "findings":findings}))?;
+    let result_bytes = imp::encode(&result)?;
+    let record_bytes = imp::encode(&json!({"result":result,"findings":findings}))?;
     async {
-        let [mut anesthesia, mut surgery] = endpoint.par()?;
+        let [
+            mut clinical,
+            mut file,
+            mut anesthesia,
+            mut surgery,
+            mut anesthesia_file,
+            mut surgery_file,
+        ] = endpoint.par()?;
+        async {
+            clinical
+                .send::<DiagnosisResultA>(&result_bytes.as_slice())
+                .await?;
+        };
+        async {
+            file.send::<FileDiagnosisResultA>(&result_bytes.as_slice())
+                .await?;
+        };
         async {
             anesthesia
-                .send::<DiagnosisForAnesthesia>(&bytes.as_slice())
+                .send::<DiagnosisForAnesthesia>(&record_bytes.as_slice())
                 .await?;
         };
         async {
             surgery
-                .send::<DiagnosisForSurgery>(&bytes.as_slice())
+                .send::<DiagnosisForSurgery>(&record_bytes.as_slice())
                 .await?;
         };
-        Ok(())
+        async {
+            anesthesia_file
+                .send::<FileDiagnosisAnesthesia>(&record_bytes.as_slice())
+                .await?;
+        };
+        async {
+            surgery_file
+                .send::<FileDiagnosisSurgery>(&record_bytes.as_slice())
+                .await?;
+        };
+        Ok::<(), ShellError>(())
     }
     .await?;
     Ok(())
@@ -131,7 +171,7 @@ pub async fn patient_b<'r, D: Domain>(
     (mut panel, actual): (Endpoint<'r, PANEL_B>, &Cell<Value>),
     domain: &D,
 ) -> ShellResult<()> {
-    let arguments = imp::decode(endpoint.recv::<AssessmentRequestB>().await?)?;
+    let arguments = endpoint.recv::<AssessmentRequestB>().await?.into_value();
     imp::patient(&arguments, "patient_b")?;
     let assessment = domain
         .execute("ER_DOCTOR_B", "assess_patient", arguments)
@@ -139,15 +179,28 @@ pub async fn patient_b<'r, D: Domain>(
         .map_err(ShellError::message)?;
     imp::actual_result(&assessment, "patient_b")?;
     let bytes = imp::encode(&assessment)?;
-    endpoint
-        .send::<AssessmentResultB>(&bytes.as_slice())
-        .await?;
+    async {
+        let [mut clinical, mut file] = endpoint.par()?;
+        async {
+            clinical
+                .send::<AssessmentResultB>(&bytes.as_slice())
+                .await?;
+        };
+        async {
+            file.send::<FileAssessmentB>(&bytes.as_slice()).await?;
+        };
+        Ok::<(), ShellError>(())
+    }
+    .await?;
     let (receipts, ct, mri) = async {
         let [mut tests, mut ct, mut mri] = endpoint.par()?;
         async {
             loop {
                 tests.send::<PanelLoan<PANEL_B>>(panel).await?;
-                let arguments = imp::decode(tests.recv::<TestRequest>().await?)?;
+                let admitted = tests.recv::<PanelFileRequestB>().await?;
+                tests.send::<PanelAdmittedB>(&admitted).await?;
+                let arguments = tests.recv::<TestRequest<3>>().await?.into_value();
+                imp::same(&arguments, &admitted.into_value())?;
                 imp::tests(&arguments, ("patient_b", &["stroke_panel", "ct_angio"]))?;
                 let result = domain
                     .execute("ER_DOCTOR_B", "order_tests", arguments)
@@ -175,11 +228,13 @@ pub async fn patient_b<'r, D: Domain>(
                     tests.send::<PanelComplete>(&bytes.as_slice()).await?;
                     break Ok(receipts);
                 }
+                let attempt = imp::encode(&result)?;
+                tests.send::<FilePanelResultB>(&attempt.as_slice()).await?;
                 tests.send::<PanelPartial>(&bytes.as_slice()).await?;
             }
         };
         async {
-            let query = imp::decode(ct.recv::<CtAssessmentQueryB>().await?)?;
+            let query = ct.recv::<CtAssessmentQueryB>().await?.into_value();
             imp::imaging(&query, ("patient_b", "CT"))?;
             let bytes = imp::encode(&assessment)?;
             ct.send::<CtAssessmentB>(&bytes.as_slice()).await?;
@@ -192,7 +247,7 @@ pub async fn patient_b<'r, D: Domain>(
             Ok(report)
         };
         async {
-            let query = imp::decode(mri.recv::<MriAssessmentQuery>().await?)?;
+            let query = mri.recv::<MriAssessmentQuery>().await?.into_value();
             imp::imaging(&query, ("patient_b", "MRI"))?;
             let bytes = imp::encode(&assessment)?;
             mri.send::<MriAssessment>(&bytes.as_slice()).await?;
@@ -209,7 +264,7 @@ pub async fn patient_b<'r, D: Domain>(
     let findings = json!({"assessment":assessment, "tests":receipts, "ct":ct, "mri":mri});
     let bytes = imp::encode(&findings)?;
     endpoint.send::<FindingsB>(&bytes.as_slice()).await?;
-    let arguments = imp::decode(endpoint.recv::<DiagnosisRequestB>().await?)?;
+    let arguments = endpoint.recv::<DiagnosisRequestB>().await?.into_value();
     imp::patient(&arguments, "patient_b")?;
     imp::optional_text(&arguments, "symptoms")?;
     let result = domain
@@ -235,9 +290,30 @@ pub async fn patient_b<'r, D: Domain>(
         &result["data"]["inputs"]["imaging:MRI"],
         &mri["data"]["artifact_id"],
     )?;
-    let bytes = imp::encode(&result)?;
-    endpoint.send::<DiagnosisResultB>(&bytes.as_slice()).await?;
-    let bytes = imp::encode(&json!({"result":result, "findings":findings}))?;
-    endpoint.send::<DiagnosisForIcu>(&bytes.as_slice()).await?;
+    let result_bytes = imp::encode(&result)?;
+    let record_bytes = imp::encode(&json!({"result":result,"findings":findings}))?;
+    async {
+        let [mut clinical, mut file, mut icu, mut icu_file] = endpoint.par()?;
+        async {
+            clinical
+                .send::<DiagnosisResultB>(&result_bytes.as_slice())
+                .await?;
+        };
+        async {
+            file.send::<FileDiagnosisResultB>(&result_bytes.as_slice())
+                .await?;
+        };
+        async {
+            icu.send::<DiagnosisForIcu>(&record_bytes.as_slice())
+                .await?;
+        };
+        async {
+            icu_file
+                .send::<FileDiagnosisIcu>(&record_bytes.as_slice())
+                .await?;
+        };
+        Ok::<(), ShellError>(())
+    }
+    .await?;
     Ok(())
 }

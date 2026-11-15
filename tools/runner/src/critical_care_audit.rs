@@ -1,12 +1,44 @@
-//! One-use clinical admissions, actual resource requests and effect data.
-//! EPF validates source execution and affine custody; this module never advances it.
+//! Actual typed file/resource receives and clinical effects. EPF owns dynamic order.
 use crate::{
     evidence::{Result, digest, save},
-    journal::{Call, Frame, check_close_pairs, close_arguments, one, records},
+    journal::{Call, Frame, one, records},
 };
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, fs, path::Path};
 
+// Immutable classification of the recorded compiled contracts, never task authority.
+fn clinical_frames(compiled: &Value) -> Result<impl Fn(&Frame) -> bool> {
+    let mut infrastructure = [false; 256];
+    let mut labels = [false; 256];
+    for (name, role) in compiled["roles"].as_object().ok_or("compiled roles")? {
+        let role = role.as_u64().filter(|r| *r < 256).ok_or("compiled role")? as usize;
+        infrastructure[role] =
+            name.ends_with("_DATA") || name.ends_with("_IO") || name.ends_with("_VM");
+    }
+    for label in compiled["labels"]
+        .as_object()
+        .ok_or("compiled labels")?
+        .values()
+    {
+        labels[label
+            .as_u64()
+            .filter(|n| *n < 256)
+            .ok_or("compiled label")? as usize] = true;
+    }
+    Ok(move |frame: &Frame| {
+        let (Some(from), Some(to)) = (
+            frame.identity["source"].as_u64(),
+            frame.identity["target"].as_u64(),
+        ) else {
+            return false;
+        };
+        from < 256
+            && to < 256
+            && !infrastructure[from as usize]
+            && !infrastructure[to as usize]
+            && labels[frame.logical_label as usize]
+    })
+}
 fn completed<'a>(
     calls: &[&'a Call],
     key: (&str, &str, &str, Option<&str>),
@@ -68,7 +100,7 @@ fn findings(calls: &[&Call], patient: &str, before: usize) -> Result<Value> {
     }
     Ok(value)
 }
-fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
+fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty critical-care evidence")?["message"];
     if compiled["task"] != "5H" || fixture["task"] != "5H" || fixture["type"] != "fixtures" {
@@ -77,116 +109,97 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
     let actors = fixture["fixtures"]
         .as_array()
         .ok_or("clinical participants")?;
+    let expected = BTreeSet::from([
+        "ER_DOCTOR_A",
+        "ER_DOCTOR_B",
+        "RADIOLOGIST",
+        "SURGEON",
+        "ANESTHESIOLOGIST",
+        "ICU_COORDINATOR",
+        "PHARMACIST",
+    ]);
     if actors.len() != 7
         || actors
             .iter()
-            .map(|a| a["agent"].as_str())
+            .map(|v| v["agent"].as_str())
             .collect::<BTreeSet<_>>()
-            != BTreeSet::from([
-                Some("ER_DOCTOR_A"),
-                Some("ER_DOCTOR_B"),
-                Some("RADIOLOGIST"),
-                Some("SURGEON"),
-                Some("ANESTHESIOLOGIST"),
-                Some("ICU_COORDINATOR"),
-                Some("PHARMACIST"),
-            ])
+            != expected.iter().copied().map(Some).collect()
     {
         return Err("critical-care participants differ".into());
     }
     let role = |name: &str| -> Result<u64> {
         compiled["roles"][name]
             .as_u64()
-            .filter(|v| *v <= 255)
+            .filter(|r| *r < 256)
             .ok_or_else(|| format!("compiled role {name}").into())
     };
     let label = |name: &str| -> Result<u8> {
         compiled["labels"][name]
             .as_u64()
-            .and_then(|v| u8::try_from(v).ok())
+            .and_then(|n| u8::try_from(n).ok())
             .ok_or_else(|| format!("compiled label {name}").into())
     };
     let labels = crate::projection::frames(artifact, rows)?;
+    let mut journal = crate::journal::read(rows, &labels, actors)?;
+    journal.bind_receives(dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
         score,
-    } = crate::journal::read(rows, &labels, actors)?;
+    } = journal;
     if calls.len() < 16
         || score["complete"] != true
         || score["violations"] != json!([])
         || frames
             .values()
-            .any(|frame| frame.identity["session"] != compiled["session"])
+            .any(|f| f.identity["session"] != compiled["session"])
     {
         return Err("incomplete or unsafe critical-care outcome".into());
     }
-    let pairs = [
-        ("ER_DOCTOR_A", "ER_A_IO"),
-        ("ER_DOCTOR_B", "ER_B_IO"),
-        ("RADIOLOGIST", "RADIOLOGY_IO"),
-        ("SURGEON", "SURGERY_IO"),
-        ("ANESTHESIOLOGIST", "ANESTHESIA_IO"),
-        ("ICU_COORDINATOR", "ICU_IO"),
-        ("PHARMACIST", "PHARMACY_IO"),
-    ]
-    .into_iter()
-    .map(|(vm, io)| Ok((role(vm)?, role(io)?)))
-    .collect::<Result<Vec<_>>>()?;
-    check_close_pairs(&frames, &pairs)?;
-    let business = |frame: &Frame| {
-        !pairs
-            .iter()
-            .any(|(vm, io)| frame.direction(*vm, *io) || frame.direction(*io, *vm))
-    };
+    let business = clinical_frames(compiled)?;
     let mut ordered = calls.values().collect::<Vec<_>>();
-    ordered.sort_by_key(|call| call.emitted);
+    ordered.sort_by_key(|c| c.emitted);
     let tests = ordered
         .iter()
-        .filter(|call| call.request["tool"] == "order_tests")
+        .filter(|c| c.request["tool"] == "order_tests")
         .count();
-    for doctor in ["ER_DOCTOR_A", "ER_DOCTOR_B"] {
-        if !ordered
-            .iter()
-            .any(|call| call.request["agent"] == doctor && call.request["tool"] == "order_tests")
-        {
-            return Err("missing an actual patient panel".into());
-        }
+    let tests_a = ordered
+        .iter()
+        .filter(|c| c.request["agent"] == "ER_DOCTOR_A" && c.request["tool"] == "order_tests")
+        .count();
+    let tests_b = tests - tests_a;
+    if tests_a == 0 || tests_b == 0 {
+        return Err("missing actual patient panel".into());
     }
-    for (name, number) in compiled["labels"]
-        .as_object()
-        .ok_or("compiled label names")?
-    {
+    for (name, number) in compiled["labels"].as_object().ok_or("compiled labels")? {
         let number = number
             .as_u64()
-            .and_then(|n| u8::try_from(n).ok())
-            .ok_or("compiled logical label")?;
-        let expected = match name.as_str() {
+            .and_then(|v| u8::try_from(v).ok())
+            .ok_or("logical label")?;
+        let count = match name.as_str() {
             "PanelLoan" | "PanelReturn" | "TestRequest" | "TestResult" => tests,
             "PanelCompleted" | "PanelComplete" | "ResourceLoan" | "ResourceReturn" => 2,
-            "PanelPartial" => tests.checked_sub(2).ok_or("two actual patient panels")?,
+            "PanelPartial" => tests - 2,
             "CtLoan" => 8,
             "MriLoan" => 4,
             "AnesthesiaLoan" | "SurgeryLoan" => 2,
+            "PanelFileRequestA" | "PanelAdmittedA" | "FilePanelResultA" => tests_a,
+            "PanelFileRequestB" | "PanelAdmittedB" | "FilePanelResultB" => tests_b,
             _ => 1,
         };
-        if frames
+        let actual = frames
             .values()
             .filter(|f| business(f) && f.logical_label == number)
-            .count()
-            != expected
-        {
-            return Err(format!("missing or excess {name}").into());
+            .count();
+        if actual != count {
+            return Err(format!("missing or excess {name}: {actual} != {count}").into());
         }
     }
-    let mut scored = score["events"]
-        .as_array()
-        .ok_or("common-world effects")?
-        .clone();
+    let mut scored = score["events"].as_array().ok_or("common effects")?.clone();
     if scored.len() != ordered.len() {
         return Err("world and domain counts differ".into());
     }
-    let (mut used, mut closes) = (BTreeSet::new(), BTreeSet::new());
+    let mut used = BTreeSet::new();
     for call in &ordered {
         let actor = call.request["agent"].as_str().ok_or("effect actor")?;
         let tool = call.tool()?;
@@ -198,251 +211,244 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
             || result["data"]["patient_id"] != patient
             || !result["data"]["artifact_id"].is_string()
         {
-            return Err("effect lacks an actual patient artifact".into());
+            return Err("effect lacks actual patient artifact".into());
         }
         let modality = arguments["modality"].as_str().map(str::to_ascii_uppercase);
-        let (io, from, owner, request, target, reply, intent, second) =
+        let relations: &[(&str, &str, &str, bool)] =
             match (actor, tool, patient, modality.as_deref()) {
-                ("ER_DOCTOR_A", "assess_patient", "patient_a", _) => (
-                    "ER_A_IO",
-                    "ER_DOCTOR_A",
-                    "PATIENT_A_SERVICE",
-                    "AssessmentRequestA",
-                    "ER_DOCTOR_A",
-                    "AssessmentResultA",
-                    None,
-                    None,
-                ),
-                ("ER_DOCTOR_B", "assess_patient", "patient_b", _) => (
-                    "ER_B_IO",
-                    "ER_DOCTOR_B",
-                    "PATIENT_B_SERVICE",
-                    "AssessmentRequestB",
-                    "ER_DOCTOR_B",
-                    "AssessmentResultB",
-                    None,
-                    None,
-                ),
-                ("ER_DOCTOR_A", "order_tests", "patient_a", _) => (
-                    "ER_A_IO",
-                    "PANEL_A",
-                    "PATIENT_A_SERVICE",
-                    "TestRequest",
-                    "PANEL_A",
-                    "TestResult",
-                    None,
-                    None,
-                ),
-                ("ER_DOCTOR_B", "order_tests", "patient_b", _) => (
-                    "ER_B_IO",
-                    "PANEL_B",
-                    "PATIENT_B_SERVICE",
-                    "TestRequest",
-                    "PANEL_B",
-                    "TestResult",
-                    None,
-                    None,
-                ),
-                ("ER_DOCTOR_A", "diagnose", "patient_a", _) => (
-                    "ER_A_IO",
-                    "ER_DOCTOR_A",
-                    "PATIENT_A_SERVICE",
-                    "DiagnosisRequestA",
-                    "ER_DOCTOR_A",
-                    "DiagnosisResultA",
-                    None,
-                    None,
-                ),
-                ("ER_DOCTOR_B", "diagnose", "patient_b", _) => (
-                    "ER_B_IO",
-                    "ER_DOCTOR_B",
-                    "PATIENT_B_SERVICE",
-                    "DiagnosisRequestB",
-                    "ER_DOCTOR_B",
-                    "DiagnosisResultB",
-                    None,
-                    None,
-                ),
-                ("RADIOLOGIST", "perform_imaging", "patient_a", Some("CT")) => (
-                    "RADIOLOGY_IO",
-                    "CT_SCANNER",
-                    "CT_SERVICE",
-                    "CtPerformRequestA",
-                    "CT_SCANNER",
-                    "CtImageA",
-                    Some("CtPerformIntentA"),
-                    None,
-                ),
-                ("RADIOLOGIST", "interpret_imaging", "patient_a", Some("CT")) => (
-                    "RADIOLOGY_IO",
-                    "CT_SCANNER",
-                    "CT_SERVICE",
-                    "CtInterpretRequestA",
-                    "CT_SCANNER",
-                    "CtReportA",
-                    Some("CtInterpretIntentA"),
-                    None,
-                ),
-                ("RADIOLOGIST", "perform_imaging", "patient_b", Some("CT")) => (
-                    "RADIOLOGY_IO",
-                    "CT_SCANNER",
-                    "CT_SERVICE",
-                    "CtPerformRequestB",
-                    "CT_SCANNER",
-                    "CtImageB",
-                    Some("CtPerformIntentB"),
-                    None,
-                ),
-                ("RADIOLOGIST", "interpret_imaging", "patient_b", Some("CT")) => (
-                    "RADIOLOGY_IO",
-                    "CT_SCANNER",
-                    "CT_SERVICE",
-                    "CtInterpretRequestB",
-                    "CT_SCANNER",
-                    "CtReportB",
-                    Some("CtInterpretIntentB"),
-                    None,
-                ),
-                ("RADIOLOGIST", "perform_imaging", "patient_b", Some("MRI")) => (
-                    "RADIOLOGY_IO",
-                    "MRI",
-                    "MRI_SERVICE",
-                    "MriPerformRequest",
-                    "MRI",
-                    "MriImage",
-                    Some("MriPerformIntent"),
-                    None,
-                ),
-                ("RADIOLOGIST", "interpret_imaging", "patient_b", Some("MRI")) => (
-                    "RADIOLOGY_IO",
-                    "MRI",
-                    "MRI_SERVICE",
-                    "MriInterpretRequest",
-                    "MRI",
-                    "MriReport",
-                    Some("MriInterpretIntent"),
-                    None,
-                ),
-                ("ANESTHESIOLOGIST", "prepare_anesthesia", "patient_a", _) => (
-                    "ANESTHESIA_IO",
-                    "OPERATING_ROOM",
-                    "ANESTHESIA_SERVICE",
-                    "AnesthesiaRequest",
-                    "OPERATING_ROOM",
-                    "AnesthesiaResult",
-                    Some("AnesthesiaIntent"),
-                    None,
-                ),
-                ("SURGEON", "perform_surgery", "patient_a", _) => (
-                    "SURGERY_IO",
-                    "OPERATING_ROOM",
-                    "SURGERY_SERVICE",
-                    "SurgeryRequest",
-                    "OPERATING_ROOM",
-                    "SurgeryResult",
-                    Some("SurgeryIntent"),
-                    None,
-                ),
-                ("ICU_COORDINATOR", "manage_icu", "patient_b", _) => (
-                    "ICU_IO",
-                    "ICU_BEDS",
-                    "ICU_SERVICE",
-                    "BedRequest",
-                    "ICU_BEDS",
-                    "BedResult",
-                    Some("IcuIntent"),
-                    Some((
-                        "VENTILATOR",
-                        "VentilatorRequest",
-                        "VENTILATOR",
-                        "VentilatorResult",
-                    )),
-                ),
-                ("PHARMACIST", "review_prescriptions", "patient_A_and_B", _) => (
-                    "PHARMACY_IO",
-                    "PHARMACIST",
-                    "PHARMACY_SERVICE",
-                    "ReviewRequest",
-                    "PHARMACIST",
-                    "ReviewResult",
-                    None,
-                    None,
-                ),
+                ("ER_DOCTOR_A", "assess_patient", "patient_a", _) => &[
+                    (
+                        "ER_A_FILE",
+                        "PATIENT_A_SERVICE",
+                        "AssessmentRequestA",
+                        false,
+                    ),
+                    (
+                        "PATIENT_A_SERVICE",
+                        "ER_DOCTOR_A",
+                        "AssessmentResultA",
+                        true,
+                    ),
+                    ("PATIENT_A_SERVICE", "ER_A_FILE", "FileAssessmentA", true),
+                ],
+                ("ER_DOCTOR_A", "order_tests", "patient_a", _) => &[
+                    ("ER_A_FILE", "PATIENT_A_SERVICE", "PanelFileRequestA", false),
+                    ("PATIENT_A_SERVICE", "ER_DOCTOR_A", "PanelAdmittedA", false),
+                    ("PANEL_A", "PATIENT_A_SERVICE", "TestRequest", false),
+                    ("PATIENT_A_SERVICE", "PANEL_A", "TestResult", true),
+                ],
+                ("ER_DOCTOR_A", "diagnose", "patient_a", _) => &[
+                    ("ER_A_FILE", "PATIENT_A_SERVICE", "DiagnosisRequestA", false),
+                    ("PATIENT_A_SERVICE", "ER_DOCTOR_A", "DiagnosisResultA", true),
+                    (
+                        "PATIENT_A_SERVICE",
+                        "ER_A_FILE",
+                        "FileDiagnosisResultA",
+                        true,
+                    ),
+                ],
+                ("ER_DOCTOR_B", "assess_patient", "patient_b", _) => &[
+                    (
+                        "ER_B_FILE",
+                        "PATIENT_B_SERVICE",
+                        "AssessmentRequestB",
+                        false,
+                    ),
+                    (
+                        "PATIENT_B_SERVICE",
+                        "ER_DOCTOR_B",
+                        "AssessmentResultB",
+                        true,
+                    ),
+                    ("PATIENT_B_SERVICE", "ER_B_FILE", "FileAssessmentB", true),
+                ],
+                ("ER_DOCTOR_B", "order_tests", "patient_b", _) => &[
+                    ("ER_B_FILE", "PATIENT_B_SERVICE", "PanelFileRequestB", false),
+                    ("PATIENT_B_SERVICE", "ER_DOCTOR_B", "PanelAdmittedB", false),
+                    ("PANEL_B", "PATIENT_B_SERVICE", "TestRequest", false),
+                    ("PATIENT_B_SERVICE", "PANEL_B", "TestResult", true),
+                ],
+                ("ER_DOCTOR_B", "diagnose", "patient_b", _) => &[
+                    ("ER_B_FILE", "PATIENT_B_SERVICE", "DiagnosisRequestB", false),
+                    ("PATIENT_B_SERVICE", "ER_DOCTOR_B", "DiagnosisResultB", true),
+                    (
+                        "PATIENT_B_SERVICE",
+                        "ER_B_FILE",
+                        "FileDiagnosisResultB",
+                        true,
+                    ),
+                ],
+                ("RADIOLOGIST", "perform_imaging", "patient_a", Some("CT")) => &[
+                    ("RADIOLOGY_FILE", "CT_SERVICE", "CtPerformIntentA", false),
+                    ("CT_SERVICE", "RADIOLOGIST", "CtPerformAdmittedA", false),
+                    ("CT_SCANNER", "CT_SERVICE", "CtPerformRequestA", false),
+                    ("CT_SERVICE", "CT_SCANNER", "CtImageA", true),
+                    ("CT_SERVICE", "RADIOLOGY_FILE", "FileCtImageA", true),
+                ],
+                ("RADIOLOGIST", "interpret_imaging", "patient_a", Some("CT")) => &[
+                    ("RADIOLOGY_FILE", "CT_SERVICE", "CtInterpretIntentA", false),
+                    ("CT_SERVICE", "RADIOLOGIST", "CtInterpretAdmittedA", false),
+                    ("CT_SCANNER", "CT_SERVICE", "CtInterpretRequestA", false),
+                    ("CT_SERVICE", "CT_SCANNER", "CtReportA", true),
+                    ("CT_SERVICE", "RADIOLOGY_FILE", "FileCtReportA", true),
+                ],
+                ("RADIOLOGIST", "perform_imaging", "patient_b", Some("CT")) => &[
+                    ("RADIOLOGY_FILE", "CT_SERVICE", "CtPerformIntentB", false),
+                    ("CT_SERVICE", "RADIOLOGIST", "CtPerformAdmittedB", false),
+                    ("CT_SCANNER", "CT_SERVICE", "CtPerformRequestB", false),
+                    ("CT_SERVICE", "CT_SCANNER", "CtImageB", true),
+                    ("CT_SERVICE", "RADIOLOGY_FILE", "FileCtImageB", true),
+                ],
+                ("RADIOLOGIST", "interpret_imaging", "patient_b", Some("CT")) => &[
+                    ("RADIOLOGY_FILE", "CT_SERVICE", "CtInterpretIntentB", false),
+                    ("CT_SERVICE", "RADIOLOGIST", "CtInterpretAdmittedB", false),
+                    ("CT_SCANNER", "CT_SERVICE", "CtInterpretRequestB", false),
+                    ("CT_SERVICE", "CT_SCANNER", "CtReportB", true),
+                    ("CT_SERVICE", "RADIOLOGY_FILE", "FileCtReportB", true),
+                ],
+                ("RADIOLOGIST", "perform_imaging", "patient_b", Some("MRI")) => &[
+                    ("RADIOLOGY_FILE", "MRI_SERVICE", "MriPerformIntent", false),
+                    ("MRI_SERVICE", "RADIOLOGIST", "MriPerformAdmitted", false),
+                    ("MRI", "MRI_SERVICE", "MriPerformRequest", false),
+                    ("MRI_SERVICE", "MRI", "MriImage", true),
+                    ("MRI_SERVICE", "RADIOLOGY_FILE", "FileMriImage", true),
+                ],
+                ("RADIOLOGIST", "interpret_imaging", "patient_b", Some("MRI")) => &[
+                    ("RADIOLOGY_FILE", "MRI_SERVICE", "MriInterpretIntent", false),
+                    ("MRI_SERVICE", "RADIOLOGIST", "MriInterpretAdmitted", false),
+                    ("MRI", "MRI_SERVICE", "MriInterpretRequest", false),
+                    ("MRI_SERVICE", "MRI", "MriReport", true),
+                    ("MRI_SERVICE", "RADIOLOGY_FILE", "FileMriReport", true),
+                ],
+                ("ANESTHESIOLOGIST", "prepare_anesthesia", "patient_a", _) => &[
+                    (
+                        "ANESTHESIA_FILE",
+                        "ANESTHESIA_SERVICE",
+                        "AnesthesiaIntent",
+                        false,
+                    ),
+                    (
+                        "ANESTHESIA_SERVICE",
+                        "ANESTHESIOLOGIST",
+                        "AnesthesiaAdmitted",
+                        false,
+                    ),
+                    (
+                        "OPERATING_ROOM",
+                        "ANESTHESIA_SERVICE",
+                        "AnesthesiaRequest",
+                        false,
+                    ),
+                    (
+                        "ANESTHESIA_SERVICE",
+                        "OPERATING_ROOM",
+                        "AnesthesiaResult",
+                        true,
+                    ),
+                    (
+                        "ANESTHESIA_SERVICE",
+                        "ANESTHESIA_FILE",
+                        "FileAnesthesiaResult",
+                        true,
+                    ),
+                ],
+                ("SURGEON", "perform_surgery", "patient_a", _) => &[
+                    ("SURGERY_FILE", "SURGERY_SERVICE", "SurgeryIntent", false),
+                    ("SURGERY_SERVICE", "SURGEON", "SurgeryAdmitted", false),
+                    ("OPERATING_ROOM", "SURGERY_SERVICE", "SurgeryRequest", false),
+                    ("SURGERY_SERVICE", "OPERATING_ROOM", "SurgeryResult", true),
+                    ("SURGERY_SERVICE", "SURGERY_FILE", "FileSurgeryResult", true),
+                ],
+                ("ICU_COORDINATOR", "manage_icu", "patient_b", _) => &[
+                    ("ICU_FILE", "ICU_SERVICE", "IcuIntent", false),
+                    ("ICU_SERVICE", "ICU_COORDINATOR", "IcuAdmitted", false),
+                    ("ICU_BEDS", "ICU_SERVICE", "BedRequest", false),
+                    ("VENTILATOR", "ICU_SERVICE", "VentilatorRequest", false),
+                    ("ICU_SERVICE", "ICU_BEDS", "BedResult", true),
+                    ("ICU_SERVICE", "VENTILATOR", "VentilatorResult", true),
+                    ("ICU_SERVICE", "ICU_FILE", "FileIcuResult", true),
+                ],
+                ("PHARMACIST", "review_prescriptions", "patient_A_and_B", _) => &[
+                    ("PHARMACY_FILE", "PHARMACY_SERVICE", "ReviewRequest", false),
+                    ("PHARMACY_SERVICE", "PHARMACIST", "ReviewResult", true),
+                    (
+                        "PHARMACY_SERVICE",
+                        "PHARMACY_FILE",
+                        "FileReviewResult",
+                        true,
+                    ),
+                ],
                 _ => return Err("unassigned clinical effect".into()),
             };
         let index = scored
             .iter()
-            .position(|event| {
-                event["agent"] == actor
-                    && event["tool"] == tool
-                    && event["args"] == *arguments
-                    && event["success"] == result["success"]
-                    && event["result"] == result["data"]
-                    && event["violations"] == json!([])
+            .position(|e| {
+                e["agent"] == actor
+                    && e["tool"] == tool
+                    && e["args"] == *arguments
+                    && e["success"] == result["success"]
+                    && e["result"] == result["data"]
+                    && e["violations"] == json!([])
             })
-            .ok_or("effect differs from its common-world occurrence")?;
+            .ok_or("effect differs from common-world occurrence")?;
         scored.remove(index);
-        let mut before = call.emitted;
-        for (from, request, target, reply) in
-            std::iter::once((from, request, target, reply)).chain(second)
-        {
-            for (from, to, name, value, after) in [
-                (from, owner, request, arguments, false),
-                (owner, target, reply, result, true),
-            ] {
-                let (from, to, n) = (role(from)?, role(to)?, label(name)?);
-                let matches = frames.iter().filter(|(id, f)| {
-                    !used.contains(*id)
-                        && f.direction(from, to)
-                        && f.logical_label == n
-                        && if after {
-                            f.sent > ended
-                        } else {
-                            f.received.is_some_and(|at| at < call.emitted)
-                        }
-                });
-                let (id, frame) = if after {
-                    matches.min_by_key(|(_, f)| f.sent)
-                } else {
-                    matches.max_by_key(|(_, f)| f.received)
-                }
-                .ok_or_else(|| format!("missing actual {name}"))?;
-                if frame.value()? != *value {
-                    return Err(format!("altered {name}").into());
-                }
-                frame.received()?;
-                used.insert(*id);
-                if !after {
-                    before = before.min(frame.sent);
-                }
+        for (from, to, name, after) in relations {
+            let (a, b, n) = (role(from)?, role(to)?, label(name)?);
+            let matches = frames.iter().filter(|(id, f)| {
+                !used.contains(*id)
+                    && f.direction(a, b)
+                    && f.logical_label == n
+                    && if *after {
+                        f.sent > ended
+                    } else {
+                        f.received.is_some_and(|at| at < call.emitted)
+                    }
+            });
+            let (id, frame) = if *after {
+                matches.min_by_key(|(_, f)| f.sent)
+            } else {
+                matches.max_by_key(|(_, f)| f.received)
             }
+            .ok_or_else(|| format!("missing actual {name}"))?;
+            if &frame.value()? != if *after { result } else { arguments } {
+                return Err(format!("altered actual {name}").into());
+            }
+            frame.received()?;
+            used.insert(*id);
         }
-        if let Some(name) = intent {
-            let (sender, recipient, logical_label) = (role(actor)?, role(owner)?, label(name)?);
-            let candidates = frames
+        if tool == "order_tests" {
+            let (svc, er, file, name) = match actor {
+                "ER_DOCTOR_A" => (
+                    "PATIENT_A_SERVICE",
+                    "ER_DOCTOR_A",
+                    "ER_A_FILE",
+                    "FilePanelResultA",
+                ),
+                "ER_DOCTOR_B" => (
+                    "PATIENT_B_SERVICE",
+                    "ER_DOCTOR_B",
+                    "ER_B_FILE",
+                    "FilePanelResultB",
+                ),
+                _ => return Err("unassigned panel reply".into()),
+            };
+            let (a, b, c, n) = (role(svc)?, role(er)?, role(file)?, label(name)?);
+            let (id, frame) = frames
                 .iter()
                 .filter(|(id, f)| {
                     !used.contains(*id)
-                        && f.direction(sender, recipient)
-                        && f.logical_label == logical_label
+                        && f.logical_label == n
+                        && (f.direction(a, c) || f.direction(b, c))
+                        && f.sent > ended
                 })
-                .collect::<Vec<_>>();
-            let (id, frame) = *one(candidates.iter())?;
-            if frame.value()? != *arguments || frame.received()? >= call.emitted {
-                return Err("intent differs from its actual resource request".into());
+                .min_by_key(|(_, f)| f.sent)
+                .ok_or("missing actual panel file reply")?;
+            if frame.value()? != *result {
+                return Err("altered actual panel file reply".into());
             }
+            frame.received()?;
             used.insert(*id);
-            before = before.min(frame.sent);
         }
-        close_arguments(
-            &frames,
-            &mut closes,
-            role(actor)?,
-            role(io)?,
-            before,
-            &format!("service/{tool}"),
-            arguments,
-        )?;
         if !["assess_patient", "review_prescriptions"].contains(&tool) {
             let doctor = if patient == "patient_a" {
                 "ER_DOCTOR_A"
@@ -526,6 +532,7 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
             return Err("surgery uses another preparation".into());
         }
     }
+
     if !scored.is_empty() {
         return Err("unused common-world effect".into());
     }
@@ -537,8 +544,8 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
             .as_object()
             .ok_or("message names")?
             .iter()
-            .find(|(_, n)| n.as_u64() == Some(u64::from(frame.logical_label)))
-            .map(|(name, _)| name.as_str())
+            .find(|(_, n)| n.as_u64() == Some(frame.logical_label as u64))
+            .map(|(n, _)| n.as_str())
             .ok_or("unknown business label")?;
         if matches!(
             name,
@@ -569,11 +576,11 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
                 } else {
                     "CT"
                 };
-                one(ordered.iter().copied().filter(|call| {
-                    call.request["agent"] == "RADIOLOGIST"
-                        && call.request["tool"] == "perform_imaging"
-                        && call.request["arguments"]["patient_id"] == patient
-                        && call.request["arguments"]["modality"]
+                one(ordered.iter().copied().filter(|c| {
+                    c.request["agent"] == "RADIOLOGIST"
+                        && c.request["tool"] == "perform_imaging"
+                        && c.request["arguments"]["patient_id"] == patient
+                        && c.request["arguments"]["modality"]
                             .as_str()
                             .is_some_and(|m| m.eq_ignore_ascii_case(modality))
                 }))?
@@ -610,14 +617,27 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
                 frame.sent,
             )?
             .clone(),
-            "FindingsA" => findings(&ordered, "patient_a", frame.sent)?,
-            "FindingsB" => findings(&ordered, "patient_b", frame.sent)?,
-            "DiagnosisForAnesthesia" | "DiagnosisForSurgery" => json!({
-                "result":completed(&ordered,("ER_DOCTOR_A","diagnose","patient_a",None),frame.sent)?,
-                "findings":findings(&ordered,"patient_a",frame.sent)?}),
-            "DiagnosisForIcu" => json!({
-                "result":completed(&ordered,("ER_DOCTOR_B","diagnose","patient_b",None),frame.sent)?,
-                "findings":findings(&ordered,"patient_b",frame.sent)?}),
+            "FindingsA" | "FileFindingsA" => findings(&ordered, "patient_a", frame.sent)?,
+            "FindingsB" | "FileFindingsB" => findings(&ordered, "patient_b", frame.sent)?,
+            "DiagnosisForAnesthesia"
+            | "DiagnosisForSurgery"
+            | "FileDiagnosisAnesthesia"
+            | "FileDiagnosisSurgery" => {
+                json!({"result":completed(&ordered,("ER_DOCTOR_A","diagnose","patient_a",None),frame.sent)?,"findings":findings(&ordered,"patient_a",frame.sent)?})
+            }
+            "DiagnosisForIcu" | "FileDiagnosisIcu" => {
+                json!({"result":completed(&ordered,("ER_DOCTOR_B","diagnose","patient_b",None),frame.sent)?,"findings":findings(&ordered,"patient_b",frame.sent)?})
+            }
+            "PanelPartial" | "PanelComplete" => {
+                let (doctor, patient) = if frame.identity["source"] == role("PATIENT_A_SERVICE")? {
+                    ("ER_DOCTOR_A", "patient_a")
+                } else if frame.identity["source"] == role("PATIENT_B_SERVICE")? {
+                    ("ER_DOCTOR_B", "patient_b")
+                } else {
+                    return Err("foreign panel data sender".into());
+                };
+                panel(&ordered, (doctor, patient), frame.sent)?
+            }
             "PreparationForSurgery" => completed(
                 &ordered,
                 ("ANESTHESIOLOGIST", "prepare_anesthesia", "patient_a", None),
@@ -647,18 +667,16 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
                 frame.sent,
             )?
             .clone(),
-            "PanelPartial" | "PanelComplete" => {
-                let source = frame.identity["source"].as_u64().ok_or("panel source")?;
-                let (actor, patient) = if source == role("PATIENT_A_SERVICE")? {
-                    ("ER_DOCTOR_A", "patient_a")
-                } else if source == role("PATIENT_B_SERVICE")? {
-                    ("ER_DOCTOR_B", "patient_b")
+            "SummaryA" | "SummaryB" => {
+                let (doctor, patient, care_actor, tool) = if name == "SummaryA" {
+                    ("ER_DOCTOR_A", "patient_a", "SURGEON", "perform_surgery")
                 } else {
-                    return Err("unknown panel source".into());
+                    ("ER_DOCTOR_B", "patient_b", "ICU_COORDINATOR", "manage_icu")
                 };
-                panel(&ordered, (actor, patient), frame.sent)?
+                let data = findings(&ordered, patient, frame.sent)?;
+                json!({"success":true,"assessment":data["assessment"],"tests":data["tests"],"findings":data,"diagnosis":completed(&ordered,(doctor,"diagnose",patient,None),frame.sent)?,"care":completed(&ordered,(care_actor,tool,patient,None),frame.sent)?,"prescription_review":completed(&ordered,("PHARMACIST","review_prescriptions","patient_A_and_B",None),frame.sent)?})
             }
-            _ => return Err(format!("unused business {name}").into()),
+            _ => return Err(format!("unused actual business {name}").into()),
         };
         if frame.value()? != expected {
             return Err(format!("{name} differs from actual patient data").into());
@@ -667,26 +685,30 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         used.insert(*id);
     }
     let mut overlaps = 0;
+    let mut scanners = 0;
     for (i, a) in ordered.iter().enumerate() {
         for b in &ordered[i + 1..] {
             if a.started()?.1 < b.ended()?.1 && b.started()?.1 < a.ended()?.1 {
                 overlaps += 1;
+                if a.request["tool"] == b.request["tool"]
+                    && matches!(a.tool()?, "perform_imaging" | "interpret_imaging")
+                    && a.request["arguments"]["modality"] != b.request["arguments"]["modality"]
+                {
+                    scanners += 1;
+                }
             }
         }
     }
     Ok(
-        json!({"status":"passed","task":"5H","domain_calls":calls.len(),"violations":0,"simulator_complete":true,
-        "common_causal_score":"passed","independent_effect_overlaps":overlaps,
-        "scope":"one-use WASI admissions, both ICU resource requests, actual patient inputs and results; EPF owns dynamic order",
-        "absent_domain_effects_certified":false}),
+        json!({"status":"passed","task":"5H","domain_calls":calls.len(),"violations":0,"simulator_complete":true,"common_causal_score":"passed","independent_effect_overlaps":overlaps,"cross_scanner_effect_overlaps":scanners,"effect_receives_bound_to_checked_occurrences":true,"scope":"one-use typed file/resource receive commits, both ICU requests, actual effects and readable findings; EPF owns dynamic order","absent_domain_effects_certified":false}),
     )
 }
-
 pub fn audit(path: &Path) -> Result<Value> {
     let artifact = crate::projection::load(path)?;
     let rows = records(path)?;
-    let mut result = check(&rows, &artifact)?;
-    result["dynamic_protocol"] = crate::projection::check_dynamic(&artifact, &rows)?;
+    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
+    let mut result = check(&rows, &artifact, &dynamic)?;
+    result["dynamic_protocol"] = dynamic;
     result["compiled_projection_sha256"] = json!(digest(
         &path
             .parent()
@@ -699,32 +721,29 @@ pub fn audit(path: &Path) -> Result<Value> {
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let artifact = crate::projection::load(path)?;
     let rows = records(path)?;
-    check(&rows, &artifact)?;
+    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
+    check(&rows, &artifact, &dynamic)?;
     let labels = crate::projection::frames(&artifact, &rows)?;
-    let actors = rows.first().ok_or("fixture")?["message"]["fixtures"]
+    let actors = rows[0]["message"]["fixtures"]
         .as_array()
         .ok_or("participants")?;
     let journal = crate::journal::read(&rows, &labels, actors)?;
     let contracts = crate::projection::contracts(&artifact["compiled"])?;
+    let business = clinical_frames(&artifact["compiled"])?;
     let selected = journal
         .frames
         .iter()
-        .filter_map(|(id, frame)| {
-            let wire = u16::try_from(frame.identity["frame_label"].as_u64()?).ok()?;
+        .filter_map(|(id, f)| {
+            let wire = u16::try_from(f.identity["frame_label"].as_u64()?).ok()?;
             let header = contracts.get(&wire)?;
-            (header[4] == 0
-                && artifact["compiled"]["labels"]
-                    .as_object()?
-                    .values()
-                    .any(|n| n.as_u64() == Some(u64::from(frame.logical_label))))
-            .then_some(*id)
+            (header[4] == 0 && business(f)).then_some(*id)
         })
         .collect::<Vec<_>>();
     fs::create_dir(output)?;
-    let verdicts =
-        crate::journal::json_frame_mutants(&rows, &selected, |changed| check(changed, &artifact))?;
-    let result = json!({"status":"passed","mutants_rejected":verdicts.len(),"source_events_sha256":digest(path)?,
-        "scope":"saved-record effect audit, not runtime attacks or EPF mutation replay","model_calls":0,"verdicts":verdicts});
+    let verdicts = crate::journal::json_frame_mutants(&rows, &selected, |changed| {
+        check(changed, &artifact, &dynamic)
+    })?;
+    let result = json!({"status":"passed","mutants_rejected":verdicts.len(),"source_events_sha256":digest(path)?,"scope":"saved-record effect audit, not runtime attacks or EPF mutation replay","model_calls":0,"verdicts":verdicts});
     save(&output.join("result.json"), &result)?;
     Ok(result)
 }

@@ -213,6 +213,20 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
             "PHARMACIST" => "/service/review_prescriptions",
             _ => return Err("unknown multi-specialty participant".into()),
         }
+    } else if critical_care {
+        match agent {
+            "ER_DOCTOR_A" | "ER_DOCTOR_B" => {
+                "/service/assess_patient, /service/order_tests and /service/diagnose; read-only /service/findings and /service/summary"
+            }
+            "RADIOLOGIST" => {
+                "/service/perform_imaging_ct_a, /service/interpret_imaging_ct_a, /service/perform_imaging_ct_b, /service/interpret_imaging_ct_b, /service/perform_imaging_mri_b and /service/interpret_imaging_mri_b"
+            }
+            "ANESTHESIOLOGIST" => "/service/prepare_anesthesia; read-only /service/diagnosis",
+            "SURGEON" => "/service/perform_surgery; read-only /service/diagnosis",
+            "ICU_COORDINATOR" => "/service/manage_icu; read-only /service/diagnosis",
+            "PHARMACIST" => "/service/review_prescriptions",
+            _ => return Err("unknown critical-care participant".into()),
+        }
     } else if kitchen {
         "/service/prepare_base_dish, /service/prepare_ingredient and /service/combine_dish"
     } else if manufacturing {
@@ -304,7 +318,7 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
     } else if feature_delivery {
         "Use your assigned feature, branch, review target, test target or suite. The reviewer and test writer choose their initial feature order. Actual responses carry coordination data: reviewed candidates, tests, interface-change data and CI outcomes. Rejected reviews and failed CI require fresh implementation, tests and review for that feature; continue from the actual response rather than assuming a fixed retry count. Merge returns the actual CI outcome. A wrong CI suite returns invalid_arguments with the actual publication so it can be corrected. The final responses report both features' CI outcomes. Finish the required work and receive the final coordination outcomes before exiting; independent participants and operations remain concurrent."
     } else if critical_care {
-        "Use your assigned patient and actual results. Each ER doctor assesses its own patient, requests the assigned panel (together or as partial tests), then requests diagnose. A final diagnosis response contains the actual findings, surgery or ICU outcome, and medication review. Neither patient's care requires the other patient's assessment or completed care. The radiologist chooses the order of the two patients' CT operations and patient B's MRI operations, keeping each interpretation after its matching actual image. The anesthesiologist prepares patient A; the actual operating-room Endpoint and preparation then travel to surgery. The surgeon performs the assigned procedure on patient A. ICU_COORDINATOR requests the actual patient B care with both bed and ventilator Endpoints. PHARMACIST reviews the assigned patient_A_and_B medication data. Resource loans and result forwarding happen through the global; do not invent acquisition, release or notification commands. Symptoms, medications and anesthesia type are optional caller strings. Choose your private shell commands and calculations freely. Read /service/result after each request and exit when your own work is complete. This abstract environment has no medication-administration, monitoring or discharge tool, and these runs cannot certify those absent effects. Its diagnostic failure injection is disabled; a depth number is not evidence of an injected-failure test."
+        "Each operation file is a direct projection of its actual Endpoint. Choose commands, private calculations and legal request orders freely. The ER doctors use their own patient assessment and test panel, read actual findings, submit diagnose and read its actual response. Panels can be combined, split, reversed or repeated while incomplete. Each ER doctor's final read-only summary contains the actual diagnosis, findings, surgery or ICU outcome and prescription review. The imaging owner obtains only the requested patient's actual assessment through the global. Use the original imaging JSON schemas with the file's patient/modality suffix: _ct_a, _ct_b or _mri_b. Either patient's CT may start first, each interpretation requires its own actual image, and CT and MRI remain independent. Treatment participants can read the actual diagnosis from their diagnosis file. Anesthesia's returned operating-room Endpoint and actual preparation pass directly to surgery; ICU requires both actual bed and ventilator requests. PHARMACIST handles the original patient_A_and_B review. Optional symptoms, medications and anesthesia type remain caller text. Read the response from the same operation file; a rejected unadmitted operation returns a recoverable error. Resource loans and returns follow the global without acquire/release or notification commands. The neutral common world scores actual input causality and physical conflicts, not a total command sequence. This abstract environment has no medication-administration, monitoring, discharge or conservative-treatment tool, so these runs cannot certify those absent effects. It has no injected diagnostic failures."
     } else if multi_specialty {
         "Each file is a direct projection of an actual Endpoint. Choose shell commands, private calculations, panel requests and imaging interleavings freely, using your assigned patient and actual results. Submit the original operation arguments and read the response from the same file. Panels permit combined, split, reversed and repeated incomplete test requests. The specialists' referral files contain the actual assessment; findings contain general, own and other test receipts and the completed CT/MRI reports. For RADIOLOGIST, each _ct or _mri operation file belongs to that actual scanner Endpoint: use the original perform_imaging/interpret_imaging argument schema with the matching modality. The read-only ct_order and mri_order files deliver the actual referrals, and each interpretation depends on its own actual image. CT and MRI are independent. The ER doctor's candidate contains the actual completed workup, both diagnoses and medication review for its case-conference operation. Optional symptoms, medications and attendees remain caller-supplied strings. After the consultation is published, the doctors and radiologist read its actual final record from summary before finishing; PHARMACIST finishes after its own independent review response. Real resource requests, returns and record transfers follow the global; do not invent acquire, release or notification tools. Invalid unadmitted data returns a recoverable shell error. The common world scores actual completed inputs and physical conflicts, not a prescribed total command order. This abstract benchmark has no prescribing or drug-administration effect and does not establish clinical correctness."
     } else if medical {
@@ -342,6 +356,7 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
     };
     let response_object = if medical
         || multi_specialty
+        || critical_care
         || kitchen
         || dining
         || coding
