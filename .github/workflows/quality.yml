@@ -30,6 +30,7 @@ jobs:
           repository: hibanaworks/hibana
           ref: main
           path: hibana
+      - uses: ./hibana/.github/actions/checkout-runtime
       - name: Select the current WASI runtime
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
