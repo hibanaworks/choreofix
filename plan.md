@@ -4,6 +4,19 @@
 入力文書のSHA-256は[実験契約](benchmark/experiment-contract.json)に記録する。
 研究の中心は、**実資源の唯一の操作権、残存手順、実際の共有効果を結ぶ保証**である。
 
+2026-11-16の追加進捗: 6Hの7人分の実Wasm実行・直接ファイルEndpoint・native側の
+実資源処理を接続した。現行globalは1,233イベント・44 viewであり、通常の返信を
+`offer()`から取得しようとしたアプリの誤りを除去した。重複するmerge-ready通知を外し、
+CI所有者が実際の検証済み入力をstagingへ渡す。連携順序・修正・rollbackはglobalが守る。
+実Wasmの深さ0で、実効果21件、完全capture、EPF動的監査、独立した効果・返答照合と
+共通採点が通り、早期merge・配備後の再編集の拒否後にも続行した。通常CIの共通入口へ
+この1条件を接続する。これは実AIの成功や全interleavingの認定ではない。
+Luna/xhigh 7人の深さ2は2,751,791,104 bytesでguardが停止したため未完である。
+観測記録の自己起床と大きなJSON値の保持をI/O所有者側で整理し、共有I/O17件・runner53件・
+Clippyと修正後の実Wasmを確認した。実AIの再認定は残り、23/48課題・残り25課題は変えない。
+公開CIに残ったEPF旧引数はhandoff・tool-cabinet・research-paper・pool fixtureから除去し、
+native handoff 6件と現行APIでのClippyを確認した。アプリ用Miri時計と実行分岐も削除した。
+
 現在はChoreoFS境界の是正を優先している。全26 taskディレクトリと共通I/Oを点検し、
 旧29課題・23系統のうち20系統・24課題で、汎用close後に別業務Endpointへ振り直す
 経路を確認した。WASI runtime側を実Endpointを所有するファイル型へ改めた。
@@ -21,17 +34,19 @@
 
 2026-11-16には、未移行の4M・13E・13M・14E・14M・14Hに残っていた旧closeアダプター、
 旧WASI入口、旧監査・機構試験を99ファイル削除した。廃止したWASI APIへの参照が
-公開CIを停止させていた。通常入口とWasm機構試験は現在実装済みの17系統へ揃える。
+公開CIを停止させていた。実AI認定済みの17系統を保持し、Wasm機構試験の共通入口には
+6Hの深さ0条件を加えた18系統を登録する。
 元の48課題の仕様・共通simulatorと採用済み実験原本は保持し、未移行25課題は減らさない。
 破棄したアダプターを互換APIで復活させない。
 
-6Hは開発中である。44 viewのglobal、24種類の型付き実要求とstaging受信側を実装した。
+6Hは実AIの認定が未完である。44 viewのglobal、24種類の型付き実要求、7人分の
+Wasm bindingと全localside、EPF・実効果監査を実装し、実Wasmの深さ0を完走した。
 Aの統合・stagingはB/Cの準備と並行に進め、stagingのA→B→C順序をsourceに記述する。
 Bの統合はAの成功とB/C準備のjoin後、Cの統合はBの成功後に進む、という現在の範囲である。
 実CI・候補・先行deploymentの検証を効果前に照合し、否定的なstaging結果では
-実際に拒否されたdeploymentをrollbackする。8件のnative試験には実Endpointを
+実際に拒否されたdeploymentをrollbackする。10件のnative試験には実Endpointを
 通る肯定・否定の受信側試験と、古いCIで効果0となる試験を含む。
-7人分のWasm binding、残るlocalside、EPF・実効果監査と実モデルの通し実行は未完であり、
+7人の実モデルの深さ2はメモリguardで停止した。修正後の実AI再実行が残るため、
 6Hを23件の認定へ追加しない。内容は[6H](benchmark/ports/6H.md)に記録する。
 
 11Eは5本の操作ファイルを実Endpointへ結び、Ready/Busy通知とclose後の振り直しを撤去した。

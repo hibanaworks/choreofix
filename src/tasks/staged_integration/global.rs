@@ -101,7 +101,6 @@ pub type StageRepairApprovedA<'a> = g::Msg<114, ReviewReply<'a, true>>;
 pub type StageRepairRejectedA<'a> = g::Msg<115, ReviewReply<'a, false>>;
 pub type ReviewFeedbackA<'a> = g::Msg<116, &'a [u8]>;
 pub type FileReviewResultA<'a> = g::Msg<117, &'a [u8]>;
-pub type MergeReadyA<'a> = g::Msg<118, &'a [u8]>;
 pub type MergeRequestA = g::Msg<119, Arguments<3>>;
 pub type MergedA<'a> = g::Msg<120, &'a [u8]>;
 pub type PublicationA<'a> = g::Msg<121, &'a [u8]>;
@@ -145,7 +144,6 @@ pub type StageRepairApprovedB<'a> = g::Msg<155, ReviewReply<'a, true>>;
 pub type StageRepairRejectedB<'a> = g::Msg<156, ReviewReply<'a, false>>;
 pub type ReviewFeedbackB<'a> = g::Msg<157, &'a [u8]>;
 pub type FileReviewResultB<'a> = g::Msg<158, &'a [u8]>;
-pub type MergeReadyB<'a> = g::Msg<159, &'a [u8]>;
 pub type MergeRequestB = g::Msg<160, Arguments<11>>;
 pub type MergedB<'a> = g::Msg<161, &'a [u8]>;
 pub type PublicationB<'a> = g::Msg<162, &'a [u8]>;
@@ -189,7 +187,6 @@ pub type StageRepairApprovedC<'a> = g::Msg<196, ReviewReply<'a, true>>;
 pub type StageRepairRejectedC<'a> = g::Msg<197, ReviewReply<'a, false>>;
 pub type ReviewFeedbackC<'a> = g::Msg<198, &'a [u8]>;
 pub type FileReviewResultC<'a> = g::Msg<199, &'a [u8]>;
-pub type MergeReadyC<'a> = g::Msg<200, &'a [u8]>;
 pub type MergeRequestC = g::Msg<201, Arguments<19>>;
 pub type MergedC<'a> = g::Msg<202, &'a [u8]>;
 pub type PublicationC<'a> = g::Msg<203, &'a [u8]>;
@@ -238,53 +235,50 @@ const fn readable(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
         },
     )
 }
-pub const DEVELOPER_A_FILES: [ChoreoFsObject<'static>; 14] = [
+pub const DEVELOPER_A_FILES: [ChoreoFsObject<'static>; 13] = [
     writable(b"service/implement_feature", 4),
     writable(b"service/merge_code", 5),
-    readable(b"service/merge_ready", 6),
-    readable(b"service/review/user_authentication", 7),
-    readable(b"service/review/payment_processing", 8),
-    readable(b"service/review/notification_system", 9),
-    readable(b"service/integration/user_authentication", 10),
-    readable(b"service/integration/payment_processing", 11),
-    readable(b"service/integration/notification_system", 12),
-    readable(b"service/release/user_authentication", 13),
-    readable(b"service/release/payment_processing", 14),
-    readable(b"service/release/notification_system", 15),
+    readable(b"service/review/user_authentication", 6),
+    readable(b"service/review/payment_processing", 7),
+    readable(b"service/review/notification_system", 8),
+    readable(b"service/integration/user_authentication", 9),
+    readable(b"service/integration/payment_processing", 10),
+    readable(b"service/integration/notification_system", 11),
+    readable(b"service/release/user_authentication", 12),
+    readable(b"service/release/payment_processing", 13),
+    readable(b"service/release/notification_system", 14),
+    readable(b"service/interface/payment_processing", 15),
+    readable(b"service/interface/notification_system", 16),
+];
+pub const DEVELOPER_B_FILES: [ChoreoFsObject<'static>; 13] = [
+    writable(b"service/implement_feature", 4),
+    writable(b"service/merge_code", 5),
+    readable(b"service/review/user_authentication", 6),
+    readable(b"service/review/payment_processing", 7),
+    readable(b"service/review/notification_system", 8),
+    readable(b"service/integration/user_authentication", 9),
+    readable(b"service/integration/payment_processing", 10),
+    readable(b"service/integration/notification_system", 11),
+    readable(b"service/release/user_authentication", 12),
+    readable(b"service/release/payment_processing", 13),
+    readable(b"service/release/notification_system", 14),
+    readable(b"service/interface/user_authentication", 15),
+    readable(b"service/interface/notification_system", 16),
+];
+pub const DEVELOPER_C_FILES: [ChoreoFsObject<'static>; 13] = [
+    writable(b"service/implement_feature", 4),
+    writable(b"service/merge_code", 5),
+    readable(b"service/review/user_authentication", 6),
+    readable(b"service/review/payment_processing", 7),
+    readable(b"service/review/notification_system", 8),
+    readable(b"service/integration/user_authentication", 9),
+    readable(b"service/integration/payment_processing", 10),
+    readable(b"service/integration/notification_system", 11),
+    readable(b"service/release/user_authentication", 12),
+    readable(b"service/release/payment_processing", 13),
+    readable(b"service/release/notification_system", 14),
+    readable(b"service/interface/user_authentication", 15),
     readable(b"service/interface/payment_processing", 16),
-    readable(b"service/interface/notification_system", 17),
-];
-pub const DEVELOPER_B_FILES: [ChoreoFsObject<'static>; 14] = [
-    writable(b"service/implement_feature", 4),
-    writable(b"service/merge_code", 5),
-    readable(b"service/merge_ready", 6),
-    readable(b"service/review/user_authentication", 7),
-    readable(b"service/review/payment_processing", 8),
-    readable(b"service/review/notification_system", 9),
-    readable(b"service/integration/user_authentication", 10),
-    readable(b"service/integration/payment_processing", 11),
-    readable(b"service/integration/notification_system", 12),
-    readable(b"service/release/user_authentication", 13),
-    readable(b"service/release/payment_processing", 14),
-    readable(b"service/release/notification_system", 15),
-    readable(b"service/interface/user_authentication", 16),
-    readable(b"service/interface/notification_system", 17),
-];
-pub const DEVELOPER_C_FILES: [ChoreoFsObject<'static>; 14] = [
-    writable(b"service/implement_feature", 4),
-    writable(b"service/merge_code", 5),
-    readable(b"service/merge_ready", 6),
-    readable(b"service/review/user_authentication", 7),
-    readable(b"service/review/payment_processing", 8),
-    readable(b"service/review/notification_system", 9),
-    readable(b"service/integration/user_authentication", 10),
-    readable(b"service/integration/payment_processing", 11),
-    readable(b"service/integration/notification_system", 12),
-    readable(b"service/release/user_authentication", 13),
-    readable(b"service/release/payment_processing", 14),
-    readable(b"service/release/notification_system", 15),
-    readable(b"service/interface/user_authentication", 16),
-    readable(b"service/interface/payment_processing", 17),
 ];
 pub const REVIEW_FILES: [ChoreoFsObject<'static>; 12] = [
     writable(b"service/code_review/user_authentication", 4),
@@ -415,17 +409,14 @@ fn prepare_a<Approved: g::Message, Rejected: g::Message>() -> impl Projectable {
 }
 fn merge_ci_a() -> impl Projectable {
     g::seq(
-        g::send::<REPO, A_FILE, MergeReadyA>(),
+        g::send::<A_FILE, REPO, MergeRequestA>(),
         g::seq(
-            g::send::<A_FILE, REPO, MergeRequestA>(),
+            g::send::<REPO, A_FILE, MergedA>(),
             g::seq(
-                g::send::<REPO, A_FILE, MergedA>(),
+                g::send::<REPO, BUILD_SERVER, PublicationA>(),
                 g::seq(
-                    g::send::<REPO, BUILD_SERVER, PublicationA>(),
-                    g::seq(
-                        g::send::<BUILD_SERVER, CI_FILE, FilePublicationA>(),
-                        g::send::<CI_FILE, BUILD_SERVER, CiRequestA>(),
-                    ),
+                    g::send::<BUILD_SERVER, CI_FILE, FilePublicationA>(),
+                    g::send::<CI_FILE, BUILD_SERVER, CiRequestA>(),
                 ),
             ),
         ),
@@ -480,7 +471,7 @@ fn integrate_a() -> impl Projectable {
 }
 pub fn staging_a() -> impl Projectable {
     g::seq(
-        g::send::<REPO, STAGING_ENV, StagingReadyA>(),
+        g::send::<BUILD_SERVER, STAGING_ENV, StagingReadyA>(),
         g::seq(
             g::send::<STAGING_ENV, RELEASE_FILE, FileStagingReadyA>(),
             g::seq(
@@ -685,17 +676,14 @@ fn prepare_b<Approved: g::Message, Rejected: g::Message>() -> impl Projectable {
 }
 fn merge_ci_b() -> impl Projectable {
     g::seq(
-        g::send::<REPO, B_FILE, MergeReadyB>(),
+        g::send::<B_FILE, REPO, MergeRequestB>(),
         g::seq(
-            g::send::<B_FILE, REPO, MergeRequestB>(),
+            g::send::<REPO, B_FILE, MergedB>(),
             g::seq(
-                g::send::<REPO, B_FILE, MergedB>(),
+                g::send::<REPO, BUILD_SERVER, PublicationB>(),
                 g::seq(
-                    g::send::<REPO, BUILD_SERVER, PublicationB>(),
-                    g::seq(
-                        g::send::<BUILD_SERVER, CI_FILE, FilePublicationB>(),
-                        g::send::<CI_FILE, BUILD_SERVER, CiRequestB>(),
-                    ),
+                    g::send::<BUILD_SERVER, CI_FILE, FilePublicationB>(),
+                    g::send::<CI_FILE, BUILD_SERVER, CiRequestB>(),
                 ),
             ),
         ),
@@ -750,7 +738,7 @@ fn integrate_b() -> impl Projectable {
 }
 pub fn staging_b() -> impl Projectable {
     g::seq(
-        g::send::<REPO, STAGING_ENV, StagingReadyB>(),
+        g::send::<BUILD_SERVER, STAGING_ENV, StagingReadyB>(),
         g::seq(
             g::send::<STAGING_ENV, RELEASE_FILE, FileStagingReadyB>(),
             g::seq(
@@ -955,17 +943,14 @@ fn prepare_c<Approved: g::Message, Rejected: g::Message>() -> impl Projectable {
 }
 fn merge_ci_c() -> impl Projectable {
     g::seq(
-        g::send::<REPO, C_FILE, MergeReadyC>(),
+        g::send::<C_FILE, REPO, MergeRequestC>(),
         g::seq(
-            g::send::<C_FILE, REPO, MergeRequestC>(),
+            g::send::<REPO, C_FILE, MergedC>(),
             g::seq(
-                g::send::<REPO, C_FILE, MergedC>(),
+                g::send::<REPO, BUILD_SERVER, PublicationC>(),
                 g::seq(
-                    g::send::<REPO, BUILD_SERVER, PublicationC>(),
-                    g::seq(
-                        g::send::<BUILD_SERVER, CI_FILE, FilePublicationC>(),
-                        g::send::<CI_FILE, BUILD_SERVER, CiRequestC>(),
-                    ),
+                    g::send::<BUILD_SERVER, CI_FILE, FilePublicationC>(),
+                    g::send::<CI_FILE, BUILD_SERVER, CiRequestC>(),
                 ),
             ),
         ),
@@ -1020,7 +1005,7 @@ fn integrate_c() -> impl Projectable {
 }
 pub fn staging_c() -> impl Projectable {
     g::seq(
-        g::send::<REPO, STAGING_ENV, StagingReadyC>(),
+        g::send::<BUILD_SERVER, STAGING_ENV, StagingReadyC>(),
         g::seq(
             g::send::<STAGING_ENV, RELEASE_FILE, FileStagingReadyC>(),
             g::seq(
@@ -1200,16 +1185,16 @@ pub fn source() -> impl Projectable {
         g::seq(
             g::seq(release_b(), release_c()),
             g::seq(
-                g::send::<REPO, TEST_ENV, TaskExit>(),
+                g::send::<STAGING_ENV, TEST_ENV, TaskExit>(),
                 g::seq(
-                    g::send::<REPO, BUILD_SERVER, TaskExit>(),
+                    g::send::<STAGING_ENV, BUILD_SERVER, TaskExit>(),
                     g::seq(
-                        g::send::<REPO, STAGING_ENV, TaskExit>(),
+                        g::send::<STAGING_ENV, REPO, TaskExit>(),
                         g::seq(
-                            g::send::<REPO, REVIEW_A, TaskExit>(),
+                            g::send::<STAGING_ENV, REVIEW_A, TaskExit>(),
                             g::seq(
-                                g::send::<REPO, REVIEW_B, TaskExit>(),
-                                g::send::<REPO, REVIEW_C, TaskExit>(),
+                                g::send::<STAGING_ENV, REVIEW_B, TaskExit>(),
+                                g::send::<STAGING_ENV, REVIEW_C, TaskExit>(),
                             ),
                         ),
                     ),
@@ -1353,7 +1338,6 @@ impl Programs {
             ("StageRepairRejectedA", StageRepairRejectedA::LOGICAL_LABEL),
             ("ReviewFeedbackA", ReviewFeedbackA::LOGICAL_LABEL),
             ("FileReviewResultA", FileReviewResultA::LOGICAL_LABEL),
-            ("MergeReadyA", MergeReadyA::LOGICAL_LABEL),
             ("MergeRequestA", MergeRequestA::LOGICAL_LABEL),
             ("MergedA", MergedA::LOGICAL_LABEL),
             ("PublicationA", PublicationA::LOGICAL_LABEL),
@@ -1393,7 +1377,6 @@ impl Programs {
             ("StageRepairRejectedB", StageRepairRejectedB::LOGICAL_LABEL),
             ("ReviewFeedbackB", ReviewFeedbackB::LOGICAL_LABEL),
             ("FileReviewResultB", FileReviewResultB::LOGICAL_LABEL),
-            ("MergeReadyB", MergeReadyB::LOGICAL_LABEL),
             ("MergeRequestB", MergeRequestB::LOGICAL_LABEL),
             ("MergedB", MergedB::LOGICAL_LABEL),
             ("PublicationB", PublicationB::LOGICAL_LABEL),
@@ -1433,7 +1416,6 @@ impl Programs {
             ("StageRepairRejectedC", StageRepairRejectedC::LOGICAL_LABEL),
             ("ReviewFeedbackC", ReviewFeedbackC::LOGICAL_LABEL),
             ("FileReviewResultC", FileReviewResultC::LOGICAL_LABEL),
-            ("MergeReadyC", MergeReadyC::LOGICAL_LABEL),
             ("MergeRequestC", MergeRequestC::LOGICAL_LABEL),
             ("MergedC", MergedC::LOGICAL_LABEL),
             ("PublicationC", PublicationC::LOGICAL_LABEL),

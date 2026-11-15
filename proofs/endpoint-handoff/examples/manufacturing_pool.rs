@@ -673,21 +673,12 @@ busy.send::<Closed>(&()).await?;
             .zip(&checkpoints)
             .map(|(records, checkpoint)| hibana_epf::Capture::new(records, *checkpoint).unwrap())
             .collect::<Vec<_>>();
-        use hibana_epf::{
-            Acceptance, AuditStorage, ExecutionStorage, Protocol, RecordId, RouteChoice, Unfold,
-        };
+        use hibana_epf::{Acceptance, AuditStorage, ExecutionStorage, Protocol, RecordId, Unfold};
         let mut source_space = vec![0; Protocol::workspace_len(&snapshot).unwrap()];
         let protocol = Protocol::new(&snapshot, &mut source_space).unwrap();
         let count = records.iter().map(Vec::len).sum::<usize>();
         let capacity = 2 * count + 1;
         let mut unfolding = vec![Unfold::Source; capacity];
-        let mut choices = vec![
-            RouteChoice {
-                span: [0, 0],
-                right: false
-            };
-            protocol.audit_choice_capacity(capacity).unwrap()
-        ];
         let mut order = vec![
             RecordId {
                 producer: 0,
@@ -712,7 +703,6 @@ busy.send::<Closed>(&()).await?;
                 &captures,
                 AuditStorage {
                     unfolding: &mut unfolding,
-                    choices: &mut choices,
                     execution: ExecutionStorage {
                         session,
                         observed_producers: &observed_order,

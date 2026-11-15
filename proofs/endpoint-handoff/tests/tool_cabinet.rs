@@ -9,6 +9,7 @@ pub(crate) mod imp {
 #[path = "../../../src/tasks/manufacturing_rework/mod.rs"]
 pub mod manufacturing_rework;
 use hibana::runtime::{SessionKitStorage, ids::SessionId, resolver::ResolverRef};
+use hibana_runtime::host::deadline;
 use manufacturing_rework::{global::*, imp as data, localside};
 use serde_json::{Value, json};
 use shell::{
@@ -16,13 +17,6 @@ use shell::{
     imp::{bus::Bus, service::Domain},
 };
 use std::{cell::Cell, time::Duration};
-#[cfg(miri)]
-#[path = "../../../src/tasks/handoff/tests/clock.rs"]
-mod clock;
-#[cfg(miri)]
-use clock::deadline;
-#[cfg(not(miri))]
-use hibana_runtime::host::deadline;
 
 /// Completed external material records and controlled quality outcomes. This
 /// fixture has no Endpoint permission, station scheduler or application cursor.
@@ -309,7 +303,7 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
                 }
             }
         };
-    },deadline(Duration::from_secs(if cfg!(miri){600}else{5}))).await?;
+    },deadline(Duration::from_secs(5))).await?;
     let checkpoints = [
         worker_runtime.tap().checkpoint(),
         inspector_runtime.tap().checkpoint(),
@@ -335,23 +329,13 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
         "an inner rework must not rerun the outer decision"
     );
     let snapshot: Vec<_> = hibana::runtime::tap::projected(&depot_program).collect();
-    #[cfg(not(miri))]
     let dynamic = {
-        use hibana_epf::{
-            Acceptance, AuditStorage, ExecutionStorage, Protocol, RecordId, RouteChoice, Unfold,
-        };
+        use hibana_epf::{Acceptance, AuditStorage, ExecutionStorage, Protocol, RecordId, Unfold};
         let mut source_storage = vec![0; Protocol::workspace_len(&snapshot).unwrap()];
         let protocol = Protocol::new(&snapshot, &mut source_storage).unwrap();
         let count = captured.iter().map(Vec::len).sum::<usize>();
         let capacity = count.checked_mul(2).and_then(|n| n.checked_add(1)).unwrap();
         let mut unfolding = vec![Unfold::Source; capacity];
-        let mut choices = vec![
-            RouteChoice {
-                span: [0, 0],
-                right: false
-            };
-            protocol.audit_choice_capacity(capacity).unwrap()
-        ];
         let mut order = vec![
             RecordId {
                 producer: 0,
@@ -376,7 +360,6 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
                 &captures,
                 AuditStorage {
                     unfolding: &mut unfolding,
-                    choices: &mut choices,
                     execution: ExecutionStorage {
                         session: session.raw(),
                         observed_producers: &observed_producers,
@@ -390,11 +373,6 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
             .map_err(|error| ShellError::message(format!("quality source execution: {error:?}")))?;
         json!({"status":"passed","captured_records":audit.execution().order.len(),
             "application_effects_certified":false,"scope":"complete native job-continuation source execution; fixture effects are checked separately"})
-    };
-    #[cfg(miri)]
-    let dynamic = {
-        let _ = &captures;
-        json!({"status":"not_repeated_under_miri","scope":"Miri checks real Endpoint and data operations; native checks the same source execution"})
     };
     // The terminal probe runs after every legitimate participant has finished.
     // An undeclared operation on this retired actor/view may end the closed run;
@@ -456,7 +434,6 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
 
 #[hibana_runtime::main]
 #[test]
-#[cfg(not(miri))]
 async fn all_six_quality_continuations_preserve_actual_rework_and_close_on_approval()
 -> ShellResult<()> {
     for rejected in 0..=3 {
@@ -467,14 +444,6 @@ async fn all_six_quality_continuations_preserve_actual_rework_and_close_on_appro
         quality_case::<4, WORKER_B, 13>(rejected).await?;
         quality_case::<5, WORKER_C, 14>(rejected).await?;
     }
-    Ok(())
-}
-
-#[cfg(miri)]
-#[hibana_runtime::main(clock::Clock)]
-#[test]
-async fn quality_continuation_moves_between_runtimes_and_rejects_retired_work() -> ShellResult<()> {
-    quality_case::<0, WORKER_A, 9>(2).await?;
     Ok(())
 }
 
@@ -519,7 +488,6 @@ impl Domain for ToolEffects {
 
 #[hibana_runtime::main]
 #[test]
-#[cfg(not(miri))]
 async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellResult<()> {
     let programs = programs();
     let orders = [
@@ -760,8 +728,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
     Ok(())
 }
 
-#[cfg_attr(not(miri), hibana_runtime::main)]
-#[cfg_attr(miri, hibana_runtime::main(clock::Clock))]
+#[hibana_runtime::main]
 #[test]
 async fn production_receiver_rejects_changed_tool_requests_before_effect() -> ShellResult<()> {
     use hibana::{

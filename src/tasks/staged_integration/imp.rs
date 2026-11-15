@@ -34,6 +34,347 @@ pub fn assigned(arguments: &Value, key: &str, expected: &str) -> ShellResult<()>
     }
     Ok(())
 }
+// Actual development material. These checks do not choose a protocol branch.
+pub fn candidate(value: &Value, feature: usize) -> ShellResult<()> {
+    result(
+        value,
+        "implement_feature",
+        ["DEVELOPER_A", "DEVELOPER_B", "DEVELOPER_C"][feature],
+    )?;
+    if value["success"] != true
+        || value["data"]["feature"] != FEATURES[feature]
+        || value["data"]["source"].as_str().is_none_or(str::is_empty)
+        || value["data"]["candidate_sha256"]
+            .as_str()
+            .is_none_or(str::is_empty)
+    {
+        return Err(ShellError::message(
+            "missing actual staged-development candidate",
+        ));
+    }
+    Ok(())
+}
+pub fn tested(value: &Value, source: &Value, feature: usize) -> ShellResult<()> {
+    candidate(source, feature)?;
+    result(value, "write_tests", "TEST_WRITER")?;
+    if value["success"] != true
+        || value["data"]["component"] != FEATURES[feature]
+        || value["data"]["candidate_sha256"] != source["data"]["candidate_sha256"]
+        || value["data"]["source_receipt"].as_u64() != Some(receipt(source)?)
+        || !value["data"]["test_source"].is_object()
+        || value["data"]["test_sha256"]
+            .as_str()
+            .is_none_or(str::is_empty)
+        || receipt(value)? <= receipt(source)?
+    {
+        return Err(ShellError::message(
+            "tests do not describe the received source occurrence",
+        ));
+    }
+    Ok(())
+}
+pub fn review_inputs(inputs: &Value, feature: usize) -> ShellResult<()> {
+    tested(&inputs["tests"], &inputs["candidate"], feature)
+}
+pub fn reviewed(value: &Value, source: &Value, feature: usize) -> ShellResult<()> {
+    candidate(source, feature)?;
+    review_notice(value, feature)?;
+    if value["data"]["candidate_sha256"] != source["data"]["candidate_sha256"]
+        || value["data"]["source_receipt"].as_u64() != Some(receipt(source)?)
+        || receipt(value)? <= receipt(source)?
+    {
+        return Err(ShellError::message(
+            "review differs from the actual source occurrence",
+        ));
+    }
+    Ok(())
+}
+pub fn review_notice(value: &Value, feature: usize) -> ShellResult<()> {
+    result(value, "code_review", "REVIEWER")?;
+    if value["data"]["target"] != FEATURES[feature]
+        || !value["data"]["source_receipt"].is_u64()
+        || value["data"]["candidate_sha256"]
+            .as_str()
+            .is_none_or(str::is_empty)
+    {
+        return Err(ShellError::message("unrelated review result"));
+    }
+    Ok(())
+}
+pub fn merge_inputs(
+    request: &Value,
+    (feature, source, tests, review): (usize, &Value, &Value, &Value),
+) -> ShellResult<()> {
+    assigned(request, "branch", FEATURES[feature])?;
+    tested(tests, source, feature)?;
+    reviewed(review, source, feature)?;
+    if review["success"] != true || receipt(review)? <= receipt(tests)? {
+        return Err(ShellError::message(
+            "merge requires positive review after current tests",
+        ));
+    }
+    Ok(())
+}
+pub fn merged(value: &Value, feature: usize) -> ShellResult<()> {
+    result(
+        value,
+        "merge_code",
+        ["DEVELOPER_A", "DEVELOPER_B", "DEVELOPER_C"][feature],
+    )?;
+    if value["success"] != true
+        || value["data"]["feature"] != FEATURES[feature]
+        || value["data"]["branch"] != FEATURES[feature]
+        || value["data"]["candidate_sha256"]
+            .as_str()
+            .is_none_or(str::is_empty)
+        || value["data"]["repository_sha256"]
+            .as_str()
+            .is_none_or(str::is_empty)
+        || value["data"]["publication_event"].as_u64() != Some(receipt(value)?)
+        || !value["data"]["review_receipt"].is_u64()
+    {
+        return Err(ShellError::message("missing actual reviewed publication"));
+    }
+    Ok(())
+}
+pub fn merge_result(
+    value: &Value,
+    (feature, source, tests, review): (usize, &Value, &Value, &Value),
+    prior_ci: &Value,
+) -> ShellResult<()> {
+    merge_inputs(
+        &json!({"branch":FEATURES[feature]}),
+        (feature, source, tests, review),
+    )?;
+    merged(value, feature)?;
+    let data = &value["data"];
+    if data["source_receipt"].as_u64() != Some(receipt(source)?)
+        || data["review_receipt"].as_u64() != Some(receipt(review)?)
+        || data["source"] != source["data"]["source"]
+        || data["candidate_sha256"] != source["data"]["candidate_sha256"]
+        || data["published_candidates"][FEATURES[feature]] != source["data"]["candidate_sha256"]
+        || receipt(value)? <= receipt(review)?
+    {
+        return Err(ShellError::message(
+            "publication substituted its reviewed material",
+        ));
+    }
+    if prior_ci.is_null() {
+        if !data["base_repository_sha256"].is_null()
+            || !data["base_test_receipt"].is_null()
+            || !data["base_failure_receipt"].is_null()
+            || data["base_publication_events"]
+                .as_object()
+                .is_none_or(|map| !map.is_empty())
+        {
+            return Err(ShellError::message(
+                "first publication names an unknown base",
+            ));
+        }
+    } else {
+        result(prior_ci, "run_tests", "CI_RUNNER")?;
+        if data["base_repository_sha256"] != prior_ci["data"]["repository_sha256"]
+            || data["base_publication_events"] != prior_ci["data"]["publication_events"]
+        {
+            return Err(ShellError::message(
+                "publication differs from the actual integrated base",
+            ));
+        }
+        match prior_ci["success"].as_bool() {
+            Some(true) => {
+                if data["base_test_receipt"].as_u64() != Some(receipt(prior_ci)?)
+                    || !data["base_failure_receipt"].is_null()
+                    || !data["repaired_publication_event"].is_null()
+                {
+                    return Err(ShellError::message(
+                        "publication lost its successful base CI",
+                    ));
+                }
+            }
+            Some(false) => {
+                let replaced = prior_ci["data"]["publication_event"]
+                    .as_u64()
+                    .ok_or_else(|| ShellError::message("failed publication occurrence"))?;
+                if prior_ci["data"]["feature"] != FEATURES[feature]
+                    || !data["base_test_receipt"].is_null()
+                    || data["base_failure_receipt"].as_u64() != Some(receipt(prior_ci)?)
+                    || data["repaired_publication_event"].as_u64() != Some(replaced)
+                    || receipt(source)? <= replaced
+                {
+                    return Err(ShellError::message(
+                        "repair did not replace the actual failed publication",
+                    ));
+                }
+            }
+            None => return Err(ShellError::message("base CI has no outcome")),
+        }
+    }
+    Ok(())
+}
+fn publication_events(value: &Value, feature: usize) -> ShellResult<Value> {
+    let mut events = value["data"]["base_publication_events"]
+        .as_object()
+        .ok_or_else(|| ShellError::message("missing publication base receipts"))?
+        .clone();
+    events.insert(FEATURES[feature].into(), json!(receipt(value)?));
+    Ok(Value::Object(events))
+}
+pub fn ci_notice(value: &Value, feature: usize) -> ShellResult<()> {
+    result(value, "run_tests", "CI_RUNNER")?;
+    if value["data"]["feature"] != FEATURES[feature] || value["data"]["suite"] != SUITES[feature] {
+        return Err(ShellError::message("unrelated integrated CI result"));
+    }
+    Ok(())
+}
+pub fn ci_inputs(publication: &Value, tests: &[Value; 3], feature: usize) -> ShellResult<()> {
+    merged(publication, feature)?;
+    let candidates = publication["data"]["published_candidates"]
+        .as_object()
+        .ok_or_else(|| ShellError::message("integrated candidate map"))?;
+    if !candidates.contains_key(FEATURES[feature]) {
+        return Err(ShellError::message(
+            "integrated publication lacks its own feature",
+        ));
+    }
+    for (name, identity) in candidates {
+        let index = FEATURES
+            .iter()
+            .position(|feature| feature == name)
+            .ok_or_else(|| ShellError::message("unassigned integrated feature"))?;
+        let test = &tests[index];
+        result(test, "write_tests", "TEST_WRITER")?;
+        if test["success"] != true
+            || test["data"]["component"] != *name
+            || test["data"]["candidate_sha256"] != *identity
+            || !test["data"]["test_source"].is_object()
+            || !test["data"]["test_sha256"].is_string()
+            || receipt(test)? >= receipt(publication)?
+        {
+            return Err(ShellError::message(
+                "CI lacks the actual published inputs' completed tests",
+            ));
+        }
+    }
+    Ok(())
+}
+pub fn ci_result(
+    value: &Value,
+    publication: &Value,
+    tests: &[Value; 3],
+    feature: usize,
+) -> ShellResult<()> {
+    ci_inputs(publication, tests, feature)?;
+    ci_notice(value, feature)?;
+    let data = &value["data"];
+    let published = &publication["data"];
+    if data["repository_sha256"] != published["repository_sha256"]
+        || data["published_candidates"] != published["published_candidates"]
+        || data["publication_event"] != published["publication_event"]
+        || data["publication_events"] != publication_events(publication, feature)?
+        || data["publication_events"][FEATURES[feature]] != published["publication_event"]
+        || receipt(value)? <= receipt(publication)?
+    {
+        return Err(ShellError::message("CI checked another publication"));
+    }
+    let candidates = published["published_candidates"]
+        .as_object()
+        .expect("checked input map");
+    for field in ["publication_events", "test_receipts", "test_inputs"] {
+        if data[field].as_object().is_none_or(|map| {
+            map.len() != candidates.len() || candidates.keys().any(|key| !map.contains_key(key))
+        }) {
+            return Err(ShellError::message(
+                "CI receipt map differs from published inputs",
+            ));
+        }
+    }
+    for name in candidates.keys() {
+        let index = FEATURES
+            .iter()
+            .position(|feature| feature == name)
+            .expect("checked feature");
+        if data["test_receipts"][name].as_u64() != Some(receipt(&tests[index])?)
+            || data["test_inputs"][name] != tests[index]["data"]
+            || data["publication_events"][name]
+                .as_u64()
+                .is_none_or(|id| id > receipt(publication).expect("checked receipt"))
+        {
+            return Err(ShellError::message(
+                "CI did not use the exact received input receipts",
+            ));
+        }
+    }
+    Ok(())
+}
+pub fn stage_notice(value: &Value, feature: usize) -> ShellResult<()> {
+    result(value, "validate_staging", "RELEASE_MANAGER")?;
+    if value["data"]["service"] != FEATURES[feature]
+        || !value["data"]["deployment_event"].is_u64()
+        || value["data"]["candidate_sha256"]
+            .as_str()
+            .is_none_or(str::is_empty)
+    {
+        return Err(ShellError::message("unrelated actual staging result"));
+    }
+    Ok(())
+}
+pub fn publication_stage(
+    value: &Value,
+    publication: &Value,
+    ci: &Value,
+    feature: usize,
+) -> ShellResult<()> {
+    stage_notice(value, feature)?;
+    staging_inputs(&json!({"publication":publication,"ci":ci}), feature)?;
+    let deployment = value["data"]["deployment_event"]
+        .as_u64()
+        .ok_or_else(|| ShellError::message("staging deployment occurrence"))?;
+    if value["data"]["candidate_sha256"] != publication["data"]["candidate_sha256"]
+        || deployment <= receipt(ci)?
+        || receipt(value)? <= deployment
+    {
+        return Err(ShellError::message(
+            "staging result names an older publication or CI",
+        ));
+    }
+    Ok(())
+}
+pub fn rollback_notice(
+    value: &Value,
+    validation: &Value,
+    publication: &Value,
+    ci: &Value,
+    feature: usize,
+) -> ShellResult<()> {
+    publication_stage(validation, publication, ci, feature)?;
+    result(value, "rollback_service", "RELEASE_MANAGER")?;
+    let removed = &value["data"]["removed_deployment"];
+    if validation["success"] != false
+        || value["success"] != true
+        || value["data"]["service"] != FEATURES[feature]
+        || removed["service"] != FEATURES[feature]
+        || removed["deployment_event"] != validation["data"]["deployment_event"]
+        || removed["candidate_sha256"] != publication["data"]["candidate_sha256"]
+        || removed["publication_event"] != publication["data"]["publication_event"]
+        || removed["ci_receipt"].as_u64() != Some(receipt(ci)?)
+        || receipt(value)? <= receipt(validation)?
+    {
+        return Err(ShellError::message(
+            "rollback did not remove the actually rejected staging material",
+        ));
+    }
+    Ok(())
+}
+pub fn actual_bytes(input: &core::cell::Cell<Option<Value>>) -> ShellResult<Vec<u8>> {
+    let value = input.take();
+    let encoded = match value.as_ref() {
+        Some(value) => encode(value),
+        None => Err(ShellError::message("missing actual effect outcome")),
+    };
+    input.set(value);
+    encoded
+}
+
 pub fn staging_inputs(value: &Value, feature: usize) -> ShellResult<()> {
     let publication = &value["publication"];
     let ci = &value["ci"];
@@ -57,6 +398,7 @@ pub fn staging_inputs(value: &Value, feature: usize) -> ShellResult<()> {
         || checked["feature"] != FEATURES[feature]
         || checked["suite"] != SUITES[feature]
         || checked["publication_event"] != material["publication_event"]
+        || checked["publication_events"] != publication_events(publication, feature)?
         || checked["publication_events"][FEATURES[feature]] != material["publication_event"]
         || checked["repository_sha256"] != material["repository_sha256"]
         || checked["published_candidates"] != material["published_candidates"]
@@ -69,15 +411,6 @@ pub fn staging_inputs(value: &Value, feature: usize) -> ShellResult<()> {
     let candidates = material["published_candidates"]
         .as_object()
         .ok_or_else(|| ShellError::message("published input map"))?;
-    if candidates.len() != feature + 1
-        || FEATURES[..=feature]
-            .iter()
-            .any(|name| !candidates.contains_key(*name))
-    {
-        return Err(ShellError::message(
-            "staged publication lacks a preceding feature",
-        ));
-    }
     let ci_receipt = receipt(ci)?;
     for field in ["publication_events", "test_receipts", "test_inputs"] {
         if checked[field].as_object().is_none_or(|map| {
@@ -89,18 +422,19 @@ pub fn staging_inputs(value: &Value, feature: usize) -> ShellResult<()> {
         }
     }
     for (name, identity) in candidates {
-        let Some(index) = FEATURES.iter().position(|feature| feature == name) else {
+        if !FEATURES.contains(&name.as_str()) {
             return Err(ShellError::message(
                 "unknown feature in integrated publication",
             ));
-        };
-        if index > feature
-            || checked["publication_events"][name]
-                .as_u64()
-                .is_none_or(|id| id >= ci_receipt)
+        }
+        if checked["publication_events"][name]
+            .as_u64()
+            .is_none_or(|id| id >= ci_receipt)
             || checked["test_receipts"][name]
                 .as_u64()
                 .is_none_or(|id| id >= ci_receipt)
+            || checked["test_receipts"][name].as_u64()
+                != Some(receipt(&json!({"data":checked["test_inputs"][name]}))?)
             || checked["test_inputs"][name]["component"] != *name
             || checked["test_inputs"][name]["candidate_sha256"] != *identity
             || checked["test_inputs"][name]["test_sha256"]

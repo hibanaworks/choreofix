@@ -15,12 +15,15 @@ pub const SUITES: [&str; 3] = [
 
 pub struct Arguments<const OPERATION: u8>(Vec<u8>);
 impl<const OPERATION: u8> Arguments<OPERATION> {
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, CodecError> {
-        Self::validate_payload(Payload::new(bytes))?;
-        Ok(Self(bytes.to_vec()))
-    }
     pub fn into_value(self) -> Value {
         serde_json::from_slice(&self.0).expect("validated staged-integration arguments")
+    }
+}
+impl<const OPERATION: u8> TryFrom<&[u8]> for Arguments<OPERATION> {
+    type Error = CodecError;
+    fn try_from(bytes: &[u8]) -> Result<Self, CodecError> {
+        Self::validate_payload(Payload::new(bytes))?;
+        Ok(Self(bytes.to_vec()))
     }
 }
 impl<const OPERATION: u8> WireEncode for Arguments<OPERATION> {

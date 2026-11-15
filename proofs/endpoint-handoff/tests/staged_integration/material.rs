@@ -7,21 +7,27 @@ pub fn material(feature: usize) -> (Value, Value, Value, Value) {
     let id = 10 + feature as u64 * 10;
     let mut candidates = serde_json::Map::new();
     let mut publications = serde_json::Map::new();
+    let mut base_publications = serde_json::Map::new();
     let mut tests = serde_json::Map::new();
     let mut test_inputs = serde_json::Map::new();
-    for (index, feature) in FEATURES.iter().enumerate().take(feature + 1) {
+    for (index, target) in FEATURES.iter().enumerate().take(feature + 1) {
         let hash = format!("candidate:{index}");
-        candidates.insert((*feature).into(), json!(hash));
-        publications.insert((*feature).into(), json!(10 + index as u64 * 10));
-        tests.insert((*feature).into(), json!(8 + index as u64 * 10));
-        test_inputs.insert((*feature).into(), json!({"component":feature,"candidate_sha256":hash,
-            "test_source":{"target":feature,"expected_candidate":hash},"test_sha256":format!("test:{index}")}));
+        candidates.insert((*target).into(), json!(hash));
+        publications.insert((*target).into(), json!(10 + index as u64 * 10));
+        if index < feature {
+            base_publications.insert((*target).into(), json!(10 + index as u64 * 10));
+        }
+        tests.insert((*target).into(), json!(8 + index as u64 * 10));
+        test_inputs.insert((*target).into(), json!({"agent":"TEST_WRITER", "component":target,"candidate_sha256":hash,
+            "artifact_id":format!("development:{}",8+index as u64*10), "source_receipt":5+index as u64*10,
+            "test_source":{"target":target,"expected_candidate":hash},"test_sha256":format!("test:{index}")}));
     }
     let inputs = json!({
         "publication":{"tool_name":"merge_code","success":true,"data":{
             "agent":(["DEVELOPER_A","DEVELOPER_B","DEVELOPER_C"][feature]),"feature":name,"branch":name,
             "candidate_sha256":format!("candidate:{feature}"),"repository_sha256":format!("repository:{feature}"),
-            "publication_event":id,"published_candidates":candidates,"artifact_id":format!("development:{id}")}},
+            "publication_event":id,"published_candidates":candidates,"artifact_id":format!("development:{id}"),
+            "base_publication_events":base_publications,"review_receipt":id-1}},
         "ci":{"tool_name":"run_tests","success":true,"data":{
             "agent":"CI_RUNNER","feature":name,"suite":SUITES[feature],
             "published_candidates":candidates,"repository_sha256":format!("repository:{feature}"),

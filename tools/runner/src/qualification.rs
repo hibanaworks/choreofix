@@ -11,13 +11,14 @@ use std::{
     process::{Command, Stdio},
 };
 
-const FAMILIES: [&str; 17] = [
+const FAMILIES: [&str; 18] = [
     "kitchen",
     "manufacturing",
     "cascading_build",
     "build",
     "document",
     "feature_delivery",
+    "staged_integration",
     "critical_care",
     "multi_specialty",
     "medical",

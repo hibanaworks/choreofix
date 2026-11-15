@@ -71,8 +71,7 @@ impl Domain for World<'_> {
 
 fn dynamic_audit(evidence: &Value) -> ShellResult<Value> {
     use hibana_epf::{
-        Acceptance, AuditStorage, Capture, ExecutionStorage, Protocol, RecordId, RouteChoice,
-        Unfold,
+        Acceptance, AuditStorage, Capture, ExecutionStorage, Protocol, RecordId, Unfold,
     };
     // Only decode the canonical five-word record format. All eligibility,
     // visits, custody and occurrence correspondence are checked by EPF.
@@ -119,15 +118,6 @@ fn dynamic_audit(evidence: &Value) -> ShellResult<Value> {
         .and_then(|n| n.checked_add(1))
         .expect("native capture capacity");
     let mut unfolding = vec![Unfold::Source; capacity];
-    let mut choices = vec![
-        RouteChoice {
-            span: [0, 0],
-            right: false
-        };
-        protocol
-            .audit_choice_capacity(capacity)
-            .map_err(|e| ShellError::message(format!("choices: {e:?}")))?
-    ];
     let producer = vec![0; count];
     let mut order = vec![
         RecordId {
@@ -158,7 +148,6 @@ fn dynamic_audit(evidence: &Value) -> ShellResult<Value> {
             &captures,
             AuditStorage {
                 unfolding: &mut unfolding,
-                choices: &mut choices,
                 execution: ExecutionStorage {
                     session: SESSION,
                     observed_producers: &producer,

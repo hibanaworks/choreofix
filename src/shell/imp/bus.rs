@@ -27,7 +27,7 @@ type Response = (Option<Value>, Option<Waker>);
 #[derive(Default)]
 struct Connection {
     sequence: u64,
-    outgoing: VecDeque<(Vec<Value>, Option<u64>)>,
+    outgoing: VecDeque<(Vec<u8>, Option<u64>)>,
     output_waiter: Option<Waker>,
     responses: BTreeMap<u64, Response>,
     terminals: BTreeMap<&'static str, Option<Commands>>,
@@ -117,18 +117,28 @@ impl Bus {
     }
 
     fn enqueue(&self, values: Vec<Value>, flushed: Option<u64>) {
-        let wake = self.connection(|connection| {
-            connection.outgoing.push_back((values, flushed));
-            connection.output_waiter.take()
+        let mut bytes = Vec::new();
+        for value in values {
+            serde_json::to_writer(&mut bytes, &value)
+                .expect("JSON values serialize to an in-memory byte buffer");
+            bytes.push(b'\n');
+        }
+        self.connection(|connection| {
+            connection.outgoing.push_back((bytes, flushed));
         });
-        if let Some(wake) = wake {
+    }
+
+    fn wake_output(&self) {
+        if let Some(wake) = self.connection(|connection| connection.output_waiter.take()) {
             wake.wake();
         }
     }
 
     /// Queue an immutable diagnostic observation with the I/O owner.
     pub fn observe(&self, value: Value) {
-        self.enqueue(vec![value], None);
+        let mut values = self.transport.take_observations();
+        values.push(value);
+        self.enqueue(values, None);
     }
 
     fn respond(&self, id: u64, value: Value) -> ShellResult<()> {
@@ -154,6 +164,7 @@ impl Bus {
         values.push(value);
         let reply = self.reply()?;
         self.enqueue(values, Some(reply.id));
+        self.wake_output();
         reply.receive().await?;
         Ok(())
     }
@@ -221,17 +232,11 @@ impl ExternalIo {
             {
                 bus.respond(id, Value::Null)?;
             }
-            let Some((values, receipt)) =
+            let Some((bytes, receipt)) =
                 bus.connection(|connection| connection.outgoing.pop_front())
             else {
                 return Ok(());
             };
-            let mut bytes = Vec::new();
-            for value in values {
-                serde_json::to_writer(&mut bytes, &value)
-                    .map_err(|error| ShellError::message(error.to_string()))?;
-                bytes.push(b'\n');
-            }
             self.output_bytes = bytes;
             self.output_receipt = receipt;
         }
@@ -398,6 +403,7 @@ impl Domain for Bus {
                 let mut values = self.transport.take_observations();
                 values.push(request);
                 self.enqueue(values, None);
+                self.wake_output();
                 receipt = Some(reply);
             }
             let result = receipt
@@ -427,16 +433,26 @@ impl Bus {
             async {
                 let request = poll_fn(|cx| {
                     self.connection(|connection| {
-                        while let Some((values, receipt)) = connection.outgoing.pop_front() {
+                        while let Some((bytes, receipt)) = connection.outgoing.pop_front() {
                             if receipt.is_some() {
                                 return Poll::Ready(Err(ShellError::message(
                                     "effect fixture cannot acknowledge terminal output",
                                 )));
                             }
-                            if let Some(request) =
-                                values.into_iter().find(|v| v["type"] == "execute")
+                            for value in
+                                serde_json::Deserializer::from_slice(&bytes).into_iter::<Value>()
                             {
-                                return Poll::Ready(Ok(request));
+                                let request = match value {
+                                    Ok(value) => value,
+                                    Err(error) => {
+                                        return Poll::Ready(Err(ShellError::message(
+                                            error.to_string(),
+                                        )));
+                                    }
+                                };
+                                if request["type"] == "execute" {
+                                    return Poll::Ready(Ok(request));
+                                }
                             }
                         }
                         connection.output_waiter = Some(cx.waker().clone());

@@ -1,8 +1,66 @@
 use super::*;
 
-#[cfg(miri)]
-#[path = "../../../tasks/handoff/tests/clock.rs"]
-mod clock;
+#[hibana_runtime::main]
+#[test]
+async fn diagnostic_observation_does_not_wake_its_own_producer() -> ShellResult<()> {
+    let (bus, _, _) = Bus::open([], []);
+    let polls = Cell::new(0);
+    let result = hibana_runtime::race(
+        async {
+            poll_fn(|cx| {
+                polls.set(polls.get() + 1);
+                bus.connection(|connection| connection.output_waiter = Some(cx.waker().clone()));
+                bus.observe(json!({"type":"observation"}));
+                assert!(bus.connection(|connection| connection.output_waiter.is_some()));
+                Poll::<std::io::Result<()>>::Pending
+            })
+            .await
+        },
+        hibana_runtime::host::deadline(std::time::Duration::from_millis(5)),
+    )
+    .await;
+    assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
+    // Only initial entry and the independent timer can poll this producer.
+    assert!(
+        polls.get() <= 2,
+        "diagnostic feedback caused {} polls",
+        polls.get()
+    );
+    Ok(())
+}
+
+#[hibana_runtime::main]
+#[test]
+async fn observations_deliver_transport_evidence_without_waiting_for_an_rpc() -> ShellResult<()> {
+    use hibana::{
+        g,
+        runtime::{SessionKitStorage, ids::SessionId, program::project},
+    };
+    type Message = g::Msg<1, u32>;
+    let source = g::send::<1, 2, Message>();
+    let program = project::<1>(&source);
+    let (bus, _, _) = Bus::open([], []);
+    let mut slab = [0; 8192];
+    let mut storage = SessionKitStorage::uninit();
+    let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
+    let mut sender = rv.enter(SessionId::new(17), &program)?;
+    sender.send::<Message>(&42).await?;
+    bus.observe(json!({"type":"observation"}));
+    assert!(bus.transport.take_observations().is_empty());
+    let pending = bus
+        .connection(|connection| connection.outgoing.pop_front())
+        .unwrap();
+    assert!(pending.1.is_none());
+    let records = serde_json::Deserializer::from_slice(&pending.0)
+        .into_iter::<Value>()
+        .map(|value| value.unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0]["type"], "protocol_frame");
+    assert_eq!(records[0]["action"], "send");
+    assert_eq!(records[1], json!({"type":"observation"}));
+    Ok(())
+}
 
 #[test]
 fn an_unpolled_effect_creates_no_rpc_or_correlation() {
@@ -11,8 +69,7 @@ fn an_unpolled_effect_creates_no_rpc_or_correlation() {
     assert!(bus.connection(|c| c.outgoing.is_empty() && c.responses.is_empty() && c.sequence == 0));
 }
 
-#[cfg_attr(not(miri), hibana_runtime::main)]
-#[cfg_attr(miri, hibana_runtime::main(clock::Clock))]
+#[hibana_runtime::main]
 #[test]
 async fn losing_a_borrowed_effect_race_preserves_the_original_rpc() -> ShellResult<()> {
     let (bus, _, _) = Bus::open([], []);
@@ -25,7 +82,12 @@ async fn losing_a_borrowed_effect_race_preserves_the_original_rpc() -> ShellResu
     assert!(result.is_none());
     let requests = bus.connection(|c| c.outgoing.drain(..).collect::<Vec<_>>());
     assert_eq!(requests.len(), 1);
-    let id = requests[0].0.last().unwrap()["id"].as_u64().unwrap();
+    let request = serde_json::Deserializer::from_slice(&requests[0].0)
+        .into_iter::<Value>()
+        .last()
+        .unwrap()
+        .unwrap();
+    let id = request["id"].as_u64().unwrap();
     bus.respond(id, json!({"actual":"original result"}))?;
     assert_eq!(
         effect.await.map_err(ShellError::message)?,
@@ -35,8 +97,7 @@ async fn losing_a_borrowed_effect_race_preserves_the_original_rpc() -> ShellResu
     Ok(())
 }
 
-#[cfg_attr(not(miri), hibana_runtime::main)]
-#[cfg_attr(miri, hibana_runtime::main(clock::Clock))]
+#[hibana_runtime::main]
 #[test]
 async fn native_world_peer_uses_the_actual_rpc_queue_and_receipts() -> ShellResult<()> {
     struct Echo;
@@ -237,8 +298,16 @@ async fn identical_concurrent_effect_arguments_keep_distinct_rpc_replies() -> Sh
         let requests =
             bus.connection(|connection| connection.outgoing.drain(..).collect::<Vec<_>>());
         assert_eq!(requests.len(), 2);
-        let first = requests[0].0.last().unwrap();
-        let second = requests[1].0.last().unwrap();
+        let first = serde_json::Deserializer::from_slice(&requests[0].0)
+            .into_iter::<Value>()
+            .last()
+            .unwrap()
+            .unwrap();
+        let second = serde_json::Deserializer::from_slice(&requests[1].0)
+            .into_iter::<Value>()
+            .last()
+            .unwrap()
+            .unwrap();
         assert_eq!(first["arguments"], second["arguments"]);
         assert_ne!(first["id"], second["id"]);
         bus.respond(second["id"].as_u64().unwrap(), json!("second"))?;
@@ -259,7 +328,12 @@ async fn output_receipt_waits_for_actual_write_completion() -> ShellResult<()> {
         let (values, flushed) = bus
             .connection(|connection| connection.outgoing.pop_front())
             .unwrap();
-        assert_eq!(values.last().unwrap()["type"], "exit");
+        let value = serde_json::Deserializer::from_slice(&values)
+            .into_iter::<Value>()
+            .last()
+            .unwrap()
+            .unwrap();
+        assert_eq!(value["type"], "exit");
         bus.respond(flushed.unwrap(), Value::Null)?;
     };
     Ok(())

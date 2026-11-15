@@ -60,6 +60,9 @@ mod review_audit;
 mod review_boundary;
 mod snapshot;
 mod sources;
+mod staged_integration_audit;
+#[cfg(test)]
+mod staged_integration_boundary;
 mod wire;
 mod writing_audit;
 #[cfg(test)]
@@ -96,6 +99,7 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
     let cicd = task == "16E";
     let review = task == "6E";
     let feature_delivery = task == "6M";
+    let staged_integration = task == "6H";
     let report = task == "3E";
     let document = task == "7E";
     let build = matches!(task, "10E" | "10M");
@@ -111,6 +115,7 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
         || cicd
         || review
         || feature_delivery
+        || staged_integration
         || document
         || build
         || report
@@ -131,6 +136,7 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
         "feature_name":actor["calls"][0]["arguments"]["feature_name"]})
     } else if review
         || feature_delivery
+        || staged_integration
         || document
         || build
         || report
@@ -230,6 +236,25 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
             "TESTER" => "/service/run_tests",
             _ => return Err("unknown coordination participant".into()),
         }
+    } else if staged_integration {
+        match agent {
+            "DEVELOPER_A" | "DEVELOPER_B" | "DEVELOPER_C" => {
+                "/service/implement_feature, /service/merge_code; read-only /service/review/<feature>, /service/integration/<feature>, /service/release/<feature> and /service/interface/<other-feature>"
+            }
+            "REVIEWER" => {
+                "/service/code_review/<feature>; read-only /service/candidate/<feature>, /service/integration/<feature> and /service/release/<feature>"
+            }
+            "TEST_WRITER" => {
+                "/service/write_tests/<feature>; read-only /service/candidate/<feature>, /service/review/<feature>, /service/integration/<feature> and /service/release/<feature>"
+            }
+            "CI_RUNNER" => {
+                "/service/run_tests/<feature>; read-only /service/publication/<feature> and /service/release/<feature>"
+            }
+            "RELEASE_MANAGER" => {
+                "/service/deploy/<feature>, /service/validate/<feature>, /service/rollback/<feature>; read-only /service/release/<feature>"
+            }
+            _ => return Err("unknown staged-integration participant".into()),
+        }
     } else if feature_delivery {
         match agent {
             "DEVELOPER_A" | "DEVELOPER_B" => {
@@ -285,6 +310,8 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
         "The two actual resource Endpoints transfer automatically; no acquisition, release or notification commands are needed. Compile results contain the actual object bytes and shared type inputs. A updates the provided SHARED_TYPES definitions. B's read-only /service/updates delivers A's actual completed compile result and changed types. A blocking read can wait for that actual incoming message; nonblocking shell I/O can inspect availability instead. B may initially compile against the provided old definitions: that object is real but becomes stale when A updates them. Use the received update and actual object inputs to decide whether B needs a rebuild through the same compile service. A current object's SHARED_TYPES.modules includes module_a's declarations. The integrator's link waits for both current actual build reports. Private commands and computations remain your choice, and the common world scores the actual object and link inputs rather than a prescribed total invocation order."
     } else if document {
         "Each file is a direct choreography projection. The editor chooses the first writer through allocate_document with {\"first_writer\":\"WRITER_A\"} or WRITER_B. Writers' initial write and references target their assigned chapter; these operations are independent. Both writers may revise either chapter when editing is requested. Reading feedback consumes the next actual reconsideration review or the final combine_sections result; a review scope identifies the assigned writer. Both positive and negative current reviews may be reconsidered before freezing. The editor submits original review_sections arguments to review_chapter_1 or review_chapter_2 and reads the actual result from that same file. Either review order is allowed, including submitting both before reading results. Each successful reopen of an incoming file consumes its next message; private files can retain actual results. To request editing, reconsider_a or reconsider_b takes {\"review_id\":\"the actual current review_id\"}; its response is the actual revised material. Fresh reviews refer to the resulting complete document. combine_sections is the actual publication request and takes the original two-chapter sections argument. Publication requires both actual current reviews to be successful and match current material. The choreography transfers editing authority before the effect; there is no separate approval-submission operation. Writers remain active for reconsideration until feedback delivers the actual combine_sections publication result; completing the initial write and references is not their completion condition. Exiting before that result aborts the run. The editor remains active until it receives the actual publication result from combine_sections. Choose your own commands, calculations, legal request orders and reconsiderations. A refused unadmitted request returns an error to the same guest; no host chooses a next command or workflow step."
+    } else if staged_integration {
+        "Each file directly projects its actual choreography Endpoint. Choose shell commands, private calculations and legal independent request orders freely. Write original assigned arguments and read the actual response from the same operation file. The three feature names are user_authentication, payment_processing and notification_system. Developers choose their own source for implement_feature and read actual peer candidates from interface/<other-feature>. Test writers read candidate/<feature>, write_tests/<feature> and read its result. Reviews require those actual completed tests; candidate/<feature> supplies the reviewer both source and tests. Review rejection permits a fresh implementation, test and review. Developers read actual review results from review/<feature> and submit merge_code when the global permits it. Initial preparation of all three features is concurrent; A may merge, run CI and stage while B/C prepare. This finite source integrates B after A's positive stage and B/C preparation, and C after B's positive stage. This is a partial order, not arbitrary merge or staging pipelining. CI_RUNNER reads publication/<feature>, submits the assigned suite through run_tests/<feature>, and reads its real result. CI failure requires fresh source, tests, approval, merge and CI. RELEASE_MANAGER reads release/<feature> for the actual publication and positive CI, deploys to staging, then validates that actual deployment. Failed validation requires rollback of that deployment followed by a fresh implementation/test/review/merge/CI/deploy/validate attempt. Rollback uses the original service argument. Deployment environment may be omitted or staging. Other agents read integration/<feature> and release/<feature> for actual CI and validation results, including failed attempts. The same feature may repeat; do not assume retry counts. Incoming files consume their next actual message on each successful reopening. Stay available for all three final positive staging results and the actual candidate/review/integration updates directed to you; then exit. RELEASE_MANAGER finishes after all three actual successful validations. Unadmitted invalid requests return recoverable shell errors. No acquire/release, grant, synthetic notification or generic result mailbox exists. The common world scores actual completed material and resource effects independently of this protocol."
     } else if feature_delivery {
         "Each operation file is a direct choreography projection. Choose shell commands, private computations and legal request orders freely. Write the original assigned JSON arguments and read the actual result from that same operation file; there is no generic result mailbox. Developers implement their own feature, read actual review feedback from review, and can choose fresh source after rejection. interface_change and peer_review deliver the other feature's actual candidate and review. The reviewer chooses either target through code_review/<pr_id>; code_ready/<feature> supplies its actual candidate. The test writer independently chooses either target through write_tests/<target>, after reading the actual candidate in code_ready/<feature>; review/<feature> carries the actual review result. Rejected reviews require a fresh implementation, test definition and review of that feature. Both features prepare concurrently. merge_ready contains the actual approval for the next integrated publication; this finite protocol gives the first merge turn to the earlier successful initial review and completes that feature's CI before the other merge. Developers submit merge_code after that actual notification. CI_RUNNER reads the actual publication/<feature>, submits the matching assigned suite through run_tests/<feature>, and reads its actual CI result there. integration delivers actual CI results: each developer and the test writer have one stream, and the reviewer has one file per feature. CI failure requires the author who merged to revise, retest, obtain a fresh review, merge that repair and run CI again before the next feature can merge. Each successful reopening of an incoming file consumes its next message. Use the actual target, candidate and result data; do not assume a retry count or invent acquire/release or notification tools. Stay available to receive both features' final successful CI results and actual peer updates before exiting. Invalid unadmitted input returns a shell error so it can be corrected or retried. The neutral common world grades actual effects and data, not this protocol's schedule."
     } else if critical_care {
@@ -322,6 +349,7 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
         || api
         || cicd
         || feature_delivery
+        || staged_integration
         || document
         || report
         || task == "4E"
@@ -525,6 +553,8 @@ async fn main() -> Result<()> {
         [mode, events] if mode == "--audit-api" => println!("{}", serde_json::to_string_pretty(&api_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-api-mutants" => println!("{}", serde_json::to_string_pretty(&api_audit::check_mutants(Path::new(events), Path::new(output))?)?),
         [mode, events] if mode == "--audit-review" => println!("{}", serde_json::to_string_pretty(&review_audit::audit(Path::new(events))?)?),
+        [mode, events] if mode == "--audit-staged-integration" => println!("{}", serde_json::to_string_pretty(&staged_integration_audit::audit(Path::new(events))?)?),
+        [mode, events, output] if mode == "--check-staged-integration-mutants" => println!("{}", serde_json::to_string_pretty(&staged_integration_audit::check_mutants(Path::new(events),Path::new(output))?)?),
         [mode, events] if mode == "--audit-feature-delivery" => println!("{}", serde_json::to_string_pretty(&feature_delivery_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-feature-delivery-mutants" => println!("{}", serde_json::to_string_pretty(&feature_delivery_audit::check_mutants(Path::new(events),Path::new(output))?)?),
         [mode, events] if mode == "--audit-coordination" => println!("{}", serde_json::to_string_pretty(&coordination_audit::audit(Path::new(events))?)?),
@@ -607,7 +637,7 @@ async fn main() -> Result<()> {
             }
         }
         _ => return Err(concat!(
-            "usage: choreofix-experiments 1E|1M|1H|2E|2M|2H|3E|4E|5E|5M|5H|6E|6M|7E|8E|9E|9M|9H|10E|10M|11E|12E|16E DEPTH OUTPUT\n",
+            "usage: choreofix-experiments 1E|1M|1H|2E|2M|2H|3E|4E|5E|5M|5H|6E|6M|6H|7E|8E|9E|9M|9H|10E|10M|11E|12E|16E DEPTH OUTPUT\n",
             "       --audit-api|--audit-review|--audit-report|--audit-document|--audit-coordination|--audit-writing|--audit-cicd|--audit-philosophers|--audit EVENTS\n",
             "       --audit-protocol EVENTS\n",
             "       --check-api-mutants|--check-review-mutants|--check-report-mutants|--check-document-mutants|--check-writing-mutants|--check-cicd-mutants|--check-philosophers-mutants|--check-protocol-mutants EVENTS NEW_OUTPUT\n",

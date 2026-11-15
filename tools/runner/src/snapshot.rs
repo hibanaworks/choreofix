@@ -83,6 +83,7 @@ pub fn freeze(task: &str, output: &Path) -> Result<Value> {
         "5H" => "CRITICAL_CARE",
         "6E" => "REVIEW",
         "6M" => "FEATURE_DELIVERY",
+        "6H" => "STAGED_INTEGRATION",
         "8E" => "API",
         "9E" | "9M" | "9H" => "PHILOSOPHERS",
         "16E" => "CICD",

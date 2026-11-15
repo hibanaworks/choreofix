@@ -84,6 +84,7 @@ async fn component(inputs: &Value, effects: &StagingEffects) -> ShellResult<()> 
     let owner_program = project::<STAGE_OWNER>(&source);
     let environment_program = project::<STAGING_ENV>(&source);
     let repo_program = project::<REPO>(&source);
+    let build_program = project::<BUILD_SERVER>(&source);
     let file_program = project::<RELEASE_FILE>(&source);
     let session = SessionId::new(SESSION);
     let (bus, _, _) = Bus::open(["RELEASE_MANAGER"], [(session, STAGING_ENV)]);
@@ -103,6 +104,7 @@ async fn component(inputs: &Value, effects: &StagingEffects) -> ShellResult<()> 
     let mut owner = rv.enter(session, &owner_program)?;
     let resource = rv.enter(session, &environment_program)?;
     let mut repo = rv.enter(session, &repo_program)?;
+    let mut build = rv.enter(session, &build_program)?;
     let mut file = rv.enter(session, &file_program)?;
     init.send::<StageLoan>(resource).await?;
     hibana_runtime::race(
@@ -112,7 +114,7 @@ async fn component(inputs: &Value, effects: &StagingEffects) -> ShellResult<()> 
             };
             async {
                 let bytes = data::encode(inputs)?;
-                repo.send::<StagingReadyA>(&bytes.as_slice()).await?;
+                build.send::<StagingReadyA>(&bytes.as_slice()).await?;
                 let outcome = repo.offer().await?;
                 use hibana::g::Message;
                 match outcome.label() {
@@ -135,17 +137,17 @@ async fn component(inputs: &Value, effects: &StagingEffects) -> ShellResult<()> 
             async {
                 let received = data::decode(file.recv::<FileStagingReadyA>().await?)?;
                 assert_eq!(&received, inputs);
-                let request = br#"{"service":"user_authentication"}"#;
-                file.send::<DeployRequestA>(&Arguments::<5>::from_bytes(request)?)
+                let request = br#"{"service":"user_authentication"}"#.as_slice();
+                file.send::<DeployRequestA>(&Arguments::<5>::try_from(request)?)
                     .await?;
                 let deployment = data::decode(file.recv::<DeployedA>().await?)?;
                 assert_eq!(deployment, effects.results[0]);
-                file.send::<ValidateRequestA>(&Arguments::<6>::from_bytes(request)?)
+                file.send::<ValidateRequestA>(&Arguments::<6>::try_from(request)?)
                     .await?;
                 let validation = data::decode(file.recv::<FileStageResultA>().await?)?;
                 assert_eq!(validation, effects.results[1]);
                 if validation["success"] == false {
-                    file.send::<RollbackRequestA>(&Arguments::<7>::from_bytes(request)?)
+                    file.send::<RollbackRequestA>(&Arguments::<7>::try_from(request)?)
                         .await?;
                     assert_eq!(
                         data::decode(file.recv::<RolledBackA>().await?)?,

@@ -3,6 +3,14 @@
 The runner records model requests, tool events, versions and usage. Hibana task
 permissions belong to the projected Endpoints, not this process interface.
 The direct-WASI command currently produces unscored qualification records.
+
+The common WASI qualification includes 6H's seven-guest depth-0 baseline under
+`staged_integration_boundary::`. It checks 21 real effects, complete EPF capture,
+effect/world correspondence and two rejected requests followed by recovery.
+This finite mechanism condition does not qualify the unfinished depth-2 live
+model trial or add 6H to the 23 qualified tasks. The normal runner accepts 6H;
+saved executions use `--audit-staged-integration EVENTS`, with record
+counterexamples through `--check-staged-integration-mutants EVENTS NEW_OUTPUT`.
 Use the experiment matrix and qualified task artifacts for scored comparisons.
 
 The trace file and versioned common simulator each have one I/O owner. Callers send

@@ -5,19 +5,13 @@ use super::{
 };
 use crate::{imp::transport::InMemoryTransport, shell::imp::bus::Bus};
 use hibana::runtime::{SessionKitStorage, ids::SessionId, resolver::ResolverRef};
-use std::{cell::Cell, time::Duration};
-#[cfg(miri)]
-mod clock;
-#[cfg(miri)]
-use clock::deadline;
-#[cfg(not(miri))]
 use hibana_runtime::host::deadline;
+use std::{cell::Cell, time::Duration};
 
-// The same schedules run under Miri; this is a validation budget, not a protocol deadline.
+// Bound native test waiting without changing protocol admission.
 const VALIDATION_TIMEOUT: Duration = Duration::from_secs(60);
 
-#[cfg_attr(not(miri), hibana_runtime::main)]
-#[cfg_attr(miri, hibana_runtime::main(clock::Clock))]
+#[hibana_runtime::main]
 #[test]
 async fn a_failed_candidate_moves_to_b_and_both_resources_guard_the_actual_commit()
 -> Result<(), crate::shell::ShellError> {
@@ -149,15 +143,12 @@ async fn a_failed_candidate_moves_to_b_and_both_resources_guard_the_actual_commi
     assert_eq!(observed_publication, [actual]);
     observations.set(observed_publication);
 
-    // The real participants, publication and captures above also run in Miri.
-    // Native conformance checks infer the complete source execution and test
-    // receipt substitution; Miri does not repeat that semantic search.
-    #[cfg(not(miri))]
+    // Infer the actual source execution and reject substituted effect receipts.
     {
         use hibana::{g::Message, runtime::tap};
         use hibana_epf::{
             Acceptance, AuditStorage, Capture, ExecutionError, ExecutionStorage, ExecutionWitness,
-            Protocol, RecordId, RouteChoice, Unfold,
+            Protocol, RecordId, Unfold,
         };
 
         let primary_records = primary_records.take();
@@ -217,13 +208,6 @@ async fn a_failed_candidate_moves_to_b_and_both_resources_guard_the_actual_commi
             .unwrap();
         }
         let mut unfolding = vec![Unfold::Source; capacity];
-        let mut choices = vec![
-            RouteChoice {
-                span: [0, 0],
-                right: false
-            };
-            protocol.audit_choice_capacity(capacity).unwrap()
-        ];
         let mut order = vec![
             RecordId {
                 producer: 0,
@@ -253,7 +237,6 @@ async fn a_failed_candidate_moves_to_b_and_both_resources_guard_the_actual_commi
                 &captures,
                 AuditStorage {
                     unfolding: &mut unfolding,
-                    choices: &mut choices,
                     execution: ExecutionStorage {
                         session: session.raw(),
                         observed_producers: &observed_producers,
@@ -367,8 +350,7 @@ async fn a_failed_candidate_moves_to_b_and_both_resources_guard_the_actual_commi
     Ok(())
 }
 
-#[cfg_attr(not(miri), hibana_runtime::main)]
-#[cfg_attr(miri, hibana_runtime::main(clock::Clock))]
+#[hibana_runtime::main]
 #[test]
 async fn old_approval_wrong_target_and_changed_arguments_never_publish()
 -> Result<(), crate::shell::ShellError> {
@@ -557,8 +539,7 @@ async fn old_approval_wrong_target_and_changed_arguments_never_publish()
     Ok(())
 }
 
-#[cfg_attr(not(miri), hibana_runtime::main)]
-#[cfg_attr(miri, hibana_runtime::main(clock::Clock))]
+#[hibana_runtime::main]
 #[test]
 async fn a_missing_second_request_keeps_the_effect_pending_then_can_complete()
 -> Result<(), crate::shell::ShellError> {
@@ -704,8 +685,7 @@ async fn a_missing_second_request_keeps_the_effect_pending_then_can_complete()
     Ok(())
 }
 
-#[cfg_attr(not(miri), hibana_runtime::main)]
-#[cfg_attr(miri, hibana_runtime::main(clock::Clock))]
+#[hibana_runtime::main]
 #[test]
 async fn claiming_approval_without_repair_does_not_replace_the_actual_failure()
 -> Result<(), crate::shell::ShellError> {
@@ -826,8 +806,7 @@ async fn claiming_approval_without_repair_does_not_replace_the_actual_failure()
     Ok(())
 }
 
-#[cfg_attr(not(miri), hibana_runtime::main)]
-#[cfg_attr(miri, hibana_runtime::main(clock::Clock))]
+#[hibana_runtime::main]
 #[test]
 async fn a_real_negative_result_can_finish_without_publication_or_forced_repair()
 -> Result<(), crate::shell::ShellError> {
@@ -939,8 +918,7 @@ async fn a_real_negative_result_can_finish_without_publication_or_forced_repair(
     Ok(())
 }
 
-#[cfg_attr(not(miri), hibana_runtime::main)]
-#[cfg_attr(miri, hibana_runtime::main(clock::Clock))]
+#[hibana_runtime::main]
 #[test]
 async fn candidate_ready_seals_rework_before_the_publication_requests() {
     let programs = programs();

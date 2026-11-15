@@ -428,6 +428,7 @@ pub fn run(root: &Path) -> Result<Value> {
         "5H" => crate::critical_care_audit::audit(&root.join("events.jsonl"))?,
         "6E" => crate::review_audit::audit(&root.join("events.jsonl"))?,
         "6M" => crate::feature_delivery_audit::audit(&root.join("events.jsonl"))?,
+        "6H" => crate::staged_integration_audit::audit(&root.join("events.jsonl"))?,
         "7E" => crate::document_audit::audit(&root.join("events.jsonl"))?,
         "10E" => crate::build_audit::audit(&root.join("events.jsonl"))?,
         "11E" => crate::manufacturing_audit::audit(&root.join("events.jsonl"))?,

@@ -2,8 +2,8 @@
 
 The current direct ChoreoFS boundary has source-bound qualification for **23 of
 48 tasks** across 17 families; 25 tasks and final-source all-family certification
-remain unfinished. The seven-agent 6H port has a checked global and staging
-receiver, but has not yet completed its Wasm or real-model qualification.
+remain unfinished. The seven-agent 6H implementation completes its actual-Wasm
+baseline with EPF/effect/world checks. Its live-model qualification is unfinished.
 See [the plan](plan.md) and [6H's current scope](benchmark/ports/6H.md).
 
 Development uses the canonical sibling worktrees for Hibana, EPF, WASI and

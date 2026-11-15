@@ -166,6 +166,13 @@ pub async fn run<D: Domain>(
                             .send::<FileStageResultC>(&bytes.as_slice())
                             .await?;
                         validations[2] = json!({"deployment":deployment,"validation":validation});
+                        environment.send::<TaskExit>(&0).await?;
+                        environment.send::<TaskExit>(&0).await?;
+                        environment.send::<TaskExit>(&0).await?;
+                        environment.send::<TaskExit>(&0).await?;
+                        environment.send::<TaskExit>(&0).await?;
+                        environment.send::<TaskExit>(&0).await?;
+                        return Ok(());
                     }
                     DecisionArm::Right => {
                         environment

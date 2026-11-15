@@ -22,7 +22,7 @@ fn check<const OP: u8>() {
         FEATURES[feature]
     };
     let bytes = serde_json::to_vec(&json!({key:expected})).unwrap();
-    let arguments = Arguments::<OP>::from_bytes(&bytes).unwrap();
+    let arguments = Arguments::<OP>::try_from(bytes.as_slice()).unwrap();
     let mut buffer = vec![0; bytes.len()];
     assert_eq!(arguments.encode_into(&mut buffer).unwrap(), bytes.len());
     assert_eq!(buffer, bytes);
@@ -43,14 +43,17 @@ fn check<const OP: u8>() {
     let revision =
         serde_json::to_vec(&json!({key:expected,"source":"agent-chosen new content"})).unwrap();
     assert_eq!(
-        Arguments::<OP>::from_bytes(&revision).is_ok(),
+        Arguments::<OP>::try_from(revision.as_slice()).is_ok(),
         OP.is_multiple_of(8)
     );
     let staged = serde_json::to_vec(&json!({key:expected,"environment":"staging"})).unwrap();
-    assert_eq!(Arguments::<OP>::from_bytes(&staged).is_ok(), OP % 8 == 5);
+    assert_eq!(
+        Arguments::<OP>::try_from(staged.as_slice()).is_ok(),
+        OP % 8 == 5
+    );
     for environment in [json!("production"), json!(""), json!(null), json!(42)] {
         let bytes = serde_json::to_vec(&json!({key:expected,"environment":environment})).unwrap();
-        assert!(Arguments::<OP>::from_bytes(&bytes).is_err());
+        assert!(Arguments::<OP>::try_from(bytes.as_slice()).is_err());
     }
     for other in FEATURES
         .into_iter()
@@ -58,7 +61,8 @@ fn check<const OP: u8>() {
         .filter(|other| *other != expected)
     {
         assert!(
-            Arguments::<OP>::from_bytes(&serde_json::to_vec(&json!({key:other})).unwrap()).is_err()
+            Arguments::<OP>::try_from(serde_json::to_vec(&json!({key:other})).unwrap().as_slice())
+                .is_err()
         );
     }
 }
@@ -88,6 +92,6 @@ fn all_twenty_four_effect_schemas_reject_wrong_targets_and_preserve_actual_bytes
     check::<21>();
     check::<22>();
     check::<23>();
-    assert!(Arguments::<24>::from_bytes(b"{}").is_err());
-    assert!(Arguments::<255>::from_bytes(b"{}").is_err());
+    assert!(Arguments::<24>::try_from(b"{}".as_slice()).is_err());
+    assert!(Arguments::<255>::try_from(b"{}".as_slice()).is_err());
 }

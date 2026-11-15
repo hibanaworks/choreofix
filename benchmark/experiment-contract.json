@@ -792,15 +792,17 @@
     "scored_comparisons": 0,
     "in_progress_port": {
       "task": "6H",
-      "status": "global_and_staging_receiver_implemented",
-      "global_events": 1245,
+      "status": "seven_wasm_baseline_passed_live_model_incomplete",
+      "global_events": 1233,
       "projected_views": 44,
       "argument_schemas": 24,
-      "native_component_tests": 8,
-      "real_wasm_qualification": false,
-      "real_model_calls": 0,
+      "native_component_tests": 10,
+      "real_wasm_qualification": true,
+      "real_wasm_conditions": 1,
+      "real_model_participants_started": 7,
+      "real_model_trials_completed": 0,
       "task_qualified": false,
-      "scope": "Native source, typed-input and production staging-receiver checks; remaining localsides, seven-Wasm bindings and complete EPF/effect/model qualification are unfinished."
+      "scope": "One actual seven-Wasm depth-0 baseline: 21 effects, complete capture, EPF/effect/world checks, rejected early merge and late edit with recovery. Seven live depth-2 participants were stopped by the unchanged memory guard. Model recovery qualification and scored experiments remain unfinished."
     },
     "removed_legacy_adapters": {
       "date": "2026-11-16",
