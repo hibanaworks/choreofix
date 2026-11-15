@@ -6,15 +6,23 @@ The direct-WASI command currently produces unscored qualification records.
 
 The common WASI qualification includes 6H's seven-guest depth-0 baseline under
 `staged_integration_boundary::`. It checks 21 real effects, complete EPF capture,
-effect/world correspondence and four rejected requests followed by recovery.
+effect/world correspondence and five rejected requests followed by recovery.
 The additional probes leave peer reviews or earlier CI unread, then verify
 that the same guest recovers by consuming its actual inputs. The shell chooses
 its commands; the runner does not drain those messages on its behalf.
+The malformed-JSON probe checks that wash names the failed close and path,
+then accepts corrected data from the same guest without an extra domain effect.
 This finite mechanism condition does not qualify the unfinished depth-2 live
 model trial or add 6H to the 23 qualified tasks. The normal runner accepts 6H;
 saved executions use `--audit-staged-integration EVENTS`, with record
 counterexamples through `--check-staged-integration-mutants EVENTS NEW_OUTPUT`.
 Use the experiment matrix and qualified task artifacts for scored comparisons.
+The model-trial budget is defined in experiment.json (now 1,800 seconds for
+every future condition). Old 600-second pilots keep their original budget and
+are reported separately. Deadline exhaustion measures the bounded trial; it
+does not establish a choreography or localside defect. The seven-model 6H
+depth-0 pilot live-v78 completes and passes its audits under the old budget;
+its full depth-2 recovery is still under qualification.
 
 The trace file and versioned common simulator each have one I/O owner. Callers send
 records or simulator requests through channels. A record returns after its

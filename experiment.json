@@ -24,7 +24,7 @@
   "expected_supplementary_runs": 432,
   "python_hash_seed": 0,
   "domain_tool_delay_multiplier": 1.0,
-  "run_timeout_seconds": 600,
+  "run_timeout_seconds": 1800,
   "coordination_wait_seconds": 30,
   "participant_tool_call_limit": 200,
   "concurrent_runs": 1

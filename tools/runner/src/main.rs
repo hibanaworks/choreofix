@@ -385,6 +385,12 @@ guest and private files.
 Your writable domain objects are {objects}.
 Write the matching operation's JSON argument object and close it to request
 the operation. Shell redirection closes its output after writing.
+Argument files contain one complete JSON object. Shell quoting does not encode
+JSON for you: single quotes preserve their contents, `>` replaces bytes, and
+`>>` appends bytes. Private files may assemble larger input from several commands;
+each command still has the script-size bound. Appending after a closed JSON
+object does not extend a string inside it. Read the reported operation and path
+when correcting an error; a close error is distinct from an open or read error.
 {response_object} These objects are not commands.
 {coordination}
 Independent participants and domain operations run concurrently. A request

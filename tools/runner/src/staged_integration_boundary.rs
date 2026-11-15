@@ -72,6 +72,14 @@ async fn seven_actual_wasm_guests_complete_staged_publication() -> Result<()> {
         for (agent,own) in [("DEVELOPER_A",0),("DEVELOPER_B",1),("DEVELOPER_C",2)] {
             async move {
                 let feature=FEATURES[own];
+                if own == 0 {
+                    // Match the live shell mistake: a complete first JSON object
+                    // followed by another chunk, then submission through cp.
+                    let malformed=guest.command(agent,
+                        "printf '%s' '{\"feature_name\":\"user_authentication\"}' > /work/bad_payload; printf '%s' 'trailing' >> /work/bad_payload; cp /work/bad_payload /service/implement_feature".into()).await?;
+                    let error=malformed["stdout"].as_str().ok_or("malformed request reply")?;
+                    assert!(error.contains("close output /service/implement_feature: Invalid argument"),"missing failed-operation context: {malformed}");
+                }
                 let implemented=guest.command(agent,format!("echo '{}' > /service/implement_feature; cat /service/implement_feature",json!({"feature_name":feature}))).await?;
                 assert_eq!(response(&implemented)?["success"],true,"{agent}: {implemented}");
                 for other in FEATURES.into_iter().filter(|other| *other != feature) {
@@ -189,7 +197,8 @@ async fn seven_actual_wasm_guests_complete_staged_publication() -> Result<()> {
         &json!({"task":"6H","conditions":1,"model_calls":0,
         "late_edit_rejected":true,"premature_merge_rejected_then_retried":true,
         "own_review_does_not_replace_peer_outcomes":true,"unread_ci_prevents_later_stage_read":true,
-        "rejected_probes":4,"scored_benchmark":false,"audit":audit}),
+        "malformed_json_close_identified_then_corrected":true,
+        "rejected_probes":5,"scored_benchmark":false,"audit":audit}),
     )?;
     println!("{}", directory.display());
     Ok(())

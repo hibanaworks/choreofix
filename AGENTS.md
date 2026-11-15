@@ -722,6 +722,11 @@ the Hibana implementation or harness.
 Do not report a run as measured until its persisted events and simulator result
 have been independently checked. Keep harness errors, protocol rejection, domain
 failure, timeout, deadlock, and incomplete work distinct.
+An AI trial deadline is an external experiment budget, not a choreography
+counterexample or evidence that a localside is incorrect. Keep its value in
+experiment.json, fix changes prospectively for all compared conditions, and
+retain older-budget failures under their original sources. Check safety and
+legal retry execution separately from how long an agent takes to choose work.
 
 Use Hayato Ohhashi <o8@vmm.dev> for commits. Do not add AI coauthor trailers.
 
