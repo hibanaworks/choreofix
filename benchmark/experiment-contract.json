@@ -796,13 +796,13 @@
       "global_events": 1233,
       "projected_views": 44,
       "argument_schemas": 24,
-      "native_component_tests": 10,
+      "native_component_tests": 11,
       "real_wasm_qualification": true,
       "real_wasm_conditions": 1,
       "real_model_participants_started": 7,
       "real_model_trials_completed": 0,
       "task_qualified": false,
-      "scope": "One actual seven-Wasm depth-0 baseline: 21 effects, complete capture, EPF/effect/world checks, rejected early merge and late edit with recovery. Seven live depth-2 participants were stopped by the unchanged memory guard. Model recovery qualification and scored experiments remain unfinished."
+      "scope": "The corrected seven-Wasm depth-0 baseline passes with 21 effects, 15186 complete capture records, EPF/effect/world checks and rejected early merge/late edit followed by recovery. The first seven-participant live depth-2 attempt hit the unchanged memory guard; a second stayed within it but exposed an application review-result/reply-type mismatch after 203.794633333 seconds. Reviewer/CI now select typed replies directly from actual effect results. The production preparation/reviewer Endpoint regression covers immediate approval and rejection/rejection/approval without core changes. Corrected-source live-model recovery and scored experiments remain unfinished."
     },
     "removed_legacy_adapters": {
       "date": "2026-11-16",

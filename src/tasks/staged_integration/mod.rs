@@ -1,5 +1,5 @@
 //! Direct staged-integration source and staging effect receiver.
-//! The seven-Wasm execution and full task qualification are still being connected.
+//! Seven-Wasm execution is connected; full real-model task qualification remains incomplete.
 pub mod arguments;
 pub mod global;
 pub mod imp;

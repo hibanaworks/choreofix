@@ -1,4 +1,7 @@
 //! Direct operation-file choreography for three development and staged-release pipelines.
+#[cfg(test)]
+mod tests;
+
 use super::arguments::Arguments;
 use crate::shell::global::{Exit, FileExit, Loan};
 use crate::shell::imp::review_reply::ReviewReply;

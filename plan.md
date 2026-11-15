@@ -13,7 +13,12 @@ CI所有者が実際の検証済み入力をstagingへ渡す。連携順序・�
 この1条件を接続する。これは実AIの成功や全interleavingの認定ではない。
 Luna/xhigh 7人の深さ2は2,751,791,104 bytesでguardが停止したため未完である。
 観測記録の自己起床と大きなJSON値の保持をI/O所有者側で整理し、共有I/O17件・runner53件・
-Clippyと修正後の実Wasmを確認した。実AIの再認定は残り、23/48課題・残り25課題は変えない。
+Clippyと修正後の実Wasmを確認した。再試行は最大2,601,713,664 bytesで上限内だったが、
+実レビューの成功後にアプリが拒否用の返信型を選び、203.794633333秒で停止した。
+reviewerとCIを実結果に対応した型を直接送る形へ直した。本体は変更していない。
+本番のprepare sourceとreviewerによる「初回承認」「拒否→拒否→承認」の実Endpoint試験、
+Clippyと修正後の7人実Wasm深さ0（21効果・15,186 capture記録・EPF/効果/共通採点）を
+確認した。修正後の実AI認定は残り、23/48課題・残り25課題は変えない。
 公開CIに残ったEPF旧引数はhandoff・tool-cabinet・research-paper・pool fixtureから除去し、
 native handoff 6件と現行APIでのClippyを確認した。アプリ用Miri時計と実行分岐も削除した。
 
@@ -46,7 +51,8 @@ Bの統合はAの成功とB/C準備のjoin後、Cの統合はBの成功後に進
 実CI・候補・先行deploymentの検証を効果前に照合し、否定的なstaging結果では
 実際に拒否されたdeploymentをrollbackする。10件のnative試験には実Endpointを
 通る肯定・否定の受信側試験と、古いCIで効果0となる試験を含む。
-7人の実モデルの深さ2はメモリguardで停止した。修正後の実AI再実行が残るため、
+7人の実モデルの深さ2は、最初にメモリguardで停止し、次は上限内でアプリの返信型の
+選択ミスが露呈した。後者も修正したが、その後の実AI再実行が残るため、
 6Hを23件の認定へ追加しない。内容は[6H](benchmark/ports/6H.md)に記録する。
 
 11Eは5本の操作ファイルを実Endpointへ結び、Ready/Busy通知とclose後の振り直しを撤去した。

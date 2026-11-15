@@ -365,16 +365,6 @@ pub fn rollback_notice(
     }
     Ok(())
 }
-pub fn actual_bytes(input: &core::cell::Cell<Option<Value>>) -> ShellResult<Vec<u8>> {
-    let value = input.take();
-    let encoded = match value.as_ref() {
-        Some(value) => encode(value),
-        None => Err(ShellError::message("missing actual effect outcome")),
-    };
-    input.set(value);
-    encoded
-}
-
 pub fn staging_inputs(value: &Value, feature: usize) -> ShellResult<()> {
     let publication = &value["publication"];
     let ci = &value["ci"];
