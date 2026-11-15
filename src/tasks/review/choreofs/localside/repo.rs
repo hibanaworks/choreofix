@@ -1,137 +1,97 @@
-//! The repository owner lends its sole Endpoint and executes only requests
-//! received through that Endpoint.
+//! The sole repository view receives each actual operation and owns its effect.
 use super::super::global::*;
 use crate::shell::{ShellError, ShellResult, imp::service::Domain};
 use hibana::Endpoint;
-
 #[hibana_runtime::scope]
-pub async fn run<'r, D: Domain>(
-    endpoint: &mut Endpoint<'r, REPO>,
-    (mut repository, control): (Endpoint<'r, REPO_ENDPOINT>, Endpoint<'r, REVIEW>),
-    domain: &D,
-) -> ShellResult<()> {
-    endpoint.send::<ReviewControl>(control).await?;
+pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> ShellResult<()> {
+    let mut repository = owner.recv::<RepoLoan>().await?;
     loop {
-        let branch = endpoint.offer().await?;
+        let branch = repository.offer().await?;
         match branch.label() {
-            REVIEW => {
-                drop(branch.recv::<ReviewControl>().await?);
-            }
-            69 | 76 | 169 | 176 => {
-                let (agent, feature, admitted) = match branch.label() {
-                    69 => ("DEVELOPER_A", FEATURE_A, branch.recv::<ImplementA>().await?),
-                    76 => ("DEVELOPER_A", FEATURE_A, branch.recv::<ReviseA>().await?),
-                    169 => ("DEVELOPER_B", FEATURE_B, branch.recv::<ImplementB>().await?),
-                    176 => ("DEVELOPER_B", FEATURE_B, branch.recv::<ReviseB>().await?),
-                    _ => unreachable!(),
-                };
-                let admitted = admitted.into_value();
-                endpoint.send::<RepoLoan>(repository).await?;
-                let request = endpoint.recv::<ImplementOnRepo>().await?.into_value();
-                if request != admitted || request["feature_name"] != feature {
-                    return Err(ShellError::message(
-                        "repository implementation arguments differ",
-                    ));
-                }
+            200 => {
+                let arguments = branch.recv::<FileImplementA>().await?.into_value();
                 let result = domain
-                    .execute(agent, "implement_feature", request)
+                    .execute("DEVELOPER_A", "implement_feature", arguments)
                     .await
                     .map_err(ShellError::message)?;
-                let bytes = serde_json::to_vec(&result)
-                    .map_err(|error| ShellError::message(error.to_string()))?;
-                endpoint.send::<RepoResult>(&bytes.as_slice()).await?;
-                repository = endpoint.recv::<RepoLoan>().await?;
+                let bytes =
+                    serde_json::to_vec(&result).map_err(|e| ShellError::message(e.to_string()))?;
+                repository
+                    .send::<FileImplementationA>(&bytes.as_slice())
+                    .await?;
+                repository
+                    .send::<Ready<TARGET_A>>(&bytes.as_slice())
+                    .await?;
             }
-            70 | 170 => {
-                let (agent, assigned_branch, admitted) = match branch.label() {
-                    70 => (
-                        "DEVELOPER_A",
-                        MERGE_BRANCH_A,
-                        branch.recv::<MergeA>().await?,
-                    ),
-                    170 => (
-                        "DEVELOPER_B",
-                        MERGE_BRANCH_B,
-                        branch.recv::<MergeB>().await?,
-                    ),
-                    _ => unreachable!(),
-                };
-                let admitted = admitted.into_value();
-                endpoint.send::<RepoLoan>(repository).await?;
-                let request = endpoint.recv::<MergeOnRepo>().await?.into_value();
-                if request != admitted || request["branch"] != assigned_branch {
-                    return Err(ShellError::message("repository merge arguments differ"));
-                }
+            202 => {
+                let arguments = branch.recv::<FileMergeA>().await?.into_value();
                 let result = domain
-                    .execute(agent, "merge_code", request)
+                    .execute("DEVELOPER_A", "merge_code", arguments)
                     .await
                     .map_err(ShellError::message)?;
-                let bytes = serde_json::to_vec(&result)
-                    .map_err(|error| ShellError::message(error.to_string()))?;
-                endpoint.send::<RepoResult>(&bytes.as_slice()).await?;
-                repository = endpoint.recv::<RepoLoan>().await?;
+                let bytes =
+                    serde_json::to_vec(&result).map_err(|e| ShellError::message(e.to_string()))?;
+                repository.send::<FileMergedA>(&bytes.as_slice()).await?;
             }
             30 => {
-                branch.recv::<ApprovedA>().await?;
+                let bytes = branch.recv::<ApprovedA>().await?.to_vec();
+                repository
+                    .send::<FileUpdate<A_FILE>>(&bytes.as_slice())
+                    .await?;
             }
             31 => {
-                branch.recv::<RejectedA>().await?;
+                let bytes = branch.recv::<RejectedA>().await?.to_vec();
+                repository
+                    .send::<FileUpdate<A_FILE>>(&bytes.as_slice())
+                    .await?;
+            }
+            201 => {
+                let arguments = branch.recv::<FileImplementB>().await?.into_value();
+                let result = domain
+                    .execute("DEVELOPER_B", "implement_feature", arguments)
+                    .await
+                    .map_err(ShellError::message)?;
+                let bytes =
+                    serde_json::to_vec(&result).map_err(|e| ShellError::message(e.to_string()))?;
+                repository
+                    .send::<FileImplementationB>(&bytes.as_slice())
+                    .await?;
+                repository
+                    .send::<Ready<TARGET_B>>(&bytes.as_slice())
+                    .await?;
+            }
+            203 => {
+                let arguments = branch.recv::<FileMergeB>().await?.into_value();
+                let result = domain
+                    .execute("DEVELOPER_B", "merge_code", arguments)
+                    .await
+                    .map_err(ShellError::message)?;
+                let bytes =
+                    serde_json::to_vec(&result).map_err(|e| ShellError::message(e.to_string()))?;
+                repository.send::<FileMergedB>(&bytes.as_slice()).await?;
             }
             40 => {
-                branch.recv::<ApprovedB>().await?;
+                let bytes = branch.recv::<ApprovedB>().await?.to_vec();
+                repository
+                    .send::<FileUpdate<B_FILE>>(&bytes.as_slice())
+                    .await?;
             }
             41 => {
-                branch.recv::<RejectedB>().await?;
-            }
-            80 => {
-                branch.recv::<FirstA>().await?;
-            }
-            81 => {
-                branch.recv::<FirstB>().await?;
-            }
-            82 => {
-                branch.recv::<AgainABeforeB>().await?;
-            }
-            83 => {
-                branch.recv::<BDuringARevision>().await?;
-            }
-            84 => {
-                branch.recv::<BAfterAMerge>().await?;
-            }
-            85 => {
-                branch.recv::<AgainAAfterB>().await?;
-            }
-            86 => {
-                branch.recv::<AgainBBeforeA>().await?;
-            }
-            87 => {
-                branch.recv::<ADuringBRevision>().await?;
-            }
-            88 => {
-                branch.recv::<AAfterBMerge>().await?;
-            }
-            89 => {
-                branch.recv::<AgainBAfterA>().await?;
-            }
-            92 => {
-                branch.recv::<AgainADuringBRevision>().await?;
-            }
-            93 => {
-                branch.recv::<AgainBDuringARevision>().await?;
-            }
-            94 => {
-                branch.recv::<AgainBBeforeAReview>().await?;
-            }
-            95 => {
-                branch.recv::<AgainABeforeBReview>().await?;
+                let bytes = branch.recv::<RejectedB>().await?.to_vec();
+                repository
+                    .send::<FileUpdate<B_FILE>>(&bytes.as_slice())
+                    .await?;
             }
             234 => {
-                branch.recv::<RepoExit>().await?;
+                let status = branch.recv::<RepoExit>().await?;
+                if status != 0 {
+                    return Err(ShellError::message("review task failed"));
+                }
                 return Ok(());
             }
             label => {
                 return Err(ShellError::message(format!(
-                    "unexpected repository operation {label}"
+                    "unexpected repository request {label}"
                 )));
             }
         }

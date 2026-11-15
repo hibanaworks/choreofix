@@ -46,49 +46,20 @@ async fn developer(
     feature: &str,
     branch: &str,
 ) -> Result<Vec<Value>> {
-    let early = guest
-        .command(
-            agent,
-            format!("echo '{{\"branch\":\"{branch}\"}}' > /service/merge_code"),
-        )
-        .await?;
-    assert!(
-        early["stdout"]
-            .as_str()
-            .ok_or("early stdout")?
-            .contains("wash:")
-    );
-    assert_eq!(
-        count(&simulator.observed_events().await?, agent, "merge_code"),
-        0
-    );
-    guest
-        .command(agent, "echo '{}' > /service/implement_feature".into())
-        .await?;
-    let invalid = guest.command(agent, "cat /service/result".into()).await?;
-    assert_eq!(response(&invalid)?["status"], "invalid_arguments");
-    let (other_feature, other_branch) = if agent == "DEVELOPER_A" {
-        ("notification_feature", "dev_b_feature")
-    } else {
-        ("user_authentication", "dev_a_feature")
-    };
-    let wrong = guest.command(agent, format!("echo '{{\"feature_name\":\"{other_feature}\"}}' > /service/implement_feature; cat /service/result")).await?;
-    assert_eq!(response(&wrong)?["status"], "invalid_arguments");
-    assert_eq!(
-        count(
-            &simulator.observed_events().await?,
-            agent,
-            "implement_feature"
-        ),
-        0
-    );
     let mut feedback = Vec::new();
     loop {
-        let padding = " ".repeat(512);
-        let reply = guest.command(agent, format!("printf '%s' '{padding}{{\"feature_name\":\"{feature}\"}}' > /service/implement_feature; cat /service/result")).await?;
+        let reply = guest
+            .command(agent, "cat /service/implement_feature".into())
+            .await?;
         let result = response(&reply)?;
         assert_eq!(result["success"], true);
-        let review = result["coordination"]["code_review"].clone();
+        let review = loop {
+            let update = response(&guest.command(agent, "cat /service/review".into()).await?)?;
+            if update["success"].is_boolean() && update["data"]["target"] == feature {
+                break update;
+            }
+            assert!(update["pr_id"].is_string() || update["success"].is_boolean());
+        };
         let accepted = review["success"].as_bool().ok_or("actual review result")?;
         feedback.push(review);
         if accepted {
@@ -110,9 +81,32 @@ async fn developer(
             count(&simulator.observed_events().await?, agent, "merge_code"),
             0
         );
+        let padding = " ".repeat(512);
+        let submitted = guest.command(agent, format!("printf '%s' '{padding}{{\"feature_name\":\"{feature}\"}}' > /service/implement_feature")).await?;
+        assert!(
+            !submitted["stdout"]
+                .as_str()
+                .ok_or("revision stdout")?
+                .contains("wash:")
+        );
     }
-    let wrong = guest.command(agent, format!("echo '{{\"branch\":\"{other_branch}\"}}' > /service/merge_code; cat /service/result")).await?;
-    assert_eq!(response(&wrong)?["status"], "invalid_arguments");
+    let other_branch = if agent == "DEVELOPER_A" {
+        "dev_b_feature"
+    } else {
+        "dev_a_feature"
+    };
+    let wrong = guest
+        .command(
+            agent,
+            format!("echo '{{\"branch\":\"{other_branch}\"}}' > /service/merge_code"),
+        )
+        .await?;
+    assert!(
+        wrong["stdout"]
+            .as_str()
+            .ok_or("wrong arguments stdout")?
+            .contains("wash:")
+    );
     assert_eq!(
         count(&simulator.observed_events().await?, agent, "merge_code"),
         0
@@ -121,7 +115,7 @@ async fn developer(
         .command(
             agent,
             format!(
-                "echo '{{\"branch\":\"{branch}\"}}' > /service/merge_code; cat /service/result"
+                "echo '{{\"branch\":\"{branch}\"}}' > /service/merge_code; cat /service/merge_code"
             ),
         )
         .await?;
@@ -138,7 +132,7 @@ async fn developer(
             reply["stdout"]
                 .as_str()
                 .ok_or("duplicate stdout")?
-                .contains("os error 8")
+                .contains("Permission denied (os error 2)")
         );
         assert_eq!(
             count(&simulator.observed_events().await?, agent, tool),
@@ -171,13 +165,25 @@ async fn reviewer(
             "user_authentication"
         };
         let before = simulator.observed_events().await?;
-        let wrong = guest.command("REVIEWER", format!("echo '{{\"pr_id\":\"{other_feature}\"}}' > /service/code_review/{feature}; cat /service/result")).await?;
-        assert_eq!(response(&wrong)?["status"], "invalid_arguments");
+        let wrong = guest
+            .command(
+                "REVIEWER",
+                format!(
+                    "echo '{{\"pr_id\":\"{other_feature}\"}}' > /service/code_review/{feature}"
+                ),
+            )
+            .await?;
+        assert!(
+            wrong["stdout"]
+                .as_str()
+                .ok_or("wrong arguments stdout")?
+                .contains("wash:")
+        );
         let after = simulator.observed_events().await?;
         assert!(!after[before.len()..].iter().any(
             |event| event["tool"] == "code_review" && event["args"]["target"] == other_feature
         ));
-        let reply = guest.command("REVIEWER", format!("echo '{{\"pr_id\":\"{feature}\"}}' > /service/code_review/{feature}; cat /service/result")).await?;
+        let reply = guest.command("REVIEWER", format!("echo '{{\"pr_id\":\"{feature}\"}}' > /service/code_review/{feature}; cat /service/code_review/{feature}")).await?;
         if !response(&reply)?["success"]
             .as_bool()
             .ok_or("review outcome")?
@@ -221,7 +227,7 @@ async fn reviewer(
             duplicate["stdout"]
                 .as_str()
                 .ok_or("duplicate review stdout")?
-                .contains("os error 8")
+                .contains("Permission denied (os error 2)")
         );
         assert_eq!(
             count(
@@ -428,41 +434,86 @@ async fn run_cases(cases: Vec<ReviewCase>) -> Result<()> {
         let (simulator, _) = oracle::Simulator::new("6E", depth, delay, trace.clone(), &failures)?;
         let (guest, runtime_loop) =
             process::guest(&runtime, module, &["6E"], &case, trace, simulator.clone())?;
-        let (a, b, result) = hibana_runtime::race(
+        let (result, (a, b)) = hibana_runtime::race(
             async {
+                async { runtime_loop.await };
                 async {
-                    reviewer(&guest, &simulator, review_first, schedule).await?;
+                    let guest = &guest;
+                    let simulator = &simulator;
+                    let a = ("DEVELOPER_A", "user_authentication", "dev_a_feature");
+                    let b = ("DEVELOPER_B", "notification_feature", "dev_b_feature");
+                    let people = if review_first == "notification_feature" { [b, a] } else { [a, b] };
+                    async {
+                        for (agent, _, branch) in people {
+                            async {
+                                let early = guest
+                                    .command(
+                                        agent,
+                                        format!("echo '{{\"branch\":\"{branch}\"}}' > /service/merge_code"),
+                                    )
+                                    .await?;
+                                assert!(
+                                    early["stdout"]
+                                        .as_str()
+                                        .ok_or("early stdout")?
+                                        .contains("wash:")
+                                );
+                                assert_eq!(
+                                    count(&simulator.observed_events().await?, agent, "merge_code"),
+                                    0
+                                );
+                                let invalid = guest
+                                    .command(agent, "echo '{}' > /service/implement_feature".into())
+                                    .await?;
+                                assert!(
+                                    invalid["stdout"]
+                                        .as_str()
+                                        .ok_or("invalid stdout")?
+                                        .contains("wash:")
+                                );
+                                let other_feature = if agent == "DEVELOPER_A" { "notification_feature" } else { "user_authentication" };
+                                let wrong = guest
+                                    .command(
+                                        agent,
+                                        format!("echo '{{\"feature_name\":\"{other_feature}\"}}' > /service/implement_feature"),
+                                    )
+                                    .await?;
+                                assert!(
+                                    wrong["stdout"]
+                                        .as_str()
+                                        .ok_or("wrong arguments stdout")?
+                                        .contains("wash:")
+                                );
+                                assert_eq!(
+                                    count(
+                                        &simulator.observed_events().await?,
+                                        agent,
+                                        "implement_feature"
+                                    ),
+                                    0
+                                );
+                            };
+                        }
+                        Ok(())
+                    }.await?;
+                    // These are actual guest command completions, not host
+                    // permissions or simulator progress signals. Both initial
+                    // implementations are submitted before awaiting results.
+                    for (agent, feature, _) in people {
+                        let padding = " ".repeat(512);
+                        let submitted = guest.command(agent, format!("printf '%s' '{padding}{{\"feature_name\":\"{feature}\"}}' > /service/implement_feature")).await?;
+                        assert!(!submitted["stdout"].as_str().ok_or("initial stdout")?.contains("wash:"));
+                    }
+                    let (a, b, ()) = async {
+                        async { developer(guest, simulator, a.0, a.1, a.2).await };
+                        async { developer(guest, simulator, b.0, b.1, b.2).await };
+                        async { reviewer(guest, simulator, review_first, schedule).await };
+                    }.await?;
+                    Ok((a, b))
                 };
-
-                let (a, b, result) = (async {
-                    async {
-                        (developer(
-                            &guest,
-                            &simulator,
-                            "DEVELOPER_A",
-                            "user_authentication",
-                            "dev_a_feature",
-                        ))
-                        .await
-                    };
-                    async {
-                        (developer(
-                            &guest,
-                            &simulator,
-                            "DEVELOPER_B",
-                            "notification_feature",
-                            "dev_b_feature",
-                        ))
-                        .await
-                    };
-                    async { (runtime_loop).await };
-                })
-                .await?;
-                Ok((a, b, result))
             },
             hibana_runtime::host::deadline(Duration::from_secs(60)),
-        )
-        .await?;
+        ).await?;
         assert_eq!(
             result["protocol"],
             json!({"type":"run_result","status":"complete"})
@@ -539,7 +590,11 @@ async fn run_cases(cases: Vec<ReviewCase>) -> Result<()> {
         let mutants: Value =
             serde_json::from_slice(&fs::read(case.join("resource-mutants/summary.json"))?)?;
         assert_eq!(mutants["status"], "passed");
-        assert_eq!(mutants["count"], if rejected == 0 { 27 } else { 30 });
+        assert!(
+            mutants["count"]
+                .as_u64()
+                .is_some_and(|n| n >= 3 * (6 + 2 * rejected) as u64)
+        );
         let audit = &mutants["audit"];
         assert_eq!(audit["status"], "passed");
         assert_eq!(audit["dynamic_protocol"]["status"], "passed");

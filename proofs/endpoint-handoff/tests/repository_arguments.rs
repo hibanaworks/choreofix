@@ -1,6 +1,8 @@
 //! Canonical repository payload and its actual message declarations.
 #[path = "../../../src/tasks/review/choreofs/global.rs"]
 pub mod global;
+#[path = "../../../src/tasks/review/choreofs/imp.rs"]
+pub mod review_arguments;
 #[path = "../../../src/imp/projection.rs"]
 pub(crate) mod projection;
 #[path = "../../../src/shell/mod.rs"]
@@ -8,6 +10,7 @@ pub mod shell;
 #[path = "../../../src/imp/transport.rs"]
 pub(crate) mod transport;
 pub(crate) mod imp {
+    pub(crate) use crate::review_arguments::Arguments;
     pub(crate) use crate::{projection, transport};
 }
 

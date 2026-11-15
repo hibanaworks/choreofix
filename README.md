@@ -230,8 +230,18 @@ The pilot takes 68.85 seconds, 1,081,788 inclusive tokens and completes 16 effec
 with zero violations and seven overlapping effect pairs. Both patient-independence
 schedules finish one patient's care before the other patient's assessment starts.
 The mechanism suite also observes concurrent CT/MRI imaging and interpretation.
-This is the 21st qualified direct-file task; 27 remain. Source-bound scope and
+This was the 21st qualified direct-file task. Source-bound scope and
 limits are recorded in [the 5H port](benchmark/ports/5H.md).
+
+Review (`6E`) is the 22nd qualified direct-file task; 26 remain. Its independent
+feature protocols pass all 34 real-Wasm conditions and a three-Luna/xhigh pilot
+on one checking binary. The pilot completes in 164.67 seconds with 976,699
+inclusive tokens, four reviews (two rejected), ten effects and zero violations.
+Complete EPF and separate effect/common-world audits pass; 3,080 effect-record
+and eleven run-record mutations are rejected. Only rejected attempts repeat,
+with approval and merge outside the roll. The source shrinks from 1,461 to 181
+events without changing the simulator or adopting core/WASI runtime changes.
+See [the exact scope and measurements](benchmark/ports/6E.md).
 
 Multi-specialty care (`5M`) passes nine direct-file real-Wasm conditions and
 one five-model pilot on the same runtime. The pilot completes in 75.24 seconds

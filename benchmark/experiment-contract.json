@@ -17,7 +17,7 @@
     "first_technical_gate": "T3/T4: compose unique resource ownership and its remaining protocol with actual effects; define the adapter trust boundary and test old owners, duplicate transfers and argument substitution before scored comparisons",
     "theorem_scope_and_milestones": "plan.md",
     "effect_boundary_contract_and_inventory": "benchmark/effect-boundaries.md",
-    "effect_boundary_status": "Twenty-one source-bound tasks have direct-file mechanism and live-model evidence; 27 remain, with the exact list in migration_status. Latest 5H passes eleven actual-Wasm conditions and one seven-Luna/xhigh pilot on the same runtime binary, with complete EPF, one-use request/effect/reply matching and neutral common scoring. The pilot completes in 68.851604666 seconds, 1081788 inclusive tokens, sixteen effects and zero violations. Both patient-independence schedules pass; actual concurrent CT/MRI effects are observed in a separate mechanism case. 354 effect-record and eleven run-record mutations are rejected. Earlier failed local attempts are not counted or pooled. Core, runtime, WASI and EPF production source are unchanged for this port. Minimum T3/T4 composition remains under its consuming receiver contract; this is not general Rust refinement, clinical validation, final-source all-family certification, a success-rate estimate or comparative superiority. Canonical sibling worktrees remain the dependencies. Current core ordinary Rust, required Miri, Lean/model and runtime-work gates passed locally; the full generated normal population remains unfinished. Comparison-connection development stays deferred.",
+    "effect_boundary_status": "Twenty-two source-bound tasks have direct-file mechanism and live-model evidence; 26 remain, with the exact list in migration_status. Latest 6E passes 34 actual-Wasm conditions and one three-Luna/xhigh pilot on the same runtime, with complete EPF, one-use request/effect/reply matching and neutral common scoring. The pilot completes in 164.669516334 seconds, 976699 inclusive tokens, ten effects, four reviews with two rejections and zero violations. It observes one implementation/review overlapping pair; all normal-delay mechanism cases independently observe implementation/review and merge/review overlap. 3080 effect-record and eleven run-record mutations are rejected. Only rejected attempts repeat; positive completion and merge are outside the roll. The two feature protocols run in par and actual requests go directly to the sole repository view. Core, runtime, WASI and EPF production source are unchanged for this repair. Minimum T3/T4 composition remains under its consuming receiver contract; this is not general Rust refinement, final-source all-family certification, a success-rate estimate or comparative superiority. Canonical sibling worktrees remain the dependencies. Core ordinary Rust, required Miri, Lean/model and runtime-work gates passed locally; the full generated normal population remains unfinished. Comparison-connection development stays deferred.",
     "minimum_handoff_case": {
       "source": "src/tasks/handoff",
       "scope": "Native hibana-runtime mechanism fixture with two independent runtimes and the application's actual Endpoint transport; not a remote-network, Wasm or model experiment",
@@ -298,17 +298,32 @@
       "6E"
     ],
     "preserved": [
-      "Original two developers, reviewer and single physical repository",
-      "Implementation before its actual code review",
-      "Approval of that feature before merge",
-      "Exclusive repository ownership during implementation and merge",
-      "Rejected reviews permit revision and another review",
-      "Original simulator effects, results and scoring"
+      "three autonomous agents",
+      "both original feature and branch assignments",
+      "arbitrary repeated reconsideration",
+      "both initial review targets",
+      "same neutral common-world effects and scoring"
     ],
-    "procedure": "The global is constructed from actual business requests, delegated repository operations, results and returns. The reviewer's validated request selects the first target and can select the other target after a failed review. Independent implementation and review, and merge and review, are projected parallel fragments driven by hibana-runtime scopes. Approval-dependent merges and successful termination occur inside the successful result branches; failed results leave routes to revision and review. File operations do not complete a business phase",
-    "ownership": "The repository service owns the sole initial repository Endpoint and receives the actual loan request. The guest receives that Endpoint by move, sends its actual implementation or merge arguments through it, receives the original simulator result and returns the same Endpoint. The service checks those arguments before executing the effect. Developer intermediary roles and review-only auxiliary views have been removed. Actual review requests and results carry branch knowledge to the affected participants; there is no application owner table or progress flag",
-    "interface": "Every WASI syscall, including private file operations, runs through the private I/O choreography and ChoreoFS. Feature and branch arguments must match the participant. Invalid arguments and unavailable requests return shell errors before any repository effect, without advancing the business operation. Guest computation and private file operations remain independent",
-    "qualification": "Ordinary pinned Git dependencies pass twenty-six actual-WASI trials: original failure conditions 0/1/2, either first target, three review schedules and eight original-delay cases. Eight additional unscored mechanism cases extend the rejection prefix to three or four through the unchanged simulator API. All thirty-four cases pass with zero violations, and their audits reject 928 record mutations, including repeated same-argument request/close/result removal, consistently altered wire labels or lanes, and substitution of a different statically valid review message. These are record checks, not runtime attacks. Original-delay cases require actual implementation/review and merge/review overlap. The scored 0/1/2 matrix is unchanged. A three-Luna-xhigh pilot at source 252b821 with its recorded ordinary Git pins completed in 30.29 seconds at depth 2, with four reviews, six resource requests and returns, zero violations and 284,702 inclusive tokens. It observed three implementation/review overlaps and one merge/review overlap. These are unscored pilot observations. The executable exports its compiled projection before the run; its artifact and executable hashes are bound to the run receipt, and the actual attached programs emit the same metadata. Every frame is checked against this static wire contract. Dynamic branch and iteration eligibility are not replayed by this auditor. Full-condition qualification and final matched task acceptance remain pending"
+    "procedure": "Each feature joins actual implementation readiness and the review-file request. Only rejected outcome -> fresh implementation and review request repeats. Positive completion and merge are outside that repetition. The feature protocols are parallel; the reviewer guest owns separate real file views for their requests. A single repository owner receives each actual typed file request before its effect.",
+    "ownership": "The sole repository Endpoint moves once to its effect owner and remains there until run end. Four operation views move into the real guests. There is no per-operation admission relay, broker, second resource request, progress flag or owner table.",
+    "interface": "Each implementation, merge or review result is read from its own actual operation file. Developer review streams carry actual review results, not an intent mailbox. Shell choices remain autonomous and unadmitted operations return recoverable errors.",
+    "qualification": {
+      "evidence": "output/experiments/review-direct-files-20261115/qualification-v45.json",
+      "actual_wasm_conditions": 34,
+      "effect_record_mutants_rejected": 3080,
+      "live_model_participants": 3,
+      "live_model": "gpt-6-luna",
+      "live_effort": "xhigh",
+      "live_elapsed_seconds": 164.669516334,
+      "inclusive_tokens": 976699,
+      "actual_effects": 10,
+      "actual_reviews": 4,
+      "live_capture_records": 4880,
+      "live_run_record_mutants_rejected": 11,
+      "violations": 0,
+      "scored_comparisons": 0,
+      "all_family_release_certified": false
+    }
   },
   "research_report_procedure": {
     "tasks": [
@@ -757,6 +772,7 @@
       "5E",
       "5M",
       "5H",
+      "6E",
       "7E",
       "8E",
       "9E",
@@ -768,22 +784,22 @@
       "12E",
       "16E"
     ],
-    "count": 21,
-    "remaining": 27,
-    "qualified_direct_families": 15,
+    "count": 22,
+    "remaining": 26,
+    "qualified_direct_families": 16,
     "final_source_all_family_certification": false,
     "scored_comparisons": 0,
     "latest_source_bound_port": {
       "tasks": [
-        "5H"
+        "6E"
       ],
       "simulator_contract": "common-environment-v23",
-      "evidence": "output/experiments/critical-care-direct-files-20261115/qualification-v14.json"
+      "evidence": "output/experiments/review-direct-files-20261115/qualification-v45.json"
     },
     "direct_choreofs_boundary": {
       "status": "migration_in_progress",
-      "strengthened_boundary_qualified_tasks": 21,
-      "remaining_tasks": 27,
+      "strengthened_boundary_qualified_tasks": 22,
+      "remaining_tasks": 26,
       "unsafe_application_miri_required": false,
       "scored_runs": 0,
       "full_48_task_goal_unchanged": true,
