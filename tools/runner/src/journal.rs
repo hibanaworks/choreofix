@@ -184,52 +184,6 @@ fn time(row: &Value) -> Result<f64> {
         .filter(|t| t.is_finite() && *t >= 0.0)
         .ok_or_else(|| "invalid observation time".into())
 }
-pub(crate) fn close_arguments(
-    frames: &BTreeMap<u64, Frame>,
-    used: &mut BTreeSet<usize>,
-    vm: u64,
-    io: u64,
-    before: usize,
-    path: &str,
-    arguments: &Value,
-) -> Result<()> {
-    let closed = frames
-        .values()
-        .filter(|f| {
-            f.direction(io, vm)
-                && f.logical_label == protocol::LABEL_WASI_FD_CLOSE_RET
-                && f.bytes.first() == Some(&4)
-                && f.bytes.len() >= 4
-                && f.received.is_some_and(|at| at < before)
-        })
-        .max_by_key(|f| f.received)
-        .ok_or("missing actual WASI close result")?;
-    let length = usize::from(closed.bytes[3]);
-    if closed.bytes[1..3] != [0, 0]
-        || closed.bytes.get(4..4 + length) != Some(path.as_bytes())
-        || serde_json::from_slice::<Value>(closed.bytes.get(4 + length..).ok_or("close pathname")?)?
-            != *arguments
-    {
-        return Err("WASI close differs from actual business arguments".into());
-    }
-    let request = frames
-        .values()
-        .filter(|frame| {
-            frame.direction(vm, io)
-                && frame.logical_label == protocol::LABEL_WASI_FD_CLOSE
-                && frame.sent < closed.sent
-        })
-        .max_by_key(|frame| frame.sent)
-        .ok_or("close result without projected WASI request")?;
-    if request.bytes != [4] {
-        return Err("close result without projected WASI request".into());
-    }
-    if !used.insert(closed.sent) {
-        return Err("WASI close reused for another effect".into());
-    }
-    Ok(())
-}
-
 pub(crate) fn check_close_pairs(frames: &BTreeMap<u64, Frame>, pairs: &[(u64, u64)]) -> Result<()> {
     for &(vm, io) in pairs {
         let mut requests = frames

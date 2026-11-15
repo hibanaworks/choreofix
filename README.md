@@ -1,12 +1,15 @@
 # ChoreoFix
 
-Development checkpoint `progress-20261112` publishes the current implementation,
-including the 29 source-bound accepted ports and unfinished 3M work. It is not
-final all-family certification or a scored comparison. For the canonical sibling
-path dependencies, select the same checkpoint tag of Hibana, hibana-epf and
-hibana-wasip1-runtime. The runtime keeps its recorded `09a803a` Git pin.
-Ordinary CI runs on branch pushes and pull requests, not progress tags. A
-checkpoint tag is a source backup, never a successful or skipped certification.
+The current direct ChoreoFS boundary has source-bound qualification for **23 of
+48 tasks** across 17 families; 25 tasks and final-source all-family certification
+remain unfinished. The seven-agent 6H port has a checked global and staging
+receiver, but has not yet completed its Wasm or real-model qualification.
+See [the plan](plan.md) and [6H's current scope](benchmark/ports/6H.md).
+
+Development uses the canonical sibling worktrees for Hibana, EPF, WASI and
+hibana-runtime. CI selects the published runtime revision recorded by the core.
+Historical checkpoint results retain their own sources and boundary; they are
+not current qualification.
 
 ChoreoFix evaluates multi-agent coordination with
 [Hibana](https://github.com/hibanaworks/hibana). A global protocol defines the

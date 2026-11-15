@@ -1,5 +1,5 @@
 use super::{global::*, imp};
-use crate::shell::global::{FileExit, Loan};
+use crate::shell::global::Loan;
 use serde_json::{Value, json};
 
 #[test]

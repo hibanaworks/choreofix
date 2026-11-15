@@ -790,6 +790,24 @@
     "qualified_direct_families": 17,
     "final_source_all_family_certification": false,
     "scored_comparisons": 0,
+    "in_progress_port": {
+      "task": "6H",
+      "status": "global_and_staging_receiver_implemented",
+      "global_events": 1245,
+      "projected_views": 44,
+      "argument_schemas": 24,
+      "native_component_tests": 8,
+      "real_wasm_qualification": false,
+      "real_model_calls": 0,
+      "task_qualified": false,
+      "scope": "Native source, typed-input and production staging-receiver checks; remaining localsides, seven-Wasm bindings and complete EPF/effect/model qualification are unfinished."
+    },
+    "removed_legacy_adapters": {
+      "date": "2026-11-16",
+      "tasks": ["4M", "13E", "13M", "14E", "14M", "14H"],
+      "files": 99,
+      "scope": "Removed unsupported execution adapters, their old auditors and mechanism drivers. Original task/world inputs and retained source-bound evidence remain; all six still require direct ports."
+    },
     "latest_source_bound_port": {
       "tasks": [
         "6M"

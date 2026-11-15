@@ -11,37 +11,6 @@ use std::{
     path::{Component, Path},
 };
 
-fn check_domain_operations(fixture: &Value, metadata: &Value, schemas: &Value) -> Result<()> {
-    if fixture["tool_schemas"] != *schemas || fixture["inputs"]["tool_schemas"] != *schemas {
-        return Err("recorded domain schemas differ from original inputs".into());
-    }
-    for actor in fixture["fixtures"].as_array().ok_or("fixture actors")? {
-        let name = actor["agent"].as_str().ok_or("scientist name")?;
-        let resources = metadata["agent_resources"][name]
-            .as_array()
-            .ok_or("original scientist resources")?;
-        let operations = schemas
-            .as_array()
-            .ok_or("original domain schemas")?
-            .iter()
-            .map(|tool| &tool["function"])
-            .filter(|tool| {
-                tool["agent_ids"]
-                    .as_array()
-                    .is_some_and(|ids| ids.contains(&actor["agent"]))
-            })
-            .collect::<Vec<_>>();
-        if operations.is_empty()
-            || actor["operations"] != json!(operations)
-            || actor["resources"] != json!(resources)
-            || actor.get("calls").is_some()
-        {
-            return Err("scientific operations or resources differ from original inputs".into());
-        }
-    }
-    Ok(())
-}
-
 fn check_resource_assignments(task: &str, fixture: &Value, metadata: &Value) -> Result<()> {
     let field = if task.starts_with('9') {
         "forks"
@@ -382,15 +351,7 @@ pub fn run(root: &Path) -> Result<Value> {
     {
         return Err("task identity, depth or participant set differs from original inputs".into());
     }
-    if task == "14H" {
-        check_domain_operations(
-            fixture,
-            &metadata,
-            &load(&root.join("source/benchmark/descriptions/14H/tools.json"))?,
-        )?;
-    } else {
-        check_resource_assignments(task, fixture, &metadata)?;
-    }
+    check_resource_assignments(task, fixture, &metadata)?;
     if fixture["adapter"] != "rust_upstream_api"
         || fixture["test_delays"] != json!({})
         || fixture["delay_multiplier"] != 1.0
@@ -462,12 +423,6 @@ pub fn run(root: &Path) -> Result<Value> {
         "2E" | "2M" | "2H" => crate::writing_audit::audit(&root.join("events.jsonl"))?,
         "3E" => crate::report_audit::audit(&root.join("events.jsonl"))?,
         "4E" => crate::coordination_audit::audit(&root.join("events.jsonl"))?,
-        "4M" => crate::refactor_audit::audit(&root.join("events.jsonl"))?,
-        "14E" => crate::discovery_audit::audit(&root.join("events.jsonl"))?,
-        "14M" => crate::regulatory_discovery_audit::audit(&root.join("events.jsonl"))?,
-        "14H" => crate::multi_round_discovery_audit::audit(&root.join("events.jsonl"))?,
-        "13E" => crate::lab_audit::audit(&root.join("events.jsonl"))?,
-        "13M" => crate::lab_quality_audit::audit(&root.join("events.jsonl"))?,
         "5E" => crate::medical_audit::audit(&root.join("events.jsonl"))?,
         "5M" => crate::multi_specialty_audit::audit(&root.join("events.jsonl"))?,
         "5H" => crate::critical_care_audit::audit(&root.join("events.jsonl"))?,
@@ -729,39 +684,6 @@ pub fn check_mutants(root: &Path, output: &Path) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn variable_material_inputs_keep_original_schemas_and_resource_bindings() {
-        let metadata = json!({"agent_resources":{"FORMULATOR":["FORMULATION_SUITE"]}});
-        let schemas = json!([
-            {"function":{"name":"prepare_formulation","agent_ids":["FORMULATOR"],"parameters":{"compound":{"type":"string"}}}},
-            {"function":{"name":"run_cell_assay","agent_ids":["BIOLOGIST"],"parameters":{"assay":{"type":"string"}}}}
-        ]);
-        let fixture = json!({"tool_schemas":schemas,"inputs":{"tool_schemas":schemas},"fixtures":[{
-            "agent":"FORMULATOR","resources":["FORMULATION_SUITE"],"operations":[schemas[0]["function"]]
-        }]});
-        check_domain_operations(&fixture, &metadata, &schemas).unwrap();
-        let mut changed = fixture.clone();
-        changed["fixtures"][0]["resources"] = json!([]);
-        assert!(check_domain_operations(&changed, &metadata, &schemas).is_err());
-        changed = fixture.clone();
-        changed["fixtures"][0]["operations"] = json!([]);
-        assert!(check_domain_operations(&changed, &metadata, &schemas).is_err());
-        changed = fixture.clone();
-        changed["fixtures"][0]["operations"]
-            .as_array_mut()
-            .unwrap()
-            .push(schemas[1]["function"].clone());
-        assert!(check_domain_operations(&changed, &metadata, &schemas).is_err());
-        changed = fixture.clone();
-        changed["fixtures"][0]["calls"] = json!([]);
-        assert!(check_domain_operations(&changed, &metadata, &schemas).is_err());
-        changed = fixture;
-        changed["tool_schemas"][0]["function"]["parameters"] = json!({});
-        changed["inputs"]["tool_schemas"] = changed["tool_schemas"].clone();
-        changed["fixtures"][0]["operations"] = json!([changed["tool_schemas"][0]["function"]]);
-        assert!(check_domain_operations(&changed, &metadata, &schemas).is_err());
-    }
 
     #[test]
     fn physical_resources_come_from_all_assigned_tools_without_a_task_allowlist() {

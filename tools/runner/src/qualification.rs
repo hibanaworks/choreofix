@@ -11,8 +11,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-const FAMILIES: [&str; 23] = [
-    "multi_round_discovery",
+const FAMILIES: [&str; 17] = [
     "kitchen",
     "manufacturing",
     "cascading_build",
@@ -22,11 +21,6 @@ const FAMILIES: [&str; 23] = [
     "critical_care",
     "multi_specialty",
     "medical",
-    "lab_quality",
-    "lab",
-    "discovery",
-    "regulatory_discovery",
-    "refactor",
     "coordination",
     "report",
     "review",
@@ -36,8 +30,6 @@ const FAMILIES: [&str; 23] = [
     "philosophers",
     "cicd",
 ];
-
-pub const MULTI_ROUND_DISCOVERY_CASES: usize = 12;
 
 fn dining_reports(reports: &[Value]) -> Result<()> {
     let mut completed = BTreeSet::new();
@@ -81,48 +73,6 @@ fn dining_reports(reports: &[Value]) -> Result<()> {
         .collect();
     if completed != expected || binaries.len() != 1 {
         return Err("dining evidence omits conditions or combines runtime binaries".into());
-    }
-    Ok(())
-}
-
-fn multi_round_discovery_reports(reports: &[Value]) -> Result<()> {
-    let mut completed = BTreeSet::new();
-    let mut artifacts = BTreeSet::new();
-    for report in reports {
-        let condition = report["case"]
-            .as_u64()
-            .ok_or("missing scientific condition")?;
-        if report["task"] != "14H"
-            || report["status"] != "mechanism_case_passed"
-            || report["declared_conditions"] != MULTI_ROUND_DISCOVERY_CASES
-            || condition >= MULTI_ROUND_DISCOVERY_CASES as u64
-            || report["source_unchanged"] != true
-            || report["dynamic_protocol_qualified"] != true
-            || report["separate_effect_audit_qualified"] != true
-            || report["effect_receives_bound_to_checked_occurrences"] != true
-            || report["scientific_effects"].as_u64().is_none_or(|n| n == 0)
-            || report["frame_contracts"].as_u64().is_none_or(|n| n == 0)
-            || !completed.insert(condition)
-        {
-            return Err("scientific evidence has a missing, failed or duplicate condition".into());
-        }
-        let identity = [
-            "runtime_binary_sha256",
-            "compiled_projection_sha256",
-            "test_driver_sha256",
-        ]
-        .map(|key| {
-            report[key]
-                .as_str()
-                .filter(|s| s.len() == 64)
-                .ok_or("missing scientific artifact hash")
-        })
-        .into_iter()
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-        artifacts.insert(identity);
-    }
-    if completed != (0..MULTI_ROUND_DISCOVERY_CASES as u64).collect() || artifacts.len() != 1 {
-        return Err("scientific evidence omits conditions or combines different artifacts".into());
     }
     Ok(())
 }
@@ -228,15 +178,6 @@ fn boundary_assignments(family: &str, filter: &str) -> Result<Vec<(String, Optio
             return Err("unknown dining finite assignment filter".into());
         }
         return Ok(assignments);
-    }
-    if family == "multi_round_discovery" {
-        let name = "multi_round_discovery_boundary::seven_actual_wasm_guests_retest_review_exhaust_and_reconsider";
-        if !name.contains(filter) {
-            return Err("unknown scientific finite assignment filter".into());
-        }
-        return Ok((0..MULTI_ROUND_DISCOVERY_CASES)
-            .map(|index| (name.to_owned(), Some(index)))
-            .collect());
     }
     if family == "kitchen" {
         let name = "kitchen_boundary::all_equipment_and_recipe_input_orders_use_actual_wasm";
@@ -560,7 +501,6 @@ pub fn run(output: &Path, filter: Option<&str>) -> Result<Value> {
                 command.env(
                     match family {
                         "kitchen" => "CHOREOFIX_KITCHEN_CASE",
-                        "multi_round_discovery" => "CHOREOFIX_MULTI_ROUND_DISCOVERY_CASE",
                         _ => "CHOREOFIX_FEATURE_DELIVERY_CASE",
                     },
                     condition.to_string(),
@@ -601,30 +541,6 @@ pub fn run(output: &Path, filter: Option<&str>) -> Result<Value> {
             }
             dining_reports(&reports)?;
         }
-        if family == "multi_round_discovery" {
-            if completed != MULTI_ROUND_DISCOVERY_CASES as u64 {
-                return Err("scientific qualification omitted a declared condition".into());
-            }
-            let reports = fs::read_dir(output.join("evidence"))?
-                .map(|entry| {
-                    let entry = entry?;
-                    if !entry
-                        .file_name()
-                        .to_string_lossy()
-                        .starts_with("multi-round-discovery-case")
-                    {
-                        return Ok(None);
-                    }
-                    Ok(Some(serde_json::from_slice(&fs::read(
-                        entry.path().join("qualification.json"),
-                    )?)?))
-                })
-                .collect::<Result<Vec<_>>>()?
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>();
-            multi_round_discovery_reports(&reports)?;
-        }
         if family == "kitchen" {
             let mut reports = Vec::new();
             for entry in fs::read_dir(output.join("evidence"))? {
@@ -661,51 +577,6 @@ pub fn run(output: &Path, filter: Option<&str>) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn scientific_assignments_require_every_condition_with_one_fixed_artifact() {
-        let assigned =
-            boundary_assignments("multi_round_discovery", "multi_round_discovery_boundary::")
-                .unwrap();
-        assert_eq!(
-            assigned.iter().map(|(_, n)| n.unwrap()).collect::<Vec<_>>(),
-            (0..12).collect::<Vec<_>>()
-        );
-        assert!(
-            boundary_assignments(
-                "multi_round_discovery",
-                "multi_round_discovery_boundary::missing"
-            )
-            .is_err()
-        );
-        let reports = (0..12).map(|case| json!({
-            "task":"14H","case":case,"status":"mechanism_case_passed","declared_conditions":12,
-            "source_unchanged":true,"dynamic_protocol_qualified":true,"separate_effect_audit_qualified":true,
-            "effect_receives_bound_to_checked_occurrences":true,"scientific_effects":13,"frame_contracts":104,
-            "runtime_binary_sha256":"a".repeat(64),"compiled_projection_sha256":"b".repeat(64),
-            "test_driver_sha256":"c".repeat(64)
-        })).collect::<Vec<_>>();
-        multi_round_discovery_reports(&reports).unwrap();
-        assert!(multi_round_discovery_reports(&reports[..11]).is_err());
-        let mut changed = reports.clone();
-        changed[11] = changed[0].clone();
-        assert!(multi_round_discovery_reports(&changed).is_err());
-        for (key, value) in [
-            ("case", json!(12)),
-            ("runtime_binary_sha256", json!("d".repeat(64))),
-            ("test_driver_sha256", Value::Null),
-            ("scientific_effects", json!(0)),
-            ("effect_receives_bound_to_checked_occurrences", json!(false)),
-            ("status", json!("failed")),
-        ] {
-            let mut changed = reports.clone();
-            changed[11][key] = value;
-            assert!(
-                multi_round_discovery_reports(&changed).is_err(),
-                "accepted invalid {key}"
-            );
-        }
-    }
 
     #[test]
     fn kitchen_assignments_and_actual_reports_cover_every_condition_once() {

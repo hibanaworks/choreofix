@@ -44,13 +44,16 @@ overwritten. These records identify the measured build; they do not establish
 that its implementation or task outcome is correct.
 
 The normal command and live subscription tests use the same execution path.
-It supports `1E`, `1M`, `1H`, `2E`, `2M`, `2H`, `3E`, `4E`, `4M`, `5E`, `5M`, `5H`,
-`6E`, `6M`, `7E`, `8E`, `9E`, `9M`, `9H`, `10E`, `10M`, `11E`, `12E`, `13E`, `13M`, `14E`,
-`14M`, `14H` and `16E`, with the original failure conditions `0`, `1` and `2`. Each qualification
-retains its exact source and simulator version. The 29 historical task entries
-are not acceptance of their current file/Endpoint boundary. Twenty-one source-bound
-tasks have completed the direct-projection mechanism and live-model checks;
-the remaining 27 still require that qualification. The rewritten 7E passes
+It supports `1E`, `1M`, `1H`, `2E`, `2M`, `2H`, `3E`, `4E`, `5E`, `5M`,
+`5H`, `6E`, `6M`, `7E`, `8E`, `9E`, `9M`, `9H`, `10E`, `10M`, `11E`, `12E`
+and `16E`, with the original failure conditions `0`, `1` and `2`.
+Each qualification retains its exact source and simulator version. Twenty-three
+source-bound tasks have completed direct-projection mechanism and live-model
+checks; the other 25 remain unqualified. The older 4M, 13E/13M and 14E/14M/14H
+adapters and their execution/audit commands have been removed. Their original
+worlds, descriptions and historical source-bound results remain. These tasks
+still require direct ports; a retired adapter is not a current implementation.
+The rewritten 7E passes
 twelve real-wash mechanism cases, EPF/effect audits and 1,503 record mutations.
 Three Luna/xhigh participants also completed depth 2 on the same runtime binary;
 the same run passes the model, EPF, effect and common-world audits. Its actual
@@ -98,19 +101,6 @@ trials retain the original timing, and these controlled delays are not performan
 Model errors or timeouts, runtime errors, nonzero runtime exits and failed
 backend jobs set the run's `error` and produce a nonzero CLI exit. A completed
 model response cannot hide an error reported with that response.
-
-The multi-round discovery `14H` family assigns all twelve scientific/retry
-conditions to separate test processes with
-`--qualify-wasi NEW_OUTPUT multi_round_discovery_boundary::`. Missing, duplicate,
-failed or mixed-artifact reports fail aggregation. The complete family rejects
-an externally preset `CHOREOFIX_MULTI_ROUND_DISCOVERY_CASE`; a direct diagnostic
-test may select one case and reports that partial scope. Every completed case
-runs the same EPF and actual-effect auditor as the model-run audit.
-`--audit-multi-round-discovery EVENTS` audits a saved record, and
-`--check-multi-round-discovery-mutants EVENTS NEW_OUTPUT` tests its auditor
-without executing models or effects again. The live input records original
-allowed tool schemas and assigned resources, not a fixed ordered command list.
-The final auditor checks those schemas against the run's frozen originals.
 
 When a guest exits or closes its output, the I/O owner explicitly fails both
 forwarded and queued shell requests, including callers sharing one live reply
@@ -187,41 +177,6 @@ The v19 world executes actual backend/frontend code and binds completed
 integration tests to the current repository contents. Its world tests cover
 both implementation orders and all 24 serial tool orders. World behavior,
 EPF conformance and the actual request/effect audit are separate checks.
-
-The `4M` shared-refactoring path uses `REFACTOR` build variables. Five actual
-Wasm shells drive the architect, both developers, reviewer and tester. The
-common simulator's published-content outcome is distinct from the ChoreoFix
-protocol, which lends the repository and test Endpoints and connects actual
-review/test results to merge requests. `--audit-refactor EVENTS` checks these
-values and calls EPF for dynamic protocol conformity. `refactor_boundary::`
-declares four short-delay branch combinations and one normal-delay condition;
-its execution and qualification status must be read from saved receipts.
-
-The `14E` instrument path uses `DISCOVERY` build variables. Four Wasm shells
-use the three actual instrument Endpoints; `--audit-discovery EVENTS` matches
-accepted inputs, resource requests, actual analyses, reports and the go/no-go
-decision and calls EPF for dynamic conformity. `discovery_boundary::` declares
-both decisions at short latency and one normal-latency condition. Its port and
-qualification scope is recorded in `benchmark/ports/14E.md`.
-
-The `13E` synthesis path uses `LAB` build variables. Three Wasm shells use the
-spectrometer and centrifuge Endpoints. `--audit-lab EVENTS` matches actual
-admissions, instrument requests, completed specimen/assay/quality results and
-calls EPF for dynamic conformity. `lab_boundary::` covers invalid early and
-duplicate requests, optional culture data, chunked input and normal-delay
-instrument overlap. See `benchmark/ports/13E.md` for its qualification scope.
-
-The `13M` path uses `LAB_QUALITY` build variables and four independent
-Wasm scientists. `--audit-lab-quality EVENTS` checks one-use actual admissions,
-both QC resource requests, scientific receipts and real results, then invokes
-EPF for dynamic conformity. `lab_quality_boundary::` declares ten real-Wasm
-conditions: both first subjects, depths 0/1/2, repeated last-subject rejection
-and four rejections while switching subjects. The source-bound migration,
-successful live pilot and remaining limits are in `benchmark/ports/13M.md`.
-The test saves all runtime cases before auditing their records. Progress reports
-runtime completion separately from audited completion; success still requires
-every dynamic/effect audit and the record mutations. Interrupted audit work
-does not erase completed guest evidence or turn it into a qualified case.
 
 `5H` uses `CRITICAL_CARE` build variables and seven independent Wasm guests.
 `critical_care_boundary::` runs eleven direct-file conditions through common

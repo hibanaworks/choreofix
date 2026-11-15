@@ -859,9 +859,9 @@ fn fixture(task: &str, metadata: &Value, inputs: &Value) -> Result<Value> {
                 }
             }
             Value::Array(calls)
-        } else if task == "6M" {
+        } else if matches!(task, "6M" | "6H") {
             let mut calls = Vec::new();
-            for (tool, table, field, key) in [
+            let development = [
                 (
                     "implement_feature",
                     "_IMPLEMENT_STEPS",
@@ -872,7 +872,24 @@ fn fixture(task: &str, metadata: &Value, inputs: &Value) -> Result<Value> {
                 ("code_review", "_CODE_REVIEW_STEPS", "target", "pr_id"),
                 ("run_tests", "_RUN_TESTS_STEPS", "suite", "suite"),
                 ("merge_code", "_MERGE_STEPS", "branch", "branch"),
-            ] {
+            ];
+            let staging = [
+                ("deploy_service", "_DEPLOY_STEPS", "service", "service"),
+                (
+                    "validate_staging",
+                    "_VALIDATE_STAGING_STEPS",
+                    "service",
+                    "service",
+                ),
+                ("rollback_service", "_ROLLBACK_STEPS", "service", "service"),
+            ];
+            let release = if task == "6H" {
+                staging.as_slice()
+            } else {
+                &[]
+            };
+            for (tool, table, field, key) in development.into_iter().chain(release.iter().copied())
+            {
                 for step in inputs[table]
                     .as_array()
                     .ok_or("feature-delivery assignments")?
@@ -949,6 +966,7 @@ fn fixture(task: &str, metadata: &Value, inputs: &Value) -> Result<Value> {
                     | "5M"
                     | "5H"
                     | "6M"
+                    | "6H"
                     | "7E"
                     | "11E"
                     | "12E"

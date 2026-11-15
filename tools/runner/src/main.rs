@@ -20,9 +20,6 @@ mod coordination_boundary;
 mod critical_care_audit;
 #[cfg(test)]
 mod critical_care_boundary;
-mod discovery_audit;
-#[cfg(test)]
-mod discovery_boundary;
 mod document_audit;
 #[cfg(test)]
 mod document_boundary;
@@ -34,12 +31,6 @@ mod journal;
 mod kitchen_audit;
 #[cfg(test)]
 mod kitchen_boundary;
-mod lab_audit;
-#[cfg(test)]
-mod lab_boundary;
-mod lab_quality_audit;
-#[cfg(test)]
-mod lab_quality_boundary;
 mod manufacturing_audit;
 #[cfg(test)]
 mod manufacturing_boundary;
@@ -49,9 +40,6 @@ mod medical_boundary;
 mod model;
 #[cfg(test)]
 mod model_boundary;
-mod multi_round_discovery_audit;
-#[cfg(test)]
-mod multi_round_discovery_boundary;
 mod multi_specialty_audit;
 #[cfg(test)]
 mod multi_specialty_boundary;
@@ -64,12 +52,6 @@ mod philosophers_boundary;
 mod process;
 mod projection;
 mod qualification;
-mod refactor_audit;
-#[cfg(test)]
-mod refactor_boundary;
-mod regulatory_discovery_audit;
-#[cfg(test)]
-mod regulatory_discovery_boundary;
 mod report_audit;
 #[cfg(test)]
 mod report_boundary;
@@ -120,12 +102,6 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
     let manufacturing = task == "11E";
     let kitchen = task == "12E";
     let coordination = task == "4E";
-    let refactor = task == "4M";
-    let discovery = task == "14E";
-    let regulatory_discovery = task == "14M";
-    let multi_round_discovery = task == "14H";
-    let lab = task == "13E";
-    let lab_quality = task == "13M";
     let medical = task == "5E";
     let multi_specialty = task == "5M";
     let critical_care = task == "5H";
@@ -139,12 +115,6 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
         || build
         || report
         || coordination
-        || refactor
-        || discovery
-        || regulatory_discovery
-        || multi_round_discovery
-        || lab
-        || lab_quality
         || medical
         || multi_specialty
         || critical_care
@@ -159,20 +129,12 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
     } else if coding {
         json!({"participant":agent,"resources":actor["modules"],
         "feature_name":actor["calls"][0]["arguments"]["feature_name"]})
-    } else if multi_round_discovery {
-        json!({"participant":agent,"resources":actor["resources"],"domain_operations":actor["operations"]})
     } else if review
         || feature_delivery
         || document
         || build
         || report
         || coordination
-        || refactor
-        || discovery
-        || regulatory_discovery
-        || multi_round_discovery
-        || lab
-        || lab_quality
         || medical
         || multi_specialty
         || critical_care
@@ -261,14 +223,6 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
         }
     } else if report {
         "Each file is a direct choreography projection. Choose shell commands and private calculations freely; an unadmitted request returns an error to the same guest. Researchers use their assigned topic and section. Write the original tool arguments to research_topic, write_section, update_references or revise_section and read the actual result from that same file. Reading feedback receives the next actual review of your section. After a negative review, choose revision text and submit it; a new review checks the current actual section and references. After your section is approved, your research work is complete and you may exit while the editor and other researcher continue. The editor chooses section order by writing original review_sections arguments to review_section_a or review_section_b and reading the result from that file. Either initial section and repeated or alternating rejection schedules are supported. Review of one section can overlap revision of the other. combine_sections submits the actual publication request; it requires both current positive reviews. The choreography then moves editing and review authority before publication. No host chooses the next request, loan or command. There is no generic result mailbox or synthetic coordination envelope. The editor finishes after receiving the actual combine result. No acquire/release or notification commands are needed."
-    } else if refactor {
-        match agent {
-            "ARCHITECT" => "/service/design_proposal",
-            "DEVELOPER_A" | "DEVELOPER_B" => "/service/refactor_code and /service/merge_code",
-            "REVIEWER" => "/service/code_review",
-            "TESTER" => "/service/run_tests",
-            _ => return Err("unknown shared-refactor participant".into()),
-        }
     } else if coordination {
         match agent {
             "BACKEND_DEV" => "/service/define_api, /service/implement_feature and /service/outcome",
@@ -339,20 +293,8 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
         "Each file is a direct projection of an actual Endpoint. Choose shell commands, private calculations, panel requests and imaging interleavings freely, using your assigned patient and actual results. Submit the original operation arguments and read the response from the same file. Panels permit combined, split, reversed and repeated incomplete test requests. The specialists' referral files contain the actual assessment; findings contain general, own and other test receipts and the completed CT/MRI reports. For RADIOLOGIST, each _ct or _mri operation file belongs to that actual scanner Endpoint: use the original perform_imaging/interpret_imaging argument schema with the matching modality. The read-only ct_order and mri_order files deliver the actual referrals, and each interpretation depends on its own actual image. CT and MRI are independent. The ER doctor's candidate contains the actual completed workup, both diagnoses and medication review for its case-conference operation. Optional symptoms, medications and attendees remain caller-supplied strings. After the consultation is published, the doctors and radiologist read its actual final record from summary before finishing; PHARMACIST finishes after its own independent review response. Real resource requests, returns and record transfers follow the global; do not invent acquire, release or notification tools. Invalid unadmitted data returns a recoverable shell error. The common world scores actual completed inputs and physical conflicts, not a prescribed total command order. This abstract benchmark has no prescribing or drug-administration effect and does not establish clinical correctness."
     } else if medical {
         "Choose your private shell commands and calculations freely, using actual patient results and your assigned operations. Each operation file owns its real Endpoint: write the operation JSON and read the actual response from that same file. ER_DOCTOR assesses the assigned patient and chooses how to interleave CT with general-panel requests. Either panel can use combined, split, reversed or repeated incomplete test_type requests. CARDIOLOGIST can read the actual assessment in /service/referral and the completed general findings in /service/findings; use actual results for diagnosis. ER_DOCTOR can read the completed consultation in /service/summary, containing clinical.findings, clinical.diagnosis and medication_review. PHARMACIST independently reviews caller-supplied medication data. medications and symptoms are optional strings, not fixed answers. Actual CT and test-panel Endpoints carry each resource request and result; do not invent acquire, release or notification tools. Invalid input returns an error without authorizing an effect, so correct it or choose another legal operation. Other participants can continue while a request waits. Finish your assigned work after reading its actual result. This abstract benchmark has no prescribing or administration effect."
-    } else if multi_round_discovery {
-        "Choose private shell commands and calculations freely, use actual scientific results, and reconsider failures. Resource and material Endpoints carry requests and results automatically. CHEMIST has three required analyses: synthesis_qc, molecular_id and documentation. A successful molecular_id is an intermediate result, not completion of the chemist assignment. Request HPLC documentation even if it must wait for the director; exit only after its actual documentation result. Documentation archives either terminal outcome, including abort. FORMULATION_SCIENTIST reads /service/result for the actual compound identity, supplies its data.compound to prepare_formulation, and retries failed preparation. BIOLOGIST performs culture_prep, then may choose the order of bioassay and stability for each actual formulation. It may retest the same bioassay material while held; submit its chosen final outcome with {\"evidence\":\"bioassay\"} to /service/submit_evidence. TOXICOLOGIST performs baseline_markers, purity_check and cytotoxicity, may retest toxicity while held, and submits {\"evidence\":\"cytotoxicity\"}. A submitted assay material cannot be edited again in that round. CLINICAL_LEAD requests combined_review of the actual completed evidence. REGULATORY_SPECIALIST chooses initial_review or hold_review, may repeat or deepen review, and submits its actual verdict with {\"evidence\":\"regulatory\"}. A held review on unchanged evidence cannot be made positive by routine repetition. PROJECT_DIRECTOR reads the actual regulatory result, then chooses continue, retry or abort; continue requires positive approval. Retry starts another formulation and assessment round, without refilling the three biological samples. Failed or exhausted assays can support an honest insufficient-data assessment and abort. The final documentation archives the actual terminal outcome. After evidence submission or a previous round, read actual responses and coordination data: they carry fresh material or the final outcome. Each scientist stays available for a requested new round and exits after the final outcome. Do not invent acquisition, release, refill or notification commands. These shell paths are the available interface, not an instruction to fabricate results or follow one total agent schedule."
-    } else if regulatory_discovery {
-        "The original scientific assignment is carried through actual instrument and study Endpoints. You choose private shell computations and commands, read every actual result, and retry your own failed analysis. CHEMIST runs synthesis_qc, molecular_id and finally documentation; documentation waits for actual regulatory approval. BIOLOGIST runs culture_prep, bioassay and stability. TOXICOLOGIST runs baseline_markers, purity_check and cytotoxicity. Both then query /service/await_review with {}. A reanalysis response specifies whether to repeat your two compound assays; after completing those selected assays, query await_review again. A regulatory result with success:true is final. LEAD_SCIENTIST runs reference_methods, structural_confirmation and characterization, choosing either order for the last two. The characterization result includes actual compound and report data under context. Choose either go or no-go by writing {\"go\":true} or {\"go\":false} to /service/submit_decision. Its response includes the actual regulatory_review. After a rejection, choose whether biology and/or toxicology should be repeated by writing two booleans, for example {\"biology\":true,\"toxicology\":false}, to /service/reconsider, then submit your reconsidered decision. All four choices, including neither and both, are available; no fixed rejection count is assumed. REGULATORY_SPECIALIST runs verify_regulatory_compliance with {\"decision\":\"go_no_go\"} and repeats after rejection. Approvals and actual data travel through the choreography. Do not invent acquire/release or notification commands. Independent private computation remains available while instrument calls wait. Finish your own work only after its actual successful outcome."
-    } else if lab_quality {
-        "Use your assigned laboratory operations and actual results. The chemist synthesizes the assigned compound, measures synthesized_compound, purifies compound_purification and finally validates final_validation. A submitted purification or later chemist remeasurement returns {operation, verification}: read the actual verification, and if rejected, reconsider and measure synthesized_compound again. The biologist prepares cell_cultures and fluorescence, then submits run_bioassay for the actual synthesized compound; optional cell_type is caller data. A failed trial returns its actual failure immediately: reconsider and run a fresh trial. A successful trial returns {operation, verification}; QC rejection also requires a fresh trial. QC_CONTROLLER chooses either assigned scientist per verify_result request and may switch subjects after rejection. Verify both scientists until each has a successful actual approval. ANALYST performs molecular_detail and verification for the delivered approved biological result. Independent biology can overlap chemist QC. The real scientific and physical instrument Endpoints carry the requests, results and returns. You do not send acquisition, release or notification tools. Services may wait for actual inputs and resources while independent participants continue. Read /service/result after each service request, use private shell commands freely, and finish after your own assigned work. The common scorer checks actual inputs, current approvals, final results and physical conflicts for every method; it does not grade this choreography."
-    } else if lab {
-        "Use your assigned laboratory operations and actual results. The chemist analyzes raw_materials, purifies compound_purification and validates final_validation after the actual quality report. The biologist prepares cell_cultures, calibrates fluorescence and runs the bioassay on the delivered compound_purification; cell_type is optional and may be any string. The analyst uses molecular_detail and verification after the actual assay report. The specimen, reports and instrument Endpoints travel through the global automatically; do not invent acquisition or notification commands. A service may wait while independent scientists continue. You choose your own private commands and computations. The common simulator checks necessary material/result causality and instrument conflicts for every method."
-    } else if discovery {
-        "Run your assigned instrument analyses from the task description. The chemist runs synthesis_qc, molecular_id and then documentation after the actual lead decision receipt. The biologist runs culture_prep, bioassay and stability; actual compound data arrives automatically. The toxicologist runs baseline_markers, purity_check and cytotoxicity. The lead runs reference_methods, structural_confirmation and characterization. The characterization response includes the actual compound and both reports under context. Read that data, choose go or no-go, then write one boolean go field to /service/submit_decision and read the actual result. Either true or false is allowed. Compound samples, reports, instrument Endpoints and their returns follow the global automatically; do not invent acquire/release or notification commands. Instrument calls may wait while other participants continue. You choose your private commands and computations. Required data must exist before use, and the common simulator checks those causal dependencies for every method."
     } else if report {
         "Hibana delegates the DOCUMENT or DATABASE Endpoint for each shared operation. The actual request and result travel through that Endpoint before it returns. You do not call resource acquisition, release or notification tools. Researchers research their assigned topic, write their assigned section and update its references. The references result includes the actual review under coordination.review_sections. After rejection, reconsider and revise your own section; the revision result includes the next actual review. Finish after your assigned section is approved. The editor reviews both submitted sections, choosing which to review first and whether to switch after a rejection. A review can overlap revision of the other section. Read the actual results and combine both sections after both pass."
-    } else if refactor {
-        "The architect chooses which assigned proposal to create first. Each developer refactors its own module and SHARED_LIBRARY, choosing either order, then merges its assigned branch. The actual repository Endpoint is transferred and returned; no acquire/release or notification calls are needed. The tester runs both assigned suites twice: once for each repository snapshot supplied by the choreography, choosing either suite order in each round. Reviews can overlap independent tests and merging: the reviewer chooses either assigned module first and reviews both. Service calls may wait for required data and resources while other participants continue. Read each actual result and finish your own work. Private shell computation remains available independently. These are this implementation's protocol capabilities. The common simulator grades actual published contents and requires completed exact-content review and test results before publication, equally for every method. It does not grade this choreography or one total operation order."
     } else if coordination {
         "Each service file is a choreography projection. Choose shell commands freely: a refused operation returns an error, so you can correct it or try another operation. BACKEND_DEV defines the assigned API through /service/define_api. FRONTEND_DEV reads its actual contract from /service/agree_api and chooses either implementation order by writing {\"api_name\":\"feature_api_spec\",\"first\":\"BACKEND_DEV\"} or {\"api_name\":\"feature_api_spec\",\"first\":\"FRONTEND_DEV\"} to that file. BACKEND_DEV receives this agreement by reading /service/outcome. Each developer's /service/implement_feature runs its assigned implementation using the actual repository Endpoint. The backend may redefine the API and collaborate on revised implementations before testing. TESTER reads the current candidate from /service/run_tests, submits its assigned suite to the same file, and reads the actual test result there. Testing requires actual REPO and TEST_ENV requests; those resources exclude editing during the effect. Each developer reads the actual final test result from /service/outcome. Reopening an incoming file reads its next actual message. Finish after the required actual work and results; no host command sequence, explicit acquire/release or finalization tool is required."
     } else if review {
@@ -586,22 +528,12 @@ async fn main() -> Result<()> {
         [mode, events] if mode == "--audit-feature-delivery" => println!("{}", serde_json::to_string_pretty(&feature_delivery_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-feature-delivery-mutants" => println!("{}", serde_json::to_string_pretty(&feature_delivery_audit::check_mutants(Path::new(events),Path::new(output))?)?),
         [mode, events] if mode == "--audit-coordination" => println!("{}", serde_json::to_string_pretty(&coordination_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-refactor" => println!("{}", serde_json::to_string_pretty(&refactor_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-discovery" => println!("{}", serde_json::to_string_pretty(&discovery_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-lab" => println!("{}", serde_json::to_string_pretty(&lab_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-lab-quality" => println!("{}", serde_json::to_string_pretty(&lab_quality_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-regulatory-discovery" => println!("{}", serde_json::to_string_pretty(&regulatory_discovery_audit::audit(Path::new(events))?)?),
         [mode, events] if mode == "--audit-medical" => println!("{}", serde_json::to_string_pretty(&medical_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-medical-mutants" => println!("{}", serde_json::to_string_pretty(&medical_audit::check_mutants(Path::new(events),Path::new(output))?)?),
         [mode, events] if mode == "--audit-multi-specialty" => println!("{}", serde_json::to_string_pretty(&multi_specialty_audit::audit(Path::new(events))?)?),
         [mode, events] if mode == "--audit-critical-care" => println!("{}", serde_json::to_string_pretty(&critical_care_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-critical-care-mutants" => println!("{}", serde_json::to_string_pretty(&critical_care_audit::check_mutants(Path::new(events),Path::new(output))?)?),
         [mode, events, output] if mode == "--check-multi-specialty-mutants" => println!("{}", serde_json::to_string_pretty(&multi_specialty_audit::check_mutants(Path::new(events),Path::new(output))?)?),
-        [mode, events, output] if mode == "--check-lab-quality-mutants" => println!("{}", serde_json::to_string_pretty(&lab_quality_audit::check_mutants(Path::new(events),Path::new(output))?)?),
-        [mode, events, output] if mode == "--check-regulatory-discovery-mutants" => println!("{}", serde_json::to_string_pretty(&regulatory_discovery_audit::check_mutants(Path::new(events),Path::new(output))?)?),
-        [mode, events, output] if mode == "--check-lab-mutants" => println!("{}", serde_json::to_string_pretty(&lab_audit::check_mutants(Path::new(events),Path::new(output))?)?),
-        [mode, events, output] if mode == "--check-discovery-mutants" => println!("{}", serde_json::to_string_pretty(&discovery_audit::check_mutants(Path::new(events),Path::new(output))?)?),
-        [mode, events, output] if mode == "--check-refactor-mutants" => println!("{}", serde_json::to_string_pretty(&refactor_audit::check_mutants(Path::new(events),Path::new(output))?)?),
         [mode, events] if mode == "--audit-report" => println!("{}", serde_json::to_string_pretty(&report_audit::audit(Path::new(events))?)?),
         [mode, events] if mode == "--audit-document" => println!("{}", serde_json::to_string_pretty(&document_audit::audit(Path::new(events))?)?),
         [mode, events] if mode == "--audit-kitchen" => println!("{}", serde_json::to_string_pretty(&kitchen_audit::audit(Path::new(events))?)?),
@@ -610,8 +542,6 @@ async fn main() -> Result<()> {
         [mode, events, output] if mode == "--check-manufacturing-mutants" => println!("{}", serde_json::to_string_pretty(&manufacturing_audit::check_mutants(Path::new(events), Path::new(output))?)?),
         [mode, events] if mode == "--audit-build" => println!("{}", serde_json::to_string_pretty(&build_audit::audit(Path::new(events))?)?),
         [mode, events] if mode == "--audit-cascading-build" => println!("{}", serde_json::to_string_pretty(&cascading_build_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-multi-round-discovery" => println!("{}", serde_json::to_string_pretty(&multi_round_discovery_audit::audit(Path::new(events))?)?),
-        [mode, events, output] if mode == "--check-multi-round-discovery-mutants" => println!("{}", serde_json::to_string_pretty(&multi_round_discovery_audit::check_mutants(Path::new(events),Path::new(output))?)?),
         [mode, events, output] if mode == "--check-cascading-build-mutants" => println!("{}", serde_json::to_string_pretty(&cascading_build_audit::check_mutants(Path::new(events),Path::new(output))?)?),
         [mode, events, output] if mode == "--check-build-mutants" => println!("{}", serde_json::to_string_pretty(&build_audit::check_mutants(Path::new(events), Path::new(output))?)?),
         [mode, events, output] if mode == "--check-document-mutants" => println!("{}", serde_json::to_string_pretty(&document_audit::check_mutants(Path::new(events), Path::new(output))?)?),
@@ -677,11 +607,9 @@ async fn main() -> Result<()> {
             }
         }
         _ => return Err(concat!(
-            "usage: choreofix-experiments 1E|1M|1H|2E|2M|2H|3E|4E|4M|5E|5M|5H|6E|6M|7E|8E|9E|9M|9H|10E|10M|11E|12E|13E|13M|14E|14M|14H|16E DEPTH OUTPUT\n",
-            "       --audit-api|--audit-review|--audit-report|--audit-document|--audit-coordination|--audit-refactor|--audit-discovery|--audit-lab|--audit-writing|--audit-cicd|--audit-philosophers|--audit EVENTS\n",
+            "usage: choreofix-experiments 1E|1M|1H|2E|2M|2H|3E|4E|5E|5M|5H|6E|6M|7E|8E|9E|9M|9H|10E|10M|11E|12E|16E DEPTH OUTPUT\n",
+            "       --audit-api|--audit-review|--audit-report|--audit-document|--audit-coordination|--audit-writing|--audit-cicd|--audit-philosophers|--audit EVENTS\n",
             "       --audit-protocol EVENTS\n",
-            "       --audit-multi-round-discovery EVENTS\n",
-            "       --check-multi-round-discovery-mutants EVENTS NEW_OUTPUT\n",
             "       --check-api-mutants|--check-review-mutants|--check-report-mutants|--check-document-mutants|--check-writing-mutants|--check-cicd-mutants|--check-philosophers-mutants|--check-protocol-mutants EVENTS NEW_OUTPUT\n",
             "       --audit-run RUN\n",
             "       --build-wasi NEW_OUTPUT FAMILY[,FAMILY...]\n",

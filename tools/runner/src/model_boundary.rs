@@ -111,49 +111,6 @@ async fn subscription_review_participants_reconsider_with_resource_endpoints() -
 
 #[hibana_runtime::main]
 #[test]
-#[ignore = "uses five Luna xhigh participants, actual WASI guests and the common published-content simulator"]
-async fn subscription_refactor_participants_use_actual_repository_and_test_endpoints() -> Result<()>
-{
-    subscription_case("4M", 0).await
-}
-
-#[hibana_runtime::main]
-#[test]
-#[ignore = "uses four Luna xhigh participants, actual Wasm guests and the common instrument environment"]
-async fn subscription_scientists_use_actual_instrument_endpoints() -> Result<()> {
-    subscription_case("14E", 0).await
-}
-
-#[hibana_runtime::main]
-#[test]
-#[ignore = "uses five Luna xhigh scientists, actual Wasm, regulatory rejection and selective reanalysis"]
-async fn subscription_regulatory_scientists_reconsider_actual_results() -> Result<()> {
-    subscription_case("14M", 2).await
-}
-
-#[hibana_runtime::main]
-#[test]
-#[ignore = "uses seven Luna xhigh scientists, actual Wasm, finite samples and source-bound effect receipts"]
-async fn subscription_seven_scientists_decide_from_actual_multi_round_evidence() -> Result<()> {
-    subscription_case("14H", 0).await
-}
-
-#[hibana_runtime::main]
-#[test]
-#[ignore = "uses three Luna xhigh scientists, actual Wasm guests and common material causality"]
-async fn subscription_lab_scientists_use_actual_specimens_and_instruments() -> Result<()> {
-    subscription_case("13E", 0).await
-}
-
-#[hibana_runtime::main]
-#[test]
-#[ignore = "uses four Luna xhigh scientists, actual Wasm and biological/QC reconsideration"]
-async fn subscription_lab_quality_scientists_reconsider_actual_results() -> Result<()> {
-    subscription_case("13M", 2).await
-}
-
-#[hibana_runtime::main]
-#[test]
 #[ignore = "uses five Luna xhigh participants, real Wasm and actual imaging/diagnosis/conference data"]
 async fn subscription_multi_specialty_participants_share_actual_findings() -> Result<()> {
     subscription_case("5M", 0).await

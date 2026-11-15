@@ -756,3 +756,93 @@ fn critical_care_assignments_preserve_both_patients_and_all_actual_tools() -> Re
     );
     Ok(())
 }
+
+#[hibana_runtime::main]
+#[test]
+async fn staged_release_inputs_preserve_all_seven_agents_and_original_operation_targets()
+-> Result<()> {
+    std::env::set_current_dir(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()?,
+    )?;
+    let directory = std::env::temp_dir().join(format!(
+        "staged-integration-inputs-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+    ));
+    fs::create_dir(&directory)?;
+    let trace = Trace::create(&directory.join("events.jsonl"))?;
+    let (world, fixture) = Simulator::new("6H", 0, 0.0, trace, &[])?;
+    let actors = fixture["fixtures"]
+        .as_array()
+        .ok_or("seven staged-release participants")?;
+    assert_eq!(actors.len(), 7);
+    assert_eq!(
+        actors
+            .iter()
+            .map(|a| a["calls"].as_array().unwrap().len())
+            .sum::<usize>(),
+        24
+    );
+    let actor = |name| {
+        actors
+            .iter()
+            .find(|a| a["agent"] == name)
+            .ok_or("original actor")
+    };
+    for (name, feature) in [
+        ("DEVELOPER_A", "user_authentication"),
+        ("DEVELOPER_B", "payment_processing"),
+        ("DEVELOPER_C", "notification_system"),
+    ] {
+        assert_eq!(
+            actor(name)?["calls"],
+            json!([
+                {"tool":"implement_feature","arguments":{"feature_name":feature}},
+                {"tool":"merge_code","arguments":{"branch":feature}}
+            ])
+        );
+        assert_eq!(actor(name)?["resources"], json!(["REPO"]));
+    }
+    let release = actor("RELEASE_MANAGER")?;
+    assert_eq!(release["resources"], json!(["STAGING_ENV"]));
+    let calls = release["calls"]
+        .as_array()
+        .ok_or("original release operations")?;
+    for feature in [
+        "user_authentication",
+        "payment_processing",
+        "notification_system",
+    ] {
+        for tool in ["deploy_service", "validate_staging", "rollback_service"] {
+            assert_eq!(
+                calls
+                    .iter()
+                    .filter(|c| c["tool"] == tool && c["arguments"] == json!({"service":feature}))
+                    .count(),
+                1
+            );
+        }
+    }
+    assert_eq!(actor("REVIEWER")?["resources"], json!([]));
+    assert_eq!(actor("TEST_WRITER")?["resources"], json!(["TEST_ENV"]));
+    assert_eq!(actor("CI_RUNNER")?["resources"], json!(["BUILD_SERVER"]));
+    assert_eq!(
+        actor("CI_RUNNER")?["calls"],
+        json!([
+            {"tool":"run_tests","arguments":{"suite":"full_suite_after_auth"}},
+            {"tool":"run_tests","arguments":{"suite":"full_suite_after_payment"}},
+            {"tool":"run_tests","arguments":{"suite":"full_suite_after_notification"}}
+        ])
+    );
+    assert!(
+        world.observed_events().await?.is_empty(),
+        "reading assignments must not execute a tool or prescribe its order"
+    );
+    drop(world);
+    fs::remove_dir_all(directory)?;
+    Ok(())
+}
