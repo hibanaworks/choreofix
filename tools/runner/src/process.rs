@@ -264,6 +264,7 @@ mod tests {
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_nanos()
         ));
+        std::fs::create_dir_all(output.parent().expect("test output parent"))?;
         std::fs::create_dir(&output)?;
         for (name, response) in [
             (
