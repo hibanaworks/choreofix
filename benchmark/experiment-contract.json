@@ -792,21 +792,28 @@
     "scored_comparisons": 0,
     "in_progress_port": {
       "task": "6H",
-      "status": "seven_wasm_baseline_passed_live_model_incomplete",
-      "global_events": 1233,
-      "projected_views": 44,
+      "status": "seven_wasm_baseline_and_recovery_passed_live_model_incomplete",
+      "global_events": 1237,
+      "projected_views": 46,
       "argument_schemas": 24,
       "native_component_tests": 11,
       "real_wasm_qualification": true,
-      "real_wasm_conditions": 1,
+      "real_wasm_conditions": 2,
       "real_model_participants_started": 7,
       "real_model_trials_completed": 1,
       "task_qualified": false,
-      "scope": "The accepted-frame-only observer records each transport acceptance once and binds actual receives from complete EPF commits, without a second preview/requeue replay state machine or core changes. mutants-v69 rejects 443 record counterexamples. live-v78 completes seven Luna/xhigh agents in 236.742336042 seconds with 3378451 inclusive tokens, 23887 EPF records, 21 effects, complete world outcome and zero violations. live-v80 reaches actual rollback after review/CI repair but times out under its original 600-second budget; earlier negative raw records remain under their original conditions. Before scored experiments, future budgets change uniformly through experiment.json to 1800 seconds, without changing model, tool limit, failures, delays or choreography. A timeout is not a core counterexample. wasi-v86 completes seven actual guests with 21 effects, 15571 EPF records, zero violations and five refused requests followed by recovery, including malformed JSON with the failed close and path in wash's error. The WASI table ceiling is 256 and immutable segments borrow validated module bytes; 107 native tests, four targeted Miri cases and Pico 2 linking pass. Reserved RAM including stack is 152296 bytes and flash is 333516 bytes. Full model recovery under the new budget, final-source all-family certification and scored experiments remain unfinished."
+      "scope": "Current source has 1237 events and 46 views. The same STAGING_ENV Endpoint moves through A/B/C native staging owners after successful validation; direct localsides retain actual predecessor material, without a flat offer dispatcher or progress flags. Native tests cover immediate success, two negative validations/rollbacks then success, real resource handoff, B continuation, refusal of the old A operation before a frame, and four stale/negative-CI refusals before effect. wasi-v92 passes seven actual guests in both baseline and depth-2 recovery: 21/53 effects, 15587/32522 complete EPF records, independent request/effect/reply audit and common-world completion with zero violations. The shared runtime hash is c17c574596ea3f48d01e84b3ca2ca6fd8ba52162c16f9a730cc70e3bacf2cbe2. Model calls and scored runs are zero for these mechanism tests. The old-source live-v78 completes seven Luna/xhigh agents; old 600-second timeouts retain their conditions. live-v88 under the new uniform 1800-second budget was diagnostically interrupted after circular blocking reads, with partial raw and no terminal token total. Current-source live-model qualification and final all-family certification remain unfinished. WASI table capacity 256, borrowed immutable element bytes, 107 native tests, four targeted library Miri cases and Pico 2 link are recorded under their actual source; linked RAM including reserved stack is 152296 bytes and flash 333516 bytes, without a physical maximum-stack claim."
     },
     "removed_legacy_adapters": {
       "date": "2026-11-16",
-      "tasks": ["4M", "13E", "13M", "14E", "14M", "14H"],
+      "tasks": [
+        "4M",
+        "13E",
+        "13M",
+        "14E",
+        "14M",
+        "14H"
+      ],
       "files": 99,
       "scope": "Removed unsupported execution adapters, their old auditors and mechanism drivers. Original task/world inputs and retained source-bound evidence remain; all six still require direct ports."
     },

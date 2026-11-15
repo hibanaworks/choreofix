@@ -27,6 +27,8 @@ pub const REPO: u8 = 8;
 pub const TEST_ENV: u8 = 9;
 pub const BUILD_SERVER: u8 = 10;
 pub const STAGING_ENV: u8 = 11;
+pub const STAGE_OWNER_B: u8 = 12;
+pub const STAGE_OWNER_C: u8 = 13;
 pub const A_FILE: u8 = 32;
 pub const B_FILE: u8 = 33;
 pub const C_FILE: u8 = 34;
@@ -64,6 +66,7 @@ pub type TestLoan<'r> = g::Msg<51, Endpoint<'r, TEST_ENV>>;
 pub type BuildLoan<'r> = g::Msg<52, Endpoint<'r, BUILD_SERVER>>;
 pub type StageLoan<'r> = g::Msg<53, Endpoint<'r, STAGING_ENV>>;
 pub type TaskExit = g::Msg<54, i32>;
+pub type StageHistory<'a> = g::Msg<222, &'a [u8]>;
 pub type StageCiPassedA<'a> = g::Msg<55, ReviewReply<'a, true>>;
 pub type StageCiFailedA<'a> = g::Msg<56, ReviewReply<'a, false>>;
 pub type StageCiApprovedA<'a> = g::Msg<57, ReviewReply<'a, true>>;
@@ -1179,14 +1182,32 @@ pub fn source() -> impl Projectable {
     );
     let task = g::seq(
         g::par(
-            g::seq(prepare_a::<ApprovedA, RejectedA>(), release_a()),
+            g::seq(
+                prepare_a::<ApprovedA, RejectedA>(),
+                g::seq(
+                    release_a(),
+                    g::seq(
+                        g::send::<STAGE_OWNER, STAGE_OWNER_B, StageHistory>(),
+                        g::send::<STAGE_OWNER, STAGE_OWNER_B, StageLoan>(),
+                    ),
+                ),
+            ),
             g::par(
                 prepare_b::<ApprovedB, RejectedB>(),
                 prepare_c::<ApprovedC, RejectedC>(),
             ),
         ),
         g::seq(
-            g::seq(release_b(), release_c()),
+            g::seq(
+                release_b(),
+                g::seq(
+                    g::send::<STAGE_OWNER_B, STAGE_OWNER_C, StageHistory>(),
+                    g::seq(
+                        g::send::<STAGE_OWNER_B, STAGE_OWNER_C, StageLoan>(),
+                        release_c(),
+                    ),
+                ),
+            ),
             g::seq(
                 g::send::<STAGING_ENV, TEST_ENV, TaskExit>(),
                 g::seq(
@@ -1254,6 +1275,8 @@ pub struct Programs {
     pub test_owner: RoleProgram<TEST_OWNER>,
     pub ci_owner: RoleProgram<CI_OWNER>,
     pub stage_owner: RoleProgram<STAGE_OWNER>,
+    pub stage_owner_b: RoleProgram<STAGE_OWNER_B>,
+    pub stage_owner_c: RoleProgram<STAGE_OWNER_C>,
     pub review_a: RoleProgram<REVIEW_A>,
     pub review_b: RoleProgram<REVIEW_B>,
     pub review_c: RoleProgram<REVIEW_C>,
@@ -1305,6 +1328,7 @@ impl Programs {
             ("BuildLoan", BuildLoan::LOGICAL_LABEL),
             ("StageLoan", StageLoan::LOGICAL_LABEL),
             ("TaskExit", TaskExit::LOGICAL_LABEL),
+            ("StageHistory", StageHistory::LOGICAL_LABEL),
             ("StageCiPassedA", StageCiPassedA::LOGICAL_LABEL),
             ("StageCiFailedA", StageCiFailedA::LOGICAL_LABEL),
             ("StageCiApprovedA", StageCiApprovedA::LOGICAL_LABEL),
@@ -1449,6 +1473,8 @@ impl Programs {
             ("TEST_OWNER", TEST_OWNER),
             ("CI_OWNER", CI_OWNER),
             ("STAGE_OWNER", STAGE_OWNER),
+            ("STAGE_OWNER_B", STAGE_OWNER_B),
+            ("STAGE_OWNER_C", STAGE_OWNER_C),
             ("REVIEW_A", REVIEW_A),
             ("REVIEW_B", REVIEW_B),
             ("REVIEW_C", REVIEW_C),
@@ -1498,6 +1524,8 @@ impl Programs {
             rows(&self.test_owner),
             rows(&self.ci_owner),
             rows(&self.stage_owner),
+            rows(&self.stage_owner_b),
+            rows(&self.stage_owner_c),
             rows(&self.review_a),
             rows(&self.review_b),
             rows(&self.review_c),
@@ -1550,6 +1578,8 @@ pub fn programs() -> Programs {
         test_owner: project(&p),
         ci_owner: project(&p),
         stage_owner: project(&p),
+        stage_owner_b: project(&p),
+        stage_owner_c: project(&p),
         review_a: project(&p),
         review_b: project(&p),
         review_c: project(&p),

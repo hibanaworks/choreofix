@@ -520,6 +520,14 @@ pub fn run(output: &Path, filter: Option<&str>) -> Result<Value> {
         if filter.is_none() && family == "manufacturing" && completed != 2 {
             return Err("manufacturing qualification must execute both the total-order/recovery and contended-choice groups".into());
         }
+        if family == "staged_integration"
+            && test_filter == "staged_integration_boundary::"
+            && completed != 2
+        {
+            return Err(
+                "staged integration must execute both baseline and failed-result recovery".into(),
+            );
+        }
         if family == "kitchen" && completed != KITCHEN_CASES as u64 {
             return Err("kitchen qualification omitted a declared condition".into());
         }

@@ -4,15 +4,21 @@ The runner records model requests, tool events, versions and usage. Hibana task
 permissions belong to the projected Endpoints, not this process interface.
 The direct-WASI command currently produces unscored qualification records.
 
-The common WASI qualification includes 6H's seven-guest depth-0 baseline under
-`staged_integration_boundary::`. It checks 21 real effects, complete EPF capture,
-effect/world correspondence and five rejected requests followed by recovery.
+The common WASI qualification declares both 6H seven-guest tests under
+`staged_integration_boundary::`: the depth-0 baseline and depth-2 recovery.
+The latter requires two review rejections, two CI failures and two staging
+failures/rollbacks before completion, for 53 actual effects. Both use actual
+Wasm with no model calls. `wasi-v92` passes both after the staging-owner
+handoff: 15,587 / 32,522 complete EPF records, effect/world audit passed,
+zero violations. Both share runtime SHA-256
+`c17c574596ea3f48d01e84b3ca2ca6fd8ba52162c16f9a730cc70e3bacf2cbe2`.
+The baseline checks 21 real effects and five refused requests followed by recovery.
 The additional probes leave peer reviews or earlier CI unread, then verify
 that the same guest recovers by consuming its actual inputs. The shell chooses
 its commands; the runner does not drain those messages on its behalf.
 The malformed-JSON probe checks that wash names the failed close and path,
 then accepts corrected data from the same guest without an extra domain effect.
-This finite mechanism condition does not qualify the unfinished depth-2 live
+These finite mechanism conditions do not qualify the unfinished depth-2 live
 model trial or add 6H to the 23 qualified tasks. The normal runner accepts 6H;
 saved executions use `--audit-staged-integration EVENTS`, with record
 counterexamples through `--check-staged-integration-mutants EVENTS NEW_OUTPUT`.

@@ -22,7 +22,7 @@ fn staged_integration_whole_source_static_contract() {
 fn staged_integration_source_projects_all_resource_file_and_wasm_views() {
     let observed = staged_integration::global::programs().observation();
     let programs = observed["programs"].as_array().unwrap();
-    assert_eq!(programs.len(), 44);
+    assert_eq!(programs.len(), 46);
     assert_eq!(programs.len(), observed["roles"].as_object().unwrap().len());
     let count = programs[0]["rows"][0][3].as_u64().unwrap() >> 16;
     println!(

@@ -5,12 +5,13 @@
 研究の中心は、**実資源の唯一の操作権、残存手順、実際の共有効果を結ぶ保証**である。
 
 2026-11-16の追加進捗: 6Hの7人分の実Wasm実行・直接ファイルEndpoint・native側の
-実資源処理を接続した。現行globalは1,233イベント・44 viewであり、通常の返信を
+実資源処理を接続した。現行globalは1,237イベント・46 viewであり、通常の返信を
 `offer()`から取得しようとしたアプリの誤りを除去した。重複するmerge-ready通知を外し、
 CI所有者が実際の検証済み入力をstagingへ渡す。連携順序・修正・rollbackはglobalが守る。
 実Wasmの深さ0で、実効果21件、完全capture、EPF動的監査、独立した効果・返答照合と
 共通採点が通り、早期merge・配備後の再編集の拒否後にも続行した。通常CIの共通入口へ
-この1条件を接続する。これは実AIの成功や全interleavingの認定ではない。
+通常・回復の2条件を接続し、現在の結果は末尾の2026-11-16 staging節に記録した。
+これは実AIの成功や全interleavingの認定ではない。
 Luna/xhigh 7人の深さ2は2,751,791,104 bytesでguardが停止したため未完である。
 観測記録の自己起床と大きなJSON値の保持をI/O所有者側で整理し、共有I/O17件・runner53件・
 Clippyと修正後の実Wasmを確認した。再試行は最大2,601,713,664 bytesで上限内だったが、
@@ -5086,3 +5087,29 @@ sourceは19 program・181イベント（前の試作は1,461）。記録した�
 binary SHA-256は `833ce2cf007c04bf6cda7597a9f0afb07268a429029c4b3b0599aa19cc3ccc6c`。
 使用する共通worldはv23（manifest 90c71ae26686bed3365453d97ed76ffd08b3d8eb2001103de9ba04675a8ba59f）
 で不変。移行22/48・残り26。採点済み比較は追加0、全familyの最終公開認定は未完である。
+
+
+## 2026-11-16: 6Hの成功後の継続を同じ資源Endpointの委譲で区切る
+
+7人の実Wasmでレビュー拒否2回・CI失敗2回・staging失敗2回から回復する入力を追加した。
+旧版は実際の肯定的validationを返した後にも、同じ担当のofferが旧StageFailedAを候補にした。
+旧版の反復をlocalsideの都合で無視せず、成功後に同じSTAGING_ENVをA担当からB担当、
+B担当からC担当へmoveするglobalへ変更した。受渡すhistoryは実際のdeployment／validation
+データであり、保持者表・進行flagではない。新しいnative担当2人はAI参加者を増やさない。
+
+1,237イベント・46 viewの全source検査、実際の否定的結果2回からのrollbackと成功、
+Endpointの受渡し、B継続、移譲後の旧A操作のframe送出前の拒否、4種の不正CI入力による
+効果0件、focused Clippyが成功した。本体のproductionは今回変更していない。
+この変更後の実Wasm全2条件も`wasi-v92`で52.53秒、最大798,523,392 bytesで通過した。
+通常条件は21効果・15,587 EPF記録、深さ2の回復条件は53効果・32,522記録で、両方とも
+完全EPF・実要求／効果／返答照合・中立な共通採点が成功し違反0。レビュー拒否・CI失敗・
+staging失敗を各2回、実rollbackを2回含む。同じruntime hashは
+`c17c574596ea3f48d01e84b3ca2ca6fd8ba52162c16f9a730cc70e3bacf2cbe2`。
+モデル呼出し0、採点比較0。派生集約は`mechanism-v93.json`、原本は`wasi-v92`へ残す。
+旧版live-v78の成功を新しいglobalの実AI認定へ読み替えず、6Hは未認定、
+移行23/48・残り25のままにする。
+
+別のlive-v88は、TEST_WRITERのB review待ちとREVIEWERのA candidate待ちが循環した
+状態を記録し、診断のため明示的に停止した。controller終了143、最大1,409,597,440 bytes、
+設定budgetは1,800秒。完了した実験やtimeoutへ数えず、partialなモデル記録と停止理由を
+保持する。モデルのterminal usageがないため、使用token数を0とも推計値とも報告しない。

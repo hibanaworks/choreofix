@@ -116,13 +116,7 @@ async fn a_failed_candidate_moves_to_b_and_both_resources_guard_the_actual_commi
     )
     .await;
     if execution.is_err() {
-        for frame in bus
-            .transport
-            .take_observations()
-            .rev()
-            .take(24)
-            .rev()
-        {
+        for frame in bus.transport.take_observations().rev().take(24).rev() {
             eprintln!("{frame}");
         }
     }

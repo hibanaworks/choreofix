@@ -142,6 +142,8 @@ pub async fn run_stdio(module: &[u8]) -> crate::shell::ShellResult<()> {
             let mut test_owner = rv.enter(session, &p.test_owner)?;
             let mut ci_owner = rv.enter(session, &p.ci_owner)?;
             let mut stage_owner = rv.enter(session, &p.stage_owner)?;
+            let mut stage_owner_b = rv.enter(session, &p.stage_owner_b)?;
+            let mut stage_owner_c = rv.enter(session, &p.stage_owner_c)?;
             let mut review_a = rv.enter(session, &p.review_a)?;
             let mut review_b = rv.enter(session, &p.review_b)?;
             let mut review_c = rv.enter(session, &p.review_c)?;
@@ -209,7 +211,13 @@ pub async fn run_stdio(module: &[u8]) -> crate::shell::ShellResult<()> {
                 localside::ci::run(&mut ci_owner, (&bus, &ci_actual)).await?;
             };
             async {
-                localside::staging::run(&mut stage_owner, (&bus, &stage_actual)).await?;
+                localside::staging::run_a(&mut stage_owner, (&bus, &stage_actual)).await?;
+            };
+            async {
+                localside::staging::run_b(&mut stage_owner_b, (&bus, &stage_actual)).await?;
+            };
+            async {
+                localside::staging::run_c(&mut stage_owner_c, (&bus, &stage_actual)).await?;
             };
             async {
                 localside::reviews::feature_a(&mut review_a, (&bus, &review_a_actual)).await?;
