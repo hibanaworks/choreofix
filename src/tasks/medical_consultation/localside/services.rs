@@ -12,7 +12,7 @@ pub async fn general<'r, D: Domain>(
     (mut panel, actual): (Endpoint<'r, GENERAL_PANEL>, &Cell<Value>),
     domain: &D,
 ) -> ShellResult<()> {
-    let arguments = json::decode(endpoint.recv::<AssessmentRequest>().await?)?;
+    let arguments = endpoint.recv::<AssessmentRequest>().await?.into_value();
     patient::patient(&arguments)?;
     let assessment = domain
         .execute("ER_DOCTOR", "assess_patient", arguments)
@@ -20,11 +20,24 @@ pub async fn general<'r, D: Domain>(
         .map_err(ShellError::message)?;
     patient::actual_result(&assessment)?;
     let bytes = json::encode(&assessment)?;
-    endpoint.send::<AssessmentResult>(&bytes.as_slice()).await?;
+    async {
+        let [mut clinical, mut file] = endpoint.par()?;
+        async {
+            clinical.send::<AssessmentResult>(&bytes.as_slice()).await?;
+        };
+        async {
+            file.send::<FileAssessmentResult>(&bytes.as_slice()).await?;
+        };
+        Ok::<(), ShellError>(())
+    }
+    .await?;
 
     loop {
         endpoint.send::<GeneralPanelLoan>(panel).await?;
-        let arguments = json::decode(endpoint.recv::<GeneralTests>().await?)?;
+        let admitted = endpoint.recv::<GeneralFileRequest>().await?;
+        endpoint.send::<GeneralAdmitted>(&admitted).await?;
+        let arguments = endpoint.recv::<GeneralTests>().await?.into_value();
+        json::same(&arguments, &admitted.into_value())?;
         patient::tests(&arguments, &["vitals", "basic_labs"])?;
         let result = domain
             .execute("ER_DOCTOR", "order_tests", arguments)
@@ -44,18 +57,28 @@ pub async fn general<'r, D: Domain>(
             .send::<GeneralTestResults>(&bytes.as_slice())
             .await?;
         panel = endpoint.recv::<GeneralPanelReturn>().await?;
-        let bytes = json::encode(&receipts)?;
         if patient::panel_complete(&receipts, &["vitals", "basic_labs"])? {
-            endpoint.send::<GeneralPanelCompleted>(panel).await?;
+            let data = serde_json::json!({"tests":receipts,"attempt":result});
+            let bytes = json::encode(&data)?;
             endpoint
-                .send::<GeneralTestsComplete>(&bytes.as_slice())
+                .send::<GeneralCompletedData>(&bytes.as_slice())
+                .await?;
+            let tests = json::encode(&receipts)?;
+            endpoint
+                .send::<GeneralTestsComplete>(&tests.as_slice())
                 .await?;
             break;
         }
+        let bytes = json::encode(&result)?;
+        endpoint
+            .send::<FileGeneralResult>(&bytes.as_slice())
+            .await?;
+        let bytes = json::encode(&receipts)?;
         endpoint
             .send::<GeneralTestsPartial>(&bytes.as_slice())
             .await?;
     }
+    endpoint.send::<GeneralPanelCompleted>(panel).await?;
     Ok(())
 }
 
@@ -69,7 +92,10 @@ pub async fn cardiac<'r, D: Domain>(
     patient::actual_result(&referral)?;
     loop {
         endpoint.send::<CardiacPanelLoan>(panel).await?;
-        let arguments = json::decode(endpoint.recv::<CardiacTests>().await?)?;
+        let admitted = endpoint.recv::<CardiacFileRequest>().await?;
+        endpoint.send::<CardiacAdmitted>(&admitted).await?;
+        let arguments = endpoint.recv::<CardiacTests>().await?.into_value();
+        json::same(&arguments, &admitted.into_value())?;
         patient::tests(&arguments, &["ecg", "cardiac_enzymes"])?;
         let result = domain
             .execute("CARDIOLOGIST", "order_tests", arguments)
@@ -89,18 +115,38 @@ pub async fn cardiac<'r, D: Domain>(
             .send::<CardiacTestResults>(&bytes.as_slice())
             .await?;
         panel = endpoint.recv::<CardiacPanelReturn>().await?;
-        let bytes = json::encode(&receipts)?;
         if patient::panel_complete(&receipts, &["ecg", "cardiac_enzymes"])? {
-            endpoint.send::<CardiacPanelCompleted>(panel).await?;
+            let data = serde_json::json!({"tests":receipts,"attempt":result});
+            let bytes = json::encode(&data)?;
             endpoint
-                .send::<CardiacTestsComplete>(&bytes.as_slice())
+                .send::<CardiacCompletedData>(&bytes.as_slice())
                 .await?;
+            let tests = json::encode(&receipts)?;
+            async {
+                let [mut specialist, mut doctor] = endpoint.par()?;
+                async {
+                    specialist
+                        .send::<CardiacTestsComplete>(&tests.as_slice())
+                        .await?;
+                };
+                async {
+                    doctor.send::<CardiacPanelReport>(&tests.as_slice()).await?;
+                };
+                Ok::<(), ShellError>(())
+            }
+            .await?;
             break;
         }
+        let bytes = json::encode(&result)?;
+        endpoint
+            .send::<FileCardiacResult>(&bytes.as_slice())
+            .await?;
+        let bytes = json::encode(&receipts)?;
         endpoint
             .send::<CardiacTestsPartial>(&bytes.as_slice())
             .await?;
     }
+    endpoint.send::<CardiacPanelCompleted>(panel).await?;
 
     let findings = json::decode(endpoint.recv::<FindingsForOwner>().await?)?;
     json::same(&findings["assessment"], &referral)?;
@@ -112,7 +158,7 @@ pub async fn cardiac<'r, D: Domain>(
         &referral["data"]["artifact_id"],
     )?;
     patient::actual_result(&findings["imaging"])?;
-    let arguments = json::decode(endpoint.recv::<DiagnosisRequest>().await?)?;
+    let arguments = endpoint.recv::<DiagnosisRequest>().await?.into_value();
     patient::patient(&arguments)?;
     if arguments
         .get("symptoms")
@@ -126,7 +172,17 @@ pub async fn cardiac<'r, D: Domain>(
         .map_err(ShellError::message)?;
     patient::actual_result(&result)?;
     let bytes = json::encode(&result)?;
-    endpoint.send::<DiagnosisResult>(&bytes.as_slice()).await?;
+    async {
+        let [mut clinical, mut file] = endpoint.par()?;
+        async {
+            clinical.send::<DiagnosisResult>(&bytes.as_slice()).await?;
+        };
+        async {
+            file.send::<FileDiagnosisResult>(&bytes.as_slice()).await?;
+        };
+        Ok::<(), ShellError>(())
+    }
+    .await?;
     Ok(())
 }
 
@@ -135,7 +191,7 @@ pub async fn pharmacy<D: Domain>(
     endpoint: &mut Endpoint<PHARMACY_SERVICE>,
     domain: &D,
 ) -> ShellResult<()> {
-    let arguments = json::decode(endpoint.recv::<ReviewRequest>().await?)?;
+    let arguments = endpoint.recv::<ReviewRequest>().await?.into_value();
     patient::patient(&arguments)?;
     if arguments
         .get("medications")
@@ -149,7 +205,17 @@ pub async fn pharmacy<D: Domain>(
         .map_err(ShellError::message)?;
     patient::actual_result(&result)?;
     let bytes = json::encode(&result)?;
-    endpoint.send::<ReviewResult>(&bytes.as_slice()).await?;
+    async {
+        let [mut clinical, mut file] = endpoint.par()?;
+        async {
+            clinical.send::<ReviewResult>(&bytes.as_slice()).await?;
+        };
+        async {
+            file.send::<FileReviewResult>(&bytes.as_slice()).await?;
+        };
+        Ok::<(), ShellError>(())
+    }
+    .await?;
     Ok(())
 }
 
@@ -159,7 +225,9 @@ pub async fn imaging<'r, D: Domain>(
     ct: Endpoint<'r, CT_SCANNER>,
     domain: &D,
 ) -> ShellResult<()> {
-    let admitted = json::decode(endpoint.recv::<ImagingIntent>().await?)?;
+    let request = endpoint.recv::<ImagingIntent>().await?;
+    endpoint.send::<ImagingAdmitted>(&request).await?;
+    let admitted = request.into_value();
     patient::patient(&admitted)?;
     if admitted["modality"]
         .as_str()
@@ -168,7 +236,7 @@ pub async fn imaging<'r, D: Domain>(
         return Err(ShellError::message("expected CT imaging"));
     }
     endpoint.send::<CtLoan>(ct).await?;
-    let arguments = json::decode(endpoint.recv::<ImagingRequest>().await?)?;
+    let arguments = endpoint.recv::<ImagingRequest>().await?.into_value();
     json::same(&arguments, &admitted)?;
     let result = domain
         .execute("ER_DOCTOR", "perform_imaging", arguments)
@@ -176,7 +244,17 @@ pub async fn imaging<'r, D: Domain>(
         .map_err(ShellError::message)?;
     patient::actual_result(&result)?;
     let bytes = json::encode(&result)?;
-    endpoint.send::<ImagingResult>(&bytes.as_slice()).await?;
+    async {
+        let [mut resource, mut file] = endpoint.par()?;
+        async {
+            resource.send::<ImagingResult>(&bytes.as_slice()).await?;
+        };
+        async {
+            file.send::<FileImagingResult>(&bytes.as_slice()).await?;
+        };
+        Ok::<(), ShellError>(())
+    }
+    .await?;
     let _ct = endpoint.recv::<CtLoan>().await?;
     Ok(())
 }

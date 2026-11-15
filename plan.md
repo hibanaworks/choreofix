@@ -10,13 +10,13 @@
 新しい境界では9E/9M/9Hを、実Wasm 6条件とLunaの3/5/7人実行、完全なEPF記録、
 実要求・実効果・返答・共通採点まで再確認した。8Eも実Wasm 3条件とLuna 3人の
 成功・終端失敗の2経路で再確認した。4Eと16Eも下記の新経路で再確認した。
-7E・3Eと2E／2M／2H・1E／1M／1Hも下記の新しい実ファイル投影で再確認し、10E・10M・11E・12Eを含め再確認済みは18/48課題で、残り30課題の
+7E・3Eと2E／2M／2H・1E／1M／1Hも下記の新しい実ファイル投影で再確認し、10E・10M・11E・12Eを含め5Eも加えて再確認済みは19/48課題で、残り29課題の
 新境界での認定と本実験は未完。本体の全gate・最終公開artifactの認定とは区別する。
 採用する実行の成果・採点は元sourceへ結び付け、新経路の成功へ読み替えない。
 
 2026-11-15の整理で、使用しない旧境界の試作記録、古い診断・停止出力、旧Rustのbuildを
 削除した。本文の過去の進捗説明に現れる保存先が、現在も残ることは意味しない。
-現行18課題の認定が実際に参照する原本・source・binaryは保持する。現在の開発用Rustは
+現行19課題の認定が実際に参照する原本・source・binaryは保持する。現在の開発用Rustは
 最新stable 1.100.0であり、停止した1.99.1の生成検査を最終合格へ数えない。
 
 11Eは5本の操作ファイルを実Endpointへ結び、Ready/Busy通知とclose後の振り直しを撤去した。
@@ -1223,6 +1223,10 @@ Endpointで受理した後、試験用I/O境界で3件がそろうまで保留�
 比較接続の開発は保留し、利用可能な条件でChoreoFix自身の実験を進める。
 元の比較実装は変更しない。
 
+以下の一覧は旧境界を含む各時点のsource記録である。過去の課題番号・Miri・認定数を、
+現在の実ファイル境界の認定へ読み替えない。現在の正確な課題集合は実験契約の
+`migration_status`と本書冒頭へまとめる。
+
 | 対象 | 現状 | 残る確認・変更 |
 | --- | --- | --- |
 | 1E/1M/1H | 実資源Endpointの要求・結果・返却。1Hは7人が実結果で再考。実Endpoint・実Wasm試験と実モデルの予備記録あり | source固定後の全条件の認定と比較 |
@@ -1237,7 +1241,7 @@ Endpointで受理した後、試験用I/O境界で3件がそろうまで保留�
 | 14E | 実装置Endpoint3本、実受信側の負例2件、実Wasm3条件と実AI4人のpilotが共通採点・EPF・実効果監査まで成功。simulatorは必要な入力の因果関係を検査し、独立した順序を許す | 16課題目として算入済み。最終sourceの全family認定・本実験は未完。範囲は`benchmark/ports/14E.md` |
 | 13E | 実装置Endpoint2本、実受信側の負例3件、実Wasm3条件と実AI3人のpilotが共通因果採点・EPF・実効果監査まで成功。試料・試験・品質結果を実データで結ぶ | 17課題目として算入済み。最終sourceの全family認定・本実験は未完。範囲は`benchmark/ports/13E.md` |
 | 13M | 全体global（589イベント、16 actor）と7つの直接localsideを実装。修正した最新本体で、4-Wasmの10条件と実AI4人のpilotが共通因果採点・動的EPF／実効果監査まで成功。実AIは86.04秒、710,689 inclusive tokens、実効果17件、違反0 | 18課題目として算入済み。最終sourceの全family認定・本実験は未完。範囲は`benchmark/ports/13M.md` |
-| 5E | CTとpanelの実Endpoint委譲、分割・逆順・反復panel、独立した紹介と薬剤レビュー。実Wasm9条件、3関数のstrict-provenance Miri、実AI3人のpilotが共通採点・動的EPF／実効果監査まで成功。pilotは31.45秒、257,121 inclusive tokens、6実効果、違反0 | 19課題目へ算入。残る29課題と最終sourceの全family認定・本実験は未完。元toolにない処方・投薬効果は認定しない。範囲は`benchmark/ports/5E.md` |
+| 5E | 実Endpointへ直接結合した9ファイル。実Wasm9条件と、同じbinaryによるLuna xhigh 3人の自由なwash操作が、完全EPF・実効果・共通採点まで成功。48.27秒、377,070 inclusive tokens、6効果、違反0。アプリMiriは使わない | 新境界の19課題目。残り29課題、最終sourceの全family認定・本実験は未完。範囲は`benchmark/ports/5E.md` |
 | 5M | 実Wasm8条件とLuna5人のpilotが共通採点・動的EPF／効果監査まで成功。pilotは48.37秒、571,513 inclusive tokens、12実効果、違反0 | 20課題目。元の失敗記録と修正後readerの再監査を区別。範囲は`benchmark/ports/5M.md` |
 | 5H | native92完走条件・要求差替え12条件、5関数のMiri、実Wasm8条件とLuna7人pilotが成功。pilotは48.16秒、679,177 inclusive tokens、16実効果、違反0、実効果の重なり7組 | 21課題目。共通採点・動的EPF／効果監査まで成功。最終source全family認定・本実験は未完。範囲は`benchmark/ports/5H.md` |
 | その他の課題 | 元の48入力・825 checklist項目を照合するmanifestとmatrixあり | 各課題のglobal/localside、実Wasm、比較入力の認定 |
@@ -1527,7 +1531,7 @@ CI待ちの間も独立した実装作業は続ける。
 | M0 比較の固定 | 基準SHA、構文範囲、native表現監査、課題と接続、指標・精度・再実行規則を固定する | 更新計画を記録。新競合と精度設計は未認定 |
 | M1 意味論 | T1–T6の定義・前提・反例・必要補題と、既存core定理の対応表。評価に使うpar/roll/委譲を含む | T3/T4の最小receiver契約下の合成済み。残る命題の対応と、具体的な二資源・実効果への適用を進める |
 | M2 実装と証明 | 効果入口一覧、実行時の負例、Leanと実装照合、必要なcore/WASI gate。通常Git pinでレビューと1Hを認定する | 通常Git pinの実Wasmはレビュー34条件・1H5条件・食事3条件、実モデルは1H7人・6E3人・9H7人のpilotが成功。wire監査、全条件・全効果入口とT3/T4の一般合成は未完 |
-| M3 課題と接続 | 全48課題と採用追加課題のglobal/localside・実Wasm・共通採点・接続を認定する | 旧境界の移行は29課題・23family。実Endpointを所有するファイルの新境界で1E/1M/1H・2E/2M/2H・3E・4E・7E・8E・9E/9M/9H・10E/10M・11E・12E・16Eの18/48課題を、各sourceの実Wasm・実AI・EPF・実効果・共通採点で確認。残り30課題の移行、最終sourceの全family認定・本実験は未完。比較接続の開発は保留 |
+| M3 課題と接続 | 全48課題と採用追加課題のglobal/localside・実Wasm・共通採点・接続を認定する | 旧境界の移行は29課題・23family。実Endpointを所有するファイルの新境界で1E/1M/1H・2E/2M/2H・3E・4E・5E・7E・8E・9E/9M/9H・10E/10M・11E・12E・16Eの19/48課題を、各sourceの実Wasm・実AI・EPF・実効果・共通採点で確認。残り29課題の移行、最終sourceの全family認定・本実験は未完。比較接続の開発は保留 |
 | M4 本比較 | A1の864件を先に実行し、A2とB–Eを認定後に実行する。全identityにrawと終了理由を残す | 採点0件 |
 | M5 原因と分析 | F/G、8課題の変更負担、cluster対応集計、負例と不確実性を整理する | 未実行 |
 | M6 論文化 | 最新owned実装へ草稿を同期し、各主張と定理・測定・TCB・再現artifactを対応付ける | 草稿。結果表と結論は未確定 |
@@ -4847,3 +4851,38 @@ runtime-only/model-onlyは0、局所不正操作280件と独立compile-fail 4件
 これは任意のRust実行のrefinement証明ではない。追補は`core-boundary-followup-v35.json`へ
 固定し、保存済み実AIのsourceと区別する。本体の最終全gate、以前のcontracts-31反例、
 12M/12H、最終全family認定は引き続き未完である。
+
+
+### 2026-11-15：5Eの直接ファイル9条件・実AI3人
+
+`output/experiments/medical-direct-files-20261115/qualification-v11.json`へ集約した。
+新しい実Endpointファイル境界の認定は19/48課題、残り29課題である。
+旧5Eの汎用close実装とそのMiri・AI記録を、今回の成功へ読み替えない。
+
+9本の実操作・データファイルを、それぞれのEndpointへ最初から結び付けた。
+共有効果の要求をclose後にパスや段階で振り直す処理を撤去し、紹介・所見・相談結果も
+実メッセージのread-onlyファイルへ投影した。完了した両panel Endpointと実データは、
+completed-record担当が一度だけ受け取る。そこから再貸出せず、実際の完了データと一致する
+相談だけを公開する。二重の進行管理・所有者表・完了flagは追加していない。
+
+`wasi-v10/`の全9条件は、分割・逆順・反復・combined panel、CTの挿入位置、不正入力、
+panel完了後の重複要求拒否を確認した。全条件の完全EPF、実要求／実効果／返答、共通採点が
+成功し、違反0。記録変異153件を拒否した。これは監査の負例であり実行時攻撃153件ではない。
+実AIと同じruntime `b2373202d4878dc539143f85b0258751f59bd5ad67ab082c0154ccae23fc1877`を使い、
+56.96秒、全子孫の最大1,151,254,528 bytes。入力・実データのnative 2件、runner通常54件、
+両者のClippyが通過した。アプリMiriは実行していない。
+
+`live-v9/`はLuna xhigh 3人が自由にwashを操作し、48.271922459秒、377,070 inclusive tokens、
+shell呼出し18件、実効果6件、2,831 producer記録、違反0で完了した。同じrunの共通採点・
+完全EPF・実要求と実効果と返答が一致し、両panelの実効果の重なり1組を確認した。
+CTとpanelの重なりはこのpilotでは0であり、通常遅延の機構条件で2組を観測した。
+共通worldは`common-environment-v23`。実データのshapeを扱う抽象課題であり、臨床上の
+診断正しさ、存在しない処方・投薬効果、成功率、採点付き比較の結果とは区別する。
+
+`live-v8/`ではER担当がCT未実施のままsummaryをblocking readし、他担当もその所見を
+待ったため停止した。成功や完走したtimeout条件へ数えず、rawと停止理由を保存した。
+通常readは自分の未完作業を待つことと、既存のnonblocking readを説明へ明記した。
+コマンド列・操作順は固定していない。条件の違う二つのpilotの時間を改善率へ使わない。
+
+本体の現在の正本では通常Rust・必要Miri・Lean/model・runtime-workの局所全gateが通過したが、
+通常生成検査の全71割当は未完。最終sourceの全family認定・本実験・採点比較も未完である。

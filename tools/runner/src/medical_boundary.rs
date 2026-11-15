@@ -129,60 +129,65 @@ async fn actual_wasi_partial_panels_and_independent_ct_orders() -> Result<()> {
         let ((),(),(),result) = hibana_runtime::race(async {
             async {
                 if invalid {
-                    let reply = guest.command("ER_DOCTOR","echo '{\"patient_id\":\"patient_other\"}' > /service/assess_patient; cat /service/result".into()).await?;
-                    assert_eq!(response(&reply)?["status"],"invalid_arguments");
+                    let reply = guest.command("ER_DOCTOR","echo '{\"patient_id\":\"patient_other\"}' > /service/assess_patient".into()).await?;
+                    assert!(reply["stdout"].as_str().ok_or("invalid-request output")?.contains("wash:"),"{reply}");
                 }
-                let reply = guest.command("ER_DOCTOR","echo '{\"patient_id\":\"patient_1\"}' > /service/assess_patient; cat /service/result".into()).await?;
+                let reply = guest.command("ER_DOCTOR","echo '{\"patient_id\":\"patient_1\"}' > /service/assess_patient; cat /service/assess_patient".into()).await?;
                 assert_eq!(response(&reply)?["success"],true);
-                for (at,request) in er_requests.iter().enumerate() {
+                for request in er_requests {
                     if invalid {
-                        let reply = guest.command("ER_DOCTOR","echo '{\"patient_id\":\"patient_1\",\"test_type\":\"ecg\"}' > /service/order_tests; cat /service/result".into()).await?;
-                        assert_eq!(response(&reply)?["status"],"invalid_arguments");
+                        let reply = guest.command("ER_DOCTOR","echo '{\"patient_id\":\"patient_1\",\"test_type\":\"ecg\"}' > /service/order_tests".into()).await?;
+                        assert!(reply["stdout"].as_str().ok_or("invalid-request output")?.contains("wash:"),"{reply}");
                     }
                     let (tool,arguments) = if *request == "CT" {
                         ("perform_imaging",json!({"patient_id":"patient_1","modality":"CT"}))
                     } else {
                         ("order_tests",json!({"patient_id":"patient_1","test_type":request}))
                     };
-                    let reply = guest.command("ER_DOCTOR",format!("echo '{arguments}' > /service/{tool}; cat /service/result")).await?;
+                    let reply = guest.command("ER_DOCTOR",format!("echo '{arguments}' > /service/{tool}; cat /service/{tool}")).await?;
                     let actual = response(&reply)?;
                     assert_eq!(actual["success"],true);
-                    if at + 1 == er_requests.len() {
-                        assert_eq!(actual["consultation"]["cardiac_diagnosis"]["success"],true);
-                        assert_eq!(actual["consultation"]["medication_review"]["success"],true);
-                    }
                 }
+                let duplicate=guest.command("ER_DOCTOR","echo '{\"patient_id\":\"patient_1\",\"test_type\":\"vitals\"}' > /service/order_tests".into()).await?;
+                assert!(duplicate["stdout"].as_str().ok_or("retired panel output")?.contains("wash:"),"{duplicate}");
+                let summary=response(&guest.command("ER_DOCTOR","cat /service/summary".into()).await?)?;
+                assert_eq!(summary["clinical"]["diagnosis"]["success"],true);
+                assert_eq!(summary["medication_review"]["success"],true);
                 assert_eq!(guest.command("ER_DOCTOR","exit 0".into()).await?["exit_status"],0);
                 Ok(())
             };
             async {
+                let referral=response(&guest.command("CARDIOLOGIST","cat /service/referral".into()).await?)?;
+                assert_eq!(referral["success"],true);
                 for request in cardiac_requests {
                     if invalid {
-                        let reply = guest.command("CARDIOLOGIST","echo '{\"patient_id\":\"patient_1\",\"test_type\":\"vitals\"}' > /service/order_tests; cat /service/result".into()).await?;
-                        assert_eq!(response(&reply)?["status"],"invalid_arguments");
+                        let reply = guest.command("CARDIOLOGIST","echo '{\"patient_id\":\"patient_1\",\"test_type\":\"vitals\"}' > /service/order_tests".into()).await?;
+                        assert!(reply["stdout"].as_str().ok_or("invalid-request output")?.contains("wash:"),"{reply}");
                     }
                     let arguments = json!({"patient_id":"patient_1","test_type":request});
-                    let reply = guest.command("CARDIOLOGIST",format!("echo '{arguments}' > /service/order_tests; cat /service/result")).await?;
+                    let reply = guest.command("CARDIOLOGIST",format!("echo '{arguments}' > /service/order_tests; cat /service/order_tests")).await?;
                     assert_eq!(response(&reply)?["success"],true);
                 }
+                let findings=response(&guest.command("CARDIOLOGIST","cat /service/findings".into()).await?)?;
+                assert_eq!(findings["assessment"],referral);
+                assert_eq!(findings["imaging"]["success"],true);
                 let mut arguments = json!({"patient_id":"patient_1"});
                 if index % 2 == 0 { arguments["symptoms"] = json!("caller symptom notes"); }
-                let reply = guest.command("CARDIOLOGIST",format!("echo '{arguments}' > /service/diagnose; cat /service/result")).await?;
+                let reply = guest.command("CARDIOLOGIST",format!("echo '{arguments}' > /service/diagnose; cat /service/diagnose")).await?;
                 let actual = response(&reply)?;
                 assert_eq!(actual["success"],true);
                 assert_eq!(actual["data"]["symptoms"],arguments["symptoms"]);
-                assert_eq!(actual["consultation"]["imaging"]["success"],true);
                 assert_eq!(guest.command("CARDIOLOGIST","exit 0".into()).await?["exit_status"],0);
                 Ok(())
             };
             async {
                 if invalid {
-                    let reply = guest.command("PHARMACIST","echo '{\"patient_id\":\"patient_1\",\"medications\":[]}' > /service/review_prescriptions; cat /service/result".into()).await?;
-                    assert_eq!(response(&reply)?["status"],"invalid_arguments");
+                    let reply = guest.command("PHARMACIST","echo '{\"patient_id\":\"patient_1\",\"medications\":[]}' > /service/review_prescriptions".into()).await?;
+                    assert!(reply["stdout"].as_str().ok_or("invalid-request output")?.contains("wash:"),"{reply}");
                 }
                 let mut arguments = json!({"patient_id":"patient_1"});
                 if index % 2 == 0 { arguments["medications"] = json!("supplied medication data"); }
-                let reply = guest.command("PHARMACIST",format!("echo '{arguments}' > /service/review_prescriptions; cat /service/result")).await?;
+                let reply = guest.command("PHARMACIST",format!("echo '{arguments}' > /service/review_prescriptions; cat /service/review_prescriptions")).await?;
                 let actual = response(&reply)?;
                 assert_eq!(actual["success"],true);
                 assert_eq!(actual["data"]["medications"],arguments["medications"]);

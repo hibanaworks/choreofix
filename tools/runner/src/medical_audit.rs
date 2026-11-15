@@ -2,7 +2,7 @@
 //! Dynamic protocol order and affine custody are checked by EPF.
 use crate::{
     evidence::{Result, digest, save},
-    journal::{Call, Frame, check_close_pairs, close_arguments, one, records},
+    journal::{Call, Frame, one, records},
 };
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, fs, path::Path};
@@ -38,7 +38,7 @@ fn panel(calls: &[&Call], actor: &str, before: usize) -> Result<Value> {
     Ok(Value::Object(panel))
 }
 
-fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
+fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty medical evidence")?["message"];
     if compiled["task"] != "5E" || fixture["task"] != "5E" || fixture["type"] != "fixtures" {
@@ -68,12 +68,15 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
             .and_then(|n| u8::try_from(n).ok())
             .ok_or_else(|| format!("compiled label {name}").into())
     };
+    let records_actor = role("RECORDS")?;
     let labels = crate::projection::frames(artifact, rows)?;
+    let mut journal = crate::journal::read(rows, &labels, actors)?;
+    journal.bind_receives(dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
         score,
-    } = crate::journal::read(rows, &labels, actors)?;
+    } = journal;
     if calls.len() < 6
         || score["complete"] != true
         || score["violations"] != json!([])
@@ -83,19 +86,12 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
     {
         return Err("incomplete or unsafe consultation outcome".into());
     }
-    let pairs = [
-        ("ER_DOCTOR", "ER_IO"),
-        ("CARDIOLOGIST", "CARDIO_IO"),
-        ("PHARMACIST", "PHARMACY_IO"),
-    ]
-    .into_iter()
-    .map(|(vm, io)| Ok((role(vm)?, role(io)?)))
-    .collect::<Result<Vec<_>>>()?;
-    check_close_pairs(&frames, &pairs)?;
     let business = |frame: &Frame| {
-        !pairs
-            .iter()
-            .any(|(vm, io)| frame.direction(*vm, *io) || frame.direction(*io, *vm))
+        compiled["labels"].as_object().is_some_and(|labels| {
+            labels
+                .values()
+                .any(|label| label.as_u64() == Some(u64::from(frame.logical_label)))
+        })
     };
     let mut ordered = calls.values().collect::<Vec<_>>();
     ordered.sort_by_key(|call| call.emitted);
@@ -145,6 +141,24 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         ("CardiacPanelCompleted", 1),
         ("CardiacTestsPartial", cardiac_calls - 1),
         ("CardiacTestsComplete", 1),
+        ("CardiacPanelReport", 1),
+        ("FileAssessmentResult", 1),
+        ("GeneralFileRequest", general_calls),
+        ("GeneralAdmitted", general_calls),
+        ("FileGeneralResult", general_calls),
+        ("ImagingAdmitted", 1),
+        ("FileImagingResult", 1),
+        ("FileReferral", 1),
+        ("FileFindings", 1),
+        ("FileDiagnosisResult", 1),
+        ("FileReviewResult", 1),
+        ("Summary", 1),
+        ("CardiacFileRequest", cardiac_calls),
+        ("CardiacAdmitted", cardiac_calls),
+        ("FileCardiacResult", cardiac_calls),
+        ("GeneralCompletedData", 1),
+        ("CardiacCompletedData", 1),
+        ("CompletedConsultation", 1),
     ] {
         let number = label(name)?;
         if frames
@@ -161,7 +175,6 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         .ok_or("common-world effects")?
         .clone();
     let mut used_frames = BTreeSet::new();
-    let mut used_closes = BTreeSet::new();
     for call in &ordered {
         let actor = call.request["agent"].as_str().ok_or("effect actor")?;
         let tool = call.tool()?;
@@ -175,55 +188,78 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         {
             return Err("effect lacks its successful assigned-patient artifact".into());
         }
-        let (io, from, owner, request, result_target, reply) = match (actor, tool) {
-            ("ER_DOCTOR", "assess_patient") => (
-                "ER_IO",
-                "ER_DOCTOR",
-                "GENERAL_SERVICE",
-                "AssessmentRequest",
-                "ER_DOCTOR",
-                "AssessmentResult",
-            ),
-            ("ER_DOCTOR", "order_tests") => (
-                "ER_IO",
-                "GENERAL_PANEL",
-                "GENERAL_SERVICE",
-                "GeneralTests",
-                "GENERAL_PANEL",
-                "GeneralTestResults",
-            ),
-            ("CARDIOLOGIST", "order_tests") => (
-                "CARDIO_IO",
-                "CARDIAC_PANEL",
-                "CARDIAC_SERVICE",
-                "CardiacTests",
-                "CARDIAC_PANEL",
-                "CardiacTestResults",
-            ),
-            ("ER_DOCTOR", "perform_imaging") => (
-                "ER_IO",
-                "CT_SCANNER",
-                "IMAGING_SERVICE",
-                "ImagingRequest",
-                "CT_SCANNER",
-                "ImagingResult",
-            ),
-            ("CARDIOLOGIST", "diagnose") => (
-                "CARDIO_IO",
-                "CARDIOLOGIST",
-                "CARDIAC_SERVICE",
-                "DiagnosisRequest",
-                "CARDIOLOGIST",
-                "DiagnosisResult",
-            ),
-            ("PHARMACIST", "review_prescriptions") => (
-                "PHARMACY_IO",
-                "PHARMACIST",
-                "PHARMACY_SERVICE",
-                "ReviewRequest",
-                "PHARMACIST",
-                "ReviewResult",
-            ),
+        let messages: &[(&str, &str, &str, bool)] = match (actor, tool) {
+            ("ER_DOCTOR", "assess_patient") => &[
+                ("ASSESS_FILE", "GENERAL_SERVICE", "AssessmentRequest", false),
+                (
+                    "GENERAL_SERVICE",
+                    "ASSESS_FILE",
+                    "FileAssessmentResult",
+                    true,
+                ),
+                ("GENERAL_SERVICE", "ER_DOCTOR", "AssessmentResult", true),
+            ],
+            ("ER_DOCTOR", "order_tests") => &[
+                (
+                    "GENERAL_FILE",
+                    "GENERAL_SERVICE",
+                    "GeneralFileRequest",
+                    false,
+                ),
+                ("GENERAL_SERVICE", "ER_DOCTOR", "GeneralAdmitted", false),
+                ("GENERAL_PANEL", "GENERAL_SERVICE", "GeneralTests", false),
+                (
+                    "GENERAL_SERVICE",
+                    "GENERAL_PANEL",
+                    "GeneralTestResults",
+                    true,
+                ),
+                ("GENERAL_SERVICE", "GENERAL_FILE", "FileGeneralResult", true),
+            ],
+            ("CARDIOLOGIST", "order_tests") => &[
+                (
+                    "CARDIAC_FILE",
+                    "CARDIAC_SERVICE",
+                    "CardiacFileRequest",
+                    false,
+                ),
+                ("CARDIAC_SERVICE", "CARDIOLOGIST", "CardiacAdmitted", false),
+                ("CARDIAC_PANEL", "CARDIAC_SERVICE", "CardiacTests", false),
+                (
+                    "CARDIAC_SERVICE",
+                    "CARDIAC_PANEL",
+                    "CardiacTestResults",
+                    true,
+                ),
+                ("CARDIAC_SERVICE", "CARDIAC_FILE", "FileCardiacResult", true),
+            ],
+            ("ER_DOCTOR", "perform_imaging") => &[
+                ("IMAGING_FILE", "IMAGING_SERVICE", "ImagingIntent", false),
+                ("IMAGING_SERVICE", "ER_DOCTOR", "ImagingAdmitted", false),
+                ("CT_SCANNER", "IMAGING_SERVICE", "ImagingRequest", false),
+                ("IMAGING_SERVICE", "CT_SCANNER", "ImagingResult", true),
+                ("IMAGING_SERVICE", "IMAGING_FILE", "FileImagingResult", true),
+            ],
+            ("CARDIOLOGIST", "diagnose") => &[
+                (
+                    "DIAGNOSIS_FILE",
+                    "CARDIAC_SERVICE",
+                    "DiagnosisRequest",
+                    false,
+                ),
+                (
+                    "CARDIAC_SERVICE",
+                    "DIAGNOSIS_FILE",
+                    "FileDiagnosisResult",
+                    true,
+                ),
+                ("CARDIAC_SERVICE", "CARDIOLOGIST", "DiagnosisResult", true),
+            ],
+            ("PHARMACIST", "review_prescriptions") => &[
+                ("REVIEW_FILE", "PHARMACY_SERVICE", "ReviewRequest", false),
+                ("PHARMACY_SERVICE", "REVIEW_FILE", "FileReviewResult", true),
+                ("PHARMACY_SERVICE", "PHARMACIST", "ReviewResult", true),
+            ],
             _ => return Err("unassigned clinical effect".into()),
         };
         let index = scored
@@ -238,15 +274,15 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
             })
             .ok_or("clinical effect differs from its common-world occurrence")?;
         scored.remove(index);
-        let mut before = call.emitted;
-        for (from, to, name, value, after) in [
-            (from, owner, request, arguments, false),
-            (owner, result_target, reply, result, true),
-        ] {
+        for &(from, to, name, after) in messages {
+            let value = if after { result } else { arguments };
             let (from, to, number) = (role(from)?, role(to)?, label(name)?);
             let candidates = frames.iter().filter(|(id, frame)| {
                 !used_frames.contains(*id)
-                    && frame.direction(from, to)
+                    && (frame.direction(from, to)
+                        || (after
+                            && matches!(name, "FileGeneralResult" | "FileCardiacResult")
+                            && frame.direction(records_actor, to)))
                     && frame.logical_label == number
                     && if after {
                         frame.sent > ended
@@ -255,9 +291,9 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
                     }
             });
             let (id, frame) = if after {
-                candidates.min_by_key(|(_, frame)| frame.sent)
+                candidates.min_by_key(|(_, f)| f.sent)
             } else {
-                candidates.max_by_key(|(_, frame)| frame.received)
+                candidates.max_by_key(|(_, f)| f.received)
             }
             .ok_or_else(|| format!("missing actual {name}"))?;
             if frame.value()? != *value {
@@ -265,34 +301,7 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
             }
             frame.received()?;
             used_frames.insert(*id);
-            if !after {
-                before = before.min(frame.sent);
-            }
         }
-        if tool == "perform_imaging" {
-            let number = label("ImagingIntent")?;
-            let candidates = frames
-                .iter()
-                .filter(|(id, frame)| {
-                    !used_frames.contains(*id) && frame.logical_label == number && business(frame)
-                })
-                .collect::<Vec<_>>();
-            let &(id, intent) = one(candidates.iter())?;
-            if intent.value()? != *arguments || intent.received()? >= call.emitted {
-                return Err("CT effect differs from its admitted intent".into());
-            }
-            used_frames.insert(*id);
-            before = before.min(intent.sent);
-        }
-        close_arguments(
-            &frames,
-            &mut used_closes,
-            role(actor)?,
-            role(io)?,
-            before,
-            &format!("service/{tool}"),
-            arguments,
-        )?;
     }
     if !scored.is_empty() {
         return Err("unused common-world clinical effect".into());
@@ -325,13 +334,14 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
             continue;
         }
         let expected = match name {
-            "Referral" | "ReferralForOwner" => {
+            "Referral" | "ReferralForOwner" | "FileReferral" => {
                 completed(&ordered, "ER_DOCTOR", "assess_patient", frame.sent)?.clone()
             }
-            "GeneralFindings" | "FindingsForOwner" => json!({
+            "GeneralFindings" | "FindingsForOwner" | "FileFindings" => json!({
                 "assessment":completed(&ordered,"ER_DOCTOR","assess_patient",frame.sent)?,
                 "tests":panel(&ordered,"ER_DOCTOR",frame.sent)?,
                 "imaging":completed(&ordered,"ER_DOCTOR","perform_imaging",frame.sent)?,
+                "cardiac_tests":panel(&ordered,"CARDIOLOGIST",frame.sent)?,
             }),
             "CardiacFindings" => {
                 completed(&ordered, "CARDIOLOGIST", "diagnose", frame.sent)?.clone()
@@ -342,9 +352,35 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
             "GeneralTestsPartial" | "GeneralTestsComplete" => {
                 panel(&ordered, "ER_DOCTOR", frame.sent)?
             }
-            "CardiacTestsPartial" | "CardiacTestsComplete" => {
+            "CardiacTestsPartial" | "CardiacTestsComplete" | "CardiacPanelReport" => {
                 panel(&ordered, "CARDIOLOGIST", frame.sent)?
             }
+            "GeneralCompletedData" | "CardiacCompletedData" => {
+                let actor = if name == "GeneralCompletedData" {
+                    "ER_DOCTOR"
+                } else {
+                    "CARDIOLOGIST"
+                };
+                let last = ordered
+                    .iter()
+                    .filter(|call| {
+                        call.request["agent"] == actor
+                            && call.request["tool"] == "order_tests"
+                            && call.result.as_ref().is_some_and(|(at, _)| *at < frame.sent)
+                    })
+                    .max_by_key(|call| call.result.as_ref().map(|(at, _)| *at))
+                    .ok_or("completed panel has no actual last result")?;
+                json!({"tests":panel(&ordered,actor,frame.sent)?,"attempt":last.result()?.1})
+            }
+            "Summary" | "CompletedConsultation" => json!({
+                "clinical":{"findings":{
+                    "assessment":completed(&ordered,"ER_DOCTOR","assess_patient",frame.sent)?,
+                    "tests":panel(&ordered,"ER_DOCTOR",frame.sent)?,
+                    "imaging":completed(&ordered,"ER_DOCTOR","perform_imaging",frame.sent)?,
+                    "cardiac_tests":panel(&ordered,"CARDIOLOGIST",frame.sent)?,
+                },"diagnosis":completed(&ordered,"CARDIOLOGIST","diagnose",frame.sent)?},
+                "medication_review":completed(&ordered,"PHARMACIST","review_prescriptions",frame.sent)?,
+            }),
             _ => return Err(format!("unused or extra {name} frame").into()),
         };
         if frame.value()? != expected {
@@ -375,7 +411,8 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         json!({"status":"passed","task":"5E","domain_calls":calls.len(),"violations":0,
         "simulator_complete":true,"common_causal_score":"passed","independent_effect_overlaps":overlaps,
         "panel_imaging_overlaps":panel_imaging_overlaps,
-        "scope":"one-use actual WASI admissions, clinical requests, findings and actual results; EPF owns dynamic order",
+        "scope":"one-use typed file and resource receive commits, actual effects, results and readable findings; EPF owns dynamic order",
+        "effect_receives_bound_to_checked_occurrences":true,
         "absent_domain_effects_certified":false}),
     )
 }
@@ -383,8 +420,9 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
 pub fn audit(path: &Path) -> Result<Value> {
     let artifact = crate::projection::load(path)?;
     let rows = records(path)?;
-    let mut result = check(&rows, &artifact)?;
-    result["dynamic_protocol"] = crate::projection::check_dynamic(&artifact, &rows)?;
+    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
+    let mut result = check(&rows, &artifact, &dynamic)?;
+    result["dynamic_protocol"] = dynamic;
     result["source_events_sha256"] = json!(digest(path)?);
     result["compiled_projection_sha256"] = json!(digest(
         &path
@@ -399,7 +437,8 @@ pub fn audit(path: &Path) -> Result<Value> {
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let artifact = crate::projection::load(path)?;
     let rows = records(path)?;
-    check(&rows, &artifact)?;
+    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
+    check(&rows, &artifact, &dynamic)?;
     let labels = crate::projection::frames(&artifact, &rows)?;
     let actors = rows.first().ok_or("fixture")?["message"]["fixtures"]
         .as_array()
@@ -423,8 +462,9 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         })
         .collect::<Vec<_>>();
     fs::create_dir(output)?;
-    let verdicts =
-        crate::journal::json_frame_mutants(&rows, &selected, |changed| check(changed, &artifact))?;
+    let verdicts = crate::journal::json_frame_mutants(&rows, &selected, |changed| {
+        check(changed, &artifact, &dynamic)
+    })?;
     let result = json!({"status":"passed","mutants_rejected":verdicts.len(),"source_events_sha256":digest(path)?,
         "scope":"saved-record clinical effect audit, not runtime attacks or EPF mutation replay","model_calls":0,
         "verdicts":verdicts});

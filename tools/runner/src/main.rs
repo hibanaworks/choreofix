@@ -188,7 +188,18 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
         "topic":actor["calls"][0]["arguments"]["topic"],
         "section_name":actor["calls"][1]["arguments"]["section_name"]})
     };
-    let objects = if kitchen {
+    let objects = if medical {
+        match agent {
+            "ER_DOCTOR" => {
+                "/service/assess_patient, /service/order_tests and /service/perform_imaging; read-only /service/summary"
+            }
+            "CARDIOLOGIST" => {
+                "/service/order_tests and /service/diagnose; read-only /service/referral and /service/findings"
+            }
+            "PHARMACIST" => "/service/review_prescriptions",
+            _ => return Err("unknown medical participant".into()),
+        }
+    } else if kitchen {
         "/service/prepare_base_dish, /service/prepare_ingredient and /service/combine_dish"
     } else if manufacturing {
         match agent {
@@ -283,7 +294,7 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
     } else if multi_specialty {
         "Use your actual patient findings and assigned operations. The ER doctor assesses the patient and requests the general tests. The cardiologist and neurologist receive that actual referral, request their own tests and supply diagnoses using the shared investigation results. Each test panel may be combined, split or repeated until all assigned tests exist. The radiologist chooses the order of CT and MRI operations; each interpretation needs its matching actual image, and independent CT/MRI operations need not wait for each other. All completed findings are delivered automatically through the global. Each specialist's diagnosis response and the radiologist's final interpretation response also contain the completed consultation. After the ER doctor's final general test response contains both diagnoses and the medication review, the ER doctor requests conduct_case_conference for the actual patient; optional attendees is caller-supplied text. Optional symptoms and medications are caller-supplied strings. The real test-panel, imaging and consultation-room Endpoints carry requests, results and returns; do not invent acquire/release/notification commands. Independent participants continue while a request waits for input. Choose your private shell commands and calculations freely. Read /service/result after each request, then exit after your own work. This abstract benchmark has no prescribing or administration operation and does not represent diagnostic disagreement; do not claim either absent effect."
     } else if medical {
-        "Use the actual patient findings and your assigned operations. ER_DOCTOR first assesses the patient, then chooses the order of general-panel tests and CT imaging. Each panel can be requested together or as separate test_type requests; repeat incomplete tests if useful, and supply every assigned test. CT can be requested before, between or after partial general-panel requests. The cardiologist receives the actual referral automatically, requests the cardiac panel and supplies its diagnosis. The diagnosis response includes the actual shared general findings under consultation. The ER doctor's final test or imaging response includes the actual shared findings, cardiac diagnosis and medication review under consultation. PHARMACIST reviews caller-supplied medication data; medications and symptoms are optional string arguments, not fixed answers. The actual CT and test-panel Endpoints are passed through the global; do not invent acquire, release or notification commands. Independent participants continue while your request waits for required input. You choose your private shell commands and calculations. Read /service/result after every request and finish after your own work. This abstract benchmark has no prescribing or administration tool, and these results do not certify absent clinical effects."
+        "Choose your private shell commands and calculations freely, using actual patient results and your assigned operations. Each operation file owns its real Endpoint: write the operation JSON and read the actual response from that same file. ER_DOCTOR assesses the assigned patient and chooses how to interleave CT with general-panel requests. Either panel can use combined, split, reversed or repeated incomplete test_type requests. CARDIOLOGIST can read the actual assessment in /service/referral and the completed general findings in /service/findings; use actual results for diagnosis. ER_DOCTOR can read the completed consultation in /service/summary, containing clinical.findings, clinical.diagnosis and medication_review. PHARMACIST independently reviews caller-supplied medication data. medications and symptoms are optional strings, not fixed answers. Actual CT and test-panel Endpoints carry each resource request and result; do not invent acquire, release or notification tools. Invalid input returns an error without authorizing an effect, so correct it or choose another legal operation. Other participants can continue while a request waits. Finish your assigned work after reading its actual result. This abstract benchmark has no prescribing or administration effect."
     } else if multi_round_discovery {
         "Choose private shell commands and calculations freely, use actual scientific results, and reconsider failures. Resource and material Endpoints carry requests and results automatically. CHEMIST has three required analyses: synthesis_qc, molecular_id and documentation. A successful molecular_id is an intermediate result, not completion of the chemist assignment. Request HPLC documentation even if it must wait for the director; exit only after its actual documentation result. Documentation archives either terminal outcome, including abort. FORMULATION_SCIENTIST reads /service/result for the actual compound identity, supplies its data.compound to prepare_formulation, and retries failed preparation. BIOLOGIST performs culture_prep, then may choose the order of bioassay and stability for each actual formulation. It may retest the same bioassay material while held; submit its chosen final outcome with {\"evidence\":\"bioassay\"} to /service/submit_evidence. TOXICOLOGIST performs baseline_markers, purity_check and cytotoxicity, may retest toxicity while held, and submits {\"evidence\":\"cytotoxicity\"}. A submitted assay material cannot be edited again in that round. CLINICAL_LEAD requests combined_review of the actual completed evidence. REGULATORY_SPECIALIST chooses initial_review or hold_review, may repeat or deepen review, and submits its actual verdict with {\"evidence\":\"regulatory\"}. A held review on unchanged evidence cannot be made positive by routine repetition. PROJECT_DIRECTOR reads the actual regulatory result, then chooses continue, retry or abort; continue requires positive approval. Retry starts another formulation and assessment round, without refilling the three biological samples. Failed or exhausted assays can support an honest insufficient-data assessment and abort. The final documentation archives the actual terminal outcome. After evidence submission or a previous round, read actual responses and coordination data: they carry fresh material or the final outcome. Each scientist stays available for a requested new round and exits after the final outcome. Do not invent acquisition, release, refill or notification commands. These shell paths are the available interface, not an instruction to fabricate results or follow one total agent schedule."
     } else if regulatory_discovery {
@@ -315,7 +326,8 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
     } else {
         "Each file is a direct choreography projection. Choose shell commands and private computations freely. An unadmitted operation returns an error to the same guest, allowing correction or another operation. read_literature returns actual source material; draft_content uses that completed material; write_to_document uses your actual draft and both assigned section resources; review_own_work examines that actual contribution. The localsides drive the real section Endpoints and return the actual results. No host selects your commands or dispatches accepted files to another workflow. Read each actual response from the same operation file. Use your assigned topic, section or resource pair. Do not invent acquire/release or notification commands. The actual review outcome is terminal, including failure; finish your own work and exit after reading it."
     };
-    let response_object = if kitchen
+    let response_object = if medical
+        || kitchen
         || dining
         || coding
         || api
@@ -343,9 +355,11 @@ guest. All file I/O uses Hibana Endpoints and ChoreoFS. There is no host
 filesystem or native process execution. Use help to see shell commands and
 syntax. You may use variables, conditions, loops, pipes, redirection, expr,
 private files and saved scripts. Choose your own commands and calculations.
-Normal reads may wait for data. `dd if=PATH iflag=nonblock` requests a nonblocking
-read: if no message has arrived it returns a nonzero status without consuming a
-message, so you may choose another file or retry. It grants no operation rights.
+Normal reads may wait for data, including work you have not yet requested.
+While a shell command waits, that same guest cannot run another command.
+`dd if=PATH iflag=nonblock` requests a nonblocking read: if no message has arrived
+it returns a nonzero status without consuming a message, so you may choose
+another file or retry. It grants no operation rights.
 Private /work files have names you choose, with eight slots bounded by the configured guest memory profile.
 A script has at most 4096 UTF-8 bytes. Each participant has its own persistent
 guest and private files.

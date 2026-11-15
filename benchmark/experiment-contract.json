@@ -17,7 +17,7 @@
     "first_technical_gate": "T3/T4: compose unique resource ownership and its remaining protocol with actual effects; define the adapter trust boundary and test old owners, duplicate transfers and argument substitution before scored comparisons",
     "theorem_scope_and_milestones": "plan.md",
     "effect_boundary_contract_and_inventory": "benchmark/effect-boundaries.md",
-    "effect_boundary_status": "Minimum T3/T4 composition is proved under the consuming receiver contract; concrete handoff binds actual resource receives and publication to one checked EPF execution. Historical generic-close ports do not qualify the direct-file boundary. Eighteen source-bound tasks now have direct-file mechanism and live-model evidence; 30 remain, with the exact list in migration_status. The latest 12E direct-file implementation passes 51 actual-Wasm conditions and one three-Luna/xhigh pilot with EPF, exact effects/replies and neutral common scoring on each same run. The live pilot completes in 23.9857885 seconds with 332800 inclusive tokens and zero violations. The original kitchen tools have zero delay; controlled-delay concurrency fixtures are labeled separately and are not performance results. This is not general Rust refinement, final-source all-family certification, a success-rate estimate or comparative superiority. Canonical sibling worktrees remain the development dependencies. Foreign-tail parallel borrowing has focused native, Miri, generated and Lean evidence. The repaired current core also passes all native targets and generated assignments 31 through 36, but the full normal gate remains unfinished. New assignment 37 was stopped for intermediate-record disk growth and 38 is unstarted; neither counts as passed. Comparison-connection development stays deferred.",
+    "effect_boundary_status": "Nineteen source-bound tasks now have direct-file mechanism and live-model evidence; 29 remain, with the exact list in migration_status. Latest 5E passes nine real-Wasm cases and one three-Luna/xhigh pilot on the same binary, with complete EPF, one-use request/effect/reply matching and neutral common scoring. The live pilot completes in 48.271922459 seconds, 377070 inclusive tokens, six effects and zero violations. An earlier model-selected blocking read was interrupted and is not counted as success. Minimum T3/T4 composition remains under its consuming receiver contract; this is not general Rust refinement, clinical validation, final-source all-family certification, a success-rate estimate or comparative superiority. Canonical sibling worktrees remain the dependencies. Current core ordinary Rust, required Miri, Lean/model and runtime-work gates passed locally; the full generated normal population remains unfinished. Comparison-connection development stays deferred.",
     "minimum_handoff_case": {
       "source": "src/tasks/handoff",
       "scope": "Native hibana-runtime mechanism fixture with two independent runtimes and the application's actual Endpoint transport; not a remote-network, Wasm or model experiment",
@@ -754,6 +754,7 @@
       "2H",
       "3E",
       "4E",
+      "5E",
       "7E",
       "8E",
       "9E",
@@ -765,22 +766,22 @@
       "12E",
       "16E"
     ],
-    "count": 18,
-    "remaining": 30,
-    "qualified_direct_families": 12,
+    "count": 19,
+    "remaining": 29,
+    "qualified_direct_families": 13,
     "final_source_all_family_certification": false,
     "scored_comparisons": 0,
     "latest_source_bound_port": {
       "tasks": [
-        "12E"
+        "5E"
       ],
       "simulator_contract": "common-environment-v23",
-      "evidence": "output/experiments/kitchen-direct-files-20261115/qualification-v25.json"
+      "evidence": "output/experiments/medical-direct-files-20261115/qualification-v11.json"
     },
     "direct_choreofs_boundary": {
       "status": "migration_in_progress",
-      "strengthened_boundary_qualified_tasks": 18,
-      "remaining_tasks": 30,
+      "strengthened_boundary_qualified_tasks": 19,
+      "remaining_tasks": 29,
       "unsafe_application_miri_required": false,
       "scored_runs": 0,
       "full_48_task_goal_unchanged": true,
@@ -1305,85 +1306,62 @@
   },
   "medical_consultation_procedure": {
     "tasks": [
-      "5E",
-      "5M",
-      "5H"
+      "5E"
     ],
-    "status": "5E/5M are the nineteenth/twentieth migrated tasks under their recorded v3 sources. 5H has a compiled global, production receivers and 92 native conditions; actual Wasm/model qualification remains pending. The current common world is v4 for the 5H-only capacity fix.",
-    "simulator_contract": "common-environment-v3",
-    "common_world_test_functions": 70,
-    "medical_test_functions": 17,
-    "data_valid_5E_orders": 72,
-    "preserved": "Patient-specific completed inputs, partial test panels, independent panels/imaging/review, actual caller medication and symptoms data, physical scanner conflicts and recovery from invalid attempts.",
-    "unobservable": [
-      "No prescribing or drug-administration domain tool exists. Medication review cannot certify those absent effects.",
-      "Explicit referral and findings channels need actual communication evidence; common domain-call completion alone does not prove them."
-    ],
+    "status": "source_bound_direct_file_qualified",
+    "current_boundary": "Nine operation/data file Endpoints. Actual typed requests and results use the same operation file; referral, findings and consultation are real read-only projected messages. Completed panel Endpoints move once to their actual completed-record owner. No generic close dispatcher, permission table or progress flag.",
+    "simulator_contract": "common-environment-v23",
     "implementation": "src/tasks/medical_consultation",
-    "pending": [
-      "Implement and qualify 5H, then finish the other remaining ports.",
-      "Final-source all-family/core certification and scored experiments."
-    ],
-    "scored_runs": 0,
-    "native_test_functions": 3,
-    "native_whole_protocol_conditions": 4,
-    "native_ct_receiver_prefix_conditions": 3,
-    "panel_receipts": "Keep the latest actual receipt per required test; no accumulating retry history or progress flags. Both test-panel Endpoints move on completion, so the former effect owner cannot lend the old retry right again.",
-    "source_qualification": "output/experiments/medical-consultation-development-v1/qualification.json",
-    "counted_tasks_as_migrated": [
-      "5E",
-      "5M"
-    ],
+    "source_qualification": "output/experiments/medical-direct-files-20261115/qualification-v11.json",
     "wasm_conditions": 9,
-    "wasm_actual_effects": [
-      8,
-      8,
-      8,
-      8,
-      8,
-      8,
-      6,
-      6,
-      12
-    ],
-    "wasm_captured_records": [
-      3020,
-      2969,
-      3020,
-      2969,
-      3020,
-      2969,
-      2542,
-      2520,
-      6470
-    ],
-    "saved_record_mutants_rejected": 81,
-    "wasm_and_audit_seconds": 168.99,
-    "miri_test_functions": 3,
-    "miri_seconds": 467.89,
-    "strict_clippy": "passed",
+    "saved_record_mutants_rejected": 153,
+    "native_data_tests": 2,
+    "runner_tests": 54,
+    "application_miri_required": false,
     "live_model": {
-      "source_artifact": "output/experiments/model-qualification/current-core-medical-5E-v1/subscription-5E-1794175974163030000",
-      "status": "passed",
-      "participants": 3,
+      "run": "output/experiments/medical-direct-files-20261115/live-v9",
+      "result": {
+        "path": "output/experiments/medical-direct-files-20261115/live-v9/result.json",
+        "sha256": "041a90521ec2fd1c135882f9891df46bcb9c73db73f35cb23f96272f0a7ed601"
+      },
+      "audit": {
+        "path": "output/experiments/medical-direct-files-20261115/live-v9/audit.json",
+        "sha256": "d498e2230e4d42939f2ea34c8e23a91e2beab0cc32ad5face73f0e16389b575a"
+      },
+      "versions": {
+        "path": "output/experiments/medical-direct-files-20261115/live-v9/versions.json",
+        "sha256": "6ea2bfb510feb7b4bf274f9ebbb9b59965d19f4a72256b964370e870f994974e"
+      },
       "model": "gpt-6-luna",
       "effort": "xhigh",
-      "runtime_and_model_seconds": 31.452171791,
-      "inclusive_tokens": 257121,
+      "authentication": "existing ChatGPT subscription",
+      "participants": 3,
+      "elapsed_seconds": 48.271922459,
+      "inclusive_tokens": 377070,
+      "shell_calls": 18,
       "actual_effects": 6,
-      "captured_records": 3818,
-      "violations": 0,
+      "captured_records": 2831,
       "independent_effect_overlaps": 1,
       "panel_imaging_overlaps": 0,
-      "max_simultaneous_model_turns": 3,
-      "common_scoring_dynamic_epf_and_effect_audits": "passed",
+      "maximum_simultaneous_model_turns": 3,
+      "violations": 0,
+      "simulator_contract": "common-environment-v23",
+      "simulator_manifest_sha256": "90c71ae26686bed3365453d97ed76ffd08b3d8eb2001103de9ba04675a8ba59f",
       "scored_benchmark": false,
-      "guard_maximum_descendant_bytes": 689733632,
-      "participant_turns": 3
-    }
+      "maximum_descendant_bytes": 707903488
+    },
+    "unobservable": [
+      "The common world has no prescribing or drug-administration effect.",
+      "This abstract tool benchmark does not establish clinical correctness."
+    ],
+    "pending": [
+      "Rewrite and qualify 5M/5H and the other 27 remaining tasks.",
+      "Final-source all-family/core certification and scored experiments."
+    ],
+    "scored_runs": 0
   },
   "multi_specialty_procedure": {
-    "status": "passed_source_bound_scripted_and_live_qualification",
+    "status": "historical_generic_close_source_only_direct_file_rewrite_unqualified",
     "task": "5M",
     "migrated_task_number": 20,
     "remaining_task_ports": 28,
@@ -1443,7 +1421,7 @@
   },
   "critical_care_procedure": {
     "task": "5H",
-    "status": "source_bound_native_wasm_and_live_model_qualified",
+    "status": "historical_generic_close_source_only_direct_file_rewrite_unqualified",
     "migrated": true,
     "global": "src/tasks/critical_care/global.rs",
     "core_changed": false,
