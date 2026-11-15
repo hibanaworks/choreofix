@@ -1,5 +1,6 @@
 //! Immutable transport and effect observations, shared by task auditors.
 use crate::evidence::Result;
+use hibana::runtime::wire::{Payload, WirePayload};
 use hibana_wasip1_runtime::protocol;
 use serde_json::{Value, json};
 use std::{
@@ -249,10 +250,11 @@ pub(crate) fn check_close_pairs(frames: &BTreeMap<u64, Frame>, pairs: &[(u64, u6
             return Err("missing or extra WASI close request/result".into());
         }
         for (request, reply) in requests.into_iter().zip(replies) {
-            if request.bytes.len() != 1
-                || reply.bytes.len() < 4
-                || request.bytes[0] != reply.bytes[0]
-            {
+            protocol::FdCloseReq::validate_payload(Payload::new(&request.bytes))
+                .map_err(|_| "invalid WASI close request")?;
+            protocol::FdClosedRet::validate_payload(Payload::new(&reply.bytes))
+                .map_err(|_| "invalid WASI close result")?;
+            if request.bytes[0] != reply.bytes[0] {
                 return Err("WASI close request/result data mismatch".into());
             }
         }
@@ -650,13 +652,20 @@ mod tests {
         let reply = Frame {
             logical_label: protocol::LABEL_WASI_FD_CLOSE_RET,
             identity: json!({"source":8,"target":0}),
-            bytes: vec![6, 0, 0, 0],
+            bytes: vec![6, 0, 0],
             sent: 2,
             received: Some(3),
             queued: false,
         };
         let mut frames = BTreeMap::from([(1, request), (2, reply)]);
         assert!(check_close_pairs(&frames, &[(0, 8)]).is_ok());
+        frames.get_mut(&2).unwrap().bytes = vec![6, 0, 2];
+        assert!(check_close_pairs(&frames, &[(0, 8)]).is_ok());
+        for bytes in [vec![], vec![6], vec![6, 0], vec![6, 0, 0, 0]] {
+            frames.get_mut(&2).unwrap().bytes = bytes;
+            assert!(check_close_pairs(&frames, &[(0, 8)]).is_err());
+        }
+        frames.get_mut(&2).unwrap().bytes = vec![6, 0, 0];
         frames.get_mut(&1).unwrap().logical_label = protocol::LABEL_WASI_FD_CLOSE_RET;
         assert!(check_close_pairs(&frames, &[(0, 8)]).is_err());
         frames.get_mut(&1).unwrap().logical_label = protocol::LABEL_WASI_FD_CLOSE;
@@ -668,7 +677,7 @@ mod tests {
             Frame {
                 logical_label: protocol::LABEL_WASI_FD_CLOSE_RET,
                 identity: json!({"source":8,"target":0}),
-                bytes: vec![6, 0, 0, 0],
+                bytes: vec![6, 0, 0],
                 sent: 4,
                 received: Some(5),
                 queued: false,

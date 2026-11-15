@@ -1,184 +1,74 @@
-//! Candidate/test data belong to this service; the tester owns its environment.
-use super::super::{
-    global::{delivery::*, *},
-    imp,
-};
+//! The sole test environment owns candidate bytes and executes actual test requests.
+use super::super::{global::*, imp};
 use crate::shell::{ShellError, ShellResult, imp::service::Domain};
 use hibana::{Endpoint, g::Message};
+use serde_json::Value;
 
-pub async fn feature_a<D: Domain>(
-    endpoint: &mut Endpoint<'_, TEST_DATA_A>,
-    domain: &D,
-) -> ShellResult<()> {
+#[hibana_runtime::scope]
+pub async fn run<D: Domain>(owner: &mut Endpoint<TEST_OWNER>, domain: &D) -> ShellResult<()> {
+    let mut environment = owner.recv::<TestLoan>().await?;
+    let mut candidates = [Value::Null, Value::Null];
     loop {
-        let candidate = imp::decode(endpoint.recv::<CandidateForTestsA>().await?)?;
-        imp::candidate(&candidate, FEATURE_A)?;
-        let admitted = endpoint.recv::<TestIntentA>().await?.into_value();
-        imp::arguments(&admitted, ("target", FEATURE_A))?;
-        let bytes = imp::encode(&candidate)?;
-        endpoint
-            .send::<CandidateForTestsA>(&bytes.as_slice())
-            .await?;
-        let arguments = endpoint.recv::<TestRequestA>().await?.into_value();
-        imp::same(&arguments, &admitted)?;
-        let result = domain
-            .execute("TEST_WRITER", "write_tests", arguments)
-            .await
-            .map_err(ShellError::message)?;
-        imp::tested(&result, &candidate, FEATURE_A)?;
-        let bytes = imp::encode(&result)?;
-        endpoint.send::<TestResultA>(&bytes.as_slice()).await?;
-        endpoint.send::<TestedA>(&bytes.as_slice()).await?;
-        let branch = endpoint.offer().await?;
+        let branch = environment.offer().await?;
         match branch.label() {
-            ReviewApproved::LOGICAL_LABEL => {
-                branch.recv::<ReviewApproved>().await?;
-                break;
+            ReadyTestA::LOGICAL_LABEL => {
+                let result = imp::decode(branch.recv::<ReadyTestA>().await?)?;
+                imp::candidate(&result, FEATURE_A)?;
+                candidates[0] = result;
             }
-            ReviewRejected::LOGICAL_LABEL => {
-                branch.recv::<ReviewRejected>().await?;
+            TestRequestA::LOGICAL_LABEL => {
+                let arguments = branch.recv::<TestRequestA>().await?.into_value();
+                imp::candidate(&candidates[0], FEATURE_A)?;
+                let result = domain
+                    .execute("TEST_WRITER", "write_tests", arguments)
+                    .await
+                    .map_err(ShellError::message)?;
+                imp::tested(&result, &candidates[0], FEATURE_A)?;
+                let bytes = imp::encode(&result)?;
+                environment.send::<TestedA>(&bytes.as_slice()).await?;
+                environment.send::<FileTestedA>(&bytes.as_slice()).await?;
             }
-            _ => return Err(ShellError::message("expected the reviewed test candidate")),
-        }
-    }
-    loop {
-        let branch = endpoint.offer().await?;
-        match branch.label() {
-            LastCiPassedA::LOGICAL_LABEL => {
-                branch.recv::<LastCiPassedA>().await?;
+            ReviewFeedbackA::LOGICAL_LABEL => {
+                let result = imp::decode(branch.recv::<ReviewFeedbackA>().await?)?;
+                imp::reviewed(&result, &candidates[0], FEATURE_A)?;
+            }
+            ReadyTestB::LOGICAL_LABEL => {
+                let result = imp::decode(branch.recv::<ReadyTestB>().await?)?;
+                imp::candidate(&result, FEATURE_B)?;
+                candidates[1] = result;
+            }
+            TestRequestB::LOGICAL_LABEL => {
+                let arguments = branch.recv::<TestRequestB>().await?.into_value();
+                imp::candidate(&candidates[1], FEATURE_B)?;
+                let result = domain
+                    .execute("TEST_WRITER", "write_tests", arguments)
+                    .await
+                    .map_err(ShellError::message)?;
+                imp::tested(&result, &candidates[1], FEATURE_B)?;
+                let bytes = imp::encode(&result)?;
+                environment.send::<TestedB>(&bytes.as_slice()).await?;
+                environment.send::<FileTestedB>(&bytes.as_slice()).await?;
+            }
+            ReviewFeedbackB::LOGICAL_LABEL => {
+                let result = imp::decode(branch.recv::<ReviewFeedbackB>().await?)?;
+                imp::reviewed(&result, &candidates[1], FEATURE_B)?;
+            }
+            CiUpdate::LOGICAL_LABEL => {
+                let result = imp::decode(branch.recv::<CiUpdate>().await?)?;
+                if !result["success"].is_boolean() {
+                    return Err(ShellError::message("CI has no actual result"));
+                }
+            }
+            TaskExit::LOGICAL_LABEL => {
+                if branch.recv::<TaskExit>().await? != 0 {
+                    return Err(ShellError::message("delivery failed"));
+                }
                 return Ok(());
             }
-            CiPassedA::LOGICAL_LABEL => {
-                branch.recv::<CiPassedA>().await?;
-                return Ok(());
-            }
-            CiFailedA::LOGICAL_LABEL => {
-                branch.recv::<CiFailedA>().await?;
-            }
-            _ => return Err(ShellError::message("expected this feature's CI outcome")),
-        }
-        loop {
-            let candidate = imp::decode(endpoint.recv::<CandidateForTestsA>().await?)?;
-            imp::candidate(&candidate, FEATURE_A)?;
-            let admitted = endpoint.recv::<TestIntentA>().await?.into_value();
-            imp::arguments(&admitted, ("target", FEATURE_A))?;
-            let bytes = imp::encode(&candidate)?;
-            endpoint
-                .send::<CandidateForTestsA>(&bytes.as_slice())
-                .await?;
-            let arguments = endpoint.recv::<TestRequestA>().await?.into_value();
-            imp::same(&arguments, &admitted)?;
-            let result = domain
-                .execute("TEST_WRITER", "write_tests", arguments)
-                .await
-                .map_err(ShellError::message)?;
-            imp::tested(&result, &candidate, FEATURE_A)?;
-            let bytes = imp::encode(&result)?;
-            endpoint.send::<TestResultA>(&bytes.as_slice()).await?;
-            endpoint.send::<TestedA>(&bytes.as_slice()).await?;
-            let branch = endpoint.offer().await?;
-            match branch.label() {
-                RecoveryReviewApproved::LOGICAL_LABEL => {
-                    branch.recv::<RecoveryReviewApproved>().await?;
-                    break;
-                }
-                RecoveryReviewRejected::LOGICAL_LABEL => {
-                    branch.recv::<RecoveryReviewRejected>().await?;
-                }
-                _ => {
-                    return Err(ShellError::message(
-                        "expected the recovery candidate's review",
-                    ));
-                }
-            }
-        }
-    }
-}
-
-pub async fn feature_b<D: Domain>(
-    endpoint: &mut Endpoint<'_, TEST_DATA_B>,
-    domain: &D,
-) -> ShellResult<()> {
-    loop {
-        let candidate = imp::decode(endpoint.recv::<CandidateForTestsB>().await?)?;
-        imp::candidate(&candidate, FEATURE_B)?;
-        let admitted = endpoint.recv::<TestIntentB>().await?.into_value();
-        imp::arguments(&admitted, ("target", FEATURE_B))?;
-        let bytes = imp::encode(&candidate)?;
-        endpoint
-            .send::<CandidateForTestsB>(&bytes.as_slice())
-            .await?;
-        let arguments = endpoint.recv::<TestRequestB>().await?.into_value();
-        imp::same(&arguments, &admitted)?;
-        let result = domain
-            .execute("TEST_WRITER", "write_tests", arguments)
-            .await
-            .map_err(ShellError::message)?;
-        imp::tested(&result, &candidate, FEATURE_B)?;
-        let bytes = imp::encode(&result)?;
-        endpoint.send::<TestResultB>(&bytes.as_slice()).await?;
-        endpoint.send::<TestedB>(&bytes.as_slice()).await?;
-        let branch = endpoint.offer().await?;
-        match branch.label() {
-            ReviewApproved::LOGICAL_LABEL => {
-                branch.recv::<ReviewApproved>().await?;
-                break;
-            }
-            ReviewRejected::LOGICAL_LABEL => {
-                branch.recv::<ReviewRejected>().await?;
-            }
-            _ => return Err(ShellError::message("expected the reviewed test candidate")),
-        }
-    }
-    loop {
-        let branch = endpoint.offer().await?;
-        match branch.label() {
-            LastCiPassedB::LOGICAL_LABEL => {
-                branch.recv::<LastCiPassedB>().await?;
-                return Ok(());
-            }
-            CiPassedB::LOGICAL_LABEL => {
-                branch.recv::<CiPassedB>().await?;
-                return Ok(());
-            }
-            CiFailedB::LOGICAL_LABEL => {
-                branch.recv::<CiFailedB>().await?;
-            }
-            _ => return Err(ShellError::message("expected this feature's CI outcome")),
-        }
-        loop {
-            let candidate = imp::decode(endpoint.recv::<CandidateForTestsB>().await?)?;
-            imp::candidate(&candidate, FEATURE_B)?;
-            let admitted = endpoint.recv::<TestIntentB>().await?.into_value();
-            imp::arguments(&admitted, ("target", FEATURE_B))?;
-            let bytes = imp::encode(&candidate)?;
-            endpoint
-                .send::<CandidateForTestsB>(&bytes.as_slice())
-                .await?;
-            let arguments = endpoint.recv::<TestRequestB>().await?.into_value();
-            imp::same(&arguments, &admitted)?;
-            let result = domain
-                .execute("TEST_WRITER", "write_tests", arguments)
-                .await
-                .map_err(ShellError::message)?;
-            imp::tested(&result, &candidate, FEATURE_B)?;
-            let bytes = imp::encode(&result)?;
-            endpoint.send::<TestResultB>(&bytes.as_slice()).await?;
-            endpoint.send::<TestedB>(&bytes.as_slice()).await?;
-            let branch = endpoint.offer().await?;
-            match branch.label() {
-                RecoveryReviewApproved::LOGICAL_LABEL => {
-                    branch.recv::<RecoveryReviewApproved>().await?;
-                    break;
-                }
-                RecoveryReviewRejected::LOGICAL_LABEL => {
-                    branch.recv::<RecoveryReviewRejected>().await?;
-                }
-                _ => {
-                    return Err(ShellError::message(
-                        "expected the recovery candidate's review",
-                    ));
-                }
+            label => {
+                return Err(ShellError::message(format!(
+                    "unexpected test environment input {label}"
+                )));
             }
         }
     }

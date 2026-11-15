@@ -1,513 +1,582 @@
-//! One-use WASI admissions, actual resource requests and development effects.
-//! EPF checks the source execution; this checker never drives an Endpoint.
+//! Actual file requests, material receipts, effects and replies; EPF checks execution.
 use crate::{
     evidence::{Result, digest, save},
-    journal::{Call, check_close_pairs, close_arguments, one, records},
+    journal::{Call, Frame, one, records},
 };
 use serde_json::{Value, json};
-use std::{collections::BTreeSet, fs, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+};
 
-fn completed<'a>(
-    calls: &[&'a Call],
-    before: usize,
-    tool: &str,
-    key: &str,
-    target: &str,
-) -> Result<&'a Call> {
-    calls
-        .iter()
-        .copied()
-        .filter(|call| {
-            call.request["tool"] == tool
-                && call.request["arguments"][key] == target
-                && call.result.as_ref().is_some_and(|(at, _)| *at < before)
-        })
-        .max_by_key(|call| call.emitted)
-        .ok_or_else(|| format!("missing actual {tool} for {target}").into())
+fn named(compiled: &Value, group: &str, name: &str) -> Result<u64> {
+    compiled[group][name]
+        .as_u64()
+        .ok_or_else(|| format!("compiled {group} {name}").into())
 }
-
-fn receipt(result: &Value) -> Result<u64> {
-    result["data"]["artifact_id"]
+fn target(call: &Call) -> Result<&str> {
+    let key = match call.tool()? {
+        "implement_feature" => "feature_name",
+        "merge_code" => "branch",
+        "code_review" => "pr_id",
+        "write_tests" => "target",
+        "run_tests" => "suite",
+        _ => return Err("unknown development effect".into()),
+    };
+    call.request["arguments"][key]
         .as_str()
-        .and_then(|id| id.strip_prefix("development:"))
-        .ok_or("missing development occurrence")?
-        .parse()
-        .map_err(Into::into)
+        .ok_or_else(|| "effect target".into())
+}
+fn feature(call: &Call) -> Result<usize> {
+    match target(call)? {
+        "user_authentication" | "full_test_suite_after_auth" => Ok(0),
+        "payment_processing" | "full_test_suite_after_payment" => Ok(1),
+        _ => Err("unassigned development target".into()),
+    }
+}
+fn receipt(value: &Value) -> Result<u64> {
+    value["data"]["artifact_id"]
+        .as_str()
+        .and_then(|s| s.strip_prefix("development:"))
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| "actual effect receipt".into())
+}
+fn material<'a>(calls: &'a BTreeMap<u64, Call>, tool: &str, id: u64) -> Result<&'a Call> {
+    one(calls.values().filter(|call| {
+        call.tool().is_ok_and(|t| t == tool)
+            && call
+                .result()
+                .is_ok_and(|(_, result)| receipt(result).ok() == Some(id))
+    }))
+}
+fn consume<'a>(
+    (frames, used): (&'a BTreeMap<u64, Frame>, &mut BTreeSet<usize>),
+    (from, to, label): (u64, u64, u64),
+    (value, after, before): (&Value, usize, usize),
+) -> Result<&'a Frame> {
+    let frame = one(frames.values().filter(|f| {
+        f.direction(from, to)
+            && u64::from(f.logical_label) == label
+            && after < f.sent
+            && f.sent < before
+            && !used.contains(&f.sent)
+            && f.value().is_ok_and(|v| v == *value)
+    }))?;
+    frame.received()?;
+    used.insert(frame.sent);
+    Ok(frame)
+}
+fn business(frame: &Frame, roles: &BTreeSet<u64>) -> bool {
+    frame.identity["source"]
+        .as_u64()
+        .is_some_and(|r| roles.contains(&r))
+        && frame.identity["target"]
+            .as_u64()
+            .is_some_and(|r| roles.contains(&r))
+        && frame.value().is_ok_and(|v| v.is_object())
 }
 
-fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
-    let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("empty feature-delivery evidence")?["message"];
-    if compiled["task"] != "6M" || fixture["task"] != "6M" || fixture["type"] != "fixtures" {
-        return Err("feature-delivery task differs".into());
+fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
+    let compiled = &projection["compiled"];
+    if compiled["task"] != "6M" {
+        return Err("feature-delivery compiled task".into());
+    }
+    let role = |name: &str| named(compiled, "roles", name);
+    let label = |name: &str| named(compiled, "labels", name);
+    let fixture = &rows.first().ok_or("empty evidence")?["message"];
+    if fixture["type"] != "fixtures" || fixture["task"] != "6M" {
+        return Err("6M fixture".into());
     }
     let actors = fixture["fixtures"]
         .as_array()
-        .ok_or("feature-delivery participants")?;
-    if actors
-        .iter()
-        .map(|actor| actor["agent"].as_str())
-        .collect::<BTreeSet<_>>()
-        != BTreeSet::from([
-            Some("DEVELOPER_A"),
-            Some("DEVELOPER_B"),
-            Some("REVIEWER"),
-            Some("TEST_WRITER"),
-            Some("CI_RUNNER"),
-        ])
-        || actors.len() != 5
+        .ok_or("original participants")?;
+    let expected = BTreeSet::from([
+        "DEVELOPER_A",
+        "DEVELOPER_B",
+        "REVIEWER",
+        "TEST_WRITER",
+        "CI_RUNNER",
+    ]);
+    if actors.len() != expected.len()
+        || actors
+            .iter()
+            .filter_map(|a| a["agent"].as_str())
+            .collect::<BTreeSet<_>>()
+            != expected
     {
-        return Err("feature-delivery participants differ".into());
+        return Err("6M participants".into());
     }
-    let name = |group: &str, key: &str| -> Result<u64> {
-        compiled[group][key]
-            .as_u64()
-            .filter(|value| *value <= 255)
-            .ok_or_else(|| format!("compiled {group} {key}").into())
-    };
-    let labels = crate::projection::frames(artifact, rows)?;
+    let headers = crate::projection::frames(projection, rows)?;
+    let mut journal = crate::journal::read(rows, &headers, actors)?;
+    journal.bind_receives(dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
         score,
-    } = crate::journal::read(rows, &labels, actors)?;
+    } = journal;
     if score["complete"] != true
         || score["violations"] != json!([])
-        || calls.is_empty()
         || frames
             .values()
-            .any(|frame| frame.identity["session"] != compiled["session"])
+            .any(|f| f.identity["session"] != compiled["session"])
     {
-        return Err("feature-delivery completion, effect or session differs".into());
+        return Err("development completion, session or actual violation".into());
     }
     let pairs = [
-        ("DEVELOPER_A", "A_IO"),
-        ("DEVELOPER_B", "B_IO"),
-        ("TEST_WRITER", "WRITER_IO"),
-        ("REVIEWER", "REVIEWER_IO"),
-        ("CI_RUNNER", "RUNNER_IO"),
+        ("A_VM", "A_IO"),
+        ("B_VM", "B_IO"),
+        ("REVIEW_VM", "REVIEW_IO"),
+        ("TEST_VM", "TEST_IO"),
+        ("CI_VM", "CI_IO"),
     ]
     .into_iter()
-    .map(|(vm, io)| Ok((name("roles", vm)?, name("roles", io)?)))
+    .map(|(vm, io)| Ok((role(vm)?, role(io)?)))
     .collect::<Result<Vec<_>>>()?;
-    check_close_pairs(&frames, &pairs)?;
-    let mut ordered = calls.values().collect::<Vec<_>>();
-    ordered.sort_by_key(|call| call.emitted);
+    crate::journal::check_close_pairs(&frames, &pairs)?;
+    let roles = [
+        "REPO",
+        "TEST_ENV",
+        "BUILD_SERVER",
+        "REVIEW_A",
+        "REVIEW_B",
+        "A_FILE",
+        "B_FILE",
+        "A_REVIEW_FILE",
+        "B_REVIEW_FILE",
+        "TEST_FILE",
+        "CI_FILE",
+    ]
+    .into_iter()
+    .map(role)
+    .collect::<Result<BTreeSet<_>>>()?;
     let mut scored = score["events"]
         .as_array()
-        .ok_or("development score events")?
+        .ok_or("scored actual effects")?
         .clone();
-    let mut used_frames = BTreeSet::new();
-    let mut used_closes = BTreeSet::new();
-    let repository = name("roles", "REPOSITORY")?;
-    let repo = name("roles", "REPO")?;
-    let ci = name("roles", "CI_SERVICE")?;
+    if scored.len() != calls.len() {
+        return Err("score and effect count differ".into());
+    }
+    let mut used = BTreeSet::new();
+    let mut publication_inputs = BTreeSet::new();
+    let mut ordered = calls.values().collect::<Vec<_>>();
+    ordered.sort_by_key(|call| call.emitted);
     for call in &ordered {
-        let agent = call.request["agent"].as_str().ok_or("development actor")?;
         let tool = call.tool()?;
+        let f = feature(call)?;
+        let suffix = if f == 0 { "A" } else { "B" };
+        let name = if f == 0 {
+            "user_authentication"
+        } else {
+            "payment_processing"
+        };
+        let file = role(if f == 0 { "A_FILE" } else { "B_FILE" })?;
+        let review_file = role(if f == 0 {
+            "A_REVIEW_FILE"
+        } else {
+            "B_REVIEW_FILE"
+        })?;
+        let reviewer = role(if f == 0 { "REVIEW_A" } else { "REVIEW_B" })?;
+        let repo = role("REPO")?;
+        let environment = role("TEST_ENV")?;
+        let build = role("BUILD_SERVER")?;
         let arguments = &call.request["arguments"];
-        let actor = one(actors.iter().filter(|actor| actor["agent"] == agent))?;
-        one(actor["calls"]
+        let agent = call.request["agent"].as_str().ok_or("actual actor")?;
+        let actor = one(actors.iter().filter(|a| a["agent"] == agent))?;
+        if !actor["calls"]
             .as_array()
-            .ok_or("development assignments")?
+            .ok_or("original assignments")?
             .iter()
-            .filter(|assigned| {
-                assigned["tool"] == tool
-                    && assigned["arguments"].as_object().is_some_and(|object| {
-                        object.iter().all(|(key, value)| arguments[key] == *value)
+            .any(|a| {
+                a["tool"] == tool
+                    && a["arguments"].as_object().is_some_and(|expected| {
+                        arguments.as_object().is_some_and(|actual| {
+                            expected
+                                .iter()
+                                .all(|(key, value)| actual.get(key) == Some(value))
+                                && actual.iter().all(|(key, value)| {
+                                    expected.contains_key(key)
+                                        || (tool == "implement_feature"
+                                            && key == "source"
+                                            && value.as_str().is_some_and(|s| !s.trim().is_empty()))
+                                })
+                        })
                     })
-            }))?;
-        let vm = name("roles", agent)?;
-        let io = name(
-            "roles",
-            match agent {
-                "DEVELOPER_A" => "A_IO",
-                "DEVELOPER_B" => "B_IO",
-                "TEST_WRITER" => "WRITER_IO",
-                "REVIEWER" => "REVIEWER_IO",
-                "CI_RUNNER" => "RUNNER_IO",
-                _ => return Err("unknown participant".into()),
-            },
-        )?;
-        let feature = match tool {
-            "implement_feature" => arguments["feature_name"].as_str(),
-            "merge_code" => arguments["branch"].as_str(),
-            "write_tests" => arguments["target"].as_str(),
-            "code_review" => arguments["pr_id"].as_str(),
-            "run_tests" => match arguments["suite"].as_str() {
-                Some("full_test_suite_after_auth") => Some("user_authentication"),
-                Some("full_test_suite_after_payment") => Some("payment_processing"),
-                _ => None,
-            },
-            _ => None,
+            })
+        {
+            return Err("effect differs from the assigned actual arguments".into());
         }
-        .ok_or("unknown development operation or target")?;
-        let a = feature == "user_authentication";
-        if !a && feature != "payment_processing" {
-            return Err("unassigned feature".into());
-        }
-        let authority = name("roles", if a { "AUTH_A" } else { "AUTH_B" })?;
-        let review_service = name("roles", if a { "REVIEW_A" } else { "REVIEW_B" })?;
-        let test_service = name("roles", if a { "TEST_DATA_A" } else { "TEST_DATA_B" })?;
-        let (result_at, result) = call.result()?;
+        let (at, result) = call.result()?;
         if result["tool_name"] != tool
             || result["data"]["agent"] != agent
             || !result["success"].is_boolean()
         {
-            return Err("actual development result identity differs".into());
+            return Err("actual result identity".into());
         }
-        let score_arguments = match tool {
+        let score_args = match tool {
             "implement_feature" => {
-                json!({"feature":feature,"source":arguments.get("source").cloned()
-                .unwrap_or_else(|| json!(format!("Implementation of {feature}")))})
+                if arguments
+                    .get("source")
+                    .is_some_and(|source| *source != result["data"]["source"])
+                {
+                    return Err("caller source changed".into());
+                }
+                json!({"feature":name,"source":result["data"]["source"]})
             }
-            "write_tests" => json!({"component":feature}),
-            "code_review" => json!({"target":feature}),
-            _ => arguments.clone(),
+            "merge_code" => json!({"branch":name}),
+            "code_review" => json!({"target":name}),
+            "write_tests" => json!({"component":name}),
+            "run_tests" => json!({"suite":target(call)?}),
+            _ => unreachable!(),
         };
-        let at = scored
+        let scored_at = scored
             .iter()
-            .position(|event| {
-                event["agent"] == agent
-                    && event["tool"] == tool
-                    && event["args"] == score_arguments
-                    && event["success"] == result["success"]
-                    && event["result"] == result["data"]
-                    && event["violations"] == json!([])
+            .position(|e| {
+                e["agent"] == agent
+                    && e["tool"] == tool
+                    && e["args"] == score_args
+                    && e["success"] == result["success"]
+                    && e["result"] == result["data"]
+                    && e["violations"] == json!([])
             })
-            .ok_or("development effect differs from the independent simulator score")?;
-        scored.remove(at);
-        // Requests precede the actual effect; result frames follow its original reply.
-        let mut expected = Vec::<(u64, u64, &str, Value, bool)>::new();
+            .ok_or("common score differs from actual effect")?;
+        scored.remove(scored_at);
+        let next = ordered
+            .iter()
+            .filter(|other| {
+                other.emitted > call.emitted
+                    && other.tool().ok() == Some(tool)
+                    && feature(other).ok() == Some(f)
+            })
+            .map(|other| other.emitted)
+            .min()
+            .unwrap_or(rows.len());
+        let (from, to, request_name, reply_name) = match tool {
+            "implement_feature" => (
+                file,
+                repo,
+                format!("Implement{suffix}"),
+                format!("Implementation{suffix}"),
+            ),
+            "merge_code" => (
+                file,
+                repo,
+                format!("Merge{suffix}"),
+                format!("Merged{suffix}"),
+            ),
+            "code_review" => (
+                review_file,
+                reviewer,
+                format!("ReviewRequest{suffix}"),
+                format!("FileReviewResult{suffix}"),
+            ),
+            "write_tests" => (
+                role("TEST_FILE")?,
+                environment,
+                format!("TestRequest{suffix}"),
+                format!("FileTested{suffix}"),
+            ),
+            "run_tests" => (
+                role("CI_FILE")?,
+                build,
+                format!("CiRequest{suffix}"),
+                format!("FileCiResult{suffix}"),
+            ),
+            _ => unreachable!(),
+        };
+        let request = consume(
+            (&frames, &mut used),
+            (from, to, label(&request_name)?),
+            (arguments, 0, call.emitted),
+        )?;
+        if request.received()? >= call.emitted {
+            return Err("effect before its checked request receive".into());
+        }
+        consume(
+            (&frames, &mut used),
+            (to, from, label(&reply_name)?),
+            (result, at, next),
+        )?;
         match tool {
             "implement_feature" => {
-                if result["success"] != true
-                    || result["data"]["feature"] != feature
-                    || !result["data"]["candidate_sha256"].is_string()
-                    || !result["data"]["source"].is_string()
-                {
-                    return Err("implementation lacks its actual candidate".into());
+                if result["success"] != true || result["data"]["feature"] != name {
+                    return Err("implementation result".into());
                 }
-                expected.extend([
+                for (peer, message) in [
+                    (reviewer, format!("ReadyReview{suffix}")),
+                    (review_file, format!("FileReviewCandidate{suffix}")),
+                    (environment, format!("ReadyTest{suffix}")),
+                    (role("TEST_FILE")?, format!("FileTestCandidate{suffix}")),
                     (
-                        vm,
-                        repository,
-                        if a { "ImplementA" } else { "ImplementB" },
-                        arguments.clone(),
-                        false,
+                        role(if f == 0 { "B_FILE" } else { "A_FILE" })?,
+                        format!("Interface{suffix}"),
                     ),
-                    (authority, repository, "Implement", arguments.clone(), false),
-                    (
-                        repo,
-                        repository,
-                        "ImplementOnRepo",
-                        arguments.clone(),
-                        false,
-                    ),
-                    (repository, repo, "RepoResult", result.clone(), true),
-                ]);
+                ] {
+                    consume(
+                        (&frames, &mut used),
+                        (repo, peer, label(&message)?),
+                        (result, at, next),
+                    )?;
+                }
             }
-            "write_tests" | "code_review" => {
-                let candidate = completed(
-                    &ordered,
-                    call.emitted,
-                    "implement_feature",
-                    "feature_name",
-                    feature,
-                )?
-                .result()?
-                .1;
-                if result["data"]["candidate_sha256"] != candidate["data"]["candidate_sha256"]
-                    || result["data"]["source_receipt"].as_u64() != Some(receipt(candidate)?)
+            "code_review" | "write_tests" => {
+                let source = result["data"]["source_receipt"]
+                    .as_u64()
+                    .ok_or("candidate receipt")?;
+                let implementation = material(&calls, "implement_feature", source)?;
+                let implemented = implementation.result()?.1;
+                if feature(implementation)? != f
+                    || implementation.ended()?.0 >= call.started()?.0
+                    || result["data"]["candidate_sha256"] != implemented["data"]["candidate_sha256"]
                 {
-                    return Err(
-                        "test or review receipt differs from the actual candidate occurrence"
-                            .into(),
-                    );
+                    return Err("validation differs from the actually completed candidate".into());
                 }
                 if tool == "write_tests" {
-                    if result["success"] != true
-                        || result["data"]["component"] != feature
-                        || !result["data"]["test_source"].is_object()
-                        || !result["data"]["test_sha256"].is_string()
-                    {
-                        return Err("test definition lacks its actual content".into());
+                    if result["success"] != true || result["data"]["component"] != name {
+                        return Err("test definition result".into());
                     }
-                    expected.extend([
-                        (
-                            vm,
-                            test_service,
-                            if a { "TestIntentA" } else { "TestIntentB" },
-                            arguments.clone(),
-                            false,
-                        ),
-                        (
-                            name("roles", "TEST_ENV")?,
-                            test_service,
-                            if a { "TestRequestA" } else { "TestRequestB" },
-                            arguments.clone(),
-                            false,
-                        ),
-                        (
-                            test_service,
-                            name("roles", "TEST_ENV")?,
-                            if a { "TestResultA" } else { "TestResultB" },
-                            result.clone(),
-                            true,
-                        ),
-                    ]);
+                    consume(
+                        (&frames, &mut used),
+                        (environment, repo, label(&format!("Tested{suffix}"))?),
+                        (result, at, next),
+                    )?;
                 } else {
-                    if result["data"]["target"] != feature {
-                        return Err("review targets another feature".into());
+                    if result["data"]["target"] != name {
+                        return Err("review target".into());
                     }
-                    expected.extend([
-                        (
-                            authority,
-                            review_service,
-                            "Review",
-                            arguments.clone(),
-                            false,
-                        ),
-                        (
-                            review_service,
-                            authority,
-                            if a { "ReviewResultA" } else { "ReviewResultB" },
-                            result.clone(),
-                            true,
-                        ),
-                        (
-                            review_service,
-                            repository,
-                            if a { "ReviewResultA" } else { "ReviewResultB" },
-                            result.clone(),
-                            true,
-                        ),
-                    ]);
+                    let outcome = if result["success"] == true {
+                        "Approved"
+                    } else {
+                        "Rejected"
+                    };
+                    let outcomes = [
+                        label(&format!("{outcome}{suffix}"))?,
+                        label(&format!("Repair{outcome}{suffix}"))?,
+                    ];
+                    let accepted = one(frames.values().filter(|v| {
+                        v.direction(reviewer, repo)
+                            && outcomes.contains(&u64::from(v.logical_label))
+                            && at < v.sent
+                            && v.sent < next
+                            && !used.contains(&v.sent)
+                            && v.value().is_ok_and(|v| v == *result)
+                    }))?;
+                    let committed = accepted.received()?;
+                    used.insert(accepted.sent);
+                    for peer in [
+                        role("A_FILE")?,
+                        role("B_FILE")?,
+                        role("TEST_FILE")?,
+                        environment,
+                    ] {
+                        consume(
+                            (&frames, &mut used),
+                            (repo, peer, label(&format!("ReviewFeedback{suffix}"))?),
+                            (result, committed, next),
+                        )?;
+                    }
                 }
             }
             "merge_code" => {
-                let candidate = completed(
-                    &ordered,
-                    call.emitted,
+                let implementation = material(
+                    &calls,
                     "implement_feature",
-                    "feature_name",
-                    feature,
-                )?
-                .result()?
-                .1;
-                let review = completed(&ordered, call.emitted, "code_review", "pr_id", feature)?
-                    .result()?
-                    .1;
-                if review["success"] != true
+                    result["data"]["source_receipt"]
+                        .as_u64()
+                        .ok_or("merge candidate")?,
+                )?;
+                let review = material(
+                    &calls,
+                    "code_review",
+                    result["data"]["review_receipt"]
+                        .as_u64()
+                        .ok_or("merge approval")?,
+                )?;
+                let implemented = implementation.result()?.1;
+                let approved = review.result()?.1;
+                if feature(implementation)? != f
+                    || feature(review)? != f
                     || result["success"] != true
-                    || review["data"]["source_receipt"].as_u64() != Some(receipt(candidate)?)
-                    || result["data"]["review_receipt"].as_u64() != Some(receipt(review)?)
-                    || result["data"]["source_receipt"].as_u64() != Some(receipt(candidate)?)
-                    || result["data"]["source"] != candidate["data"]["source"]
-                    || result["data"]["published_candidates"][feature]
-                        != candidate["data"]["candidate_sha256"]
+                    || approved["success"] != true
+                    || implementation.ended()?.0 >= review.started()?.0
+                    || review.ended()?.0 >= call.started()?.0
+                    || approved["data"]["source_receipt"] != json!(receipt(implemented)?)
+                    || approved["data"]["candidate_sha256"]
+                        != implemented["data"]["candidate_sha256"]
+                    || result["data"]["candidate_sha256"] != implemented["data"]["candidate_sha256"]
+                    || result["data"]["source"] != implemented["data"]["source"]
                 {
                     return Err(
-                        "publication differs from its current candidate or actual approval".into(),
+                        "publication differs from its actual candidate or positive approval".into(),
                     );
                 }
-                expected.extend([
-                    (
-                        vm,
-                        repository,
-                        if a {
-                            "MergeAdmissionA"
-                        } else {
-                            "MergeAdmissionB"
-                        },
-                        arguments.clone(),
-                        false,
-                    ),
-                    (authority, repository, "Merge", arguments.clone(), false),
-                    (repo, repository, "MergeOnRepo", arguments.clone(), false),
-                    (repository, authority, "Merged", result.clone(), true),
-                    (repository, ci, "Merged", result.clone(), true),
-                ]);
-            }
-            "run_tests" => {
-                let publication =
-                    completed(&ordered, call.emitted, "merge_code", "branch", feature)?
-                        .result()?
-                        .1;
-                let mut publication_events = serde_json::Map::new();
-                for published in ordered.iter().filter(|published| {
-                    published.request["tool"] == "merge_code"
-                        && published
-                            .result
-                            .as_ref()
-                            .is_some_and(|(at, _)| *at < call.emitted)
+                let ready = consume(
+                    (&frames, &mut used),
+                    (repo, file, label(&format!("MergeReady{suffix}"))?),
+                    (approved, review.result()?.0, call.emitted),
+                )?;
+                if ready.received()? >= request.received()? {
+                    return Err("merge before actual readiness".into());
+                }
+                let publication_label = label(&format!("Publication{suffix}"))?;
+                let publication = one(frames.values().filter(|v| {
+                    v.direction(repo, build)
+                        && u64::from(v.logical_label) == publication_label
+                        && at < v.sent
+                        && v.sent < rows.len()
+                        && !used.contains(&v.sent)
+                        && v.value().is_ok_and(|v| v["publication"] == *result)
+                }))?;
+                let inputs = publication.value()?;
+                if inputs.as_object().is_none_or(|object| {
+                    object.len() != 2
+                        || !object.contains_key("publication")
+                        || !object.contains_key("tests")
                 }) {
-                    let value = published.result()?.1;
-                    publication_events.insert(
-                        value["data"]["feature"]
-                            .as_str()
-                            .ok_or("published feature")?
-                            .to_owned(),
-                        value["data"]["publication_event"]
-                            .as_u64()
-                            .ok_or("publication occurrence")?
-                            .into(),
-                    );
+                    return Err("publication carries unrecorded input fields".into());
                 }
-                if result["data"]["repository_sha256"] != publication["data"]["repository_sha256"]
-                    || result["data"]["publication_events"] != Value::Object(publication_events)
-                    || result["data"]["publication_event"]
-                        != publication["data"]["publication_event"]
-                    || result["data"]["published_candidates"]
-                        != publication["data"]["published_candidates"]
-                {
-                    return Err("CI result differs from the actual published repository".into());
-                }
-                for (target, identity) in publication["data"]["published_candidates"]
-                    .as_object()
-                    .ok_or("published feature data")?
-                {
-                    let tests = completed(&ordered, call.emitted, "write_tests", "target", target)?
-                        .result()?
-                        .1;
-                    if tests["data"]["candidate_sha256"] != *identity
-                        || result["data"]["test_inputs"][target] != tests["data"]
+                let tests = inputs["tests"]
+                    .as_array()
+                    .filter(|t| t.len() == 2)
+                    .ok_or("publication tests")?;
+                for (f, test) in tests.iter().enumerate() {
+                    let actual = material(&calls, "write_tests", receipt(test)?)?;
+                    if feature(actual)? != f
+                        || *actual.result()?.1 != *test
+                        || actual.ended()?.0 >= call.started()?.0
                     {
-                        return Err(
-                            "CI inputs differ from actual completed test definitions".into()
-                        );
+                        return Err("publication carries another actual test definition".into());
                     }
                 }
-                expected.extend([
+                publication.received()?;
+                used.insert(publication.sent);
+            }
+            "run_tests" => {
+                let merge = material(
+                    &calls,
+                    "merge_code",
+                    result["data"]["publication_event"]
+                        .as_u64()
+                        .ok_or("CI publication")?,
+                )?;
+                let merged = merge.result()?.1;
+                if feature(merge)? != f
+                    || merge.ended()?.0 >= call.started()?.0
+                    || result["data"]["suite"] != arguments["suite"]
+                    || result["data"]["repository_sha256"] != merged["data"]["repository_sha256"]
+                    || result["data"]["published_candidates"]
+                        != merged["data"]["published_candidates"]
+                {
+                    return Err("CI differs from its actual publication".into());
+                }
+                let publication_label = label(&format!("Publication{suffix}"))?;
+                let publication = one(frames.values().filter(|v| {
+                    v.direction(repo, build)
+                        && u64::from(v.logical_label) == publication_label
+                        && v.received.is_some_and(|n| n < call.emitted)
+                        && v.value().is_ok_and(|v| v["publication"] == *merged)
+                }))?;
+                if !publication_inputs.insert(publication.sent) {
+                    return Err("reused CI publication input".into());
+                }
+                let inputs = publication.value()?;
+                for (feature, hash) in result["data"]["published_candidates"]
+                    .as_object()
+                    .ok_or("CI candidates")?
+                {
+                    let index = match feature.as_str() {
+                        "user_authentication" => 0,
+                        "payment_processing" => 1,
+                        _ => return Err("CI feature".into()),
+                    };
+                    let test = &inputs["tests"][index];
+                    if test["data"]["candidate_sha256"] != *hash
+                        || result["data"]["test_inputs"][feature] != test["data"]
+                        || result["data"]["test_receipts"][feature] != json!(receipt(test)?)
+                    {
+                        return Err("CI used different actual test inputs".into());
+                    }
+                }
+                let incoming = consume(
+                    (&frames, &mut used),
                     (
-                        vm,
-                        ci,
-                        if a { "CiIntentA" } else { "CiIntentB" },
-                        arguments.clone(),
-                        false,
+                        build,
+                        role("CI_FILE")?,
+                        label(&format!("FilePublication{suffix}"))?,
                     ),
-                    (
-                        authority,
-                        ci,
-                        if a {
-                            "RunCiOnFeatureA"
-                        } else {
-                            "RunCiOnFeatureB"
-                        },
-                        arguments.clone(),
-                        false,
-                    ),
-                    (
-                        name("roles", "BUILD_SERVER")?,
-                        ci,
-                        if a { "RunCiA" } else { "RunCiB" },
-                        arguments.clone(),
-                        false,
-                    ),
-                    (
-                        ci,
-                        name("roles", "BUILD_SERVER")?,
-                        "CiResult",
-                        result.clone(),
-                        true,
-                    ),
-                    (ci, authority, "CiResult", result.clone(), true),
-                    (ci, repository, "CiResult", result.clone(), true),
-                ]);
+                    (merged, merge.result()?.0, call.emitted),
+                )?;
+                if incoming.received()? >= call.emitted {
+                    return Err("CI request before actual publication delivery".into());
+                }
+                let outcomes = if result["success"] == true {
+                    vec![
+                        label(&format!("CiPassed{suffix}"))?,
+                        label(&format!("LastCiPassed{suffix}"))?,
+                    ]
+                } else {
+                    vec![label(&format!("CiFailed{suffix}"))?]
+                };
+                let outcome = one(frames.values().filter(|v| {
+                    v.direction(build, repo)
+                        && outcomes.contains(&u64::from(v.logical_label))
+                        && at < v.sent
+                        && v.sent < next
+                        && !used.contains(&v.sent)
+                        && v.value().is_ok_and(|v| v == *result)
+                }))?;
+                let committed = outcome.received()?;
+                used.insert(outcome.sent);
+                for peer in [
+                    role("A_FILE")?,
+                    role("B_FILE")?,
+                    review_file,
+                    role("TEST_FILE")?,
+                    reviewer,
+                    environment,
+                ] {
+                    consume(
+                        (&frames, &mut used),
+                        (repo, peer, label("CiUpdate")?),
+                        (result, committed, next),
+                    )?;
+                }
             }
             _ => unreachable!(),
         }
-        let mut before = call.emitted;
-        for (from, to, key, value, reply) in expected {
-            let label = name("labels", key)? as u8;
-            let candidates = frames.iter().filter(|(id, frame)| {
-                !used_frames.contains(*id)
-                    && frame.direction(from, to)
-                    && frame.logical_label == label
-                    && if reply {
-                        frame.sent > result_at
-                    } else {
-                        frame.received.is_some_and(|at| at < call.emitted)
-                    }
-            });
-            let (id, frame) = if reply {
-                candidates.min_by_key(|(_, frame)| frame.sent)
-            } else {
-                candidates.max_by_key(|(_, frame)| frame.received)
+    }
+    let actual = frames
+        .values()
+        .filter(|f| business(f, &roles))
+        .map(|f| f.sent)
+        .collect::<BTreeSet<_>>();
+    if used != actual || !scored.is_empty() {
+        return Err("missing, extra, duplicated or unmatched actual business data".into());
+    }
+    let mut overlaps = BTreeMap::<String, usize>::new();
+    for (i, a) in ordered.iter().enumerate() {
+        for b in ordered.iter().skip(i + 1) {
+            if a.started()?.1.max(b.started()?.1) < a.ended()?.1.min(b.ended()?.1) {
+                let mut tools = [a.tool()?, b.tool()?];
+                tools.sort();
+                *overlaps.entry(tools.join("+")).or_default() += 1;
             }
-            .ok_or_else(|| format!("missing {key} for {agent} {tool}"))?;
-            if frame.value()? != value {
-                return Err(format!("altered {key} for {agent} {tool}").into());
-            }
-            frame.received()?;
-            if !reply {
-                before = before.min(frame.sent);
-            }
-            used_frames.insert(*id);
         }
-        close_arguments(
-            &frames,
-            &mut used_closes,
-            vm,
-            io,
-            before,
-            &format!("service/{tool}"),
-            arguments,
-        )?;
-    }
-    if !scored.is_empty() {
-        return Err("unmatched scored development effects".into());
-    }
-    let effect_labels = [
-        "ImplementA",
-        "ImplementB",
-        "Implement",
-        "ImplementOnRepo",
-        "RepoResult",
-        "TestIntentA",
-        "TestIntentB",
-        "TestRequestA",
-        "TestRequestB",
-        "TestResultA",
-        "TestResultB",
-        "Review",
-        "ReviewResultA",
-        "ReviewResultB",
-        "MergeAdmissionA",
-        "MergeAdmissionB",
-        "Merge",
-        "MergeOnRepo",
-        "CiIntentA",
-        "CiIntentB",
-        "RunCiOnFeatureA",
-        "RunCiOnFeatureB",
-        "RunCiA",
-        "RunCiB",
-        "CiResult",
-    ]
-    .into_iter()
-    .map(|key| name("labels", key))
-    .collect::<Result<BTreeSet<_>>>()?;
-    if frames.iter().any(|(id, frame)| {
-        !pairs
-            .iter()
-            .any(|(vm, io)| frame.direction(*vm, *io) || frame.direction(*io, *vm))
-            && effect_labels.contains(&u64::from(frame.logical_label))
-            && !used_frames.contains(id)
-    }) {
-        return Err("unused or extra effect admission, request or result".into());
     }
     Ok(
-        json!({"status":"passed","task":"6M","domain_calls":calls.len(),"simulator_complete":true,"violations":0,
-        "consumed_effect_frames":used_frames,"effect_scope":"one-use WASI arguments and real feature/resource requests; actual candidate, approval, publication and CI data; EPF owns dynamic order"}),
+        json!({"status":"passed","task":"6M","kind":"completed_actual_wasi_feature_delivery_trace",
+        "depth":fixture["depth"],"domain_calls":calls.len(),"carrier_frames":frames.len(),"guest_exits":actors.len(),
+        "direct_file_requests_and_replies":true,"effect_receives_bound_to_checked_occurrences":true,
+        "actual_candidate_review_test_and_ci_receipts":true,"simulator_complete":true,"violations":0,
+        "overlapping_effect_pairs":overlaps,"dynamic_protocol":dynamic,"scored_benchmark":false}),
     )
 }
 
 pub fn audit(path: &Path) -> Result<Value> {
-    let artifact = crate::projection::load(path)?;
+    let projection = crate::projection::load(path)?;
     let rows = records(path)?;
-    let mut result = check(&rows, &artifact)?;
-    result["dynamic_protocol"] = crate::projection::check_dynamic(&artifact, &rows)?;
+    let dynamic = crate::projection::check_dynamic(&projection, &rows)?;
+    let mut result = check(&rows, &projection, &dynamic)?;
     result["source_events_sha256"] = json!(digest(path)?);
     result["compiled_projection_sha256"] = json!(digest(
         &path
@@ -515,26 +584,60 @@ pub fn audit(path: &Path) -> Result<Value> {
             .ok_or("evidence directory")?
             .join("projection.json")
     )?);
-    result["runtime_binary_sha256"] = artifact["runtime_binary_sha256"].clone();
+    result["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
     Ok(result)
 }
-
-/// Saved-record mutations, not runtime attacks or changes to the source protocol.
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    let artifact = crate::projection::load(path)?;
     let rows = records(path)?;
-    let baseline = check(&rows, &artifact)?;
-    fs::create_dir(output)?;
-    let ids = baseline["consumed_effect_frames"]
+    let projection = crate::projection::load(path)?;
+    let audited = audit(path)?;
+    let dynamic = &audited["dynamic_protocol"];
+    let headers = crate::projection::frames(&projection, &rows)?;
+    let actors = rows.first().ok_or("fixture")?["message"]["fixtures"]
         .as_array()
-        .ok_or("effect frame inventory")?
+        .ok_or("actors")?;
+    let journal = crate::journal::read(&rows, &headers, actors)?;
+    let roles = [
+        "REPO",
+        "TEST_ENV",
+        "BUILD_SERVER",
+        "REVIEW_A",
+        "REVIEW_B",
+        "A_FILE",
+        "B_FILE",
+        "A_REVIEW_FILE",
+        "B_REVIEW_FILE",
+        "TEST_FILE",
+        "CI_FILE",
+    ]
+    .into_iter()
+    .map(|name| named(&projection["compiled"], "roles", name))
+    .collect::<Result<BTreeSet<_>>>()?;
+    let selected = journal
+        .frames
         .iter()
-        .map(|id| id.as_u64().ok_or_else(|| "effect frame ID".into()))
-        .collect::<Result<Vec<_>>>()?;
-    let verdicts =
-        crate::journal::json_frame_mutants(&rows, &ids, |changed| check(changed, &artifact))?;
-    let result = json!({"baseline_passed":true,"mutants_rejected":verdicts.len(),"verdicts":verdicts,
-        "scope":"effect-frame records; dynamic protocol is separately checked on the baseline"});
-    save(&output.join("mutation-results.json"), &result)?;
+        .filter(|(_, frame)| business(frame, &roles))
+        .map(|(&id, _)| id)
+        .collect::<Vec<_>>();
+    fs::create_dir(output)?;
+    let mut verdicts = crate::journal::json_frame_mutants(&rows, &selected, |changed| {
+        check(changed, &projection, dynamic)
+    })?;
+    let id = *selected.first().ok_or("actual business frame")?;
+    for (field, value) in [("frame_label", 65535), ("lane", 255)] {
+        let mut changed = rows.clone();
+        for row in &mut changed {
+            if row["message"]["type"] == "protocol_frame" && row["message"]["frame_id"] == id {
+                row["message"][field] = json!(value);
+            }
+        }
+        let error = check(&changed, &projection, dynamic)
+            .err()
+            .ok_or("coherent invalid header accepted")?;
+        verdicts.push(json!({"frame_id":id,"kind":format!("coherent_wrong_{field}"),"rejected":true,"error":error.to_string()}));
+    }
+    let result = json!({"status":"passed","task":"6M","source_events_sha256":digest(path)?,"audit":audited,"count":verdicts.len(),"mutants":verdicts,
+        "scope":"Recorded actual requests, material receipts, effects and replies with EPF-checked receive occurrences; compiled wire membership. Not runtime attacks.","model_calls":0});
+    save(&output.join("summary.json"), &result)?;
     Ok(result)
 }

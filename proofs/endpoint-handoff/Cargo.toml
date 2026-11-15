@@ -4,13 +4,6 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
-[features]
-projection-profile = []
-
-[[example]]
-name = "feature_delivery_projection"
-required-features = ["projection-profile"]
-
 [dependencies]
 hibana = { path = "../../../hibana", version = "=0.10.0" }
 hibana-wasip1-runtime = { path = "../../../hibana-wasip1-runtime" }

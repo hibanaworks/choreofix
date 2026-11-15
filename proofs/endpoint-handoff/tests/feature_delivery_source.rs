@@ -1,4 +1,4 @@
-//! The actual whole-task source, independently of Endpoint fixture scheduling.
+//! The actual operation-file global and every sealed role image.
 #[path = "../../../src/imp/projection.rs"]
 pub(crate) mod projection;
 #[path = "../../../src/shell/mod.rs"]
@@ -10,67 +10,41 @@ pub(crate) mod imp {
 }
 #[path = "../../../src/tasks/feature_delivery/mod.rs"]
 pub mod feature_delivery;
-use hibana::runtime::program::project;
-use serde_json::{Value, json};
 
 #[test]
 fn feature_delivery_whole_source_static_contract() {
-    let source = feature_delivery::global::delivery::protocol();
-    assert_eq!(hibana::g::diagnose(&source), None);
+    assert_eq!(
+        hibana::g::diagnose(&feature_delivery::global::source()),
+        None
+    );
+}
+#[test]
+fn feature_delivery_whole_source_projects_every_view() {
+    let observed = feature_delivery::projection();
+    let programs = observed["programs"].as_array().unwrap();
+    assert_eq!(programs.len(), observed["roles"].as_object().unwrap().len());
+    assert_eq!(programs.len(), 31);
+    let events = programs[0]["rows"][0][3].as_u64().unwrap() >> 16;
+    assert!(events > 0);
+    for program in programs {
+        let rows = program["rows"].as_array().unwrap();
+        assert!(rows.len() > 2);
+        assert_eq!(rows[0][3].as_u64().unwrap() >> 16, events);
+    }
 }
 
 #[test]
-fn feature_delivery_whole_source_projects_every_view() {
-    use hibana::runtime::{program::RoleProgram, tap};
-    fn inspect<const ROLE: u8>(program: RoleProgram<ROLE>) -> Value {
-        let records = tap::projected(&program).collect::<Vec<_>>();
-        assert_eq!(records[0].id(), tap::PROJECTED_PROGRAM);
-        assert_eq!(records[0].causal_key() as u8, ROLE);
-        let events = records
-            .iter()
-            .filter(|row| row.id() == tap::PROJECTED_SOURCE)
-            .count();
-        let operations = records
-            .iter()
-            .filter(|row| {
-                matches!(
-                    row.id(),
-                    tap::PROJECTED_LOCAL | tap::PROJECTED_SEND | tap::PROJECTED_RECV
-                )
-            })
-            .count();
-        assert!(events > 0 && operations > 0);
-        assert_eq!(events, (records[0].arg0() >> 16) as usize);
-        assert_eq!(operations, records[1].ts() as usize);
-        json!({"view":ROLE,"actor":records[0].causal_key() >> 8,
-            "source_events":events,"local_operations":operations,"records":records.len()})
+fn feature_delivery_file_paths_fit_the_wasip1_request() {
+    use feature_delivery::global::*;
+    for object in DEVELOPER_FILES
+        .into_iter()
+        .chain(REVIEW_FILES)
+        .chain(TEST_FILES)
+        .chain(CI_FILES)
+    {
+        // The shell may use an absolute path, including its leading slash.
+        assert!(
+            object.path().len() + 1 <= hibana_wasip1_runtime::protocol::WASIP1_PATH_CHUNK_CAPACITY
+        );
     }
-    let source = feature_delivery::global::delivery::protocol();
-    let views = [
-        inspect(project::<0>(&source)),
-        inspect(project::<1>(&source)),
-        inspect(project::<2>(&source)),
-        inspect(project::<3>(&source)),
-        inspect(project::<4>(&source)),
-        inspect(project::<5>(&source)),
-        inspect(project::<6>(&source)),
-        inspect(project::<7>(&source)),
-        inspect(project::<8>(&source)),
-        inspect(project::<9>(&source)),
-        inspect(project::<10>(&source)),
-        inspect(project::<11>(&source)),
-        inspect(project::<12>(&source)),
-        inspect(project::<13>(&source)),
-        inspect(project::<14>(&source)),
-        inspect(project::<15>(&source)),
-    ];
-    assert!(
-        views
-            .iter()
-            .all(|view| view["source_events"] == views[0]["source_events"])
-    );
-    println!(
-        "{}",
-        json!({"delivery_projection_views":views,"actual_endpoint_calls":0})
-    );
 }

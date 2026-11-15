@@ -1,10 +1,10 @@
 //! Canonical repository payload and its actual message declarations.
 #[path = "../../../src/tasks/review/choreofs/global.rs"]
 pub mod global;
-#[path = "../../../src/tasks/review/choreofs/imp.rs"]
-pub mod review_arguments;
 #[path = "../../../src/imp/projection.rs"]
 pub(crate) mod projection;
+#[path = "../../../src/tasks/review/choreofs/imp.rs"]
+pub mod review_arguments;
 #[path = "../../../src/shell/mod.rs"]
 pub mod shell;
 #[path = "../../../src/imp/transport.rs"]

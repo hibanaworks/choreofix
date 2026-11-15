@@ -97,45 +97,76 @@ async fn actual_wasi_initial_orders_and_integrated_ci() -> Result<()> {
                 let guest = &guest;
                 for (agent, feature) in [("DEVELOPER_A","user_authentication"),("DEVELOPER_B","payment_processing")] {
                     async move {
-                        let implemented = guest.command(agent,format!("echo '{}' > /service/implement_feature; cat /service/result",json!({"feature_name":feature}))).await?;
-                        let implemented = response(&implemented)?;
-                        assert_eq!(implemented["success"],true,"{implemented}");
-                        assert_eq!(implemented["coordination"]["code_review"]["success"],true,"{implemented}");
-                        let merged = guest.command(agent,format!("echo '{}' > /service/merge_code; cat /service/result",json!({"branch":feature}))).await?;
-                        let merged = response(&merged)?;
-                        assert_eq!(merged["success"],true,"{merged}");
-                        assert_eq!(merged["coordination"]["ci"]["success"],true,"{merged}");
+                        let implemented = guest.command(agent,format!("echo '{}' > /service/implement_feature; cat /service/implement_feature",json!({"feature_name":feature}))).await?;
+                        assert_eq!(response(&implemented)?["success"],true,"{implemented}");
+                        let changed = guest.command(agent,"cat /service/interface_change".into()).await?;
+                        assert_eq!(response(&changed)?["success"],true,"{changed}");
+                        let first = (feature == "payment_processing") == review_b_first;
+                        let feedbacks = if first {["review","peer_review"]} else {["peer_review","review"]};
+                        for file in feedbacks {
+                            let feedback=guest.command(agent,format!("cat /service/{file}")).await?;
+                            assert_eq!(response(&feedback)?["success"],true,"{feedback}");
+                        }
+                        if !first {
+                            let previous=guest.command(agent,"cat /service/integration".into()).await?;
+                            assert_eq!(response(&previous)?["success"],true,"{previous}");
+                        }
+                        let ready=guest.command(agent,"cat /service/merge_ready".into()).await?;
+                        assert_eq!(response(&ready)?["success"],true,"{ready}");
+                        let merged=guest.command(agent,format!("echo '{}' > /service/merge_code; cat /service/merge_code",json!({"branch":feature}))).await?;
+                        assert_eq!(response(&merged)?["success"],true,"{merged}");
+                        let integrated=guest.command(agent,"cat /service/integration".into()).await?;
+                        assert_eq!(response(&integrated)?["success"],true,"{integrated}");
+                        if first {
+                            let other=guest.command(agent,"cat /service/integration".into()).await?;
+                            assert_eq!(response(&other)?["success"],true,"{other}");
+                        }
                         assert_eq!(guest.command(agent,"exit 0".into()).await?["exit_status"],0);
                         Result::Ok(())
                     };
                 }
             };
             async {
-                let targets = if tests_b_first {["payment_processing","user_authentication"]} else {["user_authentication","payment_processing"]};
+                let targets=if tests_b_first {["payment_processing","user_authentication"]} else {["user_authentication","payment_processing"]};
                 for target in targets {
-                    let reply = guest.command("TEST_WRITER",format!("echo '{}' > /service/write_tests; cat /service/result",json!({"target":target}))).await?;
-                    let actual = response(&reply)?;
-                    assert_eq!(actual["success"],true,"{actual}");
+                    let ready=guest.command("TEST_WRITER",format!("cat /service/code_ready/{target}")).await?;
+                    assert_eq!(response(&ready)?["success"],true,"{ready}");
+                    let reply=guest.command("TEST_WRITER",format!("echo '{}' > /service/write_tests/{target}; cat /service/write_tests/{target}",json!({"target":target}))).await?;
+                    assert_eq!(response(&reply)?["success"],true,"{reply}");
+                }
+                for target in ["user_authentication","payment_processing"] {
+                    let review=guest.command("TEST_WRITER",format!("cat /service/review/{target}")).await?;
+                    assert_eq!(response(&review)?["success"],true,"{review}");
+                }
+                for _ in 0..2 {
+                    let ci=guest.command("TEST_WRITER","cat /service/integration".into()).await?;
+                    assert_eq!(response(&ci)?["success"],true,"{ci}");
                 }
                 assert_eq!(guest.command("TEST_WRITER","exit 0".into()).await?["exit_status"],0);
                 Result::Ok(())
             };
             async {
-                let targets = if review_b_first {["payment_processing","user_authentication"]} else {["user_authentication","payment_processing"]};
+                let targets=if review_b_first {["payment_processing","user_authentication"]} else {["user_authentication","payment_processing"]};
                 for target in targets {
-                    let reply = guest.command("REVIEWER",format!("echo '{}' > /service/code_review; cat /service/result",json!({"pr_id":target}))).await?;
-                    let actual = response(&reply)?;
-                    assert_eq!(actual["success"],true,"{actual}");
+                    let ready=guest.command("REVIEWER",format!("cat /service/code_ready/{target}")).await?;
+                    assert_eq!(response(&ready)?["success"],true,"{ready}");
+                    let reply=guest.command("REVIEWER",format!("echo '{}' > /service/code_review/{target}; cat /service/code_review/{target}",json!({"pr_id":target}))).await?;
+                    assert_eq!(response(&reply)?["success"],true,"{reply}");
+                }
+                for target in targets {
+                    let ci=guest.command("REVIEWER",format!("cat /service/integration/{target}")).await?;
+                    assert_eq!(response(&ci)?["success"],true,"{ci}");
                 }
                 assert_eq!(guest.command("REVIEWER","exit 0".into()).await?["exit_status"],0);
                 Result::Ok(())
             };
             async {
-                let suites = if review_b_first {["full_test_suite_after_payment","full_test_suite_after_auth"]} else {["full_test_suite_after_auth","full_test_suite_after_payment"]};
-                for suite in suites {
-                    let reply = guest.command("CI_RUNNER",format!("echo '{}' > /service/run_tests; cat /service/result",json!({"suite":suite}))).await?;
-                    let actual = response(&reply)?;
-                    assert_eq!(actual["success"],true,"{actual}");
+                let suites=if review_b_first {[("payment_processing","full_test_suite_after_payment"),("user_authentication","full_test_suite_after_auth")]} else {[("user_authentication","full_test_suite_after_auth"),("payment_processing","full_test_suite_after_payment")]};
+                for (target,suite) in suites {
+                    let publication=guest.command("CI_RUNNER",format!("cat /service/publication/{target}")).await?;
+                    assert_eq!(response(&publication)?["success"],true,"{publication}");
+                    let reply=guest.command("CI_RUNNER",format!("echo '{}' > /service/run_tests/{target}; cat /service/run_tests/{target}",json!({"suite":suite}))).await?;
+                    assert_eq!(response(&reply)?["success"],true,"{reply}");
                 }
                 assert_eq!(guest.command("CI_RUNNER","exit 0".into()).await?["exit_status"],0);
                 Result::Ok(())
@@ -159,8 +190,6 @@ async fn actual_wasi_initial_orders_and_integrated_ci() -> Result<()> {
                 .len(),
             10
         );
-        let audit = crate::feature_delivery_audit::audit(&output.join("events.jsonl"))?;
-        save(&output.join("audit.json"), &audit)?;
         let mutations = if index == 0 {
             crate::feature_delivery_audit::check_mutants(
                 &output.join("events.jsonl"),
@@ -169,6 +198,12 @@ async fn actual_wasi_initial_orders_and_integrated_ci() -> Result<()> {
         } else {
             Value::Null
         };
+        let audit = if index == 0 {
+            mutations["audit"].clone()
+        } else {
+            crate::feature_delivery_audit::audit(&output.join("events.jsonl"))?
+        };
+        save(&output.join("audit.json"), &audit)?;
         outcomes.push(json!({"case":index,"audit":audit,"record_mutations":mutations}));
         save(
             &directory.join("progress.json"),
@@ -253,95 +288,168 @@ async fn actual_wasi_review_rejection_and_ci_repair() -> Result<()> {
         let trace = Trace::create(&output.join("events.jsonl"))?;
         let (simulator, _) = oracle::Simulator::new("6M", depth, 0.01, trace.clone(), failures)?;
         let (guest, runtime) = process::guest(&binary, module, &["6M"], &output, trace, simulator)?;
-        let(_,(),(),(),result)=hibana_runtime::race(async{
-            async{
+        let (_,(),(),(),result)=hibana_runtime::race(async {
+            async {
                 let guest=&guest;
-                for(agent,feature)in[("DEVELOPER_A","user_authentication"),("DEVELOPER_B","payment_processing")]{
-                    async move{
-                        loop{
-                            let reply=guest.command(agent,format!("echo '{}' > /service/implement_feature; cat /service/result",json!({"feature_name":feature}))).await?;
-                            let actual=response(&reply)?;
-                            assert_eq!(actual["success"],true,"{actual}");
-                            match actual["coordination"]["code_review"]["success"].as_bool().ok_or("actual review outcome")?{
-                                false=>continue,
-                                true=>{
-                                    let reply=guest.command(agent,format!("echo '{}' > /service/merge_code; cat /service/result",json!({"branch":feature}))).await?;
-                                    let actual=response(&reply)?;
-                                    assert_eq!(actual["success"],true,"{actual}");
-                                    if actual["coordination"]["ci"]["success"].as_bool().ok_or("actual CI outcome")?{break;}
+                for (agent,feature) in [("DEVELOPER_A","user_authentication"),("DEVELOPER_B","payment_processing")] {
+                    async move {
+                        for command in [
+                            format!("echo '{}' > /service/merge_code",json!({"branch":feature})),
+                            r#"echo '{"feature_name":"unassigned_feature"}' > /service/implement_feature"#.into(),
+                            r#"echo '{"success":true}' > /service/review"#.into(),
+                        ] {
+                            let refused=guest.command(agent,command).await?;
+                            assert!(refused["stdout"].as_str().ok_or("refused guest output")?.contains("wash:"),"{refused}");
+                        }
+                        let implemented=guest.command(agent,format!("echo '{}' > /service/implement_feature; cat /service/implement_feature",json!({"feature_name":feature}))).await?;
+                        assert_eq!(response(&implemented)?["success"],true,"{implemented}");
+                        let first=(feature=="payment_processing")==review_b_first;
+                        let peer=guest.command(agent,"cat /service/interface_change".into()).await?;
+                        assert_eq!(response(&peer)?["success"],true,"{peer}");
+                        if !first {
+                            loop {
+                                let peer=guest.command(agent,"cat /service/peer_review".into()).await?;
+                                if response(&peer)?["success"].as_bool().ok_or("actual peer review")? { break; }
+                                let updated=guest.command(agent,"cat /service/interface_change".into()).await?;
+                                assert_eq!(response(&updated)?["success"],true,"{updated}");
+                            }
+                        }
+                        loop {
+                            let review=guest.command(agent,"cat /service/review".into()).await?;
+                            if response(&review)?["success"].as_bool().ok_or("actual own review")? {break;}
+                            let revised=guest.command(agent,format!("echo '{}' > /service/implement_feature; cat /service/implement_feature",json!({"feature_name":feature}))).await?;
+                            assert_eq!(response(&revised)?["success"],true,"{revised}");
+                        }
+                        if first {
+                            loop {
+                                let peer=guest.command(agent,"cat /service/peer_review".into()).await?;
+                                if response(&peer)?["success"].as_bool().ok_or("actual peer review")? {break;}
+                                let updated=guest.command(agent,"cat /service/interface_change".into()).await?;
+                                assert_eq!(response(&updated)?["success"],true,"{updated}");
+                            }
+                        } else {
+                            loop {
+                                let previous=guest.command(agent,"cat /service/integration".into()).await?;
+                                if response(&previous)?["success"].as_bool().ok_or("actual prior CI")? {break;}
+                                loop {
+                                    let updated=guest.command(agent,"cat /service/interface_change".into()).await?;
+                                    assert_eq!(response(&updated)?["success"],true,"{updated}");
+                                    let peer=guest.command(agent,"cat /service/peer_review".into()).await?;
+                                    if response(&peer)?["success"].as_bool().ok_or("actual peer repair review")? {break;}
                                 }
                             }
+                        }
+                        loop {
+                            let ready=guest.command(agent,"cat /service/merge_ready".into()).await?;
+                            assert_eq!(response(&ready)?["success"],true,"{ready}");
+                            let merged=guest.command(agent,format!("echo '{}' > /service/merge_code; cat /service/merge_code",json!({"branch":feature}))).await?;
+                            assert_eq!(response(&merged)?["success"],true,"{merged}");
+                            let integrated=guest.command(agent,"cat /service/integration".into()).await?;
+                            if response(&integrated)?["success"].as_bool().ok_or("actual own CI")? {break;}
+                            let revised=guest.command(agent,format!("echo '{}' > /service/implement_feature; cat /service/implement_feature",json!({"feature_name":feature}))).await?;
+                            assert_eq!(response(&revised)?["success"],true,"{revised}");
+                            loop {
+                                let review=guest.command(agent,"cat /service/review".into()).await?;
+                                if response(&review)?["success"].as_bool().ok_or("actual repair review")? {break;}
+                                let revised=guest.command(agent,format!("echo '{}' > /service/implement_feature; cat /service/implement_feature",json!({"feature_name":feature}))).await?;
+                                assert_eq!(response(&revised)?["success"],true,"{revised}");
+                            }
+                        }
+                        if first {
+                            let other=guest.command(agent,"cat /service/integration".into()).await?;
+                            assert_eq!(response(&other)?["success"],true,"{other}");
                         }
                         assert_eq!(guest.command(agent,"exit 0".into()).await?["exit_status"],0);
                         Result::Ok(())
                     };
                 }
             };
-            async{
-                let targets=if tests_b_first{["payment_processing","user_authentication"]}else{["user_authentication","payment_processing"]};
-                let mut actual=Value::Null;
-                for target in targets{
-                    let reply=guest.command("TEST_WRITER",format!("echo '{}' > /service/write_tests; cat /service/result",json!({"target":target}))).await?;
-                    actual=response(&reply)?;
-                    assert_eq!(actual["success"],true,"{actual}");
+            async {
+                let refused=guest.command("TEST_WRITER",r#"echo '{"target":"payment_processing"}' > /service/write_tests/user_authentication"#.into()).await?;
+                assert!(refused["stdout"].as_str().ok_or("wrong test target output")?.contains("wash:"),"{refused}");
+                let targets=if tests_b_first {["payment_processing","user_authentication"]} else {["user_authentication","payment_processing"]};
+                for target in targets {
+                    let ready=guest.command("TEST_WRITER",format!("cat /service/code_ready/{target}")).await?;
+                    assert_eq!(response(&ready)?["success"],true,"{ready}");
+                    let tested=guest.command("TEST_WRITER",format!("echo '{}' > /service/write_tests/{target}; cat /service/write_tests/{target}",json!({"target":target}))).await?;
+                    assert_eq!(response(&tested)?["success"],true,"{tested}");
                 }
-                loop{
-                    if !actual["coordination"]["ci"].is_null(){
-                        assert_eq!(actual["coordination"]["ci"]["success"],true,"{actual}");
-                        break;
+                let order=if review_b_first {["payment_processing","user_authentication"]} else {["user_authentication","payment_processing"]};
+                for target in order {
+                    loop {
+                        let review=guest.command("TEST_WRITER",format!("cat /service/review/{target}")).await?;
+                        if response(&review)?["success"].as_bool().ok_or("actual test writer review input")? {break;}
+                        let ready=guest.command("TEST_WRITER",format!("cat /service/code_ready/{target}")).await?;
+                        assert_eq!(response(&ready)?["success"],true,"{ready}");
+                        let tested=guest.command("TEST_WRITER",format!("echo '{}' > /service/write_tests/{target}; cat /service/write_tests/{target}",json!({"target":target}))).await?;
+                        assert_eq!(response(&tested)?["success"],true,"{tested}");
                     }
-                    let outcome=actual["coordination"]["outcomes"].as_array().and_then(|values|values.last()).ok_or("actual retry outcome for test writer")?;
-                    assert_eq!(outcome["success"],false,"{actual}");
-                    let target=outcome["data"]["target"].as_str().or_else(||outcome["data"]["feature"].as_str()).ok_or("retry target for test writer")?;
-                    let reply=guest.command("TEST_WRITER",format!("echo '{}' > /service/write_tests; cat /service/result",json!({"target":target}))).await?;
-                    actual=response(&reply)?;
-                    assert_eq!(actual["success"],true,"{actual}");
+                }
+                for target in order {
+                    loop {
+                        let integrated=guest.command("TEST_WRITER","cat /service/integration".into()).await?;
+                        let actual=response(&integrated)?;
+                        assert_eq!(actual["data"]["feature"],target,"{actual}");
+                        if actual["success"].as_bool().ok_or("actual test writer CI input")? {break;}
+                        loop {
+                            let ready=guest.command("TEST_WRITER",format!("cat /service/code_ready/{target}")).await?;
+                            assert_eq!(response(&ready)?["success"],true,"{ready}");
+                            let tested=guest.command("TEST_WRITER",format!("echo '{}' > /service/write_tests/{target}; cat /service/write_tests/{target}",json!({"target":target}))).await?;
+                            assert_eq!(response(&tested)?["success"],true,"{tested}");
+                            let review=guest.command("TEST_WRITER",format!("cat /service/review/{target}")).await?;
+                            if response(&review)?["success"].as_bool().ok_or("actual repaired review")? {break;}
+                        }
+                    }
                 }
                 assert_eq!(guest.command("TEST_WRITER","exit 0".into()).await?["exit_status"],0);
                 Result::Ok(())
             };
-            async{
-                let targets=if review_b_first{["payment_processing","user_authentication"]}else{["user_authentication","payment_processing"]};
-                let mut actual=Value::Null;
-                for target in targets{
-                    let reply=guest.command("REVIEWER",format!("echo '{}' > /service/code_review; cat /service/result",json!({"pr_id":target}))).await?;
-                    actual=response(&reply)?;
-                    assert!(actual["success"].is_boolean(),"{actual}");
-                }
-                loop{
-                    if !actual["coordination"]["ci"].is_null(){
-                        assert_eq!(actual["coordination"]["ci"]["success"],true,"{actual}");
-                        break;
+            async {
+                let refused=guest.command("REVIEWER",r#"echo '{"pr_id":"payment_processing"}' > /service/code_review/user_authentication"#.into()).await?;
+                assert!(refused["stdout"].as_str().ok_or("wrong review target output")?.contains("wash:"),"{refused}");
+                let targets=if review_b_first {["payment_processing","user_authentication"]} else {["user_authentication","payment_processing"]};
+                for target in targets {
+                    loop {
+                        let ready=guest.command("REVIEWER",format!("cat /service/code_ready/{target}")).await?;
+                        assert_eq!(response(&ready)?["success"],true,"{ready}");
+                        let reviewed=guest.command("REVIEWER",format!("echo '{}' > /service/code_review/{target}; cat /service/code_review/{target}",json!({"pr_id":target}))).await?;
+                        if response(&reviewed)?["success"].as_bool().ok_or("actual review")? {break;}
                     }
-                    let target=if !actual["coordination"]["code_review"].is_null(){
-                        actual["coordination"]["code_review"]["data"]["target"].as_str().ok_or("initial retry target")?
-                    }else if actual["success"]==false{
-                        actual["data"]["target"].as_str().ok_or("rejected recovery target")?
-                    }else{
-                        let failed=actual["coordination"]["outcomes"].as_array().and_then(|values|values.last()).ok_or("actual failed CI for reviewer")?;
-                        assert_eq!(failed["success"],false,"{actual}");
-                        failed["data"]["feature"].as_str().ok_or("actual failed publication target")?
-                    };
-                    let reply=guest.command("REVIEWER",format!("echo '{}' > /service/code_review; cat /service/result",json!({"pr_id":target}))).await?;
-                    actual=response(&reply)?;
-                    assert!(actual["success"].is_boolean(),"{actual}");
+                }
+                for target in targets {
+                    loop {
+                        let ci=guest.command("REVIEWER",format!("cat /service/integration/{target}")).await?;
+                        if response(&ci)?["success"].as_bool().ok_or("actual reviewer CI input")? {break;}
+                        loop {
+                            let ready=guest.command("REVIEWER",format!("cat /service/code_ready/{target}")).await?;
+                            assert_eq!(response(&ready)?["success"],true,"{ready}");
+                            let reviewed=guest.command("REVIEWER",format!("echo '{}' > /service/code_review/{target}; cat /service/code_review/{target}",json!({"pr_id":target}))).await?;
+                            if response(&reviewed)?["success"].as_bool().ok_or("actual repair review")? {break;}
+                        }
+                    }
                 }
                 assert_eq!(guest.command("REVIEWER","exit 0".into()).await?["exit_status"],0);
                 Result::Ok(())
             };
-            async{
-                let suites=if review_b_first{["full_test_suite_after_payment","full_test_suite_after_auth"]}else{["full_test_suite_after_auth","full_test_suite_after_payment"]};
-                for suite in suites{
-                    loop{
-                        let reply=guest.command("CI_RUNNER",format!("echo '{}' > /service/run_tests; cat /service/result",json!({"suite":suite}))).await?;
-                        let actual=response(&reply)?;
-                        if actual["success"].as_bool().ok_or("actual integrated CI result")?{break;}
+            async {
+                let refused=guest.command("CI_RUNNER",r#"echo '{"suite":"full_test_suite_after_payment"}' > /service/run_tests/user_authentication"#.into()).await?;
+                assert!(refused["stdout"].as_str().ok_or("wrong CI suite output")?.contains("wash:"),"{refused}");
+                let suites=if review_b_first {[("payment_processing","full_test_suite_after_payment"),("user_authentication","full_test_suite_after_auth")]} else {[("user_authentication","full_test_suite_after_auth"),("payment_processing","full_test_suite_after_payment")]};
+                let (target,suite)=suites[0];
+                let refused=guest.command("CI_RUNNER",format!("echo '{}' > /service/run_tests/{target}",json!({"suite":suite}))).await?;
+                assert!(refused["stdout"].as_str().ok_or("early CI output")?.contains("wash:"),"{refused}");
+                for (target,suite) in suites {
+                    loop {
+                        let publication=guest.command("CI_RUNNER",format!("cat /service/publication/{target}")).await?;
+                        assert_eq!(response(&publication)?["success"],true,"{publication}");
+                        let integrated=guest.command("CI_RUNNER",format!("echo '{}' > /service/run_tests/{target}; cat /service/run_tests/{target}",json!({"suite":suite}))).await?;
+                        if response(&integrated)?["success"].as_bool().ok_or("actual CI result")? {break;}
                     }
                 }
                 assert_eq!(guest.command("CI_RUNNER","exit 0".into()).await?["exit_status"],0);
                 Result::Ok(())
             };
-            async{runtime.await};
+            async {runtime.await};
         },hibana_runtime::host::deadline(Duration::from_secs(180))).await?;
         save(&output.join("result.json"), &result)?;
         assert_eq!(
@@ -369,15 +477,15 @@ async fn actual_wasi_review_rejection_and_ci_repair() -> Result<()> {
             failed_recovery_reviews >= failures.len(),
             "required recovery rejection was not exercised: {events:?}"
         );
-        let audit = crate::feature_delivery_audit::audit(&output.join("events.jsonl"))?;
-        save(&output.join("audit.json"), &audit)?;
         let mutations = crate::feature_delivery_audit::check_mutants(
             &output.join("events.jsonl"),
             &output.join("record-mutations"),
         )?;
+        let audit = &mutations["audit"];
+        save(&output.join("audit.json"), audit)?;
         outcomes.push(json!({"case":index,"depth":depth,"domain_calls":audit["domain_calls"],
             "capture_records":audit["dynamic_protocol"]["captured_records"],"audit_report":format!("case{index}/audit.json"),
-            "record_mutants_rejected":mutations["mutants_rejected"],"rejected_recovery_reviews":failed_recovery_reviews}));
+            "record_mutants_rejected":mutations["count"],"rejected_guest_requests":10,"rejected_recovery_reviews":failed_recovery_reviews}));
         save(
             &directory.join("progress.json"),
             &json!({"completed_conditions":outcomes.len(),"expected_conditions":expected_conditions,

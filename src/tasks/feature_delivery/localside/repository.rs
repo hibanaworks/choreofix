@@ -1,405 +1,249 @@
-//! The repository owns actual candidate, review and publication data.
-//! Known continuations use recv; offer is reserved for projected choices.
-use super::super::{
-    global::{delivery::*, *},
-    imp,
-};
-use crate::shell::{
-    ShellError, ShellResult,
-    imp::{review_reply::ReviewReply, service::Domain},
-};
+//! One affine repository view owns actual candidates, approvals and publications.
+use super::super::{global::*, imp};
+use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use core::cell::Cell;
 use hibana::{Endpoint, g::Message};
 use serde_json::Value;
 
 #[hibana_runtime::scope]
-pub async fn run<'r, D: Domain>(
-    endpoint: &mut Endpoint<'r, REPOSITORY>,
-    (mut repository, environment, feature_a, feature_b): (
-        Endpoint<'r, REPO>,
-        Endpoint<'r, TEST_ENV>,
-        Endpoint<'r, AUTH_A>,
-        Endpoint<'r, AUTH_B>,
-    ),
-    domain: &D,
-) -> ShellResult<(
-    Endpoint<'r, REPO>,
-    Endpoint<'r, TEST_ENV>,
-    Endpoint<'r, AUTH_A>,
-    Endpoint<'r, AUTH_B>,
-)> {
-    endpoint.send::<Feature<AUTH_A>>(feature_a).await?;
-    endpoint.send::<Feature<AUTH_B>>(feature_b).await?;
-    endpoint.send::<TestLoan>(environment).await?;
-    let branch = endpoint.offer().await?;
-    let first_review = match branch.label() {
-        ReviewFirstA::LOGICAL_LABEL => {
-            let arguments = branch.recv::<ReviewFirstA>().await?.into_value();
-            imp::arguments(&arguments, ("pr_id", FEATURE_A))?;
-            arguments
-        }
-        ReviewFirstB::LOGICAL_LABEL => {
-            let arguments = branch.recv::<ReviewFirstB>().await?.into_value();
-            imp::arguments(&arguments, ("pr_id", FEATURE_B))?;
-            arguments
-        }
-        _ => return Err(ShellError::message("expected the selected review request")),
-    };
-    let order = if first_review["pr_id"] == FEATURE_A {
-        [FEATURE_A, FEATURE_B]
-    } else {
-        [FEATURE_B, FEATURE_A]
-    };
+pub async fn run<D: Domain>(
+    owner: &mut Endpoint<REPO_OWNER>,
+    (domain, order): (&D, &Cell<Option<[Value; 2]>>),
+) -> ShellResult<()> {
+    let mut repository = owner.recv::<RepoLoan>().await?;
     let mut candidates = [Value::Null, Value::Null];
     let mut reviews = [Value::Null, Value::Null];
-    let mut feature_a = None;
-    let mut feature_b = None;
-    for feature in order {
-        let (index, agent) = if feature == FEATURE_A {
-            (0, "DEVELOPER_A")
-        } else {
-            (1, "DEVELOPER_B")
-        };
-        let admitted = if feature == FEATURE_A {
-            endpoint.recv::<ImplementA>().await?.into_value()
-        } else {
-            endpoint.recv::<ImplementB>().await?.into_value()
-        };
-        imp::arguments(&admitted, ("feature_name", feature))?;
-        endpoint.send::<RepoLoan>(repository).await?;
-        let (authority, arguments) = async {
-            let [mut authority, mut repo] = endpoint.par()?;
-            async { Ok::<_, ShellError>(authority.recv::<Implement>().await?.into_value()) };
-            async { Ok::<_, ShellError>(repo.recv::<ImplementOnRepo>().await?.into_value()) };
-        }
-        .await?;
-        imp::same(&authority, &admitted)?;
-        imp::same(&arguments, &admitted)?;
-        let result = domain
-            .execute(agent, "implement_feature", arguments)
-            .await
-            .map_err(ShellError::message)?;
-        imp::candidate(&result, feature)?;
-        let bytes = imp::encode(&result)?;
-        endpoint.send::<RepoResult>(&bytes.as_slice()).await?;
-        repository = endpoint.recv::<RepoReturn>().await?;
-        if feature == FEATURE_A {
-            endpoint
-                .send::<CandidateForReviewA>(&bytes.as_slice())
-                .await?;
-            endpoint
-                .send::<CandidateForTestsA>(&bytes.as_slice())
-                .await?;
-        } else {
-            endpoint
-                .send::<CandidateForReviewB>(&bytes.as_slice())
-                .await?;
-            endpoint
-                .send::<CandidateForTestsB>(&bytes.as_slice())
-                .await?;
-        }
-        candidates[index] = result;
-    }
-    for feature in order {
-        let (index, agent) = if feature == FEATURE_A {
-            (0, "DEVELOPER_A")
-        } else {
-            (1, "DEVELOPER_B")
-        };
-        loop {
-            let result = if feature == FEATURE_A {
-                imp::decode(endpoint.recv::<ReviewResultA>().await?)?
-            } else {
-                imp::decode(endpoint.recv::<ReviewResultB>().await?)?
-            };
-            imp::reviewed(&result, &candidates[index], feature)?;
-            let branch = endpoint.offer().await?;
-            match branch.label() {
-                ReviewApproved::LOGICAL_LABEL => {
-                    imp::same(
-                        &imp::decode(branch.recv::<ReviewApproved>().await?)?,
-                        &result,
-                    )?;
-                    if feature == FEATURE_A {
-                        feature_a = Some(endpoint.recv::<Feature<AUTH_A>>().await?);
-                    } else {
-                        feature_b = Some(endpoint.recv::<Feature<AUTH_B>>().await?);
-                    }
-                    reviews[index] = result;
-                    break;
-                }
-                ReviewRejected::LOGICAL_LABEL => {
-                    imp::same(
-                        &imp::decode(branch.recv::<ReviewRejected>().await?)?,
-                        &result,
-                    )?;
-                    reviews[index] = result;
-                }
-                _ => {
-                    return Err(ShellError::message(
-                        "expected this candidate's initial review outcome",
-                    ));
-                }
-            }
-            let admitted = if feature == FEATURE_A {
-                endpoint.recv::<ImplementA>().await?.into_value()
-            } else {
-                endpoint.recv::<ImplementB>().await?.into_value()
-            };
-            imp::arguments(&admitted, ("feature_name", feature))?;
-            endpoint.send::<RepoLoan>(repository).await?;
-            let (authority, arguments) = async {
-                let [mut authority, mut repo] = endpoint.par()?;
-                async { Ok::<_, ShellError>(authority.recv::<Implement>().await?.into_value()) };
-                async { Ok::<_, ShellError>(repo.recv::<ImplementOnRepo>().await?.into_value()) };
-            }
-            .await?;
-            imp::same(&authority, &admitted)?;
-            imp::same(&arguments, &admitted)?;
-            let result = domain
-                .execute(agent, "implement_feature", arguments)
-                .await
-                .map_err(ShellError::message)?;
-            imp::candidate(&result, feature)?;
-            let bytes = imp::encode(&result)?;
-            endpoint.send::<RepoResult>(&bytes.as_slice()).await?;
-            repository = endpoint.recv::<RepoReturn>().await?;
-            if feature == FEATURE_A {
-                endpoint
-                    .send::<CandidateForReviewA>(&bytes.as_slice())
-                    .await?;
-                endpoint
-                    .send::<CandidateForTestsA>(&bytes.as_slice())
-                    .await?;
-            } else {
-                endpoint
-                    .send::<CandidateForReviewB>(&bytes.as_slice())
-                    .await?;
-                endpoint
-                    .send::<CandidateForTestsB>(&bytes.as_slice())
-                    .await?;
-            }
-            candidates[index] = result;
-        }
-    }
+    let mut tests = [Value::Null, Value::Null];
+    let mut publication = Value::Null;
     let mut prior_ci = Value::Null;
-    for feature in order {
-        let (index, agent) = if feature == FEATURE_A {
-            (0, "DEVELOPER_A")
-        } else {
-            (1, "DEVELOPER_B")
-        };
-        if feature == FEATURE_A {
-            endpoint
-                .send::<MergeLoanA>(
-                    feature_a.take().ok_or_else(|| {
-                        ShellError::message("missing approved feature A Endpoint")
-                    })?,
-                )
-                .await?;
-        } else {
-            endpoint
-                .send::<MergeLoanB>(
-                    feature_b.take().ok_or_else(|| {
-                        ShellError::message("missing approved feature B Endpoint")
-                    })?,
-                )
-                .await?;
-        }
-        loop {
-            let admitted = if feature == FEATURE_A {
-                endpoint.recv::<MergeAdmissionA>().await?.into_value()
-            } else {
-                endpoint.recv::<MergeAdmissionB>().await?.into_value()
-            };
-            imp::arguments(&admitted, ("branch", feature))?;
-            endpoint.send::<RepoLoan>(repository).await?;
-            let (authority, arguments) = async {
-                let [mut authority, mut repo] = endpoint.par()?;
-                async { Ok::<_, ShellError>(authority.recv::<Merge>().await?.into_value()) };
-                async { Ok::<_, ShellError>(repo.recv::<MergeOnRepo>().await?.into_value()) };
-            }
-            .await?;
-            imp::merge_inputs(
-                &admitted,
-                (&authority, &arguments),
-                (feature, &candidates[index], &reviews[index]),
-            )?;
-            let publication = domain
-                .execute(agent, "merge_code", arguments)
-                .await
-                .map_err(ShellError::message)?;
-            imp::merge_result(
-                &publication,
-                (feature, &candidates[index], &reviews[index]),
-                &prior_ci,
-            )?;
-            let bytes = imp::encode(&publication)?;
-            endpoint.send::<Merged>(&bytes.as_slice()).await?;
-            repository = endpoint.recv::<RepoReturn>().await?;
-            endpoint.send::<Merged>(&bytes.as_slice()).await?;
-            let result = imp::decode(endpoint.recv::<CiResult>().await?)?;
-            imp::ci_publication(&result, &publication)?;
-            let bytes = imp::encode(&result)?;
-            let branch = endpoint.offer().await?;
-            match branch.label() {
-                IntegratedA::LOGICAL_LABEL => {
-                    imp::arguments(&publication["data"], ("feature", FEATURE_A))?;
-                    imp::same(&imp::decode(branch.recv::<IntegratedA>().await?)?, &result)?;
-                    let mut authority = endpoint.recv::<Feature<AUTH_A>>().await?;
-                    let reply = ReviewReply::<true>::from_bytes(&bytes)?;
-                    if first_review["pr_id"] == FEATURE_A {
-                        authority.send::<CiPassedA>(&reply).await?;
-                        authority.send::<CiPassedA>(&reply).await?;
-                        authority.send::<CiPassedA>(&reply).await?;
-                        authority.send::<CiPassedA>(&reply).await?;
-                        authority.send::<CiPassedA>(&reply).await?;
-                        authority.send::<CiPassedA>(&reply).await?;
-                        authority.send::<CiPassedA>(&reply).await?;
-                        authority.send::<CiPassedA>(&reply).await?;
-                    } else {
-                        authority.send::<LastCiPassedA>(&reply).await?;
-                        authority.send::<LastCiPassedA>(&reply).await?;
-                        authority.send::<LastCiPassedA>(&reply).await?;
-                        authority.send::<LastCiPassedA>(&reply).await?;
-                        authority.send::<LastCiPassedA>(&reply).await?;
-                        authority.send::<LastCiPassedA>(&reply).await?;
-                        authority.send::<LastCiPassedA>(&reply).await?;
-                        authority.send::<LastCiPassedA>(&reply).await?;
-                    }
-                    feature_a = Some(authority);
-                    prior_ci = result;
-                    break;
-                }
-                IntegrationFailedA::LOGICAL_LABEL => {
-                    imp::arguments(&publication["data"], ("feature", FEATURE_A))?;
-                    imp::same(
-                        &imp::decode(branch.recv::<IntegrationFailedA>().await?)?,
-                        &result,
-                    )?;
-                }
-                IntegratedB::LOGICAL_LABEL => {
-                    imp::arguments(&publication["data"], ("feature", FEATURE_B))?;
-                    imp::same(&imp::decode(branch.recv::<IntegratedB>().await?)?, &result)?;
-                    let mut authority = endpoint.recv::<Feature<AUTH_B>>().await?;
-                    let reply = ReviewReply::<true>::from_bytes(&bytes)?;
-                    if first_review["pr_id"] == FEATURE_B {
-                        authority.send::<CiPassedB>(&reply).await?;
-                        authority.send::<CiPassedB>(&reply).await?;
-                        authority.send::<CiPassedB>(&reply).await?;
-                        authority.send::<CiPassedB>(&reply).await?;
-                        authority.send::<CiPassedB>(&reply).await?;
-                        authority.send::<CiPassedB>(&reply).await?;
-                        authority.send::<CiPassedB>(&reply).await?;
-                        authority.send::<CiPassedB>(&reply).await?;
-                    } else {
-                        authority.send::<LastCiPassedB>(&reply).await?;
-                        authority.send::<LastCiPassedB>(&reply).await?;
-                        authority.send::<LastCiPassedB>(&reply).await?;
-                        authority.send::<LastCiPassedB>(&reply).await?;
-                        authority.send::<LastCiPassedB>(&reply).await?;
-                        authority.send::<LastCiPassedB>(&reply).await?;
-                        authority.send::<LastCiPassedB>(&reply).await?;
-                        authority.send::<LastCiPassedB>(&reply).await?;
-                    }
-                    feature_b = Some(authority);
-                    prior_ci = result;
-                    break;
-                }
-                IntegrationFailedB::LOGICAL_LABEL => {
-                    imp::arguments(&publication["data"], ("feature", FEATURE_B))?;
-                    imp::same(
-                        &imp::decode(branch.recv::<IntegrationFailedB>().await?)?,
-                        &result,
-                    )?;
-                }
-                _ => return Err(ShellError::message("expected the actual CI outcome")),
-            }
-            prior_ci = result;
-            loop {
-                let admitted = if feature == FEATURE_A {
-                    endpoint.recv::<ImplementA>().await?.into_value()
-                } else {
-                    endpoint.recv::<ImplementB>().await?.into_value()
-                };
-                imp::arguments(&admitted, ("feature_name", feature))?;
-                endpoint.send::<RepoLoan>(repository).await?;
-                let (authority, arguments) = async {
-                    let [mut authority, mut repo] = endpoint.par()?;
-                    async {
-                        Ok::<_, ShellError>(authority.recv::<Implement>().await?.into_value())
-                    };
-                    async {
-                        Ok::<_, ShellError>(repo.recv::<ImplementOnRepo>().await?.into_value())
-                    };
-                }
-                .await?;
-                imp::same(&authority, &admitted)?;
-                imp::same(&arguments, &admitted)?;
+    loop {
+        let branch = repository.offer().await?;
+        match branch.label() {
+            ImplementA::LOGICAL_LABEL => {
+                let arguments = branch.recv::<ImplementA>().await?.into_value();
                 let result = domain
-                    .execute(agent, "implement_feature", arguments)
+                    .execute("DEVELOPER_A", "implement_feature", arguments)
                     .await
                     .map_err(ShellError::message)?;
-                imp::candidate(&result, feature)?;
+                imp::candidate(&result, FEATURE_A)?;
                 let bytes = imp::encode(&result)?;
-                endpoint.send::<RepoResult>(&bytes.as_slice()).await?;
-                repository = endpoint.recv::<RepoReturn>().await?;
-                if feature == FEATURE_A {
-                    endpoint
-                        .send::<CandidateForReviewA>(&bytes.as_slice())
-                        .await?;
-                    endpoint
-                        .send::<CandidateForTestsA>(&bytes.as_slice())
-                        .await?;
-                } else {
-                    endpoint
-                        .send::<CandidateForReviewB>(&bytes.as_slice())
-                        .await?;
-                    endpoint
-                        .send::<CandidateForTestsB>(&bytes.as_slice())
-                        .await?;
-                }
-                candidates[index] = result;
-                let result = if feature == FEATURE_A {
-                    imp::decode(endpoint.recv::<ReviewResultA>().await?)?
-                } else {
-                    imp::decode(endpoint.recv::<ReviewResultB>().await?)?
+                candidates[0] = result;
+                repository
+                    .send::<ImplementationA>(&bytes.as_slice())
+                    .await?;
+                repository.send::<ReadyReviewA>(&bytes.as_slice()).await?;
+                repository
+                    .send::<FileReviewCandidateA>(&bytes.as_slice())
+                    .await?;
+                repository.send::<ReadyTestA>(&bytes.as_slice()).await?;
+                repository
+                    .send::<FileTestCandidateA>(&bytes.as_slice())
+                    .await?;
+                repository.send::<InterfaceA>(&bytes.as_slice()).await?;
+            }
+            ApprovedA::LOGICAL_LABEL
+            | RejectedA::LOGICAL_LABEL
+            | RepairApprovedA::LOGICAL_LABEL
+            | RepairRejectedA::LOGICAL_LABEL => {
+                let bytes = match branch.label() {
+                    ApprovedA::LOGICAL_LABEL => branch.recv::<ApprovedA>().await?.to_vec(),
+                    RejectedA::LOGICAL_LABEL => branch.recv::<RejectedA>().await?.to_vec(),
+                    RepairApprovedA::LOGICAL_LABEL => {
+                        branch.recv::<RepairApprovedA>().await?.to_vec()
+                    }
+                    RepairRejectedA::LOGICAL_LABEL => {
+                        branch.recv::<RepairRejectedA>().await?.to_vec()
+                    }
+                    _ => unreachable!(),
                 };
-                imp::reviewed(&result, &candidates[index], feature)?;
-                let branch = endpoint.offer().await?;
-                match branch.label() {
-                    RecoveryReviewApproved::LOGICAL_LABEL => {
-                        imp::same(
-                            &imp::decode(branch.recv::<RecoveryReviewApproved>().await?)?,
-                            &result,
-                        )?;
-                        reviews[index] = result;
-                        break;
+                let result = imp::decode(&bytes)?;
+                imp::reviewed(&result, &candidates[0], FEATURE_A)?;
+                reviews[0] = result;
+                order.set(Some(reviews.clone()));
+            }
+            ReviewFeedbackA::LOGICAL_LABEL => {
+                let bytes = imp::encode(&reviews[0])?;
+                branch.send::<ReviewFeedbackA>(&bytes.as_slice()).await?;
+                repository
+                    .send::<ReviewFeedbackA>(&bytes.as_slice())
+                    .await?;
+                repository
+                    .send::<ReviewFeedbackA>(&bytes.as_slice())
+                    .await?;
+                repository
+                    .send::<ReviewFeedbackA>(&bytes.as_slice())
+                    .await?;
+            }
+            TestedA::LOGICAL_LABEL => {
+                let result = imp::decode(branch.recv::<TestedA>().await?)?;
+                imp::tested(&result, &candidates[0], FEATURE_A)?;
+                tests[0] = result;
+            }
+            MergeReadyA::LOGICAL_LABEL => {
+                let bytes = imp::encode(&reviews[0])?;
+                branch.send::<MergeReadyA>(&bytes.as_slice()).await?;
+            }
+            MergeA::LOGICAL_LABEL => {
+                let arguments = branch.recv::<MergeA>().await?.into_value();
+                imp::merge_inputs(&arguments, (FEATURE_A, &candidates[0], &reviews[0]))?;
+                let result = domain
+                    .execute("DEVELOPER_A", "merge_code", arguments)
+                    .await
+                    .map_err(ShellError::message)?;
+                imp::merge_result(&result, (FEATURE_A, &candidates[0], &reviews[0]), &prior_ci)?;
+                let bytes = imp::encode(&result)?;
+                repository.send::<MergedA>(&bytes.as_slice()).await?;
+                let inputs = imp::encode(&serde_json::json!({"publication":result,"tests":tests}))?;
+                publication = result;
+                repository.send::<PublicationA>(&inputs.as_slice()).await?;
+            }
+            CiPassedA::LOGICAL_LABEL | CiFailedA::LOGICAL_LABEL => {
+                let bytes = match branch.label() {
+                    CiPassedA::LOGICAL_LABEL => branch.recv::<CiPassedA>().await?.to_vec(),
+                    CiFailedA::LOGICAL_LABEL => branch.recv::<CiFailedA>().await?.to_vec(),
+                    _ => unreachable!(),
+                };
+                let result = imp::decode(&bytes)?;
+                imp::ci_result(&result, &publication, (&tests[0], &tests[1]))?;
+                prior_ci = result;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+            }
+            ImplementB::LOGICAL_LABEL => {
+                let arguments = branch.recv::<ImplementB>().await?.into_value();
+                let result = domain
+                    .execute("DEVELOPER_B", "implement_feature", arguments)
+                    .await
+                    .map_err(ShellError::message)?;
+                imp::candidate(&result, FEATURE_B)?;
+                let bytes = imp::encode(&result)?;
+                candidates[1] = result;
+                repository
+                    .send::<ImplementationB>(&bytes.as_slice())
+                    .await?;
+                repository.send::<ReadyReviewB>(&bytes.as_slice()).await?;
+                repository
+                    .send::<FileReviewCandidateB>(&bytes.as_slice())
+                    .await?;
+                repository.send::<ReadyTestB>(&bytes.as_slice()).await?;
+                repository
+                    .send::<FileTestCandidateB>(&bytes.as_slice())
+                    .await?;
+                repository.send::<InterfaceB>(&bytes.as_slice()).await?;
+            }
+            ApprovedB::LOGICAL_LABEL
+            | RejectedB::LOGICAL_LABEL
+            | RepairApprovedB::LOGICAL_LABEL
+            | RepairRejectedB::LOGICAL_LABEL => {
+                let bytes = match branch.label() {
+                    ApprovedB::LOGICAL_LABEL => branch.recv::<ApprovedB>().await?.to_vec(),
+                    RejectedB::LOGICAL_LABEL => branch.recv::<RejectedB>().await?.to_vec(),
+                    RepairApprovedB::LOGICAL_LABEL => {
+                        branch.recv::<RepairApprovedB>().await?.to_vec()
                     }
-                    RecoveryReviewRejected::LOGICAL_LABEL => {
-                        imp::same(
-                            &imp::decode(branch.recv::<RecoveryReviewRejected>().await?)?,
-                            &result,
-                        )?;
-                        reviews[index] = result;
+                    RepairRejectedB::LOGICAL_LABEL => {
+                        branch.recv::<RepairRejectedB>().await?.to_vec()
                     }
-                    _ => {
-                        return Err(ShellError::message(
-                            "expected this candidate's recovery review outcome",
-                        ));
-                    }
-                }
+                    _ => unreachable!(),
+                };
+                let result = imp::decode(&bytes)?;
+                imp::reviewed(&result, &candidates[1], FEATURE_B)?;
+                reviews[1] = result;
+                order.set(Some(reviews.clone()));
+            }
+            ReviewFeedbackB::LOGICAL_LABEL => {
+                let bytes = imp::encode(&reviews[1])?;
+                branch.send::<ReviewFeedbackB>(&bytes.as_slice()).await?;
+                repository
+                    .send::<ReviewFeedbackB>(&bytes.as_slice())
+                    .await?;
+                repository
+                    .send::<ReviewFeedbackB>(&bytes.as_slice())
+                    .await?;
+                repository
+                    .send::<ReviewFeedbackB>(&bytes.as_slice())
+                    .await?;
+            }
+            TestedB::LOGICAL_LABEL => {
+                let result = imp::decode(branch.recv::<TestedB>().await?)?;
+                imp::tested(&result, &candidates[1], FEATURE_B)?;
+                tests[1] = result;
+            }
+            MergeReadyB::LOGICAL_LABEL => {
+                let bytes = imp::encode(&reviews[1])?;
+                branch.send::<MergeReadyB>(&bytes.as_slice()).await?;
+            }
+            MergeB::LOGICAL_LABEL => {
+                let arguments = branch.recv::<MergeB>().await?.into_value();
+                imp::merge_inputs(&arguments, (FEATURE_B, &candidates[1], &reviews[1]))?;
+                let result = domain
+                    .execute("DEVELOPER_B", "merge_code", arguments)
+                    .await
+                    .map_err(ShellError::message)?;
+                imp::merge_result(&result, (FEATURE_B, &candidates[1], &reviews[1]), &prior_ci)?;
+                let bytes = imp::encode(&result)?;
+                repository.send::<MergedB>(&bytes.as_slice()).await?;
+                let inputs = imp::encode(&serde_json::json!({"publication":result,"tests":tests}))?;
+                publication = result;
+                repository.send::<PublicationB>(&inputs.as_slice()).await?;
+            }
+            CiPassedB::LOGICAL_LABEL | CiFailedB::LOGICAL_LABEL => {
+                let bytes = match branch.label() {
+                    CiPassedB::LOGICAL_LABEL => branch.recv::<CiPassedB>().await?.to_vec(),
+                    CiFailedB::LOGICAL_LABEL => branch.recv::<CiFailedB>().await?.to_vec(),
+                    _ => unreachable!(),
+                };
+                let result = imp::decode(&bytes)?;
+                imp::ci_result(&result, &publication, (&tests[0], &tests[1]))?;
+                prior_ci = result;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+            }
+            LastCiPassedA::LOGICAL_LABEL => {
+                let bytes = branch.recv::<LastCiPassedA>().await?.to_vec();
+                let result = imp::decode(&bytes)?;
+                imp::ci_result(&result, &publication, (&tests[0], &tests[1]))?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<TaskExit>(&0).await?;
+                repository.send::<TaskExit>(&0).await?;
+                repository.send::<TaskExit>(&0).await?;
+                repository.send::<TaskExit>(&0).await?;
+                return Ok(());
+            }
+            LastCiPassedB::LOGICAL_LABEL => {
+                let bytes = branch.recv::<LastCiPassedB>().await?.to_vec();
+                let result = imp::decode(&bytes)?;
+                imp::ci_result(&result, &publication, (&tests[0], &tests[1]))?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdate>(&bytes.as_slice()).await?;
+                repository.send::<TaskExit>(&0).await?;
+                repository.send::<TaskExit>(&0).await?;
+                repository.send::<TaskExit>(&0).await?;
+                repository.send::<TaskExit>(&0).await?;
+                return Ok(());
+            }
+            label => {
+                return Err(ShellError::message(format!(
+                    "unexpected repository operation {label}"
+                )));
             }
         }
     }
-    let environment = endpoint.recv::<TestReturn>().await?;
-    Ok((
-        repository,
-        environment,
-        feature_a
-            .take()
-            .ok_or_else(|| ShellError::message("missing final feature A Endpoint"))?,
-        feature_b
-            .take()
-            .ok_or_else(|| ShellError::message("missing final feature B Endpoint"))?,
-    ))
 }

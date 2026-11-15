@@ -26,33 +26,21 @@ fn merge_data_requires_the_exact_candidate_approval_and_integrated_base() {
             "data":{"agent":"REVIEWER", "target":feature,"candidate_sha256":"source hash",
                 "source_receipt":10,"artifact_id":"development:12"}});
         let request = json!({"branch":feature});
-        data::merge_inputs(
-            &request,
-            (&request, &request),
-            (feature, &candidate, &review),
-        )
-        .unwrap();
-        for trial in 0..7 {
-            let mut feature_request = request.clone();
-            let mut repo_request = request.clone();
+        data::merge_inputs(&request, (feature, &candidate, &review)).unwrap();
+        for trial in 0..6 {
+            let mut actual_request = request.clone();
             let mut approval = review.clone();
             match trial {
-                0 => feature_request["branch"] = json!("other feature"),
-                1 => repo_request["branch"] = json!("other feature"),
-                2 => approval["success"] = json!(false),
-                3 => approval["data"]["candidate_sha256"] = json!("old source"),
-                4 => approval["data"]["source_receipt"] = json!(9),
-                5 => approval["tool_name"] = json!("run_tests"),
-                6 => approval["data"]["agent"] = json!("DEVELOPER_A"),
+                0 => actual_request["branch"] = json!("other feature"),
+                1 => approval["success"] = json!(false),
+                2 => approval["data"]["candidate_sha256"] = json!("old source"),
+                3 => approval["data"]["source_receipt"] = json!(9),
+                4 => approval["tool_name"] = json!("run_tests"),
+                5 => approval["data"]["agent"] = json!("DEVELOPER_A"),
                 _ => unreachable!(),
             }
             assert!(
-                data::merge_inputs(
-                    &request,
-                    (&feature_request, &repo_request),
-                    (feature, &candidate, &approval)
-                )
-                .is_err(),
+                data::merge_inputs(&actual_request, (feature, &candidate, &approval)).is_err(),
                 "{feature} input {trial}"
             );
         }

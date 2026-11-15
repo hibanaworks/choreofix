@@ -1,197 +1,151 @@
-//! The service owns the candidate and original review outcome, not a phase flag.
-use super::super::{
-    global::{delivery::*, *},
-    imp,
+//! Actual review results drive the initial and CI-repair continuations directly.
+use super::super::{actual_outcome, global::*, imp};
+use crate::shell::{
+    ShellError, ShellResult,
+    imp::{review_reply::ReviewReply, service::Domain},
 };
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
-use hibana::{Endpoint, g::Message};
+use core::cell::Cell;
+use hibana::{Endpoint, runtime::resolver::DecisionArm};
+use serde_json::Value;
 
+#[hibana_runtime::scope]
 pub async fn feature_a<D: Domain>(
-    endpoint: &mut Endpoint<'_, REVIEW_A>,
-    domain: &D,
+    task: &mut Endpoint<REVIEW_A>,
+    (domain, actual): (&D, &Cell<Option<Value>>),
 ) -> ShellResult<()> {
     loop {
-        let candidate = imp::decode(endpoint.recv::<CandidateForReviewA>().await?)?;
+        let candidate = imp::decode(task.recv::<ReadyReviewA>().await?)?;
         imp::candidate(&candidate, FEATURE_A)?;
-        let arguments = endpoint.recv::<Review>().await?.into_value();
-        imp::arguments(&arguments, ("pr_id", FEATURE_A))?;
+        let arguments = task.recv::<ReviewRequestA>().await?.into_value();
         let result = domain
             .execute("REVIEWER", "code_review", arguments)
             .await
             .map_err(ShellError::message)?;
         imp::reviewed(&result, &candidate, FEATURE_A)?;
         let bytes = imp::encode(&result)?;
-        endpoint.send::<ReviewResultA>(&bytes.as_slice()).await?;
-        endpoint.send::<ReviewResultA>(&bytes.as_slice()).await?;
-        let branch = endpoint.offer().await?;
-        match branch.label() {
-            ReviewApproved::LOGICAL_LABEL => {
-                imp::same(
-                    &imp::decode(branch.recv::<ReviewApproved>().await?)?,
-                    &result,
-                )?;
+        actual.set(Some(result));
+        match actual_outcome(actual).map_err(|e| ShellError::message(format!("{e:?}")))? {
+            DecisionArm::Left => {
+                task.send::<ApprovedA>(&ReviewReply::<true>::from_bytes(&bytes)?)
+                    .await?;
+                task.send::<FileReviewResultA>(&bytes.as_slice()).await?;
                 break;
             }
-            ReviewRejected::LOGICAL_LABEL => {
-                imp::same(
-                    &imp::decode(branch.recv::<ReviewRejected>().await?)?,
-                    &result,
-                )?;
-            }
-            _ => {
-                return Err(ShellError::message(
-                    "expected this review's original outcome",
-                ));
+            DecisionArm::Right => {
+                task.send::<RejectedA>(&ReviewReply::<false>::from_bytes(&bytes)?)
+                    .await?;
+                task.send::<FileReviewResultA>(&bytes.as_slice()).await?;
             }
         }
     }
     loop {
-        let branch = endpoint.offer().await?;
-        match branch.label() {
-            LastCiPassedA::LOGICAL_LABEL => {
-                branch.recv::<LastCiPassedA>().await?;
-                return Ok(());
-            }
-            CiPassedA::LOGICAL_LABEL => {
-                branch.recv::<CiPassedA>().await?;
-                return Ok(());
-            }
-            CiFailedA::LOGICAL_LABEL => {
-                branch.recv::<CiFailedA>().await?;
-            }
-            _ => return Err(ShellError::message("expected feature A's CI outcome")),
+        let result = imp::decode(task.recv::<CiUpdate>().await?)?;
+        if result["data"]["feature"] != FEATURE_A {
+            return Err(ShellError::message("unrelated CI data"));
         }
-        loop {
-            let candidate = imp::decode(endpoint.recv::<CandidateForReviewA>().await?)?;
-            imp::candidate(&candidate, FEATURE_A)?;
-            let admitted = endpoint.recv::<ReviewRequestA>().await?.into_value();
-            imp::arguments(&admitted, ("pr_id", FEATURE_A))?;
-            let arguments = endpoint.recv::<Review>().await?.into_value();
-            imp::same(&arguments, &admitted)?;
-            let result = domain
-                .execute("REVIEWER", "code_review", arguments)
-                .await
-                .map_err(ShellError::message)?;
-            imp::reviewed(&result, &candidate, FEATURE_A)?;
-            let bytes = imp::encode(&result)?;
-            endpoint.send::<ReviewResultA>(&bytes.as_slice()).await?;
-            endpoint.send::<ReviewResultA>(&bytes.as_slice()).await?;
-            let branch = endpoint.offer().await?;
-            match branch.label() {
-                RecoveryReviewApproved::LOGICAL_LABEL => {
-                    imp::same(
-                        &imp::decode(branch.recv::<RecoveryReviewApproved>().await?)?,
-                        &result,
-                    )?;
-                    break;
+        match result["success"].as_bool() {
+            Some(true) => break,
+            Some(false) => loop {
+                let candidate = imp::decode(task.recv::<ReadyReviewA>().await?)?;
+                imp::candidate(&candidate, FEATURE_A)?;
+                let arguments = task.recv::<ReviewRequestA>().await?.into_value();
+                let result = domain
+                    .execute("REVIEWER", "code_review", arguments)
+                    .await
+                    .map_err(ShellError::message)?;
+                imp::reviewed(&result, &candidate, FEATURE_A)?;
+                let bytes = imp::encode(&result)?;
+                actual.set(Some(result));
+                match actual_outcome(actual).map_err(|e| ShellError::message(format!("{e:?}")))? {
+                    DecisionArm::Left => {
+                        task.send::<RepairApprovedA>(&ReviewReply::<true>::from_bytes(&bytes)?)
+                            .await?;
+                        task.send::<FileReviewResultA>(&bytes.as_slice()).await?;
+                        break;
+                    }
+                    DecisionArm::Right => {
+                        task.send::<RepairRejectedA>(&ReviewReply::<false>::from_bytes(&bytes)?)
+                            .await?;
+                        task.send::<FileReviewResultA>(&bytes.as_slice()).await?;
+                    }
                 }
-                RecoveryReviewRejected::LOGICAL_LABEL => {
-                    imp::same(
-                        &imp::decode(branch.recv::<RecoveryReviewRejected>().await?)?,
-                        &result,
-                    )?;
-                }
-                _ => {
-                    return Err(ShellError::message(
-                        "expected the recovery review's original outcome",
-                    ));
-                }
-            }
+            },
+            None => return Err(ShellError::message("CI has no actual outcome")),
         }
     }
+    if task.recv::<TaskExit>().await? != 0 {
+        return Err(ShellError::message("delivery failed"));
+    }
+    Ok(())
 }
 
+#[hibana_runtime::scope]
 pub async fn feature_b<D: Domain>(
-    endpoint: &mut Endpoint<'_, REVIEW_B>,
-    domain: &D,
+    task: &mut Endpoint<REVIEW_B>,
+    (domain, actual): (&D, &Cell<Option<Value>>),
 ) -> ShellResult<()> {
     loop {
-        let candidate = imp::decode(endpoint.recv::<CandidateForReviewB>().await?)?;
+        let candidate = imp::decode(task.recv::<ReadyReviewB>().await?)?;
         imp::candidate(&candidate, FEATURE_B)?;
-        let arguments = endpoint.recv::<Review>().await?.into_value();
-        imp::arguments(&arguments, ("pr_id", FEATURE_B))?;
+        let arguments = task.recv::<ReviewRequestB>().await?.into_value();
         let result = domain
             .execute("REVIEWER", "code_review", arguments)
             .await
             .map_err(ShellError::message)?;
         imp::reviewed(&result, &candidate, FEATURE_B)?;
         let bytes = imp::encode(&result)?;
-        endpoint.send::<ReviewResultB>(&bytes.as_slice()).await?;
-        endpoint.send::<ReviewResultB>(&bytes.as_slice()).await?;
-        let branch = endpoint.offer().await?;
-        match branch.label() {
-            ReviewApproved::LOGICAL_LABEL => {
-                imp::same(
-                    &imp::decode(branch.recv::<ReviewApproved>().await?)?,
-                    &result,
-                )?;
+        actual.set(Some(result));
+        match actual_outcome(actual).map_err(|e| ShellError::message(format!("{e:?}")))? {
+            DecisionArm::Left => {
+                task.send::<ApprovedB>(&ReviewReply::<true>::from_bytes(&bytes)?)
+                    .await?;
+                task.send::<FileReviewResultB>(&bytes.as_slice()).await?;
                 break;
             }
-            ReviewRejected::LOGICAL_LABEL => {
-                imp::same(
-                    &imp::decode(branch.recv::<ReviewRejected>().await?)?,
-                    &result,
-                )?;
-            }
-            _ => {
-                return Err(ShellError::message(
-                    "expected this review's original outcome",
-                ));
+            DecisionArm::Right => {
+                task.send::<RejectedB>(&ReviewReply::<false>::from_bytes(&bytes)?)
+                    .await?;
+                task.send::<FileReviewResultB>(&bytes.as_slice()).await?;
             }
         }
     }
     loop {
-        let branch = endpoint.offer().await?;
-        match branch.label() {
-            LastCiPassedB::LOGICAL_LABEL => {
-                branch.recv::<LastCiPassedB>().await?;
-                return Ok(());
-            }
-            CiPassedB::LOGICAL_LABEL => {
-                branch.recv::<CiPassedB>().await?;
-                return Ok(());
-            }
-            CiFailedB::LOGICAL_LABEL => {
-                branch.recv::<CiFailedB>().await?;
-            }
-            _ => return Err(ShellError::message("expected feature B's CI outcome")),
+        let result = imp::decode(task.recv::<CiUpdate>().await?)?;
+        if result["data"]["feature"] != FEATURE_B {
+            return Err(ShellError::message("unrelated CI data"));
         }
-        loop {
-            let candidate = imp::decode(endpoint.recv::<CandidateForReviewB>().await?)?;
-            imp::candidate(&candidate, FEATURE_B)?;
-            let admitted = endpoint.recv::<ReviewRequestB>().await?.into_value();
-            imp::arguments(&admitted, ("pr_id", FEATURE_B))?;
-            let arguments = endpoint.recv::<Review>().await?.into_value();
-            imp::same(&arguments, &admitted)?;
-            let result = domain
-                .execute("REVIEWER", "code_review", arguments)
-                .await
-                .map_err(ShellError::message)?;
-            imp::reviewed(&result, &candidate, FEATURE_B)?;
-            let bytes = imp::encode(&result)?;
-            endpoint.send::<ReviewResultB>(&bytes.as_slice()).await?;
-            endpoint.send::<ReviewResultB>(&bytes.as_slice()).await?;
-            let branch = endpoint.offer().await?;
-            match branch.label() {
-                RecoveryReviewApproved::LOGICAL_LABEL => {
-                    imp::same(
-                        &imp::decode(branch.recv::<RecoveryReviewApproved>().await?)?,
-                        &result,
-                    )?;
-                    break;
+        match result["success"].as_bool() {
+            Some(true) => break,
+            Some(false) => loop {
+                let candidate = imp::decode(task.recv::<ReadyReviewB>().await?)?;
+                imp::candidate(&candidate, FEATURE_B)?;
+                let arguments = task.recv::<ReviewRequestB>().await?.into_value();
+                let result = domain
+                    .execute("REVIEWER", "code_review", arguments)
+                    .await
+                    .map_err(ShellError::message)?;
+                imp::reviewed(&result, &candidate, FEATURE_B)?;
+                let bytes = imp::encode(&result)?;
+                actual.set(Some(result));
+                match actual_outcome(actual).map_err(|e| ShellError::message(format!("{e:?}")))? {
+                    DecisionArm::Left => {
+                        task.send::<RepairApprovedB>(&ReviewReply::<true>::from_bytes(&bytes)?)
+                            .await?;
+                        task.send::<FileReviewResultB>(&bytes.as_slice()).await?;
+                        break;
+                    }
+                    DecisionArm::Right => {
+                        task.send::<RepairRejectedB>(&ReviewReply::<false>::from_bytes(&bytes)?)
+                            .await?;
+                        task.send::<FileReviewResultB>(&bytes.as_slice()).await?;
+                    }
                 }
-                RecoveryReviewRejected::LOGICAL_LABEL => {
-                    imp::same(
-                        &imp::decode(branch.recv::<RecoveryReviewRejected>().await?)?,
-                        &result,
-                    )?;
-                }
-                _ => {
-                    return Err(ShellError::message(
-                        "expected the recovery review's original outcome",
-                    ));
-                }
-            }
+            },
+            None => return Err(ShellError::message("CI has no actual outcome")),
         }
     }
+    if task.recv::<TaskExit>().await? != 0 {
+        return Err(ShellError::message("delivery failed"));
+    }
+    Ok(())
 }

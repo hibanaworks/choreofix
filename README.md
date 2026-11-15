@@ -233,7 +233,7 @@ The mechanism suite also observes concurrent CT/MRI imaging and interpretation.
 This was the 21st qualified direct-file task. Source-bound scope and
 limits are recorded in [the 5H port](benchmark/ports/5H.md).
 
-Review (`6E`) is the 22nd qualified direct-file task; 26 remain. Its independent
+Review (`6E`) was the 22nd qualified direct-file task. Its independent
 feature protocols pass all 34 real-Wasm conditions and a three-Luna/xhigh pilot
 on one checking binary. The pilot completes in 164.67 seconds with 976,699
 inclusive tokens, four reviews (two rejected), ten effects and zero violations.
@@ -242,6 +242,14 @@ and eleven run-record mutations are rejected. Only rejected attempts repeat,
 with approval and merge outside the roll. The source shrinks from 1,461 to 181
 events without changing the simulator or adopting core/WASI runtime changes.
 See [the exact scope and measurements](benchmark/ports/6E.md).
+
+Feature delivery (`6M`) is the 23rd qualified direct-file task; 25 remain.
+Six five-Wasm conditions pass the complete EPF capture, request/effect and
+common-score checks. A five-Luna/xhigh pilot freely using wash and private files
+also passes, including two review rejections and two failed CI results followed
+by repair: 482.10 seconds, 3,854,537 inclusive tokens, 26 effects and zero
+violations. This is an unscored source-bound qualification.
+See [the protocol policy and evidence](benchmark/ports/6M.md).
 
 Multi-specialty care (`5M`) passes nine direct-file real-Wasm conditions and
 one five-model pilot on the same runtime. The pilot completes in 75.24 seconds

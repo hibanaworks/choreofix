@@ -318,7 +318,13 @@ async fn fact<'borrow, 'run, const AUTHOR: u8, const SECTION: u8, C: ChapterMess
 }
 
 #[hibana_runtime::scope]
-async fn editor_chapter<'borrow, 'run, const AUTHOR: u8, const SECTION: u8, C: ChapterMessages<AUTHOR>>(
+async fn editor_chapter<
+    'borrow,
+    'run,
+    const AUTHOR: u8,
+    const SECTION: u8,
+    C: ChapterMessages<AUTHOR>,
+>(
     endpoint: &mut EndpointBorrow<'borrow, 'run, EDITOR>,
 ) -> ShellResult<()> {
     loop {

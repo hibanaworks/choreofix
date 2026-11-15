@@ -613,6 +613,11 @@ in the global, receive the actual exit result, then receive the returned Endpoin
 Component tests, simulator completion and green CI cannot establish this
 architecture without checking the actual request/reply path.
 
+Receiving an outcome does not complete the current parallel siblings. A retained
+incoming continuation can arrive before their replies. Drive the declared par
+directly or use the next enabled operation from `offer()`; do not treat receipt
+of a review as permission to send its downstream notifications immediately.
+
 Updating the Hibana dependency does not complete either the WASI or ChoreoFix
 rewrite. Their Hibana localsides must pass the actual operation Endpoint and
 use that received value for the request, result and return in the same global.

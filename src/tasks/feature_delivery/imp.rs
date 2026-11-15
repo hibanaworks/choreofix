@@ -8,14 +8,6 @@ pub fn decode(bytes: &[u8]) -> ShellResult<Value> {
 pub fn encode(value: &Value) -> ShellResult<Vec<u8>> {
     serde_json::to_vec(value).map_err(|error| ShellError::message(error.to_string()))
 }
-pub fn same(first: &Value, second: &Value) -> ShellResult<()> {
-    if first != second {
-        return Err(ShellError::message(
-            "resource request differs from admitted arguments",
-        ));
-    }
-    Ok(())
-}
 pub fn candidate(value: &Value, feature: &str) -> ShellResult<()> {
     if value["success"] != true
         || value["data"]["feature"] != feature
@@ -78,15 +70,12 @@ pub fn merged(value: &Value, feature: &str) -> ShellResult<()> {
     Ok(())
 }
 
-/// Check the three actual merge inputs against the repository's own data.
+/// Check the actual request against the repository's candidate and approval.
 pub fn merge_inputs(
-    admitted: &Value,
-    requests: (&Value, &Value),
+    request: &Value,
     (feature, candidate, review): (&str, &Value, &Value),
 ) -> ShellResult<()> {
-    arguments(admitted, ("branch", feature))?;
-    same(admitted, requests.0)?;
-    same(admitted, requests.1)?;
+    arguments(request, ("branch", feature))?;
     self::candidate(candidate, feature)?;
     reviewed(review, candidate, feature)?;
     let source_receipt = candidate["data"]["artifact_id"]
