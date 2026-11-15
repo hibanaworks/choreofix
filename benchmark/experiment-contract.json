@@ -17,7 +17,7 @@
     "first_technical_gate": "T3/T4: compose unique resource ownership and its remaining protocol with actual effects; define the adapter trust boundary and test old owners, duplicate transfers and argument substitution before scored comparisons",
     "theorem_scope_and_milestones": "plan.md",
     "effect_boundary_contract_and_inventory": "benchmark/effect-boundaries.md",
-    "effect_boundary_status": "Nineteen source-bound tasks now have direct-file mechanism and live-model evidence; 29 remain, with the exact list in migration_status. Latest 5E passes nine real-Wasm cases and one three-Luna/xhigh pilot on the same binary, with complete EPF, one-use request/effect/reply matching and neutral common scoring. The live pilot completes in 48.271922459 seconds, 377070 inclusive tokens, six effects and zero violations. An earlier model-selected blocking read was interrupted and is not counted as success. Minimum T3/T4 composition remains under its consuming receiver contract; this is not general Rust refinement, clinical validation, final-source all-family certification, a success-rate estimate or comparative superiority. Canonical sibling worktrees remain the dependencies. Current core ordinary Rust, required Miri, Lean/model and runtime-work gates passed locally; the full generated normal population remains unfinished. Comparison-connection development stays deferred.",
+    "effect_boundary_status": "Twenty source-bound tasks now have direct-file mechanism and live-model evidence; 28 remain, with the exact list in migration_status. Latest 5M passes nine actual-Wasm cases and one five-Luna/xhigh pilot on the same runtime binary, with complete EPF, one-use request/effect/reply matching and neutral common scoring. The pilot completes in 75.243086458 seconds, 776651 inclusive tokens, twelve effects and zero violations. Premature own-work reads return recoverable errors rather than blocking the guest; 360 effect-record and eleven run-record mutations are rejected. An earlier timed-out seven-view pilot is not counted or pooled. Minimum T3/T4 composition remains under its consuming receiver contract; this is not general Rust refinement, clinical validation, final-source all-family certification, a success-rate estimate or comparative superiority. Canonical sibling worktrees remain the dependencies. Current core ordinary Rust, required Miri, Lean/model and runtime-work gates passed locally; the full generated normal population remains unfinished. Comparison-connection development stays deferred.",
     "minimum_handoff_case": {
       "source": "src/tasks/handoff",
       "scope": "Native hibana-runtime mechanism fixture with two independent runtimes and the application's actual Endpoint transport; not a remote-network, Wasm or model experiment",
@@ -755,6 +755,7 @@
       "3E",
       "4E",
       "5E",
+      "5M",
       "7E",
       "8E",
       "9E",
@@ -766,22 +767,22 @@
       "12E",
       "16E"
     ],
-    "count": 19,
-    "remaining": 29,
-    "qualified_direct_families": 13,
+    "count": 20,
+    "remaining": 28,
+    "qualified_direct_families": 14,
     "final_source_all_family_certification": false,
     "scored_comparisons": 0,
     "latest_source_bound_port": {
       "tasks": [
-        "5E"
+        "5M"
       ],
       "simulator_contract": "common-environment-v23",
-      "evidence": "output/experiments/medical-direct-files-20261115/qualification-v11.json"
+      "evidence": "output/experiments/multi-specialty-direct-files-20261115/qualification-v9.json"
     },
     "direct_choreofs_boundary": {
       "status": "migration_in_progress",
-      "strengthened_boundary_qualified_tasks": 19,
-      "remaining_tasks": 29,
+      "strengthened_boundary_qualified_tasks": 20,
+      "remaining_tasks": 28,
       "unsafe_application_miri_required": false,
       "scored_runs": 0,
       "full_48_task_goal_unchanged": true,
@@ -1361,63 +1362,76 @@
     "scored_runs": 0
   },
   "multi_specialty_procedure": {
-    "status": "historical_generic_close_source_only_direct_file_rewrite_unqualified",
+    "status": "source_bound_direct_file_qualified",
     "task": "5M",
-    "migrated_task_number": 20,
-    "remaining_task_ports": 28,
-    "scored_benchmark": false,
-    "core_source_changed": false,
-    "scripted": {
-      "conditions": 8,
-      "effects": [
-        15,
-        15,
-        15,
-        15,
-        15,
-        15,
-        12,
-        18
-      ],
-      "record_mutants_rejected": 234,
-      "first_case_independent_overlap_pairs": 16,
-      "source": "output/experiments/multi-specialty-wasi-v2",
-      "maximum_descendant_bytes": 1143308288
-    },
-    "native": {
-      "test_functions": 4,
-      "complete_flows": 6,
-      "changed_input_cases": 7,
-      "domain_invocations_on_rejection": 0
-    },
-    "miri": {
-      "test_functions": 3,
-      "changed_input_cases": 7,
-      "strict_provenance": true,
-      "full_protocol_flows_claimed": false
-    },
-    "live": {
-      "source_artifact": "output/experiments/model-qualification/current-core-multi-specialty-5M-v1/subscription-5M-1794183661020374000",
+    "source_qualification": "output/experiments/multi-specialty-direct-files-20261115/qualification-v9.json",
+    "current_boundary": "Twenty-three actual operation/data files use five affine Endpoint views explicitly loaned to their guest VMs. Actual typed file requests, resource custody, replies and terminal results occur in the single global; no generic-close dispatcher or second workflow. Completed panel custody and file results remain inside the completed branch.",
+    "core_source_changed_for_port": false,
+    "runtime_binary_sha256": "942584524ace8d9eb4db2b17c868027e26c918f873bbd1bba69cafde48ef24c2",
+    "wasm_conditions": 9,
+    "saved_effect_record_mutants_rejected": 360,
+    "run_record_mutants_rejected": 11,
+    "native_data_tests": 2,
+    "runner_tests": 54,
+    "application_miri_required": false,
+    "live_model": {
+      "run": "output/experiments/multi-specialty-direct-files-20261115/live-v8",
+      "result": {
+        "path": "output/experiments/multi-specialty-direct-files-20261115/live-v8/result.json",
+        "sha256": "98aa839a2af74be580b8bfcc4a52c17e42ccfb7400bc4fe300cea00c53c18037"
+      },
+      "audit": {
+        "path": "output/experiments/multi-specialty-direct-files-20261115/live-v8/audit.json",
+        "sha256": "74a0769328f090c1dd619d24d3cb3b60ff4b3d692f80169a4b46d30f4b9e4478"
+      },
+      "versions": {
+        "path": "output/experiments/multi-specialty-direct-files-20261115/live-v8/versions.json",
+        "sha256": "d225280b206f5ef1a87501cce366793569c2bab2b4a1d019d628f32a1650778c"
+      },
       "model": "gpt-6-luna",
       "effort": "xhigh",
+      "authentication": "existing ChatGPT subscription",
       "participants": 5,
-      "elapsed_seconds": 48.365349708,
-      "inclusive_tokens": 571513,
-      "domain_calls": 12,
-      "captured_records": 13072,
+      "elapsed_seconds": 75.243086458,
+      "inclusive_tokens": 776651,
+      "shell_calls": 35,
+      "actual_effects": 12,
+      "captured_records": 7504,
+      "independent_effect_overlaps": 4,
+      "cross_scanner_effect_overlaps": 0,
+      "maximum_simultaneous_model_turns": 5,
       "violations": 0,
-      "independent_effect_overlaps": 5,
-      "dynamic_protocol_status": "passed",
-      "effect_audit_status": "passed",
-      "simulator_complete": true,
-      "original_test_exit": 101,
-      "offline_reaudit_exit": 0,
-      "offline_audit_seconds": 839.39,
-      "model_calls_repeated": 0
+      "simulator_contract": "common-environment-v23",
+      "simulator_manifest_sha256": "90c71ae26686bed3365453d97ed76ffd08b3d8eb2001103de9ba04675a8ba59f",
+      "scored_benchmark": false,
+      "maximum_descendant_bytes": 1026211840,
+      "run_record_mutants_rejected": 11,
+      "run_record_mutants": {
+        "path": "output/experiments/multi-specialty-direct-files-20261115/live-v8-run-mutants/report.json",
+        "sha256": "d4be41675b7073fb74f75e99f028bc6d7bf9bc06026f55ac90200d3e270bd9d3"
+      }
     },
-    "runtime_binary_sha256": "fbb5c12710458275c1888b5b985e1f71b2f83e78edc7d5d3ab77ff37df95bf4f",
-    "all_core_normal_assignments_passed": false,
-    "final_source_all_family_certification": false
+    "previous_unsuccessful_pilot": {
+      "run": "output/experiments/multi-specialty-direct-files-20261115/live-v5",
+      "status": "timed_out_not_qualified",
+      "result": {
+        "path": "output/experiments/multi-specialty-direct-files-20261115/live-v5/result.json",
+        "sha256": "e38c4a92c6ec41f0e2a91466ac938f1a2d12c228230f3782684e2866721e62b8"
+      },
+      "reason": {
+        "path": "output/experiments/multi-specialty-direct-files-20261115/live-v5-interrupted.json",
+        "sha256": "f7e80a10ef416b9f4d5f6e0afbc9b66a9fc79513bb84031169b9ddb890e9060f"
+      },
+      "included_in_success": false,
+      "pooled_for_performance_comparison": false
+    },
+    "pending": [
+      "remaining 28 direct-file task qualifications",
+      "final-source all-family and core gates",
+      "scored experiments"
+    ],
+    "scored_runs": 0,
+    "scope": "Finite direct-file Wasm cases and one audited live-model pilot on the captured sources. Does not certify clinical correctness, absent prescribing/administration effects, all interleavings, current full core gates, final-source all-family certification, success rates or comparison superiority."
   },
   "critical_care_procedure": {
     "task": "5H",

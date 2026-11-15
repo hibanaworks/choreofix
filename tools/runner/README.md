@@ -48,9 +48,9 @@ It supports `1E`, `1M`, `1H`, `2E`, `2M`, `2H`, `3E`, `4E`, `4M`, `5E`, `5M`, `5
 `6E`, `6M`, `7E`, `8E`, `9E`, `9M`, `9H`, `10E`, `10M`, `11E`, `12E`, `13E`, `13M`, `14E`,
 `14M`, `14H` and `16E`, with the original failure conditions `0`, `1` and `2`. Each qualification
 retains its exact source and simulator version. The 29 historical task entries
-are not acceptance of their current file/Endpoint boundary. Seven source-bound
+are not acceptance of their current file/Endpoint boundary. Twenty source-bound
 tasks have completed the direct-projection mechanism and live-model checks;
-the remaining 41 still require that qualification. The rewritten 7E passes
+the remaining 28 still require that qualification. The rewritten 7E passes
 twelve real-wash mechanism cases, EPF/effect audits and 1,503 record mutations.
 Three Luna/xhigh participants also completed depth 2 on the same runtime binary;
 the same run passes the model, EPF, effect and common-world audits. Its actual

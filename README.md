@@ -224,18 +224,19 @@ The subsequent common-world version 4 corrects 5H's ICU bed capacity from the
 default one to the specified two. All 73 world tests pass, including 90 legal
 5H image orders and actual overlapping ICU calls. Effect/scorer code is unchanged;
 earlier pilot records keep their original contracts and hashes.
-The 5H port passes eight real-Wasm conditions and a seven-model pilot through
+The historical pre-direct-file 5H port passed eight real-Wasm conditions and a seven-model pilot through
 common scoring, dynamic EPF and actual-effect audits. The pilot takes 48.16
 seconds, 679,177 inclusive tokens and completes 16 effects with zero violations.
 Its actual effects have seven overlapping pairs. Source-bound scope and limits
 are recorded in [the 5H port](benchmark/ports/5H.md).
 
-Multi-specialty care (`5M`) passes eight scripted real-Wasm conditions and one
-five-model pilot. The pilot completes in 48.37 seconds with 571,513 inclusive
-tokens, 12 actual effects, zero violations and passing dynamic EPF/effect audits.
-Its original test stopped at an auditor metadata bug after execution succeeded;
-the corrected reader passed an offline audit of the unchanged saved run.
-The original failed test remains recorded. See [the exact scope](benchmark/ports/5M.md).
+Multi-specialty care (`5M`) passes nine direct-file real-Wasm conditions and
+one five-model pilot on the same runtime. The pilot completes in 75.24 seconds
+with 776,651 inclusive tokens, 12 effects, zero violations and passing complete
+EPF/effect/common-world audits. Early own-work reads return recoverable errors;
+the agents choose subsequent operations themselves. The scripted suite retains
+all six causal imaging orders and actual concurrent CT/MRI effects, and rejects
+360 effect-record mutations. See [the exact scope](benchmark/ports/5M.md).
 
 Drug discovery (`14E`) has two production-receiver negative probes, three
 actual-Wasm conditions covering both decisions, and one four-model pilot. The

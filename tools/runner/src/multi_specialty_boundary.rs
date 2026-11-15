@@ -56,11 +56,11 @@ async fn actual_wasi_all_imaging_orders_and_partial_panels() -> Result<()> {
         [("MRI", true), ("CT", true), ("CT", false), ("MRI", false)],
     ];
     let mut outcomes = Vec::new();
-    for index in 0..8 {
+    for index in 0..9 {
         let order = orders[index % orders.len()];
         let invalid = index == 7;
-        let combined = index == 6;
-        let delay = if index == 0 { 1.0 } else { 0.01 };
+        let combined = index == 6 || index == 8;
+        let delay = if index == 0 || index == 8 { 1.0 } else { 0.01 };
         let output = directory.join(format!("case{index}"));
         fs::create_dir(&output)?;
         crate::projection::archive(&binary, &output, "5M")?;
@@ -75,30 +75,62 @@ async fn actual_wasi_all_imaging_orders_and_partial_panels() -> Result<()> {
         let guest = &guest;
         let ((),[(),()],(),(),result)=hibana_runtime::race(async{
             async{
-                if invalid{let reply=guest.command("ER_DOCTOR","echo '{\"patient_id\":\"other\"}' > /service/assess_patient; cat /service/result".into()).await?;assert_eq!(response(&reply)?["status"],"invalid_arguments");}
-                let reply=guest.command("ER_DOCTOR","echo '{\"patient_id\":\"patient_1\"}' > /service/assess_patient; cat /service/result".into()).await?;assert_eq!(response(&reply)?["success"],true);
+                if invalid {
+                    let reply=guest.command("ER_DOCTOR","ls /service && cat /service/candidate && cat /service/summary".into()).await?;
+                    assert!(reply["stdout"].as_str().ok_or("premature candidate reply")?.contains("wash:"));
+                    let reply=guest.command("ER_DOCTOR","cat /service/summary".into()).await?;
+                    assert!(reply["stdout"].as_str().ok_or("premature summary reply")?.contains("wash:"));
+                }
+                if invalid{let reply=guest.command("ER_DOCTOR","echo '{\"patient_id\":\"other\"}' > /service/assess_patient".into()).await?;assert!(reply["stdout"].as_str().ok_or("shell response")?.contains("wash:"));}
+                let reply=guest.command("ER_DOCTOR","echo '{\"patient_id\":\"patient_1\"}' > /service/assess_patient; cat /service/assess_patient".into()).await?;assert_eq!(response(&reply)?["success"],true);
                 let requests=if combined{vec!["vitals,basic_labs"]}else if invalid{vec!["vitals","vitals","basic_labs"]}else if index%2==0{vec!["vitals","basic_labs"]}else{vec!["basic_labs","vitals"]};
-                for(at,test)in requests.iter().enumerate(){let args=json!({"patient_id":"patient_1","test_type":test});let reply=guest.command("ER_DOCTOR",format!("echo '{args}' > /service/order_tests; cat /service/result")).await?;let actual=response(&reply)?;assert_eq!(actual["success"],true);if at+1==requests.len(){assert_eq!(actual["consultation"]["cardiac"]["result"]["success"],true);assert_eq!(actual["consultation"]["neurology"]["result"]["success"],true);assert_eq!(actual["consultation"]["review"]["success"],true);}}
-                if invalid{let reply=guest.command("ER_DOCTOR","echo '{\"patient_id\":\"patient_1\",\"attendees\":[]}' > /service/conduct_case_conference; cat /service/result".into()).await?;assert_eq!(response(&reply)?["status"],"invalid_arguments");}
-                let args=json!({"patient_id":"patient_1","attendees":"caller-selected conference participants"});let reply=guest.command("ER_DOCTOR",format!("echo '{args}' > /service/conduct_case_conference; cat /service/result")).await?;let actual=response(&reply)?;assert_eq!(actual["success"],true);assert_eq!(actual["data"]["attendees"],args["attendees"]);
+                for test in requests{let args=json!({"patient_id":"patient_1","test_type":test});let reply=guest.command("ER_DOCTOR",format!("echo '{args}' > /service/order_tests; cat /service/order_tests")).await?;assert_eq!(response(&reply)?["success"],true);}
+                let duplicate=guest.command("ER_DOCTOR","echo '{\"patient_id\":\"patient_1\",\"test_type\":\"vitals\"}' > /service/order_tests".into()).await?;assert!(duplicate["stdout"].as_str().ok_or("duplicate reply")?.contains("wash:"));
+                let candidate=response(&guest.command("ER_DOCTOR","cat /service/candidate".into()).await?)?;
+                assert_eq!(candidate["cardiac"]["result"]["success"],true);assert_eq!(candidate["neurology"]["result"]["success"],true);assert_eq!(candidate["review"]["success"],true);
+                if invalid{let reply=guest.command("ER_DOCTOR","echo '{\"patient_id\":\"patient_1\",\"attendees\":[]}' > /service/conduct_case_conference".into()).await?;assert!(reply["stdout"].as_str().ok_or("shell response")?.contains("wash:"));}
+                let args=json!({"patient_id":"patient_1","attendees":"caller-selected conference participants"});let reply=guest.command("ER_DOCTOR",format!("echo '{args}' > /service/conduct_case_conference; cat /service/conduct_case_conference")).await?;let actual=response(&reply)?;assert_eq!(actual["success"],true);assert_eq!(actual["data"]["attendees"],args["attendees"]);
+                let summary=response(&guest.command("ER_DOCTOR","cat /service/summary".into()).await?)?;assert_eq!(summary["case"],candidate);assert_eq!(summary["conference"],actual);
                 assert_eq!(guest.command("ER_DOCTOR","exit 0".into()).await?["exit_status"],0);Ok(())
             };
             for(actor,panel,other)in [("CARDIOLOGIST",["ecg","cardiac_enzymes"],"vitals"),("NEUROLOGIST",["neuro_exam","nerve_conduction"],"ecg")]{async move{
-                if invalid{let args=json!({"patient_id":"patient_1","test_type":other});let reply=guest.command(actor,format!("echo '{args}' > /service/order_tests; cat /service/result")).await?;assert_eq!(response(&reply)?["status"],"invalid_arguments");}
+                let referral=response(&guest.command(actor,"cat /service/referral".into()).await?)?;assert_eq!(referral["success"],true);
+                if invalid {let reply=guest.command(actor,"cat /service/findings".into()).await?;assert!(reply["stdout"].as_str().ok_or("premature findings reply")?.contains("wash:"));}
+                if invalid{let args=json!({"patient_id":"patient_1","test_type":other});let reply=guest.command(actor,format!("echo '{args}' > /service/order_tests")).await?;assert!(reply["stdout"].as_str().ok_or("shell response")?.contains("wash:"));}
                 let requests=if combined{vec![panel.join(",")]}else if invalid{vec![panel[0].to_owned(),panel[0].to_owned(),panel[1].to_owned()]}else if index%2==0{panel.into_iter().map(str::to_owned).collect()}else{panel.into_iter().rev().map(str::to_owned).collect()};
-                for test in requests{let args=json!({"patient_id":"patient_1","test_type":test});let reply=guest.command(actor,format!("echo '{args}' > /service/order_tests; cat /service/result")).await?;assert_eq!(response(&reply)?["success"],true);}
-                let args=json!({"patient_id":"patient_1","symptoms":format!("caller {actor} findings")});let reply=guest.command(actor,format!("echo '{args}' > /service/diagnose; cat /service/result")).await?;let actual=response(&reply)?;assert_eq!(actual["success"],true);assert_eq!(actual["data"]["symptoms"],args["symptoms"]);assert_eq!(actual["consultation"]["conference"]["success"],true);
+                for test in requests{let args=json!({"patient_id":"patient_1","test_type":test});let reply=guest.command(actor,format!("echo '{args}' > /service/order_tests; cat /service/order_tests")).await?;assert_eq!(response(&reply)?["success"],true);}
+                let findings=response(&guest.command(actor,"cat /service/findings".into()).await?)?;
+                assert_eq!(findings["CT"]["success"],true);assert_eq!(findings["MRI"]["success"],true);
+                let args=json!({"patient_id":"patient_1","symptoms":format!("caller {actor} findings")});let reply=guest.command(actor,format!("echo '{args}' > /service/diagnose; cat /service/diagnose")).await?;let actual=response(&reply)?;assert_eq!(actual["success"],true);assert_eq!(actual["data"]["symptoms"],args["symptoms"]);
+                let duplicate=guest.command(actor,format!("echo '{args}' > /service/diagnose")).await?;assert!(duplicate["stdout"].as_str().ok_or("duplicate reply")?.contains("wash:"));
+                let summary=response(&guest.command(actor,"cat /service/summary".into()).await?)?;assert_eq!(summary["conference"]["success"],true);
                 assert_eq!(guest.command(actor,"exit 0".into()).await?["exit_status"],0);Ok(())
             };}
             async{
-                if invalid{let reply=guest.command("RADIOLOGIST","echo '{\"patient_id\":\"patient_1\",\"modality\":\"CT\"}' > /service/interpret_imaging; cat /service/result".into()).await?;assert_eq!(response(&reply)?["status"],"invalid_arguments");let reply=guest.command("RADIOLOGIST","echo '{\"patient_id\":\"patient_1\",\"modality\":\"PET\"}' > /service/perform_imaging; cat /service/result".into()).await?;assert_eq!(response(&reply)?["status"],"invalid_arguments");}
-                for(at,(modality,perform))in order.into_iter().enumerate(){let args=json!({"patient_id":"patient_1","modality":modality});let tool=if perform{"perform_imaging"}else{"interpret_imaging"};let reply=guest.command("RADIOLOGIST",format!("echo '{args}' > /service/{tool}; cat /service/result")).await?;let actual=response(&reply)?;assert_eq!(actual["success"],true);assert_eq!(actual["data"]["modality"],modality);if at==3{assert_eq!(actual["consultation"]["conference"]["success"],true);}
-if invalid&&perform{let reply=guest.command("RADIOLOGIST",format!("echo '{args}' > /service/{tool}; cat /service/result")).await?;assert_eq!(response(&reply)?["status"],"out_of_order");}}
+                for path in ["ct_order","mri_order"]{let reply=guest.command("RADIOLOGIST",format!("cat /service/{path}")).await?;assert_eq!(response(&reply)?["success"],true);}
+                if invalid{
+                    let reply=guest.command("RADIOLOGIST","cat /service/summary".into()).await?;assert!(reply["stdout"].as_str().ok_or("premature radiology summary reply")?.contains("wash:"));
+                    let reply=guest.command("RADIOLOGIST","echo '{\"patient_id\":\"patient_1\",\"modality\":\"CT\"}' | dd of=/service/interpret_imaging_ct oflag=nonblock".into()).await?;assert!(reply["stdout"].as_str().ok_or("shell response")?.contains("wash:"));
+                    let reply=guest.command("RADIOLOGIST","echo '{\"patient_id\":\"patient_1\",\"modality\":\"PET\"}' > /service/perform_imaging_ct".into()).await?;assert!(reply["stdout"].as_str().ok_or("shell response")?.contains("wash:"));
+                }
+                if index==8 {
+                    for modality in ["CT","MRI"] {let args=json!({"patient_id":"patient_1","modality":modality});let file=format!("perform_imaging_{}",modality.to_ascii_lowercase());let reply=guest.command("RADIOLOGIST",format!("echo '{args}' > /service/{file}")).await?;assert!(!reply["stdout"].as_str().ok_or("shell response")?.contains("wash:"));}
+                    for file in ["perform_imaging_ct","perform_imaging_mri"] {let reply=guest.command("RADIOLOGIST",format!("cat /service/{file}")).await?;assert_eq!(response(&reply)?["success"],true);}
+                    for modality in ["CT","MRI"] {let args=json!({"patient_id":"patient_1","modality":modality});let file=format!("interpret_imaging_{}",modality.to_ascii_lowercase());let reply=guest.command("RADIOLOGIST",format!("echo '{args}' > /service/{file}")).await?;assert!(!reply["stdout"].as_str().ok_or("shell response")?.contains("wash:"));}
+                    for file in ["interpret_imaging_ct","interpret_imaging_mri"] {let reply=guest.command("RADIOLOGIST",format!("cat /service/{file}")).await?;assert_eq!(response(&reply)?["success"],true);}
+                }else{
+                for(modality,perform)in order{
+                    let args=json!({"patient_id":"patient_1","modality":modality});let tool=if perform{"perform_imaging"}else{"interpret_imaging"};let file=format!("{tool}_{}",modality.to_ascii_lowercase());
+                    let reply=guest.command("RADIOLOGIST",format!("echo '{args}' > /service/{file}; cat /service/{file}")).await?;let actual=response(&reply)?;assert_eq!(actual["success"],true);assert_eq!(actual["data"]["modality"],modality);
+                    if invalid&&perform{let reply=guest.command("RADIOLOGIST",format!("echo '{args}' > /service/{file}")).await?;assert!(reply["stdout"].as_str().ok_or("duplicate reply")?.contains("wash:"));}
+                }
+                }
+                let summary=response(&guest.command("RADIOLOGIST","cat /service/summary".into()).await?)?;assert_eq!(summary["conference"]["success"],true);
                 assert_eq!(guest.command("RADIOLOGIST","exit 0".into()).await?["exit_status"],0);Ok(())
             };
             async{
-                if invalid{let reply=guest.command("PHARMACIST","echo '{\"patient_id\":\"patient_1\",\"medications\":[]}' > /service/review_prescriptions; cat /service/result".into()).await?;assert_eq!(response(&reply)?["status"],"invalid_arguments");}
-                let args=json!({"patient_id":"patient_1","medications":"caller supplied medications"});let reply=guest.command("PHARMACIST",format!("echo '{args}' > /service/review_prescriptions; cat /service/result")).await?;let actual=response(&reply)?;assert_eq!(actual["success"],true);assert_eq!(actual["data"]["medications"],args["medications"]);assert_eq!(guest.command("PHARMACIST","exit 0".into()).await?["exit_status"],0);Ok(())
+                if invalid{let reply=guest.command("PHARMACIST","echo '{\"patient_id\":\"patient_1\",\"medications\":[]}' > /service/review_prescriptions".into()).await?;assert!(reply["stdout"].as_str().ok_or("shell response")?.contains("wash:"));}
+                let args=json!({"patient_id":"patient_1","medications":"caller supplied medications"});let reply=guest.command("PHARMACIST",format!("echo '{args}' > /service/review_prescriptions; cat /service/review_prescriptions")).await?;let actual=response(&reply)?;assert_eq!(actual["success"],true);assert_eq!(actual["data"]["medications"],args["medications"]);assert_eq!(guest.command("PHARMACIST","exit 0".into()).await?["exit_status"],0);Ok(())
             };
             async{runtime.await};
         },hibana_runtime::host::deadline(Duration::from_secs(240))).await?;
@@ -121,6 +153,28 @@ if invalid&&perform{let reply=guest.command("RADIOLOGIST",format!("echo '{args}'
         let output = directory.join(format!("case{index}"));
         let audit = crate::multi_specialty_audit::audit(&output.join("events.jsonl"))?;
         save(&output.join("audit.json"), &audit)?;
+        if index == 8 {
+            let rows = crate::journal::records(&output.join("events.jsonl"))?;
+            let artifact = crate::projection::load(&output.join("events.jsonl"))?;
+            let labels = crate::projection::frames(&artifact, &rows)?;
+            let actors = rows[0]["message"]["fixtures"]
+                .as_array()
+                .ok_or("participants")?;
+            let journal = crate::journal::read(&rows, &labels, actors)?;
+            for tool in ["perform_imaging", "interpret_imaging"] {
+                let calls = journal
+                    .calls
+                    .values()
+                    .filter(|call| call.request["tool"] == tool)
+                    .collect::<Vec<_>>();
+                assert_eq!(calls.len(), 2);
+                assert!(
+                    calls[0].started()?.1 < calls[1].ended()?.1
+                        && calls[1].started()?.1 < calls[0].ended()?.1,
+                    "independent CT/MRI effects must overlap"
+                );
+            }
+        }
         if index == 0 {
             assert!(
                 audit["independent_effect_overlaps"]
