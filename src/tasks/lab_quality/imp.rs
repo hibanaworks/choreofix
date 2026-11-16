@@ -9,6 +9,108 @@ pub fn decode(bytes: &[u8]) -> ShellResult<Value> {
 pub fn encode(value: &Value) -> ShellResult<Vec<u8>> {
     serde_json::to_vec(value).map_err(|error| ShellError::message(error.to_string()))
 }
+
+pub fn same_value(actual: &Value, expected: &Value) -> ShellResult<()> {
+    if actual != expected {
+        return Err(ShellError::message(
+            "instrument data differs from the actual admitted value",
+        ));
+    }
+    Ok(())
+}
+
+pub fn arguments<const OP: u8>(value: &Value) -> ShellResult<Value> {
+    let bytes = encode(value)?;
+    Ok(super::arguments::Arguments::<OP>::try_from(bytes.as_slice())?.into_value())
+}
+
+pub fn qc_arguments(value: &Value, scientist: &str) -> ShellResult<()> {
+    let expected = match scientist {
+        "CHEMIST" => arguments::<9>(value)?,
+        "BIOLOGIST" => arguments::<10>(value)?,
+        _ => return Err(ShellError::message("unknown actual QC subject")),
+    };
+    same_value(value, &expected)
+}
+
+pub fn synthesis_id(value: &Value) -> ShellResult<u64> {
+    let name = value["data"]["compound"]
+        .as_str()
+        .ok_or_else(|| ShellError::message("missing actual synthesized compound name"))?;
+    record(
+        value,
+        ("run_synthesis", "CHEMIST", &json!({"compound":name})),
+        &json!({}),
+    )
+}
+
+pub fn biological_proof(bytes: &[u8]) -> ShellResult<Value> {
+    let proof = decode(bytes)?;
+    if proof["success"] != proof["result"]["success"]
+        || proof["materials"]["bioassay"] != proof["result"]
+    {
+        return Err(ShellError::message(
+            "biological evidence substitutes its actual result",
+        ));
+    }
+    bio_result(&proof["result"], &proof["arguments"], &proof["materials"])?;
+    Ok(proof)
+}
+
+pub fn qc_admission(
+    admitted: &Value,
+    selected: &Value,
+    (synthesis, sample, evidence): (&Value, &Value, &Value),
+) -> ShellResult<()> {
+    same_value(&admitted["arguments"], selected)?;
+    same_value(&sample["synthesis"], synthesis)?;
+    let expected = match selected["scientist"].as_str() {
+        Some("CHEMIST") => {
+            let mut materials = sample.clone();
+            materials["analysis"] = evidence.clone();
+            materials
+        }
+        Some("BIOLOGIST") => {
+            same_value(&evidence["materials"]["synthesis"], synthesis)?;
+            same_value(
+                &evidence["materials"]["purification"],
+                &sample["purification"],
+            )?;
+            evidence["materials"].clone()
+        }
+        _ => return Err(ShellError::message("unknown actual QC material subject")),
+    };
+    qc_packet(admitted, &expected)?;
+    Ok(())
+}
+
+pub fn decide(
+    actual: &std::cell::Cell<Value>,
+) -> Result<hibana::runtime::resolver::DecisionArm, hibana::runtime::resolver::ResolverError> {
+    use hibana::runtime::resolver::{DecisionArm, ResolverError};
+    let value = actual.take();
+    let result = match value["success"].as_bool() {
+        Some(true) => Ok(DecisionArm::Left),
+        Some(false) => Ok(DecisionArm::Right),
+        None => Err(ResolverError::reject()),
+    };
+    actual.set(value);
+    result
+}
+
+pub fn decide_subject(
+    actual: &std::cell::Cell<Value>,
+) -> Result<hibana::runtime::resolver::DecisionArm, hibana::runtime::resolver::ResolverError> {
+    use hibana::runtime::resolver::{DecisionArm, ResolverError};
+    let value = actual.take();
+    let result = match value["data"]["scientist"].as_str() {
+        Some("CHEMIST") => Ok(DecisionArm::Left),
+        Some("BIOLOGIST") => Ok(DecisionArm::Right),
+        _ => Err(ResolverError::reject()),
+    };
+    actual.set(value);
+    result
+}
 pub fn record(
     value: &Value,
     (tool, actor, arguments): (&str, &str, &Value),

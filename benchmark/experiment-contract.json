@@ -1080,8 +1080,8 @@
       "model_calls": 0,
       "wasm_conditions": 0,
       "scored_runs": 0,
-      "evidence": "output/experiments/lab-quality-direct-20261116/source-v15.json",
-      "scope": "Full protocol projection, compiled direct scientist localsides, controlled QC Endpoint/data fixtures. Physical instrument and QC control localsides, whole Wasm/live/EPF qualification remain unfinished.",
+      "evidence": "output/experiments/lab-quality-direct-20261116/source-v29.json",
+      "scope": "Full protocol projection, all seven direct localsides and four-Wasm startup compile. Actual production QC receiver prefixes cover 8 request-order/subject/verdict and 14 refusal conditions; the legitimate synthesis prefix is distinct from the zero refused QC effects. Whole Wasm/live/EPF qualification remains unfinished.",
       "global_source_events": 776,
       "projected_views": 29,
       "global_const_eval": "forbid",
@@ -1090,11 +1090,15 @@
         "BIOLOGIST",
         "ANALYST"
       ],
-      "scientist_localsides_executed": false
+      "scientist_localsides_executed": false,
+      "device_and_qc_localsides_compiled": true,
+      "four_wasm_startup_compiled": true,
+      "runtime_projection_output_checked": true,
+      "qc_prefix_uses_production_receiver": true,
+      "qc_candidate_retirement_executed": false
     },
     "remaining": [
-      "Complete QC control and physical instrument localsides",
-      "Wire four Wasm guests, common runner and independent EPF/effect auditor",
+      "Execute four Wasm guests through the common runner and independent EPF/effect auditor",
       "Qualify legal alternative/retry/parallel execution, rejection and actual live models under the neutral scorer"
     ],
     "previous_adapter_qualification": {

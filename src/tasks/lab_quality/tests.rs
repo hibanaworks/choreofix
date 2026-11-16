@@ -44,6 +44,7 @@ fn whole_source_projects_all_views_and_the_scientists_file_operations() {
 }
 
 struct Effects {
+    synthesis: Value,
     result: Value,
     calls: Cell<Vec<Value>>,
 }
@@ -57,7 +58,11 @@ impl Domain for Effects {
         let mut calls = self.calls.take();
         calls.push(json!({"actor":actor,"tool":tool,"arguments":arguments}));
         self.calls.set(calls);
-        Ok(self.result.clone())
+        match tool {
+            "run_synthesis" => Ok(self.synthesis.clone()),
+            "verify_result" => Ok(self.result.clone()),
+            _ => Err("unexpected physical tool in QC receiver fixture".into()),
+        }
     }
 }
 fn measured((actor, tool, arguments): (&str, &str, Value), (id, inputs): (u64, Value)) -> Value {
@@ -218,234 +223,638 @@ fn typed_qc_replies_bind_both_their_actual_subject_and_verdict() {
 }
 #[hibana_runtime::main]
 #[test]
-async fn both_actual_resource_requests_return_each_actual_positive_or_negative_result()
--> ShellResult<()> {
-    for subject in 0..2 {
-        for approved in [false, true] {
-            for fume_first in [false, true] {
-                let source = g::seq(
+async fn chemistry_qc_prefix_requires_both_requests_and_refuses_substitution() -> ShellResult<()> {
+    use crate::shell::imp::review_reply::ReviewReply;
+    let subject = 0;
+    for case in 0..13 {
+        let (approved, fume_first, bad) = if case < 4 {
+            (case >= 2, case % 2 == 1, None)
+        } else {
+            (true, false, Some(case - 4))
+        };
+        // Run the synthesis and custody prefix of the production owner. Stop
+        // after returning both instruments, before submitting the candidates.
+        // This is a finite prefix test; whole-Wasm tests cover final retirement.
+        let source = g::par(
+            g::send::<INIT, QC_SERVICE, FumeLoan>(),
+            g::send::<INIT, QC, SpecLoan>(),
+        );
+        let source = g::seq(source, g::send::<QC_SERVICE, CHEMIST, ChemAccess>());
+        let source = g::seq(source, g::send::<CHEMISTRY, QC_SERVICE, Synthesis>());
+        let source = g::seq(source, g::send::<QC_SERVICE, CHEMISTRY, FumeLoan>());
+        let source = g::seq(source, g::send::<FUME_HOOD, QC_SERVICE, SynthesisRequest>());
+        let source = g::seq(source, g::send::<QC_SERVICE, FUME_HOOD, InstrumentResult>());
+        let source = g::seq(source, g::send::<CHEMISTRY, QC_SERVICE, FumeLoan>());
+        let source = g::seq(source, g::send::<SPEC_SERVICE, QC_SERVICE, AnalysisProof>());
+        let source = g::seq(
+            source,
+            g::send::<CENT_SERVICE, QC_SERVICE, PurificationProof>(),
+        );
+        let source = g::seq(source, g::send::<CHEMIST, QC, ChemAccess>());
+        let resource_roundtrip = || {
+            g::seq(
+                g::send::<QC_SERVICE, QC, FumeLoan>(),
+                g::seq(
                     g::par(
-                        g::send::<INIT, QC, SpecLoan>(),
-                        g::send::<INIT, QC, FumeLoan>(),
+                        g::send::<SPECTROMETER, QC_SERVICE, QcSpecRequest>(),
+                        g::send::<FUME_HOOD, QC_SERVICE, QcFumeRequest>(),
                     ),
                     g::seq(
-                        qc_operation(),
+                        g::par(
+                            g::send::<QC_SERVICE, SPECTROMETER, QcSpecResult>(),
+                            g::send::<QC_SERVICE, FUME_HOOD, QcFumeResult>(),
+                        ),
                         g::par(
                             g::send::<QC, INIT, SpecLoan>(),
-                            g::send::<QC, INIT, FumeLoan>(),
+                            g::send::<QC, QC_SERVICE, FumeLoan>(),
                         ),
                     ),
-                );
-                let p_init = project::<INIT>(&source);
-                let p_qc = project::<QC>(&source);
-                let p_service = project::<QC_SERVICE>(&source);
-                let p_spec = project::<SPECTROMETER>(&source);
-                let p_fume = project::<FUME_HOOD>(&source);
-                let session = SessionId::new(SESSION);
-                let (bus, _, []) = Bus::open([], [(session, SPECTROMETER), (session, FUME_HOOD)]);
-                let mut client_slab = vec![0; 128 * 1024];
-                let mut server_slab = vec![0; 128 * 1024];
-                let mut client_storage = SessionKitStorage::uninit();
-                let mut server_storage = SessionKitStorage::uninit();
-                let client = client_storage
-                    .init()
-                    .rendezvous(&mut client_slab, &bus.transport)?;
-                let server = server_storage
-                    .init()
-                    .rendezvous(&mut server_slab, &bus.transport)?;
-                let mut init = client.enter(session, &p_init)?;
-                let mut qc = client.enter(session, &p_qc)?;
-                let mut service = server.enter(session, &p_service)?;
-                let spec = client.enter(session, &p_spec)?;
-                let fume = client.enter(session, &p_fume)?;
-                let materials = material();
-                let args = arguments(subject);
-                let inputs = imp::qc_inputs(&args, &materials)?;
-                let actual = verdict(&args, &inputs, approved);
-                let effects = Effects {
-                    result: actual.clone(),
-                    calls: Cell::new(Vec::new()),
-                };
-                let packet = imp::encode(&json!({"arguments":args,"materials":materials}))?;
+                ),
+            )
+        };
+        let source = g::seq(
+            source,
+            g::seq(
+                g::send::<QC, QC_SERVICE, FirstChemist>(),
+                g::par(
+                    g::seq(
+                        g::send::<CENT_SERVICE, QC_SERVICE, BioFumePassed>(),
+                        g::send::<CENT_SERVICE, QC, BioAccess>(),
+                    ),
+                    g::seq(
+                        g::send::<CHEMISTRY, QC_SERVICE, QcAdmission>(),
+                        resource_roundtrip(),
+                    ),
+                ),
+            ),
+        );
+        let source = g::seq(
+            source,
+            g::par(
+                g::send::<QC, QC_SERVICE, ChemAccess>(),
+                g::send::<QC, QC_SERVICE, BioAccess>(),
+            ),
+        );
+        let p_init = project::<INIT>(&source);
+        let p_qc = project::<QC>(&source);
+        let p_chemist = project::<CHEMIST>(&source);
+        let p_service = project::<QC_SERVICE>(&source);
+        let p_spec_service = project::<SPEC_SERVICE>(&source);
+        let p_cent_service = project::<CENT_SERVICE>(&source);
+        let p_spec = project::<SPECTROMETER>(&source);
+        let p_fume = project::<FUME_HOOD>(&source);
+        let p_chemistry = project::<CHEMISTRY>(&source);
+        let p_biology = project::<BIOLOGY>(&source);
+        let session = SessionId::new(SESSION);
+        let (bus, _, []) = Bus::open(
+            [],
+            [
+                (session, SPECTROMETER),
+                (session, FUME_HOOD),
+                (session, CHEMISTRY),
+                (session, BIOLOGY),
+            ],
+        );
+        let mut client_slab = vec![0; 128 * 1024];
+        let mut server_slab = vec![0; 128 * 1024];
+        let mut client_storage = SessionKitStorage::uninit();
+        let mut server_storage = SessionKitStorage::uninit();
+        let client = client_storage
+            .init()
+            .rendezvous(&mut client_slab, &bus.transport)?;
+        let server = server_storage
+            .init()
+            .rendezvous(&mut server_slab, &bus.transport)?;
+        let mut init = client.enter(session, &p_init)?;
+        let mut qc = client.enter(session, &p_qc)?;
+        let mut chemist = client.enter(session, &p_chemist)?;
+        let mut spec_owner = client.enter(session, &p_spec_service)?;
+        let mut cent_owner = client.enter(session, &p_cent_service)?;
+        let mut service = server.enter(session, &p_service)?;
+        let spec = client.enter(session, &p_spec)?;
+        let fume = client.enter(session, &p_fume)?;
+        let chemistry = server.enter(session, &p_chemistry)?;
+        let biology = client.enter(session, &p_biology)?;
+        let mut materials = material();
+        materials["analysis"] = materials["initial_analysis"].clone();
+        let args = arguments(subject);
+        let inputs = imp::qc_inputs(&args, &materials)?;
+        let actual = verdict(&args, &inputs, approved);
+        let effects = Effects {
+            synthesis: materials["synthesis"].clone(),
+            result: actual.clone(),
+            calls: Cell::new(Vec::new()),
+        };
+        let decision = Cell::new(Value::Null);
+        let mut reported = materials.clone();
+        if subject == 0 {
+            for key in ["cells", "calibration", "bioassay"] {
+                reported.as_object_mut().unwrap().remove(key);
+            }
+        }
+        let mut admitted = json!({"arguments":args,"materials":reported});
+        match bad {
+            Some(4) => admitted["arguments"]["data_type"] = json!("wrong subject data"),
+            Some(5) => admitted["materials"]["synthesis"]["data"]["artifact_id"] = json!(90),
+            Some(6) => admitted["materials"]["synthesis"]["success"] = json!(false),
+            Some(7) => {
+                admitted["materials"]["initial_analysis"]["data"]["inputs"] =
+                    json!({"synthesis":80})
+            }
+            Some(8) => {
+                admitted["materials"]["purification"]["data"]["compound"] = json!("different batch")
+            }
+            Some(9) => admitted["materials"]["bioassay"]["success"] = json!(false),
+            Some(10) => {
+                admitted["materials"]["bioassay"]["data"]["inputs"]["purification"] = json!(80)
+            }
+            Some(11) => admitted["materials"]["cells"]["data"]["artifact_id"] = Value::Null,
+            Some(12) => {
+                admitted["materials"]["calibration"]["data"]["inputs"]["prepared_cells"] = json!(80)
+            }
+            Some(13) => {
+                admitted["materials"]["bioassay"]["data"]["compound"] = json!("foreign batch")
+            }
+            _ => {}
+        }
+        let mut spec_packet = admitted.clone();
+        let mut fume_packet = admitted.clone();
+        match bad {
+            Some(0) => spec_packet["arguments"]["scientist"] = json!("BIOLOGIST"),
+            Some(1) => fume_packet["arguments"]["data_type"] = json!("bioassay"),
+            Some(2) => spec_packet["materials"]["analysis"]["data"]["artifact_id"] = json!(90),
+            Some(3) => {
+                fume_packet["materials"]["synthesis"]["data"]["compound"] = json!("foreign batch")
+            }
+            _ => {}
+        }
+        let mut sample = materials.clone();
+        for key in ["cells", "calibration", "bioassay"] {
+            sample.as_object_mut().unwrap().remove(key);
+        }
+        let proof = json!({"success":true,"arguments":{
+            "compound":materials["synthesis"]["data"]["compound"],"cell_type":"free β culture"},
+            "result":materials["bioassay"],"materials":materials});
+        let result = hibana_runtime::race(
+            hibana_runtime::race(
+                localside::qc::run(&mut service, (chemistry, &effects, &decision)),
                 async {
                     async {
+                        let [mut a, mut b] = init.par()?;
                         async {
-                            let [mut a, mut b] = init.par()?;
-                            async {
-                                a.send::<SpecLoan>(spec).await?;
-                            };
-                            async {
-                                b.send::<FumeLoan>(fume).await?;
-                            };
-                            Ok(())
-                        }
-                        .await?;
+                            a.send::<FumeLoan>(fume).await?;
+                        };
                         async {
-                            let [mut a, mut b] = init.par()?;
-                            async {
-                                let spec = a.recv::<SpecLoan>().await?;
-                                drop(spec);
-                                Ok(())
-                            };
-                            async {
-                                let fume = b.recv::<FumeLoan>().await?;
-                                drop(fume);
-                                Ok(())
-                            };
-                            Ok(())
-                        }
+                            b.send::<SpecLoan>(spec).await?;
+                        };
+                        Ok(())
+                    }
+                    .await?;
+                    let mut spec = qc.recv::<SpecLoan>().await?;
+                    let mut chemistry = chemist.recv::<ChemAccess>().await?;
+                    let synthesis_args =
+                        json!({"compound":materials["synthesis"]["data"]["compound"]});
+                    let bytes = imp::encode(&synthesis_args)?;
+                    chemistry.send::<Synthesis>(&bytes.as_slice()).await?;
+                    let mut fume = chemistry.recv::<FumeLoan>().await?;
+                    fume.send::<SynthesisRequest>(&bytes.as_slice()).await?;
+                    assert_eq!(
+                        imp::decode(fume.recv::<InstrumentResult>().await?)?,
+                        materials["synthesis"]
+                    );
+                    chemistry.send::<FumeLoan>(fume).await?;
+                    let bytes = imp::encode(&materials["initial_analysis"])?;
+                    spec_owner.send::<AnalysisProof>(&bytes.as_slice()).await?;
+                    let bytes = imp::encode(&sample)?;
+                    cent_owner
+                        .send::<PurificationProof>(&bytes.as_slice())
                         .await?;
-                    };
-                    async {
-                        localside::qc::run(&mut service, (&effects, &materials)).await?;
-                    };
-                    async {
-                        let (mut spec, mut fume) = async {
-                            let [mut a, mut b] = qc.par()?;
-                            async { a.recv::<SpecLoan>().await };
-                            async { b.recv::<FumeLoan>().await };
-                        }
-                        .await?;
-                        qc.send::<QcAdmission>(&packet.as_slice()).await?;
-                        if fume_first {
-                            fume.send::<QcFumeRequest>(&packet.as_slice()).await?;
-                            hibana_runtime::host::sleep(std::time::Duration::from_millis(20))
+                    chemist.send::<ChemAccess>(chemistry).await?;
+                    let mut chemistry = qc.recv::<ChemAccess>().await?;
+                    let bytes = imp::encode(&args)?;
+                    if subject == 0 {
+                        qc.send::<FirstChemist>(&bytes.as_slice()).await?;
+                    } else {
+                        qc.send::<FirstBiologist>(&bytes.as_slice()).await?;
+                    }
+                    let proof_bytes = imp::encode(&proof)?;
+                    let proof = ReviewReply::<true>::from_bytes(&proof_bytes)?;
+                    let bytes = imp::encode(&admitted)?;
+                    let _prefix_receipts = async {
+                        async {
+                            cent_owner.send::<BioFumePassed>(&proof).await?;
+                            cent_owner.send::<BioAccess>(biology).await?;
+                        };
+                        async {
+                            let [mut trials, mut verify] = qc.par()?;
+                            async { trials.recv::<BioAccess>().await };
+                            async {
+                                chemistry.send::<QcAdmission>(&bytes.as_slice()).await?;
+                                let mut fume = verify.recv::<FumeLoan>().await?;
+                                let spec_bytes = imp::encode(&spec_packet)?;
+                                let fume_bytes = imp::encode(&fume_packet)?;
+                                if fume_first {
+                                    fume.send::<QcFumeRequest>(&fume_bytes.as_slice()).await?;
+                                } else {
+                                    spec.send::<QcSpecRequest>(&spec_bytes.as_slice()).await?;
+                                }
+                                hibana_runtime::host::sleep(std::time::Duration::from_millis(20))
+                                    .await?;
+                                let calls = effects.calls.take();
+                                assert!(
+                                    calls.iter().all(|call| call["tool"] != "verify_result"),
+                                    "QC invoked without both actual instrument requests"
+                                );
+                                effects.calls.set(calls);
+                                if fume_first {
+                                    spec.send::<QcSpecRequest>(&spec_bytes.as_slice()).await?;
+                                } else {
+                                    fume.send::<QcFumeRequest>(&fume_bytes.as_slice()).await?;
+                                }
+                                let (spec_result, fume_result) = async {
+                                    async { imp::decode(spec.recv::<QcSpecResult>().await?) };
+                                    async { imp::decode(fume.recv::<QcFumeResult>().await?) };
+                                }
                                 .await?;
-                            assert!(
-                                effects.calls.take().is_empty(),
-                                "QC ran without the spectrometer request"
-                            );
-                            spec.send::<QcSpecRequest>(&packet.as_slice()).await?;
-                        } else {
-                            spec.send::<QcSpecRequest>(&packet.as_slice()).await?;
-                            hibana_runtime::host::sleep(std::time::Duration::from_millis(20))
+                                assert_eq!(spec_result, actual);
+                                assert_eq!(fume_result, actual);
+                                async {
+                                    let [mut a, mut b] = verify.par()?;
+                                    async {
+                                        a.send::<SpecLoan>(spec).await?;
+                                    };
+                                    async {
+                                        b.send::<FumeLoan>(fume).await?;
+                                    };
+                                    Ok(())
+                                }
                                 .await?;
-                            assert!(
-                                effects.calls.take().is_empty(),
-                                "QC ran without the fume-hood request"
-                            );
-                            fume.send::<QcFumeRequest>(&packet.as_slice()).await?;
-                        }
-                        let (spec_result, fume_result) = async {
-                            async { imp::decode(spec.recv::<QcSpecResult>().await?) };
-                            async { imp::decode(fume.recv::<QcFumeResult>().await?) };
-                        }
-                        .await?;
-                        let qc_result = imp::decode(qc.recv::<QcResult>().await?)?;
-                        assert_eq!(spec_result, actual);
-                        assert_eq!(fume_result, actual);
-                        assert_eq!(qc_result, actual);
-                        async {
-                            let [mut a, mut b] = qc.par()?;
-                            async {
-                                a.send::<SpecLoan>(spec).await?;
+                                let returned = init.recv::<SpecLoan>().await?;
+                                drop(returned);
                             };
-                            async {
-                                b.send::<FumeLoan>(fume).await?;
-                            };
-                            Ok(())
-                        }
-                        .await?;
-                    };
+                        };
+                    }
+                    .await?;
+                    // Withholding both candidate submissions keeps the actual
+                    // owner Pending at the next source operation, without an ack.
                     Ok(())
-                }
-                .await?;
-                assert_eq!(
-                    effects.calls.take(),
-                    vec![json!({"actor":"QC_CONTROLLER","tool":"verify_result","arguments":args})]
-                );
-            }
+                },
+            ),
+            async {
+                hibana_runtime::host::sleep(std::time::Duration::from_secs(10)).await?;
+                Err(ShellError::message("QC boundary fixture deadline"))
+            },
+        )
+        .await;
+        if let Some(bad) = bad {
+            let error = result.expect_err("substituted QC request succeeded");
+            assert!(
+                !error.to_string().contains("EndpointError")
+                    && !error.to_string().contains("deadline"),
+                "{bad}: {error}"
+            );
+        } else {
+            result?;
+        }
+        let calls = effects.calls.take();
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|call| call["tool"] == "verify_result")
+                .count(),
+            usize::from(bad.is_none())
+        );
+        assert_eq!(
+            calls[0],
+            json!({"actor":"CHEMIST","tool":"run_synthesis","arguments":{"compound":materials["synthesis"]["data"]["compound"]}})
+        );
+        if bad.is_none() {
+            assert_eq!(
+                calls[1],
+                json!({"actor":"QC_CONTROLLER","tool":"verify_result","arguments":args})
+            );
         }
     }
     Ok(())
 }
 #[hibana_runtime::main]
 #[test]
-async fn qc_rejects_substituted_requests_and_materials_before_the_effect() -> ShellResult<()> {
-    for bad in 0..14 {
-        let source = qc_operation();
+async fn biology_qc_prefix_requires_both_requests_and_refuses_substitution() -> ShellResult<()> {
+    use crate::shell::imp::review_reply::ReviewReply;
+    let subject = 1;
+    for case in 0..9 {
+        let (approved, fume_first, bad) = if case < 4 {
+            (case >= 2, case % 2 == 1, None)
+        } else {
+            (true, false, Some(case - 4 + 9))
+        };
+        // Run the synthesis and custody prefix of the production owner. Stop
+        // after returning both instruments, before submitting the candidates.
+        // This is a finite prefix test; whole-Wasm tests cover final retirement.
+        let source = g::par(
+            g::send::<INIT, QC_SERVICE, FumeLoan>(),
+            g::send::<INIT, QC, SpecLoan>(),
+        );
+        let source = g::seq(source, g::send::<QC_SERVICE, CHEMIST, ChemAccess>());
+        let source = g::seq(source, g::send::<CHEMISTRY, QC_SERVICE, Synthesis>());
+        let source = g::seq(source, g::send::<QC_SERVICE, CHEMISTRY, FumeLoan>());
+        let source = g::seq(source, g::send::<FUME_HOOD, QC_SERVICE, SynthesisRequest>());
+        let source = g::seq(source, g::send::<QC_SERVICE, FUME_HOOD, InstrumentResult>());
+        let source = g::seq(source, g::send::<CHEMISTRY, QC_SERVICE, FumeLoan>());
+        let source = g::seq(source, g::send::<SPEC_SERVICE, QC_SERVICE, AnalysisProof>());
+        let source = g::seq(
+            source,
+            g::send::<CENT_SERVICE, QC_SERVICE, PurificationProof>(),
+        );
+        let source = g::seq(source, g::send::<CHEMIST, QC, ChemAccess>());
+        let resource_roundtrip = || {
+            g::seq(
+                g::send::<QC_SERVICE, QC, FumeLoan>(),
+                g::seq(
+                    g::par(
+                        g::send::<SPECTROMETER, QC_SERVICE, QcSpecRequest>(),
+                        g::send::<FUME_HOOD, QC_SERVICE, QcFumeRequest>(),
+                    ),
+                    g::seq(
+                        g::par(
+                            g::send::<QC_SERVICE, SPECTROMETER, QcSpecResult>(),
+                            g::send::<QC_SERVICE, FUME_HOOD, QcFumeResult>(),
+                        ),
+                        g::par(
+                            g::send::<QC, INIT, SpecLoan>(),
+                            g::send::<QC, QC_SERVICE, FumeLoan>(),
+                        ),
+                    ),
+                ),
+            )
+        };
+        let source = g::seq(
+            source,
+            g::seq(
+                g::send::<QC, QC_SERVICE, FirstBiologist>(),
+                g::seq(
+                    g::seq(
+                        g::send::<CENT_SERVICE, QC_SERVICE, BioFumePassed>(),
+                        g::send::<CENT_SERVICE, QC, BioAccess>(),
+                    ),
+                    g::seq(
+                        g::send::<BIOLOGY, QC_SERVICE, QcAdmission>(),
+                        resource_roundtrip(),
+                    ),
+                ),
+            ),
+        );
+        let source = g::seq(
+            source,
+            g::par(
+                g::send::<QC, QC_SERVICE, ChemAccess>(),
+                g::send::<QC, QC_SERVICE, BioAccess>(),
+            ),
+        );
+        let p_init = project::<INIT>(&source);
         let p_qc = project::<QC>(&source);
+        let p_chemist = project::<CHEMIST>(&source);
         let p_service = project::<QC_SERVICE>(&source);
+        let p_spec_service = project::<SPEC_SERVICE>(&source);
+        let p_cent_service = project::<CENT_SERVICE>(&source);
         let p_spec = project::<SPECTROMETER>(&source);
         let p_fume = project::<FUME_HOOD>(&source);
+        let p_chemistry = project::<CHEMISTRY>(&source);
+        let p_biology = project::<BIOLOGY>(&source);
         let session = SessionId::new(SESSION);
-        let (bus, _, []) = Bus::open([], [(session, SPECTROMETER), (session, FUME_HOOD)]);
-        let mut slab = vec![0; 128 * 1024];
-        let mut storage = SessionKitStorage::uninit();
-        let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
-        let mut qc = rv.enter(session, &p_qc)?;
-        let mut service = rv.enter(session, &p_service)?;
-        let mut spec = rv.enter(session, &p_spec)?;
-        let mut fume = rv.enter(session, &p_fume)?;
+        let (bus, _, []) = Bus::open(
+            [],
+            [
+                (session, SPECTROMETER),
+                (session, FUME_HOOD),
+                (session, CHEMISTRY),
+                (session, BIOLOGY),
+            ],
+        );
+        let mut client_slab = vec![0; 128 * 1024];
+        let mut server_slab = vec![0; 128 * 1024];
+        let mut client_storage = SessionKitStorage::uninit();
+        let mut server_storage = SessionKitStorage::uninit();
+        let client = client_storage
+            .init()
+            .rendezvous(&mut client_slab, &bus.transport)?;
+        let server = server_storage
+            .init()
+            .rendezvous(&mut server_slab, &bus.transport)?;
+        let mut init = client.enter(session, &p_init)?;
+        let mut qc = client.enter(session, &p_qc)?;
+        let mut chemist = client.enter(session, &p_chemist)?;
+        let mut spec_owner = client.enter(session, &p_spec_service)?;
+        let mut cent_owner = client.enter(session, &p_cent_service)?;
+        let mut service = server.enter(session, &p_service)?;
+        let spec = client.enter(session, &p_spec)?;
+        let fume = client.enter(session, &p_fume)?;
+        let chemistry = server.enter(session, &p_chemistry)?;
+        let biology = client.enter(session, &p_biology)?;
         let mut materials = material();
-        let args = arguments(if bad >= 9 { 1 } else { 0 });
+        materials["analysis"] = materials["initial_analysis"].clone();
+        let args = arguments(subject);
         let inputs = imp::qc_inputs(&args, &materials)?;
+        let actual = verdict(&args, &inputs, approved);
         let effects = Effects {
-            result: verdict(&args, &inputs, true),
+            synthesis: materials["synthesis"].clone(),
+            result: actual.clone(),
             calls: Cell::new(Vec::new()),
         };
-        let mut admitted = json!({"arguments":args,"materials":materials});
-        match bad {
-            4 => admitted["arguments"]["data_type"] = json!("wrong subject data"),
-            5 => admitted["materials"]["synthesis"]["data"]["artifact_id"] = json!(90),
-            6 => materials["synthesis"]["success"] = json!(false),
-            7 => materials["initial_analysis"]["data"]["inputs"] = json!({"synthesis":80}),
-            8 => materials["purification"]["data"]["compound"] = json!("different batch"),
-            9 => materials["bioassay"]["success"] = json!(false),
-            10 => materials["bioassay"]["data"]["inputs"]["purification"] = json!(80),
-            11 => materials["cells"]["data"]["artifact_id"] = Value::Null,
-            12 => materials["calibration"]["data"]["inputs"]["prepared_cells"] = json!(80),
-            13 => materials["bioassay"]["data"]["compound"] = json!("foreign batch"),
-            _ => {}
+        let decision = Cell::new(Value::Null);
+        let mut reported = materials.clone();
+        if subject == 0 {
+            for key in ["cells", "calibration", "bioassay"] {
+                reported.as_object_mut().unwrap().remove(key);
+            }
         }
-        if bad >= 6 {
-            admitted["materials"] = materials.clone();
+        let mut admitted = json!({"arguments":args,"materials":reported});
+        match bad {
+            Some(4) => admitted["arguments"]["data_type"] = json!("wrong subject data"),
+            Some(5) => admitted["materials"]["synthesis"]["data"]["artifact_id"] = json!(90),
+            Some(6) => admitted["materials"]["synthesis"]["success"] = json!(false),
+            Some(7) => {
+                admitted["materials"]["initial_analysis"]["data"]["inputs"] =
+                    json!({"synthesis":80})
+            }
+            Some(8) => {
+                admitted["materials"]["purification"]["data"]["compound"] = json!("different batch")
+            }
+            Some(9) => admitted["materials"]["bioassay"]["success"] = json!(false),
+            Some(10) => {
+                admitted["materials"]["bioassay"]["data"]["inputs"]["purification"] = json!(80)
+            }
+            Some(11) => admitted["materials"]["cells"]["data"]["artifact_id"] = Value::Null,
+            Some(12) => {
+                admitted["materials"]["calibration"]["data"]["inputs"]["prepared_cells"] = json!(80)
+            }
+            Some(13) => {
+                admitted["materials"]["bioassay"]["data"]["compound"] = json!("foreign batch")
+            }
+            _ => {}
         }
         let mut spec_packet = admitted.clone();
         let mut fume_packet = admitted.clone();
         match bad {
-            0 => spec_packet["arguments"]["scientist"] = json!("BIOLOGIST"),
-            1 => fume_packet["arguments"]["data_type"] = json!("bioassay"),
-            2 => spec_packet["materials"]["analysis"]["data"]["artifact_id"] = json!(90),
-            3 => fume_packet["materials"]["synthesis"]["data"]["compound"] = json!("foreign batch"),
+            Some(0) => spec_packet["arguments"]["scientist"] = json!("BIOLOGIST"),
+            Some(1) => fume_packet["arguments"]["data_type"] = json!("bioassay"),
+            Some(2) => spec_packet["materials"]["analysis"]["data"]["artifact_id"] = json!(90),
+            Some(3) => {
+                fume_packet["materials"]["synthesis"]["data"]["compound"] = json!("foreign batch")
+            }
             _ => {}
         }
-        let admitted = imp::encode(&admitted)?;
-        let spec_packet = imp::encode(&spec_packet)?;
-        let fume_packet = imp::encode(&fume_packet)?;
-        let error = hibana_runtime::race(
+        let mut sample = materials.clone();
+        for key in ["cells", "calibration", "bioassay"] {
+            sample.as_object_mut().unwrap().remove(key);
+        }
+        let proof = json!({"success":true,"arguments":{
+            "compound":materials["synthesis"]["data"]["compound"],"cell_type":"free β culture"},
+            "result":materials["bioassay"],"materials":materials});
+        let result = hibana_runtime::race(
             hibana_runtime::race(
-                localside::qc::run(&mut service, (&effects, &materials)),
+                localside::qc::run(&mut service, (chemistry, &effects, &decision)),
                 async {
-                    qc.send::<QcAdmission>(&admitted.as_slice()).await?;
                     async {
+                        let [mut a, mut b] = init.par()?;
                         async {
-                            spec.send::<QcSpecRequest>(&spec_packet.as_slice()).await?;
+                            a.send::<FumeLoan>(fume).await?;
                         };
                         async {
-                            fume.send::<QcFumeRequest>(&fume_packet.as_slice()).await?;
+                            b.send::<SpecLoan>(spec).await?;
                         };
                         Ok(())
                     }
                     .await?;
-                    core::future::pending::<ShellResult<()>>().await
+                    let mut spec = qc.recv::<SpecLoan>().await?;
+                    let mut chemistry = chemist.recv::<ChemAccess>().await?;
+                    let synthesis_args =
+                        json!({"compound":materials["synthesis"]["data"]["compound"]});
+                    let bytes = imp::encode(&synthesis_args)?;
+                    chemistry.send::<Synthesis>(&bytes.as_slice()).await?;
+                    let mut fume = chemistry.recv::<FumeLoan>().await?;
+                    fume.send::<SynthesisRequest>(&bytes.as_slice()).await?;
+                    assert_eq!(
+                        imp::decode(fume.recv::<InstrumentResult>().await?)?,
+                        materials["synthesis"]
+                    );
+                    chemistry.send::<FumeLoan>(fume).await?;
+                    let bytes = imp::encode(&materials["initial_analysis"])?;
+                    spec_owner.send::<AnalysisProof>(&bytes.as_slice()).await?;
+                    let bytes = imp::encode(&sample)?;
+                    cent_owner
+                        .send::<PurificationProof>(&bytes.as_slice())
+                        .await?;
+                    chemist.send::<ChemAccess>(chemistry).await?;
+                    let mut chemistry = qc.recv::<ChemAccess>().await?;
+                    let bytes = imp::encode(&args)?;
+                    if subject == 0 {
+                        qc.send::<FirstChemist>(&bytes.as_slice()).await?;
+                    } else {
+                        qc.send::<FirstBiologist>(&bytes.as_slice()).await?;
+                    }
+                    let proof_bytes = imp::encode(&proof)?;
+                    let proof = ReviewReply::<true>::from_bytes(&proof_bytes)?;
+                    let bytes = imp::encode(&admitted)?;
+                    let _biology = if subject == 0 {
+                        async {
+                            async {
+                                cent_owner.send::<BioFumePassed>(&proof).await?;
+                                cent_owner.send::<BioAccess>(biology).await?;
+                            };
+                            async {
+                                chemistry.send::<QcAdmission>(&bytes.as_slice()).await?;
+                            };
+                            Ok(())
+                        }
+                        .await?;
+                        qc.recv::<BioAccess>().await?
+                    } else {
+                        cent_owner.send::<BioFumePassed>(&proof).await?;
+                        cent_owner.send::<BioAccess>(biology).await?;
+                        let mut biology = qc.recv::<BioAccess>().await?;
+                        biology.send::<QcAdmission>(&bytes.as_slice()).await?;
+                        biology
+                    };
+                    let mut fume = qc.recv::<FumeLoan>().await?;
+                    let spec_bytes = imp::encode(&spec_packet)?;
+                    let fume_bytes = imp::encode(&fume_packet)?;
+                    if fume_first {
+                        fume.send::<QcFumeRequest>(&fume_bytes.as_slice()).await?;
+                    } else {
+                        spec.send::<QcSpecRequest>(&spec_bytes.as_slice()).await?;
+                    }
+                    hibana_runtime::host::sleep(std::time::Duration::from_millis(20)).await?;
+                    let calls = effects.calls.take();
+                    assert!(
+                        calls.iter().all(|call| call["tool"] != "verify_result"),
+                        "QC invoked without both actual instrument requests"
+                    );
+                    effects.calls.set(calls);
+                    if fume_first {
+                        spec.send::<QcSpecRequest>(&spec_bytes.as_slice()).await?;
+                    } else {
+                        fume.send::<QcFumeRequest>(&fume_bytes.as_slice()).await?;
+                    }
+                    let (spec_result, fume_result) = async {
+                        async { imp::decode(spec.recv::<QcSpecResult>().await?) };
+                        async { imp::decode(fume.recv::<QcFumeResult>().await?) };
+                    }
+                    .await?;
+                    assert_eq!(spec_result, actual);
+                    assert_eq!(fume_result, actual);
+                    async {
+                        let [mut a, mut b] = qc.par()?;
+                        async {
+                            a.send::<SpecLoan>(spec).await?;
+                        };
+                        async {
+                            b.send::<FumeLoan>(fume).await?;
+                        };
+                        Ok(())
+                    }
+                    .await?;
+                    let returned = init.recv::<SpecLoan>().await?;
+                    drop(returned);
+                    // Withholding both candidate submissions keeps the actual
+                    // owner Pending at the next source operation, without an ack.
+                    Ok(())
                 },
             ),
             async {
-                hibana_runtime::host::sleep(std::time::Duration::from_secs(3)).await?;
+                hibana_runtime::host::sleep(std::time::Duration::from_secs(10)).await?;
                 Err(ShellError::message("QC boundary fixture deadline"))
             },
         )
-        .await
-        .expect_err("substituted QC request succeeded");
-        assert!(
-            !error.to_string().contains("EndpointError") && !error.to_string().contains("deadline"),
-            "{bad}: {error}"
+        .await;
+        if let Some(bad) = bad {
+            let error = result.expect_err("substituted QC request succeeded");
+            assert!(
+                !error.to_string().contains("EndpointError")
+                    && !error.to_string().contains("deadline"),
+                "{bad}: {error}"
+            );
+        } else {
+            result?;
+        }
+        let calls = effects.calls.take();
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|call| call["tool"] == "verify_result")
+                .count(),
+            usize::from(bad.is_none())
         );
-        assert!(
-            effects.calls.take().is_empty(),
-            "{bad}: rejected request invoked physical effect"
+        assert_eq!(
+            calls[0],
+            json!({"actor":"CHEMIST","tool":"run_synthesis","arguments":{"compound":materials["synthesis"]["data"]["compound"]}})
         );
+        if bad.is_none() {
+            assert_eq!(
+                calls[1],
+                json!({"actor":"QC_CONTROLLER","tool":"verify_result","arguments":args})
+            );
+        }
     }
     Ok(())
 }

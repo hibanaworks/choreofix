@@ -153,16 +153,6 @@ fn qc_requests_and_replies() -> impl Projectable {
         ),
     )
 }
-pub type QcResult<'a> = g::Msg<8, &'a [u8]>;
-pub fn qc_operation() -> impl Projectable {
-    g::seq(
-        g::send::<QC, QC_SERVICE, QcAdmission>(),
-        g::seq(
-            qc_requests_and_replies(),
-            g::send::<QC_SERVICE, QC, QcResult>(),
-        ),
-    )
-}
 const fn writable(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
     ChoreoFsObject::read_write(
         path,

@@ -5244,3 +5244,35 @@ sealed imageに科学者の通常受信とFILE送信が含まれることを実�
 残るQC制御／実装置3系統／Wasm・runner・監査を実装し、実4 Wasm・実4モデル・
 完全EPF・独立した実効果照合・共通採点まで成功することが13M全体の認定条件である。
 現在のsource／partial boundaryの原本は`output/experiments/lab-quality-direct-20261116/source-v15.json`。
+
+## 2026-11-16: 13Mの直接localsideと4 Wasm起動口を実装
+
+QC制御、SPECTROMETER、CENTRIFUGE、FUME_HOOD/QCの実効果所有者を書き、7者の
+localsideを直接Endpoint操作でつないだ。QCは実ファイル要求から相手を選び、両資源の
+実結果と実材料を照合する。拒否では候補を返して再測定・再試行を待ち、承認した候補は
+INITへ移す。実装済みという範囲であり、この全経路の実行認定はまだしていない。
+保持するのは実際の合成・測定・試験・審査データであり、別の許可表や進行flagはない。
+
+4つのWasm起動口はFILEとWASI rootの実Endpointを各科学者actorへ受け渡し、操作ファイルを
+対応する実メッセージへ直接bindする。生物試験のresolverは委譲されたBIOLOGY view、
+QCのresolverは実効果所有者の実結果を参照する。汎用closeアダプターと旧QC試作用の
+メッセージ・source経路は残していない。
+
+本番QC受信側の合成・所有権prefixを通す9 native試験が成功した。両subject・両verdict・
+両到着順の8条件と、差替え14条件を検査する。入力拒否時のQC効果は0件であり、正当な
+合成prefixの1効果をQC効果へ混ぜない。これらは候補の提出前で止める有限のnative prefixで、
+最終返却・全体完了の認定ではない。試験入力で誤っていた分岐の分け方、材料の形、並行fragmentの
+対応と候補の早期dropを直し、本体の進行規則や期待する拒否件数を変更して通してはいない。
+
+固定sourceのnative試験・Clippy・`lab-quality-wasi`ビルドとClippyが成功し、全子孫最大
+663,650,304 bytesだった。実バイナリの`--projection`も776イベント・29 viewを出力した。
+binary SHA-256は`c1fdeae7413301547a4aeb5e7b4b84651de925a17c44531d9961ca39dcda5aef`。
+原本は`output/experiments/lab-quality-direct-20261116/source-v29.json`、検証ログは
+`devices-v26.log`。Cargo metadataは本体・runtime・WASIの正本となる隣接worktreeだけを
+選択している。本体・WASI・runtime・共通simulatorはこの作業では変更していない。
+
+ユーザーが許可したPico 2内でのWASI容量拡張は引き続き可能だが、今回は容量不足が
+露呈していないため固定容量を増やしていない。ホスト上の4 Wasm用メモリ使用量を、
+Pico 2への収容実測と取り違えない。残りは共通runner・EPF／実効果監査への接続と、
+実4 Wasm・実4モデル・共通採点の同一runでの確認である。13Mは未認定、26/48課題・
+残り22課題、採点比較0件を維持する。
