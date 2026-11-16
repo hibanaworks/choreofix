@@ -4,6 +4,13 @@
 入力文書のSHA-256は[実験契約](benchmark/experiment-contract.json)に記録する。
 研究の中心は、**実資源の唯一の操作権、残存手順、実際の共有効果を結ぶ保証**である。
 
+現在は直接ファイル境界の24/48課題をsource別に認定し、残り24課題である。
+6Hの`live-directory-v101`はLuna/xhigh 7人、深さ2を517.343330458秒で完走した。
+同じrunの完全EPF50,851記録、53実効果・返答照合・中立な共通採点が成功し違反0。
+レビュー拒否・CI失敗・staging失敗を各2回、実rollbackを2回含み、inclusive tokensは
+8,533,959。認定原本は`qualification-live-v102.json`。全生成入力、最終sourceの全family、
+本実験の認定ではない。以下の段階別経過と失敗記録は、それぞれ元のsourceへ結び付ける。
+
 2026-11-16の追加進捗: 6Hの7人分の実Wasm実行・直接ファイルEndpoint・native側の
 実資源処理を接続した。現行globalは1,237イベント・46 viewであり、通常の返信を
 `offer()`から取得しようとしたアプリの誤りを除去した。重複するmerge-ready通知を外し、
@@ -73,17 +80,16 @@ native handoff 6件と現行APIでのClippyを確認した。アプリ用Miri時
 元の48課題の仕様・共通simulatorと採用済み実験原本は保持し、未移行25課題は減らさない。
 破棄したアダプターを互換APIで復活させない。
 
-6Hは実AIの認定が未完である。44 viewのglobal、24種類の型付き実要求、7人分の
-Wasm bindingと全localside、EPF・実効果監査を実装し、実Wasmの深さ0を完走した。
+6Hは1,237イベント・46 viewのglobal、24種類の型付き実要求、7人分の
+Wasm bindingと全localsideを持ち、実Wasmの通常・回復2条件と実AI深さ2を認定した。
 Aの統合・stagingはB/Cの準備と並行に進め、stagingのA→B→C順序をsourceに記述する。
 Bの統合はAの成功とB/C準備のjoin後、Cの統合はBの成功後に進む、という現在の範囲である。
 実CI・候補・先行deploymentの検証を効果前に照合し、否定的なstaging結果では
 実際に拒否されたdeploymentをrollbackする。10件のnative試験には実Endpointを
 通る肯定・否定の受信側試験と、古いCIで効果0となる試験を含む。
-7人の実モデルは修正後の深さ0を完走・監査済みである。深さ2では修正と実rollbackまで
-進んだ600秒条件の時間切れを保存している。時間予算とプロトコルの正しさを区別し、
-新しい共通予算による再試行全体の確認は残るため、
-6Hを23件の認定へ追加しない。内容は[6H](benchmark/ports/6H.md)に記録する。
+新しい共通1,800秒条件で7人の実AI・完全EPF・効果照合・共通採点まで成功した。
+旧600秒条件の時間切れ、guard停止、診断停止は消さず、新しい完走へ読み替えない。
+6Hを24件目の認定へ追加した。有限の範囲と原本は[6H](benchmark/ports/6H.md)に記録する。
 
 11Eは5本の操作ファイルを実Endpointへ結び、Ready/Busy通知とclose後の振り直しを撤去した。
 実Wasm36条件とLuna xhigh 3人の実行が、同じrunのEPF・実効果・共通採点まで成功した。
@@ -1630,7 +1636,7 @@ CI待ちの間も独立した実装作業は続ける。
 | M0 比較の固定 | 基準SHA、構文範囲、native表現監査、課題と接続、指標・精度・再実行規則を固定する | 更新計画を記録。新競合と精度設計は未認定 |
 | M1 意味論 | T1–T6の定義・前提・反例・必要補題と、既存core定理の対応表。評価に使うpar/roll/委譲を含む | T3/T4の最小receiver契約下の合成済み。残る命題の対応と、具体的な二資源・実効果への適用を進める |
 | M2 実装と証明 | 効果入口一覧、実行時の負例、Leanと実装照合、必要なcore/WASI gate。通常Git pinでレビューと1Hを認定する | 通常Git pinの実Wasmはレビュー34条件・1H5条件・食事3条件、実モデルは1H7人・6E3人・9H7人のpilotが成功。wire監査、全条件・全効果入口とT3/T4の一般合成は未完 |
-| M3 課題と接続 | 全48課題と採用追加課題のglobal/localside・実Wasm・共通採点・接続を認定する | 旧境界の移行は29課題・23family。新しい直接ファイル境界で1E/1M/1H・2E/2M/2H・3E・4E・5E/5M/5H・6E/6M・7E・8E・9E/9M/9H・10E/10M・11E・12E・16Eの23/48課題を、各sourceの実Wasm・実AI・EPF・実効果・共通採点で確認。残り25課題、最終sourceの全family認定・本実験は未完。比較接続の開発は保留 |
+| M3 課題と接続 | 全48課題と採用追加課題のglobal/localside・実Wasm・共通採点・接続を認定する | 旧境界の移行は29課題・23family。新しい直接ファイル境界で1E/1M/1H・2E/2M/2H・3E・4E・5E/5M/5H・6E/6M/6H・7E・8E・9E/9M/9H・10E/10M・11E・12E・16Eの24/48課題を、各sourceの実Wasm・実AI・EPF・実効果・共通採点で確認。残り24課題、最終sourceの全family認定・本実験は未完。比較接続の開発は保留 |
 | M4 本比較 | A1の864件を先に実行し、A2とB–Eを認定後に実行する。全identityにrawと終了理由を残す | 採点0件 |
 | M5 原因と分析 | F/G、8課題の変更負担、cluster対応集計、負例と不確実性を整理する | 未実行 |
 | M6 論文化 | 最新owned実装へ草稿を同期し、各主張と定理・測定・TCB・再現artifactを対応付ける | 草稿。結果表と結論は未確定 |
@@ -5143,3 +5149,26 @@ Pico 2 link、実Wasm shell例、Cargo packageを確認した。Miriで解釈し
 `295b8bdf4ae086fd2e22cced011c66d531954799fd7ec13794ffdd63b5edcfc2`。
 集約は`mechanism-directory-v98.json`と`wasi-storage-v98.json`。モデル呼出し0、採点比較0、
 現在sourceの実AIと全family再認定は未完。23/48課題・残り25課題を維持する。
+
+
+## 2026-11-16: 6Hの実AI・完全監査を認定、24/48課題
+
+`live-directory-v101`は7人のLuna/xhighが自由なwash操作で、深さ2の修正・再考・rollbackを
+含む全53実効果と正常終了まで完走した。517.343330458秒、8,533,959 inclusive tokens、
+256 shell calls。レビュー拒否・CI失敗・staging失敗を各2回、実rollbackを2回含む。
+完全EPF50,851記録、受理済みの要求／効果／返答と現在素材の照合、中立な共通採点は、
+別実行を寄せ集めず同じrunで成功し違反0。7つのmodel turnは重なったが、実効果の
+重なりは0件であり、並行性能の優位性へ読み替えない。
+
+実行時の全子孫最大1,423,425,536 bytes、保存記録の監査は425,148,416 bytes。
+実Wasm全2条件と同じruntime SHA-256は
+`295b8bdf4ae086fd2e22cced011c66d531954799fd7ec13794ffdd63b5edcfc2`。
+その間に変えた3つのbuild入力は記録説明のみで、通常build入口から正しいreceiptを作り、
+sourceの不一致を無視して起動してはいない。raw・source・hash・最終usageを保存した。
+集約は`output/experiments/staged-integration-direct-20261116/qualification-live-v102.json`。
+
+直接ファイル境界は24/48課題・18系統、残り24課題。採点比較は0件のまま。
+本体の全通常生成入力、最終sourceの全family認定、残りの移行と論文用本実験は未完。
+使用したcanonical coreの基点とdirty patchのhashも記録し、最終本体合格と混同しない。
+次は4Mの直接ファイル投影を実装する。元の自由なworldと公開前の内容一致による採点を守り、
+受理した実要求から実効果までを、別のhost workflowや進行flagで補わない。

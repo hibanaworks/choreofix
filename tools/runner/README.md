@@ -25,8 +25,12 @@ violations. Runtime SHA-256 is
 `295b8bdf4ae086fd2e22cced011c66d531954799fd7ec13794ffdd63b5edcfc2`.
 These records include the caller-owned ChoreoFS object-storage and directory
 repair; the older `wasi-v92` results remain bound to their earlier source.
-These finite mechanism conditions do not qualify the unfinished depth-2 live
-model trial or add 6H to the 23 qualified tasks. The normal runner accepts 6H;
+These finite mechanism conditions alone do not qualify a model trial. The
+separate `live-directory-v101` seven-model depth-2 run now passes the complete
+run audit on that same runtime: 53 effects, 50,851 complete EPF records, neutral
+world completion and zero violations. It takes 517.343330458 seconds and
+8,533,959 inclusive tokens. Its source-bound qualification is
+`qualification-live-v102.json`. The normal runner accepts 6H;
 saved executions use `--audit-staged-integration EVENTS`, with record
 counterexamples through `--check-staged-integration-mutants EVENTS NEW_OUTPUT`.
 Use the experiment matrix and qualified task artifacts for scored comparisons.
@@ -34,8 +38,8 @@ The model-trial budget is defined in experiment.json (now 1,800 seconds for
 every future condition). Old 600-second pilots keep their original budget and
 are reported separately. Deadline exhaustion measures the bounded trial; it
 does not establish a choreography or localside defect. The seven-model 6H
-depth-0 pilot live-v78 completes and passes its audits under the old budget;
-its full depth-2 recovery is still under qualification.
+depth-0 pilot live-v78 retains its old source and budget. The new depth-2
+qualification above uses the uniform 1,800-second budget.
 
 The trace file and versioned common simulator each have one I/O owner. Callers send
 records or simulator requests through channels. A record returns after its
@@ -77,11 +81,11 @@ that its implementation or task outcome is correct.
 
 The normal command and live subscription tests use the same execution path.
 It supports `1E`, `1M`, `1H`, `2E`, `2M`, `2H`, `3E`, `4E`, `5E`, `5M`,
-`5H`, `6E`, `6M`, `7E`, `8E`, `9E`, `9M`, `9H`, `10E`, `10M`, `11E`, `12E`
+`5H`, `6E`, `6M`, `6H`, `7E`, `8E`, `9E`, `9M`, `9H`, `10E`, `10M`, `11E`, `12E`
 and `16E`, with the original failure conditions `0`, `1` and `2`.
-Each qualification retains its exact source and simulator version. Twenty-three
+Each qualification retains its exact source and simulator version. Twenty-four
 source-bound tasks have completed direct-projection mechanism and live-model
-checks; the other 25 remain unqualified. The older 4M, 13E/13M and 14E/14M/14H
+checks; the other 24 remain unqualified. The older 4M, 13E/13M and 14E/14M/14H
 adapters and their execution/audit commands have been removed. Their original
 worlds, descriptions and historical source-bound results remain. These tasks
 still require direct ports; a retired adapter is not a current implementation.

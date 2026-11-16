@@ -17,7 +17,7 @@
     "first_technical_gate": "T3/T4: compose unique resource ownership and its remaining protocol with actual effects; define the adapter trust boundary and test old owners, duplicate transfers and argument substitution before scored comparisons",
     "theorem_scope_and_milestones": "plan.md",
     "effect_boundary_contract_and_inventory": "benchmark/effect-boundaries.md",
-    "effect_boundary_status": "Twenty-three source-bound tasks have direct-file mechanism and live-model evidence; 25 remain. Latest 6M passes all six five-Wasm assignments and a five-Luna/xhigh pilot through real typed ChoreoFS files, complete EPF, one-use request/effect/reply matching and neutral common scoring. The pilot completes in 482.10365525 seconds with 3854537 inclusive tokens, 26 effects and zero violations, including two rejected reviews and two failed CI results followed by repair. It observes three review/test effect intersections. Mechanism evidence covers 93 effects and 53335 records; 1149 effect-record and eleven model-record mutations are rejected. Core Rust and Lean admission semantics are unchanged; EPF now constructs a nested retained overlap using the existing checked derivation. The shared journal uses the runtime close codec rather than its stale response-length assumption. Ordinary core Rust, required Miri, Lean/model and runtime-work passed locally, while the full generated normal population and final-source all-family certification remain unfinished. These are unscored finite qualifications, not general Rust refinement, success rates or comparative superiority. Comparison-connection development remains deferred.",
+    "effect_boundary_status": "Twenty-four source-bound tasks have direct-file mechanism and live-model evidence; 24 remain. Latest 6H passes both seven-Wasm conditions and one seven-Luna/xhigh depth-2 pilot on the same executable. That single model run passes complete EPF, request/effect/reply matching and neutral scoring: 517.343330458 seconds, 8533959 inclusive tokens, 53 effects, two rejected reviews, two failed CI results, two failed staging validations and two rollbacks, zero violations. Seven model turns overlap; no overlapping domain effects were observed in this pilot. The core working-patch identity is retained; the full normal generated population and final all-family certification remain unfinished. These are finite unscored qualifications, not general Rust refinement, success rates or comparative superiority. Comparison-connection development remains deferred.",
     "minimum_handoff_case": {
       "source": "src/tasks/handoff",
       "scope": "Native hibana-runtime mechanism fixture with two independent runtimes and the application's actual Endpoint transport; not a remote-network, Wasm or model experiment",
@@ -778,6 +778,7 @@
       "5H",
       "5M",
       "6E",
+      "6H",
       "6M",
       "7E",
       "8E",
@@ -785,25 +786,11 @@
       "9H",
       "9M"
     ],
-    "count": 23,
-    "remaining": 25,
-    "qualified_direct_families": 17,
+    "count": 24,
+    "remaining": 24,
+    "qualified_direct_families": 18,
     "final_source_all_family_certification": false,
     "scored_comparisons": 0,
-    "in_progress_port": {
-      "task": "6H",
-      "status": "seven_wasm_baseline_and_recovery_passed_live_model_incomplete",
-      "global_events": 1237,
-      "projected_views": 46,
-      "argument_schemas": 24,
-      "native_component_tests": 11,
-      "real_wasm_qualification": true,
-      "real_wasm_conditions": 2,
-      "real_model_participants_started": 7,
-      "real_model_trials_completed": 1,
-      "task_qualified": false,
-      "scope": "Current source has 1237 events and 46 views. The same STAGING_ENV Endpoint moves through A/B/C native staging owners after successful validation; direct localsides retain actual predecessor material, without a flat offer dispatcher or progress flags. Native tests cover immediate success, two negative validations/rollbacks then success, real resource handoff, B continuation, refusal of the old A operation before a frame, and four stale/negative-CI refusals before effect. wasi-v92 passes seven actual guests in both baseline and depth-2 recovery: 21/53 effects, 15587/32522 complete EPF records, independent request/effect/reply audit and common-world completion with zero violations. The shared runtime hash is c17c574596ea3f48d01e84b3ca2ca6fd8ba52162c16f9a730cc70e3bacf2cbe2. Model calls and scored runs are zero for these mechanism tests. The old-source live-v78 completes seven Luna/xhigh agents; old 600-second timeouts retain their conditions. live-v88 under the new uniform 1800-second budget was diagnostically interrupted after circular blocking reads, with partial raw and no terminal token total. Current-source live-model qualification and final all-family certification remain unfinished. WASI table capacity 256, borrowed immutable element bytes, 107 native tests, four targeted library Miri cases and Pico 2 link are recorded under their actual source; linked RAM including reserved stack is 152296 bytes and flash 333516 bytes, without a physical maximum-stack claim."
-    },
     "removed_legacy_adapters": {
       "date": "2026-11-16",
       "tasks": [
@@ -819,15 +806,15 @@
     },
     "latest_source_bound_port": {
       "tasks": [
-        "6M"
+        "6H"
       ],
       "simulator_contract": "common-environment-v23",
-      "evidence": "output/experiments/feature-delivery-direct-20261115/qualification-v70.json"
+      "evidence": "output/experiments/staged-integration-direct-20261116/qualification-live-v102.json"
     },
     "direct_choreofs_boundary": {
       "status": "migration_in_progress",
-      "strengthened_boundary_qualified_tasks": 23,
-      "remaining_tasks": 25,
+      "strengthened_boundary_qualified_tasks": 24,
+      "remaining_tasks": 24,
       "unsafe_application_miri_required": false,
       "scored_runs": 0,
       "full_48_task_goal_unchanged": true,
@@ -844,9 +831,10 @@
         "conditions": 2,
         "model_calls": 0,
         "scored_runs": 0,
-        "real_model_qualified": false,
+        "real_model_qualified": true,
         "all_family_requalification_complete": false,
-        "scope": "Actual seven-guest Wasm nested-directory listings, baseline and failed-result recovery; complete EPF, request/effect/reply agreement and neutral world completion. No core progress change."
+        "scope": "Actual seven-guest Wasm nested-directory listings, baseline and failed-result recovery; complete EPF, request/effect/reply agreement and neutral world completion. No core progress change.",
+        "real_model_qualification": "output/experiments/staged-integration-direct-20261116/qualification-live-v102.json"
       }
     },
     "historical_pre_direct_boundary": {
@@ -1005,7 +993,33 @@
         "wasi_library_revision": "0362074",
         "wasi_library_ordinary_gates": "passed_local"
       }
-    }
+    },
+    "remaining_task_ids": [
+      "10H",
+      "11H",
+      "11M",
+      "12H",
+      "12M",
+      "13E",
+      "13H",
+      "13M",
+      "14E",
+      "14H",
+      "14M",
+      "15E",
+      "15H",
+      "15M",
+      "16H",
+      "16M",
+      "3H",
+      "3M",
+      "4H",
+      "4M",
+      "7H",
+      "7M",
+      "8H",
+      "8M"
+    ]
   },
   "shared_build_procedure": {
     "task": "10E",
@@ -1967,5 +1981,84 @@
     "model_calls": 0,
     "scored_runs": 0,
     "scope": "The generic WASI stage dispatcher and fd-bearing Close envelope have been removed. All four operation files own their actual Endpoints. Localsides directly receive requests, drive both owned module Endpoints, check actual admitted arguments, apply effects and return actual results. Handoffs return before testing. Actual test responses drive 1H resolver branches; no workflow flags or holder table are added. EPF handles source execution; the independent auditor binds actual receive occurrences, material/results, module returns, test decisions and common scores. Real-Wasm and real-model qualification remain pending."
+  },
+  "staged_integration_procedure": {
+    "task": "6H",
+    "task_qualified": true,
+    "global_events": 1237,
+    "projected_views": 46,
+    "physical_resources": [
+      "REPO",
+      "TEST_ENV",
+      "BUILD_SERVER",
+      "STAGING_ENV"
+    ],
+    "guest_participants": 7,
+    "mechanism_conditions": 2,
+    "qualification": {
+      "task": "6H",
+      "status": "source_bound_direct_file_port_qualified",
+      "accepted_task": 24,
+      "remaining_tasks": 24,
+      "source_binary_sha256": "295b8bdf4ae086fd2e22cced011c66d531954799fd7ec13794ffdd63b5edcfc2",
+      "simulator_contract": "common-environment-v23",
+      "simulator_manifest_sha256": "90c71ae26686bed3365453d97ed76ffd08b3d8eb2001103de9ba04675a8ba59f",
+      "mechanism": {
+        "evidence": "output/experiments/staged-integration-direct-20261116/mechanism-directory-v98.json",
+        "evidence_sha256": "c08c6ccc4f5a99ddfe52e5c7265db642f7fe5a15128c2675bd5cfec7e43c6f1b",
+        "conditions": 2,
+        "domain_effects": [
+          21,
+          53
+        ],
+        "captured_records": [
+          15906,
+          32918
+        ],
+        "model_calls": 0
+      },
+      "model": {
+        "directory": "output/experiments/staged-integration-direct-20261116/live-directory-v101",
+        "result_sha256": "75b1a7719d7639ce704a9450edbecbfb81aa6fc0ba4f1de08f0261f2422726a1",
+        "audit_log": "output/experiments/staged-integration-direct-20261116/live-directory-v101-audit.log",
+        "audit_log_sha256": "e3196eca0f55f414d79f3e51097bf2cba6de5fc3bb0594d26010044a9d3b70c7",
+        "events_sha256": "8a83c0c0dcc3624ffc6b8914eed19d921d971f444be3300735e7d4a74b3e9f42",
+        "participants": 7,
+        "model": "gpt-6-luna",
+        "effort": "xhigh",
+        "authentication": "chatgpt",
+        "depth": 2,
+        "elapsed_seconds": 517.343330458,
+        "inclusive_tokens": 8533959,
+        "input_tokens": 8476944,
+        "output_tokens": 57015,
+        "shell_calls": 256,
+        "domain_effects": 53,
+        "captured_records": 50851,
+        "negative_outcomes": {
+          "code_review": 2,
+          "run_tests": 2,
+          "validate_staging": 2
+        },
+        "actual_rollbacks": 2,
+        "max_simultaneous_model_turns": 7,
+        "overlapping_effect_pairs": {},
+        "violations": 0,
+        "maximum_descendant_bytes": 1423425536,
+        "audit_maximum_descendant_bytes": 425148416
+      },
+      "source": {
+        "application_git_base": "823ab81db3309bd598394e98df24d5dc0c2d11f2",
+        "runtime_source_manifest_sha256": "d4e749e3e86b4bebff352ed691578199451d34ccdb549a7c3bf41c2bac63adf0",
+        "core_git_base": "b7abd2e66003aaad623b479233e68371386a0fb4",
+        "core_dirty_patch_sha256": "5b0dd961be0dc5ee85a7ab09841a4fbfcd912cfa45f71c4f0c463bd3e3df00f3",
+        "core_normal_generated_population_complete": false,
+        "final_source_all_family_certification": false
+      },
+      "scope": "Two finite seven-Wasm mechanism conditions and one audited unscored seven-Luna/xhigh depth-2 run. The same model execution passes complete EPF, request/effect/reply matching and neutral world scoring. No success-rate, timing-comparison, all-interleaving, physical-Pico, full-core or final all-family claim.",
+      "scored_runs": 0
+    },
+    "policy": "One global and direct Endpoint localsides; actual staging authority moves between A/B/C native owners after validation. The original staged order and failed-result repair/rollback remain in the source. Private directories derive from actual mounted paths. Actual accepted requests, values and current material are checked before effects; no host workflow or progress flags.",
+    "current_scope": "One source-bound finite qualification, with core working-patch identity preserved. Final core generated gates, all-family certification, the other 24 task ports and scored experiments remain unfinished."
   }
 }

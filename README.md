@@ -246,13 +246,22 @@ with approval and merge outside the roll. The source shrinks from 1,461 to 181
 events without changing the simulator or adopting core/WASI runtime changes.
 See [the exact scope and measurements](benchmark/ports/6E.md).
 
-Feature delivery (`6M`) is the 23rd qualified direct-file task; 25 remain.
+Feature delivery (`6M`) was the 23rd qualified direct-file task.
 Six five-Wasm conditions pass the complete EPF capture, request/effect and
 common-score checks. A five-Luna/xhigh pilot freely using wash and private files
 also passes, including two review rejections and two failed CI results followed
 by repair: 482.10 seconds, 3,854,537 inclusive tokens, 26 effects and zero
 violations. This is an unscored source-bound qualification.
 See [the protocol policy and evidence](benchmark/ports/6M.md).
+
+Staged integration (`6H`) is the 24th qualified direct-file task; 24 remain.
+Both seven-Wasm conditions and a seven-Luna/xhigh depth-2 pilot pass complete
+EPF, independent request/effect/reply checks and neutral common scoring on the
+same executable. The pilot completes in 517.34 seconds with 8,533,959 inclusive
+tokens, 53 effects and zero violations, including two failed reviews, two failed
+CI results, two failed staging validations and two real rollbacks. No domain
+effects overlap in this pilot; seven model turns do overlap. These are finite,
+unscored observations. See [the source-bound scope](benchmark/ports/6H.md).
 
 Multi-specialty care (`5M`) passes nine direct-file real-Wasm conditions and
 one five-model pilot on the same runtime. The pilot completes in 75.24 seconds
