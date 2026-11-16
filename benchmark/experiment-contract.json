@@ -428,7 +428,7 @@
     "qualification": "The Endpoint-bound path passes one production-receiver forgery test, three completed Wasm conditions at original depths 0/1/2, and one early-exit case with zero effects. Each completed record passes EPF, exact file/request/effect/result correspondence and common scoring; 3 x 16 record mutants are rejected. After retaining unsafe-deployment observations in the common scorer, unchanged Rust/SDK/runtime/runner evidence was carried forward, with one current-scorer ordinary Wasm case and its 16 mutants added. A fresh three-person Luna xhigh pilot on that final source passes independent run, EPF and effect/score audits: 32.079833 seconds, 386756 inclusive tokens, three effects, seven incoming messages and zero violations. The initial source-bound pilot remains separate. These are unscored finite qualifications, not all-family certification or matched comparisons. Evidence: output/experiments/cicd-direct-projection-20261113/qualification-summary.json."
   },
   "simulator": {
-    "contract": "common-environment-v23",
+    "contract": "common-environment-v24",
     "source": "benchmark",
     "manifest": "benchmark/simulator-manifest.json",
     "base_upstream_revision": "36b4bd108fcd74f7efb17613aebbe3fdf55499a9",
@@ -487,10 +487,11 @@
       "Version 20 replaces 16E done flags with compiled application bytes, executed unit/integration/smoke checks, actual production bytes and matching completed integration evidence observed at deployment. Tools remain callable in all six serial orders and can be repeated; an untested deployment still changes production, but later tests cannot validate that earlier effect. Equal-content rebuilds preserve matching evidence, incomplete builds/tests do not supply completed inputs, and physical resource conflicts remain independent. The other 47 task worlds remain unchanged from v19. Earlier source-bound results retain their exact world source and scope.",
       "Version 21 moves 3E from done maps to the same content-bound document world used by 3M and 7E/M/H. Actual completed assigned-topic research is required by draft/reference artifacts; each section's named review covers that section's current material, without invalidating the other section's independent review. Stale, failed and pending evidence cannot authorize combination, and a later repair retains any unsafe publication violation. Both author orders, write/reference orders, review orders and independent DOCUMENT/DATABASE effects remain free for every method. This version entry records the world-only checkpoint; the later direct-file 3E qualification is recorded in research_report_procedure.",
       "Version 22 replaces 2E/2M/2H read/draft/write/review done flags with actual completed literature, content-bound drafts, document contributions and review snapshots. Any method can invoke tools in any order and retry; later inputs cannot supply an earlier operation. Equal-content rewrites preserve matching evidence. Physical section conflicts remain separately observable. The other 45 task worlds, 48 task interfaces and 825 checklist items are unchanged. Earlier ports retain their exact world sources and are not relabeled.",
-      "Version 23 replaces the 1E/1M/1H design/implementation/commit/test done maps with completed design text, content-bound synthetic source, actual committed module snapshots and test receipts. Calls remain free to every method and later inputs cannot validate earlier work. The 1H repair consumes an actual completed negative test diagnostic and is committed before retesting; no workflow cursor or expected-next-call is used. Identical content preserves matching evidence; later failures invalidate older passing receipts. Original failure profiles and physical module conflicts remain. This is a synthetic content world, not a real compiler. Other 45 worlds, all 48 interfaces and 825 checklist items are unchanged. Existing qualifications retain their exact earlier world sources."
+      "Version 23 replaces the 1E/1M/1H design/implementation/commit/test done maps with completed design text, content-bound synthetic source, actual committed module snapshots and test receipts. Calls remain free to every method and later inputs cannot validate earlier work. The 1H repair consumes an actual completed negative test diagnostic and is committed before retesting; no workflow cursor or expected-next-call is used. Identical content preserves matching evidence; later failures invalidate older passing receipts. Original failure profiles and physical module conflicts remain. This is a synthetic content world, not a real compiler. Other 45 worlds, all 48 interfaces and 825 checklist items are unchanged. Existing qualifications retain their exact earlier world sources.",
+      "Version 24 adds both current module/shared-library content identities to every 4M refactor response, including invalid and idempotent calls. This is factual world data available to every method. Tool arguments, free mechanical calls, code transformations, outcome scoring, physical resources, the other 47 worlds and all 825 checklist items remain unchanged. Earlier qualifications retain their exact simulator sources."
     ],
     "earlier_results": "Earlier qualifications retain their exact recorded simulator source/hash, including intermediate common-environment snapshots. No result is relabeled as another source.",
-    "task_revision": "Version 23 replaces the 1E/1M/1H design/implementation/commit/test done maps with completed design text, content-bound synthetic source, actual committed module snapshots and test receipts. Calls remain free to every method and later inputs cannot validate earlier work. The 1H repair consumes an actual completed negative test diagnostic and is committed before retesting; no workflow cursor or expected-next-call is used. Identical content preserves matching evidence; later failures invalidate older passing receipts. Original failure profiles and physical module conflicts remain. This is a synthetic content world, not a real compiler. Other 45 worlds, all 48 interfaces and 825 checklist items are unchanged. Existing qualifications retain their exact earlier world sources.",
+    "task_revision": "Version 24 adds both current module/shared-library content identities to every 4M refactor response, including invalid and idempotent calls. This is factual world data available to every method. Tool arguments, free mechanical calls, code transformations, outcome scoring, physical resources, the other 47 worlds and all 825 checklist items remain unchanged. Earlier qualifications retain their exact simulator sources.",
     "document_data_qualification": {
       "contract": "common-environment-v8",
       "task": "7E",
@@ -774,6 +775,7 @@
       "2M",
       "3E",
       "4E",
+      "4M",
       "5E",
       "5H",
       "5M",
@@ -786,9 +788,9 @@
       "9H",
       "9M"
     ],
-    "count": 24,
-    "remaining": 24,
-    "qualified_direct_families": 18,
+    "count": 25,
+    "remaining": 23,
+    "qualified_direct_families": 19,
     "final_source_all_family_certification": false,
     "scored_comparisons": 0,
     "removed_legacy_adapters": {
@@ -806,10 +808,10 @@
     },
     "latest_source_bound_port": {
       "tasks": [
-        "6H"
+        "4M"
       ],
-      "simulator_contract": "common-environment-v23",
-      "evidence": "output/experiments/staged-integration-direct-20261116/qualification-live-v102.json"
+      "simulator_contract": "common-environment-v24",
+      "evidence": "output/experiments/shared-refactor-direct-20261116/qualification-live-v20.json"
     },
     "direct_choreofs_boundary": {
       "status": "migration_in_progress",
@@ -1014,7 +1016,6 @@
       "3H",
       "3M",
       "4H",
-      "4M",
       "7H",
       "7M",
       "8H",
@@ -1225,43 +1226,74 @@
   },
   "shared_refactor_procedure": {
     "task": "4M",
-    "simulator_contract": "common-environment-v1",
-    "status": "Migrated as the fifteenth task; revised common outcome-based task, not unchanged upstream semantics",
-    "protocol": "The architect and each developer choose actual operation order. The sole REPO and TEST_ENV Endpoints carry actual requests and results and return. Physical receivers compare admitted arguments, current candidate data and actual review/test results before merging. No application holder table, progress flag or second state machine is added.",
-    "native": {
-      "conditions": 64,
-      "fixture_effects": 896,
-      "captured_records": 22336,
-      "actual_receiver_negative_probes": 2,
-      "controlled_effect_start_barriers": true
+    "status": "accepted_source_bound_direct_file_task",
+    "counted_in_migrated_tasks": true,
+    "simulator_contract": "common-environment-v24",
+    "original_effects": 12,
+    "participants": 5,
+    "protocol": "Direct typed file requests. Four edits precede stable content-bound validation. Independent module pipelines each run review and tests, deliver actual read-only results, receive a merge request and send its actual evidence to the sole REPO effect owner before publication. No phase flags, holder table or second workflow.",
+    "finite_wasm_cases": 8,
+    "production_receiver_negative_cases": 12,
+    "evidence": "output/experiments/shared-refactor-direct-20261116",
+    "prior_adapter_qualification": {
+      "task": "4M",
+      "simulator_contract": "common-environment-v1",
+      "status": "Migrated as the fifteenth task; revised common outcome-based task, not unchanged upstream semantics",
+      "protocol": "The architect and each developer choose actual operation order. The sole REPO and TEST_ENV Endpoints carry actual requests and results and return. Physical receivers compare admitted arguments, current candidate data and actual review/test results before merging. No application holder table, progress flag or second state machine is added.",
+      "native": {
+        "conditions": 64,
+        "fixture_effects": 896,
+        "captured_records": 22336,
+        "actual_receiver_negative_probes": 2,
+        "controlled_effect_start_barriers": true
+      },
+      "wasm": {
+        "conditions": 5,
+        "actual_effects": 70,
+        "captured_records": 18850,
+        "record_mutants_rejected": 168,
+        "all_common_outcomes_complete": true,
+        "epf_and_effect_audits": "passed",
+        "source_artifact": "output/experiments/refactor-wasi-qualification-v3"
+      },
+      "live_model": {
+        "participants": 5,
+        "model": "gpt-6-luna",
+        "effort": "xhigh",
+        "authentication": "chatgpt",
+        "elapsed_seconds": 61.072589917,
+        "input_tokens": 656820,
+        "output_tokens": 3869,
+        "inclusive_tokens": 660689,
+        "actual_effects": 14,
+        "captured_records": 7191,
+        "violations": 0,
+        "review_test_overlaps": 1,
+        "merge_review_overlaps": 0,
+        "epf_and_effect_audits": "passed",
+        "source_artifact": "output/experiments/model-qualification/current-core-refactor-4M-v1"
+      },
+      "qualification_scope": "Recorded source-bound, finite mechanism tests and one unscored pilot. Current final-core/all-family qualification, 33 task ports and scored experiments remain unfinished. Cached input and reasoning tokens are included, not counted twice."
     },
-    "wasm": {
-      "conditions": 5,
-      "actual_effects": 70,
-      "captured_records": 18850,
-      "record_mutants_rejected": 168,
-      "all_common_outcomes_complete": true,
-      "epf_and_effect_audits": "passed",
-      "source_artifact": "output/experiments/refactor-wasi-qualification-v3"
-    },
-    "live_model": {
-      "participants": 5,
-      "model": "gpt-6-luna",
+    "prior_scope": "Historical source only; removed adapter does not qualify the direct-file boundary.",
+    "qualification": {
+      "evidence": "output/experiments/shared-refactor-direct-20261116/qualification-live-v20.json",
+      "wasm_cases": 8,
+      "effects_in_mechanism": 96,
+      "captured_records_in_mechanism": 25720,
+      "record_counterexamples_rejected": 9,
+      "production_receiver_negative_conditions": 12,
+      "live_model_participants": 5,
+      "live_model": "gpt-6-luna",
       "effort": "xhigh",
-      "authentication": "chatgpt",
-      "elapsed_seconds": 61.072589917,
-      "input_tokens": 656820,
-      "output_tokens": 3869,
-      "inclusive_tokens": 660689,
-      "actual_effects": 14,
-      "captured_records": 7191,
+      "live_seconds": 79.728423,
+      "inclusive_tokens": 687694,
+      "live_effects": 12,
+      "live_captured_records": 5624,
       "violations": 0,
-      "review_test_overlaps": 1,
-      "merge_review_overlaps": 0,
-      "epf_and_effect_audits": "passed",
-      "source_artifact": "output/experiments/model-qualification/current-core-refactor-4M-v1"
-    },
-    "qualification_scope": "Recorded source-bound, finite mechanism tests and one unscored pilot. Current final-core/all-family qualification, 33 task ports and scored experiments remain unfinished. Cached input and reasoning tokens are included, not counted twice."
+      "scored_runs": 0,
+      "scope": "Recorded source/binary, complete declared finite mechanism domain, one unscored live trial. All-input, final core/all-family and matched-comparison claims are not established."
+    }
   },
   "regulatory_discovery_procedure": {
     "task": "14M",

@@ -110,6 +110,22 @@ class SharedLibraryWorld(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.success)
         self.assertNotEqual(result.data['outputs'][0]['actual'], result.data['outputs'][0]['expected'])
 
+    async def test_refactor_returns_current_content_identities_without_enforcing_order(self):
+        before = dict(self.sim.progress['working_candidates'])
+        changed = await self.call('DEVELOPER_A', 'refactor_code', target='module_a')
+        current = changed.data['working_candidates']
+        self.assertEqual(current, self.sim.progress['working_candidates'])
+        self.assertNotEqual(current['module_a'], before['module_a'])
+        self.assertEqual(current['module_b'], before['module_b'])
+        library = await self.call('DEVELOPER_B', 'refactor_code', target='SHARED_LIBRARY')
+        self.assertNotEqual(library.data['working_candidates']['module_a'], current['module_a'])
+        self.assertNotEqual(library.data['working_candidates']['module_b'], current['module_b'])
+        repeated = await self.call('DEVELOPER_A', 'refactor_code', target='SHARED_LIBRARY')
+        self.assertEqual(repeated.data['working_candidates'], library.data['working_candidates'])
+        invalid = await self.call('DEVELOPER_A', 'refactor_code', target='unknown')
+        self.assertFalse(invalid.success)
+        self.assertEqual(invalid.data['working_candidates'], repeated.data['working_candidates'])
+
     async def test_same_content_does_not_become_stale_due_to_an_extra_call(self):
         await self.changes(); await self.reviews(); await self.suites()
         before = list(self.sim.reviews)

@@ -1,9 +1,11 @@
 # ChoreoFix
 
-The current direct ChoreoFS boundary has source-bound qualification for **23 of
-48 tasks** across 17 families; 25 tasks and final-source all-family certification
-remain unfinished. The seven-agent 6H implementation completes its actual-Wasm
-baseline with EPF/effect/world checks. Its live-model qualification is unfinished.
+The current direct ChoreoFS boundary has source-bound qualification for **25 of
+48 tasks** across 19 families; 23 tasks and final-source all-family certification
+remain unfinished. Seven Luna/xhigh agents completed 6H's depth-2 recovery in
+517.34 seconds, with complete EPF capture, 53 checked effects and common-world
+success. Five Luna/xhigh agents also completed direct 4M in 79.73 seconds with
+687,694 inclusive tokens, complete EPF capture and 12 checked effects.
 See [the plan](plan.md) and [6H's current scope](benchmark/ports/6H.md).
 
 Development uses the canonical sibling worktrees for Hibana, EPF, WASI and

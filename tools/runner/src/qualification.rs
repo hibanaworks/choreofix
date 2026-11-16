@@ -11,7 +11,10 @@ use std::{
     process::{Command, Stdio},
 };
 
-const FAMILIES: [&str; 18] = [
+pub const REFACTOR_CASES: usize = 1 << 3;
+
+const FAMILIES: [&str; 19] = [
+    "refactor",
     "kitchen",
     "manufacturing",
     "cascading_build",
@@ -233,6 +236,7 @@ fn execute(command: &mut Command, output: &Path, name: &str) -> Result<String> {
         "CARGO_ENCODED_RUSTFLAGS",
         "PYTHONHASHSEED",
         "CHOREOFIX_FEATURE_DELIVERY_CASE",
+        "CHOREOFIX_REFACTOR_CASE",
         "CHOREOFIX_KITCHEN_CASE",
         "CHOREOFIX_REGULATORY_DISCOVERY_CASE",
         "CHOREOFIX_MULTI_ROUND_DISCOVERY_CASE",
@@ -418,7 +422,8 @@ pub fn build_only(output: &Path, selection: &str) -> Result<Value> {
 
 /// Build the real guest and run each selected family's declared WASI boundary.
 pub fn run(output: &Path, filter: Option<&str>) -> Result<Value> {
-    if std::env::var_os("CHOREOFIX_FEATURE_DELIVERY_CASE").is_some()
+    if std::env::var_os("CHOREOFIX_REFACTOR_CASE").is_some()
+        || std::env::var_os("CHOREOFIX_FEATURE_DELIVERY_CASE").is_some()
         || std::env::var_os("CHOREOFIX_KITCHEN_CASE").is_some()
         || std::env::var_os("CHOREOFIX_REGULATORY_DISCOVERY_CASE").is_some()
         || std::env::var_os("CHOREOFIX_MULTI_ROUND_DISCOVERY_CASE").is_some()
@@ -519,6 +524,36 @@ pub fn run(output: &Path, filter: Option<&str>) -> Result<Value> {
         }
         if filter.is_none() && family == "manufacturing" && completed != 2 {
             return Err("manufacturing qualification must execute both the total-order/recovery and contended-choice groups".into());
+        }
+        if family == "refactor" && test_filter == "refactor_boundary::" {
+            let report: Value = serde_json::from_slice(&fs::read(
+                output.join("evidence/refactor-mechanism.json"),
+            )?)?;
+            let cases = report["cases"]
+                .as_array()
+                .ok_or("refactor condition reports")?;
+            let ids = cases
+                .iter()
+                .filter_map(|case| case["case_index"].as_u64())
+                .collect::<BTreeSet<_>>();
+            if completed != 1
+                || report["complete_finite_domain"] != true
+                || report["declared_cases"] != REFACTOR_CASES
+                || cases.len() != REFACTOR_CASES
+                || ids != (0..REFACTOR_CASES as u64).collect()
+                || cases
+                    .iter()
+                    .any(|case| case["status"] != "passed" || case["domain_calls"] != 12)
+                || cases
+                    .iter()
+                    .find(|case| case["case_index"] == 0)
+                    .and_then(|case| case["counterexamples"]["record_counterexamples"].as_array())
+                    .is_none_or(|items| {
+                        items.len() != 9 || items.iter().any(|item| item["rejected"] != true)
+                    })
+            {
+                return Err("refactor qualification omits a declared real-Wasm condition".into());
+            }
         }
         if family == "staged_integration"
             && test_filter == "staged_integration_boundary::"

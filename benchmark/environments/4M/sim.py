@@ -150,7 +150,9 @@ class SharedLibraryRefactorSim(SimContext):
         if success:
             self.files[file] = _REFACTORED[file]
         data = {"target": target, "source": self.files.get(file),
-                "content_sha256": sha256(self.files[file].encode()).hexdigest() if success else None}
+                "content_sha256": sha256(self.files[file].encode()).hexdigest() if success else None,
+                "working_candidates": {module: self._identity(self.files, module)
+                                       for module in ("module_a", "module_b")}}
         self.log_event(agent_id, "refactor_code", {"target": target}, success, data)
         return ToolResult("refactor_code", success, data)
 

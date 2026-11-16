@@ -13,6 +13,9 @@ behavior-preserving source transformation, `merge_code` publishes the current
 module/library bytes, and review/test tools execute those actual sources and
 return content-bound results. These are coordination tasks, not an evaluation of
 arbitrary model-generated programs.
+Each refactor response also reports both current module/shared-library content
+identities. These describe actual working bytes; they grant no operation and
+are available to every method, including on invalid or repeated requests.
 
 Choose the coordination procedure freely. All mechanical operations can be
 invoked independently of earlier designs, reviews, tests or merges. You may

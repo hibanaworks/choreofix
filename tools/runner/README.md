@@ -4,6 +4,14 @@ The runner records model requests, tool events, versions and usage. Hibana task
 permissions belong to the projected Endpoints, not this process interface.
 The direct-WASI command currently produces unscored qualification records.
 
+The new 4M direct-file port uses five actual Wasm guests and twelve original
+effects. Its declared eight-case domain is `refactor_boundary::`; all eight
+cases and one five-person Luna/xhigh trial passed complete EPF, effect/reply and
+common-world audits. The live run took 79.728423 seconds and 687,694 inclusive
+tokens; it is task 25 of 48, with 23 remaining. Common-environment-v24 exposes current
+code identities in refactor responses for every method without changing scoring
+or permitted calls. See [the current port](../../benchmark/ports/4M.md).
+
 The common WASI qualification declares both 6H seven-guest tests under
 `staged_integration_boundary::`: the depth-0 baseline and depth-2 recovery.
 The latter requires two review rejections, two CI failures and two staging
@@ -80,15 +88,16 @@ overwritten. These records identify the measured build; they do not establish
 that its implementation or task outcome is correct.
 
 The normal command and live subscription tests use the same execution path.
-It supports `1E`, `1M`, `1H`, `2E`, `2M`, `2H`, `3E`, `4E`, `5E`, `5M`,
+It supports `1E`, `1M`, `1H`, `2E`, `2M`, `2H`, `3E`, `4E`, `4M`, `5E`, `5M`,
 `5H`, `6E`, `6M`, `6H`, `7E`, `8E`, `9E`, `9M`, `9H`, `10E`, `10M`, `11E`, `12E`
 and `16E`, with the original failure conditions `0`, `1` and `2`.
-Each qualification retains its exact source and simulator version. Twenty-four
+Each qualification retains its exact source and simulator version. Twenty-five
 source-bound tasks have completed direct-projection mechanism and live-model
-checks; the other 24 remain unqualified. The older 4M, 13E/13M and 14E/14M/14H
+checks; the other 23 remain unqualified. The older 4M, 13E/13M and 14E/14M/14H
 adapters and their execution/audit commands have been removed. Their original
 worlds, descriptions and historical source-bound results remain. These tasks
-still require direct ports; a retired adapter is not a current implementation.
+other than 4M still require direct ports; 4M's new direct qualification is
+separate from that retired adapter.
 The rewritten 7E passes
 twelve real-wash mechanism cases, EPF/effect audits and 1,503 record mutations.
 Three Luna/xhigh participants also completed depth 2 on the same runtime binary;

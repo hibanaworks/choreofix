@@ -52,6 +52,9 @@ mod philosophers_boundary;
 mod process;
 mod projection;
 mod qualification;
+mod refactor_audit;
+#[cfg(test)]
+mod refactor_boundary;
 mod report_audit;
 #[cfg(test)]
 mod report_boundary;
@@ -106,6 +109,7 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
     let manufacturing = task == "11E";
     let kitchen = task == "12E";
     let coordination = task == "4E";
+    let refactor = task == "4M";
     let medical = task == "5E";
     let multi_specialty = task == "5M";
     let critical_care = task == "5H";
@@ -120,6 +124,7 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
         || build
         || report
         || coordination
+        || refactor
         || medical
         || multi_specialty
         || critical_care
@@ -141,6 +146,7 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
         || build
         || report
         || coordination
+        || refactor
         || medical
         || multi_specialty
         || critical_care
@@ -229,6 +235,21 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
         }
     } else if report {
         "Each file is a direct choreography projection. Choose shell commands and private calculations freely; an unadmitted request returns an error to the same guest. Researchers use their assigned topic and section. Write the original tool arguments to research_topic, write_section, update_references or revise_section and read the actual result from that same file. Reading feedback receives the next actual review of your section. After a negative review, choose revision text and submit it; a new review checks the current actual section and references. After your section is approved, your research work is complete and you may exit while the editor and other researcher continue. The editor chooses section order by writing original review_sections arguments to review_section_a or review_section_b and reading the result from that file. Either initial section and repeated or alternating rejection schedules are supported. Review of one section can overlap revision of the other. combine_sections submits the actual publication request; it requires both current positive reviews. The choreography then moves editing and review authority before publication. No host chooses the next request, loan or command. There is no generic result mailbox or synthetic coordination envelope. The editor finishes after receiving the actual combine result. No acquire/release or notification commands are needed."
+    } else if refactor {
+        match agent {
+            "ARCHITECT" => {
+                "/service/design_proposal/module_a and /service/design_proposal/module_b"
+            }
+            "DEVELOPER_A" => {
+                "/service/refactor_code/module_a, /service/refactor_code/SHARED_LIBRARY and /service/merge_code; read-only /service/review and /service/test_result"
+            }
+            "DEVELOPER_B" => {
+                "/service/refactor_code/module_b, /service/refactor_code/SHARED_LIBRARY and /service/merge_code; read-only /service/review and /service/test_result"
+            }
+            "REVIEWER" => "/service/code_review/module_a and /service/code_review/module_b",
+            "TESTER" => "/service/run_tests/module_a_tests and /service/run_tests/module_b_tests",
+            _ => return Err("unknown refactor participant".into()),
+        }
     } else if coordination {
         match agent {
             "BACKEND_DEV" => "/service/define_api, /service/implement_feature and /service/outcome",
@@ -322,6 +343,8 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
         "Choose your private shell commands and calculations freely, using actual patient results and your assigned operations. Each operation file owns its real Endpoint: write the operation JSON and read the actual response from that same file. ER_DOCTOR assesses the assigned patient and chooses how to interleave CT with general-panel requests. Either panel can use combined, split, reversed or repeated incomplete test_type requests. CARDIOLOGIST can read the actual assessment in /service/referral and the completed general findings in /service/findings; use actual results for diagnosis. ER_DOCTOR can read the completed consultation in /service/summary, containing clinical.findings, clinical.diagnosis and medication_review. PHARMACIST independently reviews caller-supplied medication data. medications and symptoms are optional strings, not fixed answers. Actual CT and test-panel Endpoints carry each resource request and result; do not invent acquire, release or notification tools. Invalid input returns an error without authorizing an effect, so correct it or choose another legal operation. Other participants can continue while a request waits. Finish your assigned work after reading its actual result. This abstract benchmark has no prescribing or administration effect."
     } else if report {
         "Hibana delegates the DOCUMENT or DATABASE Endpoint for each shared operation. The actual request and result travel through that Endpoint before it returns. You do not call resource acquisition, release or notification tools. Researchers research their assigned topic, write their assigned section and update its references. The references result includes the actual review under coordination.review_sections. After rejection, reconsider and revise your own section; the revision result includes the next actual review. Finish after your assigned section is approved. The editor reviews both submitted sections, choosing which to review first and whether to switch after a rejection. A review can overlap revision of the other section. Read the actual results and combine both sections after both pass."
+    } else if refactor {
+        "Each operation file is directly bound to its actual choreography Endpoint. Choose your own shell commands and private computation. Submit the original JSON arguments and read the actual response from that same file. The architect's two proposals and the developers' own-module/shared-library changes can be ordered independently. Reviews and tests use the completed team changes, with each module's validation and publication independent of the other module. A developer reads its actual review and test_result before publishing through merge_code. There is no acquire/release or readiness command. An unadmitted request returns a WASI error, permitting a corrected or independent operation. Complete and read your assigned results before exiting. The common world scores published contents and completed matching validations, without enforcing this procedure."
     } else if coordination {
         "Each service file is a choreography projection. Choose shell commands freely: a refused operation returns an error, so you can correct it or try another operation. BACKEND_DEV defines the assigned API through /service/define_api. FRONTEND_DEV reads its actual contract from /service/agree_api and chooses either implementation order by writing {\"api_name\":\"feature_api_spec\",\"first\":\"BACKEND_DEV\"} or {\"api_name\":\"feature_api_spec\",\"first\":\"FRONTEND_DEV\"} to that file. BACKEND_DEV receives this agreement by reading /service/outcome. Each developer's /service/implement_feature runs its assigned implementation using the actual repository Endpoint. The backend may redefine the API and collaborate on revised implementations before testing. TESTER reads the current candidate from /service/run_tests, submits its assigned suite to the same file, and reads the actual test result there. Testing requires actual REPO and TEST_ENV requests; those resources exclude editing during the effect. Each developer reads the actual final test result from /service/outcome. Reopening an incoming file reads its next actual message. Finish after the required actual work and results; no host command sequence, explicit acquire/release or finalization tool is required."
     } else if review {
@@ -352,6 +375,7 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
         || staged_integration
         || document
         || report
+        || refactor
         || task == "4E"
         || family == 2
         || build
@@ -563,6 +587,7 @@ async fn main() -> Result<()> {
         [mode, events, output] if mode == "--check-staged-integration-mutants" => println!("{}", serde_json::to_string_pretty(&staged_integration_audit::check_mutants(Path::new(events),Path::new(output))?)?),
         [mode, events] if mode == "--audit-feature-delivery" => println!("{}", serde_json::to_string_pretty(&feature_delivery_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-feature-delivery-mutants" => println!("{}", serde_json::to_string_pretty(&feature_delivery_audit::check_mutants(Path::new(events),Path::new(output))?)?),
+        [mode, events] if mode == "--audit-refactor" => println!("{}", serde_json::to_string_pretty(&refactor_audit::audit(Path::new(events))?)?),
         [mode, events] if mode == "--audit-coordination" => println!("{}", serde_json::to_string_pretty(&coordination_audit::audit(Path::new(events))?)?),
         [mode, events] if mode == "--audit-medical" => println!("{}", serde_json::to_string_pretty(&medical_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-medical-mutants" => println!("{}", serde_json::to_string_pretty(&medical_audit::check_mutants(Path::new(events),Path::new(output))?)?),
@@ -643,7 +668,7 @@ async fn main() -> Result<()> {
             }
         }
         _ => return Err(concat!(
-            "usage: choreofix-experiments 1E|1M|1H|2E|2M|2H|3E|4E|5E|5M|5H|6E|6M|6H|7E|8E|9E|9M|9H|10E|10M|11E|12E|16E DEPTH OUTPUT\n",
+            "usage: choreofix-experiments 1E|1M|1H|2E|2M|2H|3E|4E|4M|5E|5M|5H|6E|6M|6H|7E|8E|9E|9M|9H|10E|10M|11E|12E|16E DEPTH OUTPUT\n",
             "       --audit-api|--audit-review|--audit-report|--audit-document|--audit-coordination|--audit-writing|--audit-cicd|--audit-philosophers|--audit EVENTS\n",
             "       --audit-protocol EVENTS\n",
             "       --check-api-mutants|--check-review-mutants|--check-report-mutants|--check-document-mutants|--check-writing-mutants|--check-cicd-mutants|--check-philosophers-mutants|--check-protocol-mutants EVENTS NEW_OUTPUT\n",

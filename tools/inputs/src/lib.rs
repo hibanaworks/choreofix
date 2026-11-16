@@ -16,7 +16,7 @@ use std::{
 };
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-pub const SIMULATOR_CONTRACT: &str = "common-environment-v23";
+pub const SIMULATOR_CONTRACT: &str = "common-environment-v24";
 pub const LATEST: &str = "36b4bd108fcd74f7efb17613aebbe3fdf55499a9";
 pub const PAPER: &str = "87b01a2c0ae53c5045c9ce3d43cd0235b1831275";
 
