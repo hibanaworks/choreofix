@@ -9,8 +9,9 @@ actual four-Wasm conditions: both initial subjects, depths 0/1/2, reconsideratio
 and a normal-delay overlap case. All pass EPF and independent scientific
 request/material/effect/reply/common-world checks (112 effects, 37,128 capture
 records). Eighteen record counterexamples are refused. The four-Luna/xhigh
-pilot also completes, but its independent run audit is pending; 13M is not yet
-included in the qualified task count. See [13M](../../benchmark/ports/13M.md).
+pilot also passes its independent full-run audit: 113.926317333 seconds, 872,510
+inclusive tokens, seventeen effects and 5,873 complete records, with zero violations.
+It is qualified as direct task 27/48; 21 tasks remain. See [13M](../../benchmark/ports/13M.md).
 
 The 13E direct scientific port is source-bound qualified as task 26 of 48. Its declared
 `lab_boundary::` domain has 24 causal-order/quality-order/culture combinations
@@ -109,13 +110,12 @@ The normal command and live subscription tests use the same execution path.
 It supports `1E`, `1M`, `1H`, `2E`, `2M`, `2H`, `3E`, `4E`, `4M`, `5E`, `5M`,
 `5H`, `6E`, `6M`, `6H`, `7E`, `8E`, `9E`, `9M`, `9H`, `10E`, `10M`, `11E`, `12E`,
 `13E`, `13M` and `16E`, with the original failure conditions `0`, `1` and `2`.
-Each qualification retains its exact source and simulator version. Twenty-six
+Each qualification retains its exact source and simulator version. Twenty-seven
 source-bound tasks have completed direct-projection mechanism and live-model
-checks; the other 22 remain unqualified. The older 4M, 13E/13M and 14E/14M/14H
+checks; the other 21 remain unqualified. The older 4M, 13E/13M and 14E/14M/14H
 adapters and their execution/audit commands have been removed. Their original
 worlds, descriptions and historical source-bound results remain. These tasks
-other than 4M/13E still require direct qualification; 13M's current mechanism
-domain is implemented above. The new qualification is separate from those
+other than 4M/13E/13M still require direct qualification. The new qualification is separate from those
 retired adapters.
 The rewritten 7E passes
 twelve real-wash mechanism cases, EPF/effect audits and 1,503 record mutations.
@@ -488,3 +488,8 @@ Comma-separated filters select complementary families under one frozen source
 and one build, for example `discovery_boundary::,refactor_boundary::`.
 A repeated family or unknown/empty selector fails before starting the build.
 An empty or unmatched test result fails. Normal CI uses the unfiltered command.
+
+The saved QC captures can be checked without another model or Wasm run using
+`--audit-lab-quality EVENTS` and `--check-lab-quality-mutants EVENTS REPORT`.
+The latter checks nine scientific effect-record counterexamples against the
+same captured baseline; these are audit mutations, not runtime attacks.

@@ -4,12 +4,15 @@
 入力文書のSHA-256は[実験契約](benchmark/experiment-contract.json)に記録する。
 研究の中心は、**実資源の唯一の操作権、残存手順、実際の共有効果を結ぶ保証**である。
 
-現在は直接ファイル境界の26/48課題をsource別に認定し、残り22課題である。
+現在は直接ファイル境界の27/48課題をsource別に認定し、残り21課題である。
 13Mは776イベント・29 viewの直接global、7つのlocalside、4 Wasmと共通runnerを実装した。
-全8条件の実Wasmが112効果・37,128記録で、EPF・実要求／材料／効果／返答・共通採点まで成功した。
-実AI4人も113.926317333秒で17効果・業務完了・違反0となったが、その独立監査は実行中であり、
-まだ認定件数へ加えない。WASIの実パス容量不足は64バイトへ拡張し、長すぎる入力は
-Endpoint操作前にENAMETOOLONGを返して正当な再試行を可能にした。基盤の全gateは成功した。
+全8条件の実Wasm（112効果・37,128記録）と実AI4人のrunについて、それぞれ同じ実行記録で
+EPF・実要求／材料／効果／返答・共通採点まで成功した。実AIは113.926317333秒、872,510 inclusive tokens、40 shell calls、
+17効果・完全5,873記録・違反0である。保存済み記録を固定した監査器で再検査し、科学的な記録反例
+27件とrun証拠の反例11件も拒否した。原本は`lab-quality-direct-20261116/qualification-live-v94.json`。
+EPFの完了済みroll訪問からの遅れた受信の扱いを修正し、全gateが成功した。本体の実行仕様は
+変更していない。WASIの実パス容量不足は64バイトへ拡張し、長すぎる入力はEndpoint操作前に
+ENAMETOOLONGを返して正当な再試行を可能にした。WASIの全gateも成功しmainへpush済みである。
 13EはLuna/xhigh 3人が76.462663417秒で完走し、同じrunの完全EPF4,044記録、
 8実効果・科学的入力・返答照合・共通採点が成功し違反0。inclusive tokensは564,435。
 25条件の実Wasm（200効果・55,648記録）、本番receiverの15負例と監査記録の9反例も確認した。
@@ -1374,7 +1377,7 @@ Endpointで受理した後、試験用I/O境界で3件がそろうまで保留�
 | 4M | 直接Endpointの実Wasm8条件・96効果、本番receiverの12負例、監査記録の9反例、実AI5人がEPF・実要求／返答・共通採点まで成功。実AI79.728423秒・687,694 inclusive tokens・5,624記録・違反0 | 新境界の25課題目、残り23課題。旧アダプターの成績とは別source。最終sourceの全family認定・本実験は未完。範囲は`benchmark/ports/4M.md` |
 | 14E | 実装置Endpoint3本、実受信側の負例2件、実Wasm3条件と実AI4人のpilotが共通採点・EPF・実効果監査まで成功。simulatorは必要な入力の因果関係を検査し、独立した順序を許す | 16課題目として算入済み。最終sourceの全family認定・本実験は未完。範囲は`benchmark/ports/14E.md` |
 | 13E | 直接Endpointの実Wasm25条件・200効果、本番receiverの15負例、監査記録の9反例、実AI3人がEPF・実要求／返答・共通採点まで成功。実AI76.462663秒・564,435 inclusive tokens・4,044記録・違反0 | 新境界の26課題目。試料・試験・品質結果を実データで結ぶ。最終sourceの全family認定・本実験は未完。範囲は`benchmark/ports/13E.md` |
-| 13M | 全体global（589イベント、16 actor）と7つの直接localsideを実装。修正した最新本体で、4-Wasmの10条件と実AI4人のpilotが共通因果採点・動的EPF／実効果監査まで成功。実AIは86.04秒、710,689 inclusive tokens、実効果17件、違反0 | 18課題目として算入済み。最終sourceの全family認定・本実験は未完。範囲は`benchmark/ports/13M.md` |
+| 13M | 直接境界の776イベント・29 view・7 localside。実Wasm全8条件（112効果）と実AI4人の同じrunがEPF・実効果・共通採点まで成功。実AI113.926秒・872,510 inclusive tokens・17効果・違反0 | 新境界の27課題目。科学的記録反例27件とrun証拠反例11件を拒否。最終sourceの全family認定・本実験は未完。範囲は`benchmark/ports/13M.md` |
 | 5E | 実Endpointへ直接結合した9ファイル。実Wasm9条件と、同じbinaryによるLuna xhigh 3人の自由なwash操作が、完全EPF・実効果・共通採点まで成功。48.27秒、377,070 inclusive tokens、6効果、違反0。アプリMiriは使わない | 新境界の19課題目。残り29課題、最終sourceの全family認定・本実験は未完。範囲は`benchmark/ports/5E.md` |
 | 5M | 直接ファイルの実Wasm9条件と同じbinaryのLuna5人pilotが、共通採点・完全EPF／効果監査まで成功。pilotは75.24秒、776,651 inclusive tokens、12実効果、違反0 | 新境界の20課題目。古い7-viewのtimeoutは成功へ含めない。範囲は`benchmark/ports/5M.md` |
 | 5H | 直接ファイルの実Wasm11条件と同じbinaryのLuna7人pilotが、共通採点・完全EPF／効果監査まで成功。pilotは68.85秒、1,081,788 inclusive tokens、16実効果、違反0、実効果の重なり7組 | 新境界の21課題目。両方向の患者独立性と機構試験のCT/MRI並行効果を確認。アプリMiriなし。範囲は`benchmark/ports/5H.md` |
@@ -1665,7 +1668,7 @@ CI待ちの間も独立した実装作業は続ける。
 | M0 比較の固定 | 基準SHA、構文範囲、native表現監査、課題と接続、指標・精度・再実行規則を固定する | 更新計画を記録。新競合と精度設計は未認定 |
 | M1 意味論 | T1–T6の定義・前提・反例・必要補題と、既存core定理の対応表。評価に使うpar/roll/委譲を含む | T3/T4の最小receiver契約下の合成済み。残る命題の対応と、具体的な二資源・実効果への適用を進める |
 | M2 実装と証明 | 効果入口一覧、実行時の負例、Leanと実装照合、必要なcore/WASI gate。通常Git pinでレビューと1Hを認定する | 通常Git pinの実Wasmはレビュー34条件・1H5条件・食事3条件、実モデルは1H7人・6E3人・9H7人のpilotが成功。wire監査、全条件・全効果入口とT3/T4の一般合成は未完 |
-| M3 課題と接続 | 全48課題と採用追加課題のglobal/localside・実Wasm・共通採点・接続を認定する | 旧境界の移行は29課題・23family。新しい直接ファイル境界で1E/1M/1H・2E/2M/2H・3E・4E/4M・5E/5M/5H・6E/6M/6H・7E・8E・9E/9M/9H・10E/10M・11E・12E・13E・16Eの26/48課題を、各sourceの実Wasm・実AI・EPF・実効果・共通採点で確認。残り22課題、最終sourceの全family認定・本実験は未完。比較接続の開発は保留 |
+| M3 課題と接続 | 全48課題と採用追加課題のglobal/localside・実Wasm・共通採点・接続を認定する | 旧境界の移行は29課題・23family。新しい直接ファイル境界で1E/1M/1H・2E/2M/2H・3E・4E/4M・5E/5M/5H・6E/6M/6H・7E・8E・9E/9M/9H・10E/10M・11E・12E・13E/13M・16Eの27/48課題を、各sourceの実Wasm・実AI・EPF・実効果・共通採点で確認。残り21課題、最終sourceの全family認定・本実験は未完。比較接続の開発は保留 |
 | M4 本比較 | A1の864件を先に実行し、A2とB–Eを認定後に実行する。全identityにrawと終了理由を残す | 採点0件 |
 | M5 原因と分析 | F/G、8課題の変更負担、cluster対応集計、負例と不確実性を整理する | 未実行 |
 | M6 論文化 | 最新owned実装へ草稿を同期し、各主張と定理・測定・TCB・再現artifactを対応付ける | 草稿。結果表と結論は未確定 |
@@ -5307,3 +5310,33 @@ tokens、40 shell callsで全員正常終了した。元深さ2の生物試験�
 17実効果・業務完了・違反0となった。完全な5,873記録の独立監査は実行中であり、ここでは
 13Mを認定数へ加えない。26/48・残り22、採点比較0件のままとする。
 原本は`output/experiments/lab-quality-direct-20261116/qualified-v51`と`live-v52`。
+
+
+## 2026-11-16: 13Mの保存済み実AI記録を監査し、新境界の27課題目を認定
+
+前節の`live-v52`を新たにモデル実行せず、そのまま再検査した。問題は、現在の反復のFILE viewが
+未受信でも、前の反復が完了していれば遅れた継続の受信が可能である、という本体の既存仕様を
+EPFの通常反復展開が表していなかったことだった。本体の公開Endpoint試験8件では、この受信を
+許可し、新しい送信は現在のFILE受信までPendingとする区別が成功した。globalやlocalsideの
+順序・通知・flagを足して合わせる変更はしていない。
+
+EPFは同じsourceの順序境界・同じ外側訪問にある前の選択済み訪問について、実行actorの必要な
+全commitと非空性を確認する。受理だけ、別actor、別の外側訪問、未完了の訪問は流用しない。
+新しい送信、ローカル操作、同じ出現の受理と同居送信の依存は維持する。別選択を試す場合も、
+既存の受信の正確なprefixを再検査する。EPF `009735d`はnative/doctest165件、Miri140件、
+全6 Lean module、Clippy、no_std・thumbv6mの全gateに成功した。最大子孫メモリは
+1,379,024,896 bytes（上限2,750,000,000）。追加した8つのLean命題は完了と依存のcomponentの
+性質であり、Rustによるsource範囲の抽出全体や一般的なRust/source refinementの証明ではない。
+
+同じ監査器で全8 Wasm記録と実AI記録を再照合し、科学的な記録反例は機構2条件と実AIで
+各9件、計27件を拒否した。実AIのrun証拠の反例11件も拒否した。実AIのEPF・実効果・モデル・
+source・共通採点の通し監査は約11.99秒で成功した。この時間はAIの実行時間113.93秒と区別する。
+全再監査の最大子孫メモリは224,051,200 bytesで、モデルの再呼出しは0件である。
+
+認定原本は`output/experiments/lab-quality-direct-20261116/qualification-live-v94.json`。
+同じruntimeのSHA-256は`cd6b1523d7cb0f1a80289cf6c3f0f7547910b9c25ea127db5fa9b5d370e3d93c`。
+監査器のsource基点・dirty patch・1,555入力のhashとcompilerは`auditor-source-v92/`、
+実際の依存解決は`auditor-metadata-v95.json`に保存した。coreは正本1個へ一致し、現在の本体の
+production sourceも実Wasmを認定した保存版と一致した。これは通常生成検査71割当の全完了、
+一般refinement、最終sourceの全family認定や採点比較の成功ではない。それらは別の未完項目とする。
+現在27/48・残り21、採点比較0件で、次は13Hの直接委譲global・localsidesを進める。

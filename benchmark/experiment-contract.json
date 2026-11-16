@@ -17,7 +17,7 @@
     "first_technical_gate": "T3/T4: compose unique resource ownership and its remaining protocol with actual effects; define the adapter trust boundary and test old owners, duplicate transfers and argument substitution before scored comparisons",
     "theorem_scope_and_milestones": "plan.md",
     "effect_boundary_contract_and_inventory": "benchmark/effect-boundaries.md",
-    "effect_boundary_status": "Twenty-four source-bound tasks have direct-file mechanism and live-model evidence; 24 remain. Latest 6H passes both seven-Wasm conditions and one seven-Luna/xhigh depth-2 pilot on the same executable. That single model run passes complete EPF, request/effect/reply matching and neutral scoring: 517.343330458 seconds, 8533959 inclusive tokens, 53 effects, two rejected reviews, two failed CI results, two failed staging validations and two rollbacks, zero violations. Seven model turns overlap; no overlapping domain effects were observed in this pilot. The core working-patch identity is retained; the full normal generated population and final all-family certification remain unfinished. These are finite unscored qualifications, not general Rust refinement, success rates or comparative superiority. Comparison-connection development remains deferred.",
+    "effect_boundary_status": "Twenty-seven source-bound tasks across 21 families have direct-file mechanism and live-model evidence; 21 tasks remain. Direct 13M passes all eight four-Wasm conditions and one four-Luna/xhigh depth-2 run on the same executable, with complete EPF capture, actual scientific request/material/effect/reply agreement and neutral scoring. The pilot is 113.926317333 seconds, 872510 inclusive tokens, 17 effects and zero violations. The core working-patch identity is retained; the full normal generated population and final all-family certification remain unfinished. These are finite unscored qualifications, not general Rust refinement, success rates or comparative superiority. Comparison-connection development remains deferred.",
     "minimum_handoff_case": {
       "source": "src/tasks/handoff",
       "scope": "Native hibana-runtime mechanism fixture with two independent runtimes and the application's actual Endpoint transport; not a remote-network, Wasm or model experiment",
@@ -767,6 +767,7 @@
       "11E",
       "12E",
       "13E",
+      "13M",
       "16E",
       "1E",
       "1H",
@@ -789,9 +790,9 @@
       "9H",
       "9M"
     ],
-    "count": 26,
-    "remaining": 22,
-    "qualified_direct_families": 20,
+    "count": 27,
+    "remaining": 21,
+    "qualified_direct_families": 21,
     "final_source_all_family_certification": false,
     "scored_comparisons": 0,
     "removed_legacy_adapters": {
@@ -809,15 +810,15 @@
     },
     "latest_source_bound_port": {
       "tasks": [
-        "13E"
+        "13M"
       ],
       "simulator_contract": "common-environment-v24",
-      "evidence": "output/experiments/lab-synthesis-direct-20261116/qualification-live-v12.json"
+      "evidence": "output/experiments/lab-quality-direct-20261116/qualification-live-v94.json"
     },
     "direct_choreofs_boundary": {
       "status": "migration_in_progress",
-      "strengthened_boundary_qualified_tasks": 24,
-      "remaining_tasks": 24,
+      "strengthened_boundary_qualified_tasks": 27,
+      "remaining_tasks": 21,
       "unsafe_application_miri_required": false,
       "scored_runs": 0,
       "full_48_task_goal_unchanged": true,
@@ -1004,7 +1005,6 @@
       "12H",
       "12M",
       "13H",
-      "13M",
       "14E",
       "14H",
       "14M",
@@ -1063,8 +1063,8 @@
   },
   "lab_quality_procedure": {
     "task": "13M",
-    "status": "finite_direct_file_mechanism_passed_live_audit_pending",
-    "counted_in_migrated_tasks": false,
+    "status": "source_bound_qualified",
+    "counted_in_migrated_tasks": true,
     "source_notes": "benchmark/ports/13M.md",
     "current_boundary": {
       "native_tests": 9,
@@ -1087,7 +1087,7 @@
       "runtime_binary_sha256": "cd6b1523d7cb0f1a80289cf6c3f0f7547910b9c25ea127db5fa9b5d370e3d93c",
       "scored_runs": 0,
       "evidence": "output/experiments/lab-quality-direct-20261116/qualified-v51/evidence/lab-quality-mechanism.json",
-      "scope": "All eight declared actual four-Wasm conditions pass complete EPF and independent scientific request/material/effect/reply/common-score checks, including normal-delay physical overlap, retry and subject changes. Native production QC prefixes additionally check 8 arrival-order/subject/verdict and 14 refusal conditions; the legitimate synthesis prefix is distinct from the zero refused QC effects. The autonomous pilot's complete independent run audit remains pending.",
+      "scope": "All eight declared actual four-Wasm conditions pass complete EPF and independent scientific request/material/effect/reply/common-score checks, including normal-delay physical overlap, retry and subject changes. Native production QC prefixes additionally check 8 arrival-order/subject/verdict and 14 refusal conditions; legitimate synthesis is distinct from the zero refused QC effects. The saved four-model pilot also passes the complete independent audit with the same runtime binary.",
       "global_source_events": 776,
       "projected_views": 29,
       "global_const_eval": "forbid",
@@ -1105,7 +1105,7 @@
     },
     "live_model": {
       "directory": "output/experiments/lab-quality-direct-20261116/live-v52",
-      "status": "actual_run_completed_independent_audit_pending",
+      "status": "source_bound_qualified",
       "participants": 4,
       "elapsed_seconds": 113.926317333,
       "inclusive_tokens": 872510,
@@ -1115,7 +1115,17 @@
       "actual_negative_qc": 2,
       "simulator_complete": true,
       "violations": 0,
-      "scored_runs": 0
+      "scored_runs": 0,
+      "audit": {
+        "evidence": "output/experiments/lab-quality-direct-20261116/reaudit-v93/live-run.json",
+        "sha256": "6bc2a486f3f55a130cd821d801bba3e81c82fe3736efab5f02f3ae61af7009ad",
+        "seconds": 11.991074125282466
+      },
+      "captured_records": 5873,
+      "events_sha256": "c9657e41c6b366d2512b4270c0fc0595ac9f17862e421dca7e0c6c71a9342e62",
+      "result_sha256": "f8e3e3b6f6c82de4719cf7a51955bea33c6f8349d6e3e6b7d671b6c10a048678",
+      "business_record_counterexamples_rejected": 9,
+      "run_record_counterexamples_rejected": 11
     },
     "wasi_path_capacity": {
       "revision": "34c17e6989eb05a1ed78c447d0edcbc75d926341",
@@ -1129,7 +1139,7 @@
       "evidence": "output/experiments/lab-quality-direct-20261116/wasi-gates-v39.log"
     },
     "remaining": [
-      "Complete the independent EPF/effect/model/source audit of the saved four-model pilot",
+      "Remaining 21 direct-file task qualifications",
       "Final-source all-family certification and scored experiment matrix"
     ],
     "previous_adapter_qualification": {
@@ -1232,6 +1242,28 @@
         "model_calls_repeated_for_audit": 0,
         "scored_benchmark": false
       }
+    },
+    "accepted_direct_port": 27,
+    "source_qualification": "output/experiments/lab-quality-direct-20261116/qualification-live-v94.json",
+    "epf_completion_credit": {
+      "revision": "009735da6921c2ced74aa8667ca74f534fce148d",
+      "library_gates": {
+        "status": "passed",
+        "revision": "009735da6921c2ced74aa8667ca74f534fce148d",
+        "native_including_doctests": 165,
+        "miri": 140,
+        "proof_modules": 6,
+        "new_completion_claims": 8,
+        "clippy": "passed",
+        "no_std_and_thumbv6m": "passed",
+        "maximum_descendant_bytes": 1379024896,
+        "stop_bytes": 2750000000,
+        "log": "output/experiments/lab-quality-direct-20261116/epf-completion-all-v88.log",
+        "log_sha256": "44f15e8f2a416cc885a12d44aaa782e03f5bae2a56d1abca8ef5f988fb8f4c0e",
+        "scope": "EPF library only; not the complete core normal generated population or a general Rust/source refinement proof"
+      },
+      "runtime_specification_changed": false,
+      "source_correspondence": "A nonempty earlier selected visit of the same physical actor may satisfy a late incoming continuation. Source invocation and enclosing visit must match. Every selected commit must exist; outgoing/local and same-event acceptance/publication dependencies are retained. General Rust/source extraction refinement is not proved."
     }
   },
   "lab_cascading_world": {

@@ -636,6 +636,7 @@ async fn main() -> Result<()> {
         [mode, events, output] if mode == "--check-feature-delivery-mutants" => println!("{}", serde_json::to_string_pretty(&feature_delivery_audit::check_mutants(Path::new(events),Path::new(output))?)?),
         [mode, events] if mode == "--audit-refactor" => println!("{}", serde_json::to_string_pretty(&refactor_audit::audit(Path::new(events))?)?),
         [mode, events] if mode == "--audit-lab-quality" => println!("{}", serde_json::to_string_pretty(&lab_quality_audit::audit(Path::new(events))?)?),
+        [mode, events, output] if mode == "--check-lab-quality-mutants" => println!("{}", serde_json::to_string_pretty(&lab_quality_audit::check_mutants(Path::new(events), Path::new(output))?.1)?),
         [mode, events] if mode == "--audit-lab" => println!("{}", serde_json::to_string_pretty(&lab_audit::audit(Path::new(events))?)?),
         [mode, events] if mode == "--audit-coordination" => println!("{}", serde_json::to_string_pretty(&coordination_audit::audit(Path::new(events))?)?),
         [mode, events] if mode == "--audit-medical" => println!("{}", serde_json::to_string_pretty(&medical_audit::audit(Path::new(events))?)?),

@@ -1182,7 +1182,6 @@ fn audited(path: &Path) -> Result<(Value, Vec<Value>, Value)> {
 pub fn audit(path: &Path) -> Result<Value> {
     Ok(audited(path)?.0)
 }
-#[cfg(test)]
 pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
     let (baseline, rows, artifact) = audited(path)?;
     let dynamic = &baseline["dynamic_protocol"];
