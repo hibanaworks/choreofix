@@ -1,13 +1,65 @@
 //! Native component checks, not a full 13H Wasm/model qualification.
 use choreofix::shell;
-#[path = "../src/tasks/lab_cascading/mod.rs"]
+#[path = "../../../src/tasks/lab_cascading/mod.rs"]
 mod lab_cascading;
 
 use hibana::runtime::{SessionKitStorage, ids::SessionId, program::project};
-use lab_cascading::{arguments::InspectionArguments, global::*, imp, localside};
+use lab_cascading::{
+    arguments::{Arguments, InspectionArguments},
+    global::*,
+    imp, localside,
+};
 use serde_json::{Value, json};
 use shell::{ShellResult, imp::bus::Bus, imp::service::Domain};
 use std::cell::Cell;
+
+// Offline data checking only: this owns no Endpoint and drives no task protocol.
+fn audit_native(
+    captures: &[hibana_epf::Capture<'_>],
+    snapshot: &[hibana::runtime::tap::TapEvent],
+    (session, observed_producers): (u32, &[usize]),
+) -> usize {
+    let mut source_storage = vec![0; hibana_epf::Protocol::workspace_len(snapshot).unwrap()];
+    let protocol = hibana_epf::Protocol::new(snapshot, &mut source_storage).unwrap();
+    let count = captures
+        .iter()
+        .map(|capture| capture.records().len())
+        .sum::<usize>();
+    let capacity = count.checked_mul(2).and_then(|n| n.checked_add(1)).unwrap();
+    let mut unfolding = vec![hibana_epf::Unfold::Source; capacity];
+    let record_id = hibana_epf::RecordId {
+        producer: 0,
+        ordinal: 0,
+    };
+    let mut order = vec![record_id; count];
+    let mut occurrences = vec![None; count];
+    let mut acceptances = vec![
+        hibana_epf::Acceptance {
+            first_poll: record_id,
+            before: 0
+        };
+        count
+    ];
+    let mut scratch = vec![0; protocol.audit_workspace_len(captures, capacity).unwrap()];
+    let audited = protocol
+        .audit(
+            captures,
+            hibana_epf::AuditStorage {
+                unfolding: &mut unfolding,
+                execution: hibana_epf::ExecutionStorage {
+                    session,
+                    observed_producers,
+                    order: &mut order,
+                    occurrences: &mut occurrences,
+                    acceptances: &mut acceptances,
+                },
+            },
+            &mut scratch,
+        )
+        .expect("actual laboratory execution must have a checked source interpretation");
+    assert_eq!(audited.execution().order.len(), count);
+    count
+}
 
 struct Inspection {
     result: Value,
@@ -218,43 +270,12 @@ async fn officer_returns_all_four_endpoints_and_preserves_the_actual_result() ->
         });
         let snapshot: Vec<_> = hibana::runtime::tap::projected(&p_service).collect();
         assert_eq!(snapshot[0].arg0() >> 16, 23);
-        let mut source_storage = vec![0; hibana_epf::Protocol::workspace_len(&snapshot).unwrap()];
-        let protocol = hibana_epf::Protocol::new(&snapshot, &mut source_storage).unwrap();
         let count = captured.iter().map(Vec::len).sum::<usize>();
-        let capacity = count.checked_mul(2).and_then(|n| n.checked_add(1)).unwrap();
-        let mut unfolding = vec![hibana_epf::Unfold::Source; capacity];
-        let record_id = hibana_epf::RecordId {
-            producer: 0,
-            ordinal: 0,
-        };
-        let mut order = vec![record_id; count];
-        let mut occurrences = vec![None; count];
-        let mut acceptances = vec![
-            hibana_epf::Acceptance {
-                first_poll: record_id,
-                before: 0
-            };
-            count
-        ];
         let observed_producers = observed_producers.take();
-        let mut scratch = vec![0; protocol.audit_workspace_len(&captures, capacity).unwrap()];
-        let audited = protocol
-            .audit(
-                &captures,
-                hibana_epf::AuditStorage {
-                    unfolding: &mut unfolding,
-                    execution: hibana_epf::ExecutionStorage {
-                        session: session.raw(),
-                        observed_producers: &observed_producers,
-                        order: &mut order,
-                        occurrences: &mut occurrences,
-                        acceptances: &mut acceptances,
-                    },
-                },
-                &mut scratch,
-            )
-            .expect("actual inspection must have a checked source execution");
-        assert_eq!(audited.execution().order.len(), count);
+        assert_eq!(
+            audit_native(&captures, &snapshot, (session.raw(), &observed_producers)),
+            count
+        );
         println!(
             "inspection success={success}: EPF checked {count} complete records from three runtimes"
         );
@@ -529,6 +550,334 @@ async fn inspection_requires_each_received_request_and_rejects_argument_substitu
                     "agent":"SAFETY_OFFICER","tool":"perform_inspection","arguments":arguments
                 })]
             );
+        }
+    }
+    Ok(())
+}
+
+// Plain fixture values, not another material store or application progress state.
+fn synthesized(compound: &str, (status, remaining, artifact): (&str, u64, Option<u64>)) -> Value {
+    json!({"tool_name":"run_synthesis","success":status=="complete","data":{
+        "scientist":"CHEMIST","compound":compound,"inputs":{},"missing_inputs":[],
+        "status":status,"artifact_id":artifact,"reagent_units_remaining":remaining
+    }})
+}
+
+struct Synthesis {
+    results: Vec<Value>,
+    calls: Cell<Vec<Value>>,
+}
+
+impl Domain for Synthesis {
+    async fn execute(
+        &self,
+        agent: &'static str,
+        tool: &'static str,
+        arguments: Value,
+    ) -> Result<Value, String> {
+        let mut calls = self.calls.take();
+        let result = self.results.get(calls.len()).cloned();
+        calls.push(json!({"agent":agent,"tool":tool,"arguments":arguments}));
+        self.calls.set(calls);
+        result.ok_or_else(|| "unexpected additional physical synthesis in fixture".into())
+    }
+}
+
+#[test]
+fn scientific_arguments_preserve_original_data_and_reject_workflow_fields() {
+    fn roundtrip<const OP: u8>(arguments: Value) {
+        let bytes = imp::encode(&arguments).unwrap();
+        assert_eq!(
+            Arguments::<OP>::try_from(bytes.as_slice())
+                .unwrap()
+                .into_value(),
+            arguments
+        );
+        let mut unrelated = arguments;
+        unrelated["stage"] = json!("host-selected operation");
+        let bytes = imp::encode(&unrelated).unwrap();
+        assert!(Arguments::<OP>::try_from(bytes.as_slice()).is_err());
+    }
+    roundtrip::<0>(json!({"compound":"free β compound\n\"not a fixed batch name\""}));
+    roundtrip::<1>(json!({"sample":"synthesized_compound"}));
+    roundtrip::<2>(json!({"material":"compound_purification"}));
+    roundtrip::<3>(json!({"material":"cell_cultures"}));
+    roundtrip::<4>(json!({"sample":"fluorescence"}));
+    roundtrip::<5>(json!({"compound":"free β compound"}));
+    roundtrip::<5>(json!({"compound":"free β compound","cell_type":"free β culture".repeat(90)}));
+    roundtrip::<6>(json!({"sample":"free β compound"}));
+    roundtrip::<7>(json!({"sample":"molecular_detail"}));
+    roundtrip::<8>(json!({"material":"verification"}));
+    roundtrip::<9>(json!({"scientist":"BIOLOGIST","data_type":"bioassay"}));
+    roundtrip::<10>(json!({"sample":"final_validation"}));
+    for arguments in [
+        json!({"compound":""}),
+        json!({"compound":" \n\t"}),
+        json!({"compound":7}),
+    ] {
+        let bytes = imp::encode(&arguments).unwrap();
+        assert!(Arguments::<0>::try_from(bytes.as_slice()).is_err());
+    }
+    let bytes = imp::encode(&json!({"scientist":"CHEMIST","data_type":"purification"})).unwrap();
+    assert!(Arguments::<9>::try_from(bytes.as_slice()).is_err());
+}
+
+#[test]
+fn synthesis_terminal_payload_cannot_turn_retry_or_exhaustion_into_success() {
+    for result in [
+        synthesized("β", ("complete", 2, Some(0))),
+        synthesized("β", ("synthesis_failed", 0, None)),
+        synthesized("β", ("reagent_exhausted", 0, None)),
+    ] {
+        let bytes = imp::encode(&result).unwrap();
+        assert_eq!(
+            imp::SynthesisTerminal::<true>::try_from(bytes.as_slice()).is_ok(),
+            result["success"] == true
+        );
+        assert_eq!(
+            imp::SynthesisTerminal::<false>::try_from(bytes.as_slice()).is_ok(),
+            result["data"]["status"] == "reagent_exhausted"
+        );
+    }
+    let mut result = synthesized("β", ("reagent_exhausted", 0, None));
+    result["data"]["reagent_units_remaining"] = json!(1);
+    let bytes = imp::encode(&result).unwrap();
+    assert!(imp::SynthesisTerminal::<false>::try_from(bytes.as_slice()).is_err());
+}
+
+#[test]
+fn synthesis_retry_and_terminal_handoff_have_no_projection_diagnostic() {
+    assert_eq!(hibana::g::diagnose(&synthesis()), None);
+}
+
+#[hibana_runtime::main]
+#[test]
+async fn actual_synthesis_failures_retry_and_exhaustion_returns_normally_with_one_stock_endpoint()
+-> ShellResult<()> {
+    use hibana::g::Message;
+    let cases = [
+        vec![("complete", 2, Some(0))],
+        vec![("synthesis_failed", 2, None), ("complete", 1, Some(1))],
+        vec![
+            ("synthesis_failed", 2, None),
+            ("synthesis_failed", 1, None),
+            ("complete", 0, Some(2)),
+        ],
+        vec![
+            ("synthesis_failed", 2, None),
+            ("synthesis_failed", 1, None),
+            ("synthesis_failed", 0, None),
+            ("reagent_exhausted", 0, None),
+        ],
+        vec![("reagent_exhausted", 0, None)],
+    ];
+    for (case, outcomes) in cases.into_iter().enumerate() {
+        let source = synthesis();
+        let p_owner = project::<FUME_OWNER>(&source);
+        let p_chemist = project::<CHEMIST>(&source);
+        let p_file = project::<CHEM_FILE>(&source);
+        let p_data = project::<CHEM_DATA>(&source);
+        let p_fume = project::<FUME_HOOD>(&source);
+        let p_stock = project::<REAGENT_SUPPLY>(&source);
+        let p_qc = project::<QC>(&source);
+        let session = SessionId::new(133);
+        let (bus, _, []) = Bus::open(
+            [],
+            [
+                (session, FUME_HOOD),
+                (session, REAGENT_SUPPLY),
+                (session, CHEM_FILE),
+            ],
+        );
+        let records: [Cell<Vec<hibana::runtime::tap::TapEvent>>; 3] =
+            core::array::from_fn(|_| Cell::new(Vec::new()));
+        let observed_producers = Cell::new(Vec::new());
+        let observers = [0, 1, 2].map(|producer| {
+            let records = &records;
+            let observed_producers = &observed_producers;
+            move |event| {
+                let mut order = observed_producers.take();
+                order.push(producer);
+                observed_producers.set(order);
+                let mut capture = records[producer].take();
+                capture.push(event);
+                records[producer].set(capture);
+            }
+        });
+        let mut owner_slab = vec![0; 128 * 1024];
+        let mut owner_storage = SessionKitStorage::uninit();
+        let owner_rv = owner_storage
+            .init()
+            .rendezvous(&mut owner_slab, &bus.transport)?;
+        let mut scientist_slab = vec![0; 128 * 1024];
+        let mut scientist_storage = SessionKitStorage::uninit();
+        let scientist_rv = scientist_storage
+            .init()
+            .rendezvous(&mut scientist_slab, &bus.transport)?;
+        let mut qc_slab = vec![0; 128 * 1024];
+        let mut qc_storage = SessionKitStorage::uninit();
+        let qc_rv = qc_storage.init().rendezvous(&mut qc_slab, &bus.transport)?;
+        owner_rv.observe(&observers[0]);
+        scientist_rv.observe(&observers[1]);
+        qc_rv.observe(&observers[2]);
+        let mut owner = owner_rv.enter(session, &p_owner)?;
+        let fume = owner_rv.enter(session, &p_fume)?;
+        let stock = owner_rv.enter(session, &p_stock)?;
+        let mut chemist = scientist_rv.enter(session, &p_chemist)?;
+        let mut data = owner_rv.enter(session, &p_data)?;
+        let file = owner_rv.enter(session, &p_file)?;
+        let mut qc = qc_rv.enter(session, &p_qc)?;
+        data.send::<Loan<CHEM_FILE>>(file).await?;
+        let mut file = owner.recv::<Loan<CHEM_FILE>>().await?;
+        let results: Vec<_> = outcomes
+            .into_iter()
+            .enumerate()
+            .map(|(attempt, outcome)| {
+                synthesized(
+                    &format!("free β compound case {case} attempt {attempt}\n"),
+                    outcome,
+                )
+            })
+            .collect();
+        let expected = results.last().unwrap().clone();
+        let domain = Synthesis {
+            results: results.clone(),
+            calls: Cell::new(Vec::new()),
+        };
+        let execution = hibana_runtime::race(
+            async {
+                async {
+                    localside::fume::run(&mut owner, (fume, stock), &domain)
+                        .await
+                        .map_err(|error| {
+                            shell::ShellError::message(format!("synthesis owner: {error}"))
+                        })
+                };
+                async {
+                    assert_eq!(
+                        localside::chemist::run(&mut chemist)
+                            .await
+                            .map_err(|error| shell::ShellError::message(format!(
+                                "synthesis chemist: {error}"
+                            )))?,
+                        expected
+                    );
+                    Ok::<(), shell::ShellError>(())
+                };
+                async {
+                    for (attempt, result) in results.iter().enumerate() {
+                        let arguments = json!({"compound":result["data"]["compound"]});
+                        let bytes = imp::encode(&arguments)?;
+                        let arguments = Arguments::<0>::try_from(bytes.as_slice())?;
+                        file.send::<FileSynthesis>(&arguments)
+                            .await
+                            .map_err(|error| {
+                                shell::ShellError::message(format!(
+                                        "synthesis file request case={case} attempt={attempt}: {error:?}"
+                                ))
+                            })?;
+                        assert_eq!(
+                            imp::decode(file.recv::<FileSynthesisResult>().await?)?,
+                            *result
+                        );
+                    }
+                    Ok::<(), shell::ShellError>(())
+                };
+                async {
+                    let branch = qc.offer().await?;
+                    let actual = match branch.label() {
+                        SynthesisFinished::LOGICAL_LABEL => {
+                            branch.recv::<SynthesisFinished>().await?.into_value()
+                        }
+                        ReagentsExhausted::LOGICAL_LABEL => {
+                            branch.recv::<ReagentsExhausted>().await?.into_value()
+                        }
+                        label => {
+                            return Err(shell::ShellError::message(format!(
+                                "unexpected QC synthesis outcome {label}"
+                            )));
+                        }
+                    };
+                    assert_eq!(actual, expected);
+                    let stock = qc.recv::<Loan<REAGENT_SUPPLY>>().await?;
+                    drop(stock);
+                    Ok::<(), shell::ShellError>(())
+                };
+            },
+            hibana_runtime::host::deadline(std::time::Duration::from_secs(20)),
+        )
+        .await;
+        if execution.is_err() {
+            let captured = records.each_ref().map(|records| records.take());
+            for (producer, events) in captured.iter().enumerate() {
+                for event in events.iter().rev().take(12).rev() {
+                    eprintln!(
+                        "synthesis failure producer={producer} record={:?}",
+                        choreofix::imp::projection::record(*event)
+                    );
+                }
+            }
+            if let Some(directory) = std::env::var_os("CHOREOFIX_LAB_CASCADING_EVIDENCE") {
+                let directory = std::path::PathBuf::from(directory);
+                std::fs::create_dir_all(&directory)?;
+                let snapshot: Vec<_> = hibana::runtime::tap::projected(&p_owner)
+                    .map(choreofix::imp::projection::record)
+                    .collect();
+                let evidence = json!({"case":case,"source":snapshot,
+                    "captures":captured.iter().map(|events|events.iter().copied().map(choreofix::imp::projection::record).collect::<Vec<_>>()).collect::<Vec<_>>(),
+                    "frames":bus.transport.take_observations().collect::<Vec<_>>(),"calls":domain.calls.take(),
+                    "expected_results":results});
+                std::fs::write(
+                    directory.join(format!("failure-case-{case}.json")),
+                    serde_json::to_vec_pretty(&evidence)
+                        .map_err(|error| shell::ShellError::message(error.to_string()))?,
+                )?;
+            }
+        }
+        let (returned_fume, (), (), ()) = execution?;
+        drop(returned_fume);
+        let calls = domain.calls.take();
+        let expected_calls: Vec<_> = results.iter().map(|result| json!({
+            "agent":"CHEMIST","tool":"run_synthesis","arguments":{"compound":result["data"]["compound"]}
+        })).collect();
+        assert_eq!(calls, expected_calls);
+        let checkpoints = [
+            owner_rv.tap().checkpoint(),
+            scientist_rv.tap().checkpoint(),
+            qc_rv.tap().checkpoint(),
+        ];
+        let captured = records.each_ref().map(|records| records.take());
+        let captures: [hibana_epf::Capture; 3] = core::array::from_fn(|producer| {
+            hibana_epf::Capture::new(&captured[producer], checkpoints[producer])
+                .expect("complete synthesis producer capture")
+        });
+        let snapshot: Vec<_> = hibana::runtime::tap::projected(&p_owner).collect();
+        assert_eq!(snapshot[0].arg0() >> 16, 17);
+        let observed_producers = observed_producers.take();
+        let count = audit_native(&captures, &snapshot, (session.raw(), &observed_producers));
+        println!(
+            "synthesis case={case}: {} actual effects, terminal={}, EPF checked {count} complete records",
+            calls.len(),
+            expected["data"]["status"]
+        );
+        if let Some(directory) = std::env::var_os("CHOREOFIX_LAB_CASCADING_EVIDENCE") {
+            let directory = std::path::PathBuf::from(directory);
+            std::fs::create_dir_all(&directory)?;
+            let frames: Vec<_> = bus.transport.take_observations().collect();
+            let evidence = json!({
+                "scope":"native synthesis/reagent component; controlled actual-result fixture, not full 13H qualification",
+                "session":session.raw(),
+                "source":snapshot.iter().copied().map(choreofix::imp::projection::record).collect::<Vec<_>>(),
+                "captures":captured.iter().map(|producer| producer.iter().copied().map(choreofix::imp::projection::record).collect::<Vec<_>>()).collect::<Vec<_>>(),
+                "checkpoints":checkpoints,"observed_producers":observed_producers,
+                "frames":frames,"effects":calls,"results":results,"terminal":expected,
+                "epf_checked_records":count,"application_effects_certified_by_epf":false
+            });
+            std::fs::write(
+                directory.join(format!("synthesis-{case}.json")),
+                serde_json::to_vec_pretty(&evidence)
+                    .map_err(|error| shell::ShellError::message(error.to_string()))?,
+            )?;
         }
     }
     Ok(())

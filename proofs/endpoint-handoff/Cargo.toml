@@ -11,6 +11,7 @@ hibana-runtime = { path = "../../../hibana-runtime", version = "=0.1.0", feature
 serde_json = "=1.0.154"
 
 [dev-dependencies]
+choreofix = { path = "../.." }
 hibana-epf = { path = "../../../hibana-epf" }
 
 [workspace]

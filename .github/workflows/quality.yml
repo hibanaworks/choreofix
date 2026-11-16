@@ -97,6 +97,8 @@ jobs:
           cargo +stable clippy --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test staged_integration_source --test staged_integration_arguments --test staged_integration_data --test staged_integration_effects -- -D warnings
           cargo +stable test --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test lab_quality lab_quality:: -- --test-threads=1
           cargo +stable clippy --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test lab_quality -- -D warnings
+          cargo +stable test --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test lab_cascading -- --test-threads=1
+          cargo +stable clippy --locked --manifest-path proofs/endpoint-handoff/Cargo.toml --test lab_cascading -- -D warnings
           cargo +stable clippy --locked --all-targets -- -D warnings
           cargo +stable clippy --locked --manifest-path vendor/hibana-wash/Cargo.toml --target wasm32-wasip1 --release -- -D warnings
           CHECKS

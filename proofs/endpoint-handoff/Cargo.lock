@@ -3,9 +3,20 @@
 version = 4
 
 [[package]]
+name = "choreofix"
+version = "0.1.0"
+dependencies = [
+ "hibana",
+ "hibana-runtime",
+ "hibana-wasip1-runtime",
+ "serde_json",
+]
+
+[[package]]
 name = "choreofix-handoff-check"
 version = "0.1.0"
 dependencies = [
+ "choreofix",
  "hibana",
  "hibana-epf",
  "hibana-runtime",

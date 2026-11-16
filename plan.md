@@ -5,7 +5,11 @@
 研究の中心は、**実資源の唯一の操作権、残存手順、実際の共有効果を結ぶ保証**である。
 
 現在は直接ファイル境界の27/48課題をsource別に認定し、残り21課題である。
-次の13Hは4装置の安全検査componentを実装した。直接委譲globalと2つのlocalsideについて、
+次の13Hは4装置の安全検査と、試薬EndpointをQCへ渡す合成componentを実装した。
+合成は実結果を使うnative fixtureの5経路（初回成功、1/2回失敗後の成功、3回失敗後と
+初期の枯渇）を確認し、同じ5実行の完全646記録をEPFで照合した。試薬残量はアプリで
+保持しない。2回目の要求で露呈した別viewの返却待ちは本体の待機分類で修正中であり、
+本体の最終全gate成功や13H全体の認定とはしない。直接委譲globalと2つの検査localsideでは、
 要求到着の全24順序・不足要求の待機と再開・引数差し替え4件の効果0での拒否・実結果と
 4本すべての返却をnativeで確認した。科学処理全体と実Wasm・EPF・実AIへの接続は未完で、
 13Hを移行済み件数へ加えない。詳細は`benchmark/ports/13H.md`に記録した。
@@ -5375,3 +5379,27 @@ projectionと3producerの完全capture（各107記録、source 23イベント）
 使用済みの再生成可能なtarget・binaryはユーザーの削除指示に従って撤去し、原記録・source・
 hashを残す。13H全体の科学global・ChoreoFS/Wasm・EPF・実AIを引き続き進める。
 現在27/48・残り21、採点比較0件を維持する。
+
+### 13H：合成の再試行と枯渇のcomponent（11月16日）
+
+合成のファイル要求、実装置／試薬Endpointの貸出、両資源からの実要求と実結果、
+両Endpointの返却とファイル返答を同じglobalへ置いた。再試行はroll、完了と枯渇は
+実結果に対応した型付き分岐とし、同じ試薬EndpointをQCへ渡す。実装側に残量カウンタ、
+保持者表、進行flagを追加していない。科学的な引数codecは元の自由な化合物名を保つ。
+
+初回失敗後、File viewの返答は受信済みでも、同じactorの所有者viewに資源返却の受信が
+残ると次の要求がUnavailableになった。globalやlocalsideの順序は変えず、本体へ4イベントの
+実Endpoint再現を置いた。進行許可の条件は変えず、他viewだけの待機と、自分／借用中の
+viewを必要とする待機を分類する修正で、9件の公開回帰試験と13Hの8件が成功した。
+自分の返答が未読なら拒否し、別view待ちの間はsend／reentryをcommitしないことも確認した。
+
+合成の5条件はcontrolled native Domainによる機構試験で、実simulator、Wasm、実AIの
+認定ではない。同一実行のEPFは74／120／166／212／74記録を受理し、既存の検査component
+2条件の107記録ずつも維持した。source・完全capture・失敗時原本とcommandは
+`output/experiments/lab-cascading-direct-20261116/synthesis-v5/`へ保存する。
+native試験は既存の`proofs/endpoint-handoff`packageへ移し、正本のアプリlibを参照する。
+これにより選択した試験だけのために無関係な全アプリbinaryをビルドせず、CIでも同じ
+Cargo targetを一度だけ実行する。検査を省略したり別sourceを認定へ使ったりしない。
+
+本体の生成検査・形式モデルとの対応、科学処理全体と検査位置、ChoreoFS／Wasm・実AI・
+共通採点は未完であり、移行27/48・残り21、今回AI呼出し0・採点比較0を維持する。
