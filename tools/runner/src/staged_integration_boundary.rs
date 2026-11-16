@@ -73,6 +73,17 @@ async fn seven_actual_wasm_guests_complete_staged_publication() -> Result<()> {
             async move {
                 let feature=FEATURES[own];
                 if own == 0 {
+                    for (path, expected) in [
+                        ("/service", vec!["implement_feature", "integration", "interface", "merge_code", "release", "review"]),
+                        ("/service/review", vec!["notification_system", "payment_processing", "user_authentication"]),
+                        ("/service/interface", vec!["notification_system", "payment_processing"]),
+                    ] {
+                        let listing=guest.command(agent,format!("ls {path}")).await?;
+                        let actual=listing["stdout"].as_str().ok_or("directory output")?
+                            .strip_suffix("wash> ").ok_or("directory command did not finish")?
+                            .split_whitespace().collect::<Vec<_>>();
+                        assert_eq!(actual,expected,"{path}: {listing}");
+                    }
                     // Match the live shell mistake: a complete first JSON object
                     // followed by another chunk, then submission through cp.
                     let malformed=guest.command(agent,
@@ -254,12 +265,21 @@ async fn seven_actual_wasm_guests_repair_review_ci_and_staging_failures() -> Res
                 let value = guest.command("DEVELOPER_A",format!("cat /service/interface/{peer}")).await?;
                 assert_eq!(response(&value)?["success"],true,"{value}");
             }
+            let mut expected_probe_errors = [2, 2, 2, 2, 6].into_iter();
             loop {
                 let value = guest.command("DEVELOPER_A",
                     "echo '{\"feature_name\":\"user_authentication\"}' > /service/implement_feature; cat /service/implement_feature".into()).await?;
                 assert_eq!(response(&value)?["success"],true,"{value}");
                 let review = guest.command("DEVELOPER_A","cat /service/review/user_authentication".into()).await?;
                 if response(&review)?["success"] != true {continue;}
+                // After a completed elastic visit, an older in-flight suffix
+                // remains possible. Its absence is EAGAIN, not permission to
+                // claim that the whole public receive contract is impossible.
+                let premature = guest.command("DEVELOPER_A",
+                    "dd if=/service/release/user_authentication iflag=nonblock".into()).await?;
+                let errno = expected_probe_errors.next().expect("unexpected extra approval");
+                assert!(premature["stdout"].as_str().is_some_and(|text| text.contains(&format!("os error {errno}"))),
+                    "unexpected release-stream admission: {premature}");
                 let merged = guest.command("DEVELOPER_A",
                     "echo '{\"branch\":\"user_authentication\"}' > /service/merge_code; cat /service/merge_code".into()).await?;
                 assert_eq!(response(&merged)?["success"],true,"{merged}");
@@ -268,6 +288,7 @@ async fn seven_actual_wasm_guests_repair_review_ci_and_staging_failures() -> Res
                 let stage = guest.command("DEVELOPER_A","cat /service/release/user_authentication".into()).await?;
                 if response(&stage)?["success"] == true {break;}
             }
+            assert!(expected_probe_errors.next().is_none(), "recovery skipped a declared probe");
             for feature in &FEATURES[1..] {
                 let value = guest.command("DEVELOPER_A",format!("cat /service/review/{feature}")).await?;
                 assert_eq!(response(&value)?["success"],true,"{value}");

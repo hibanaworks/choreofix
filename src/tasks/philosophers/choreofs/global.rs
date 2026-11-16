@@ -11,7 +11,7 @@ use hibana_wasip1_runtime::{
 pub const THINK_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
     b"service/think",
     ObjectId(4),
-    FdSpec::new(4, 66, 1),
+    FdSpec::new(4, 66),
     b"",
     protocol::FdBinding {
         read: Some(protocol::FdReadRow::Base),
@@ -22,7 +22,7 @@ pub const THINK_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
 pub const EAT_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
     b"service/eat",
     ObjectId(5),
-    FdSpec::new(5, 66, 1),
+    FdSpec::new(5, 66),
     b"",
     protocol::FdBinding {
         read: Some(protocol::FdReadRow::Base),

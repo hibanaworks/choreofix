@@ -158,7 +158,7 @@ const fn operation(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
     ChoreoFsObject::read_write(
         path,
         ObjectId(fd as u32),
-        FdSpec::new(fd, 66, 1),
+        FdSpec::new(fd, 66),
         b"",
         protocol::FdBinding {
             read: Some(protocol::FdReadRow::Base),
@@ -171,7 +171,7 @@ const fn result(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
     ChoreoFsObject::readable(
         path,
         ObjectId(fd as u32),
-        FdSpec::new(fd, 2, 1),
+        FdSpec::new(fd, 2),
         b"",
         protocol::FdBinding {
             read: Some(protocol::FdReadRow::Base),

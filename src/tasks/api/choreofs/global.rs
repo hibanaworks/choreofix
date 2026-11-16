@@ -49,28 +49,28 @@ const OPERATION_BINDING: protocol::FdBinding = protocol::FdBinding {
 pub const ADMIN_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
     b"service/migrate_schema",
     ObjectId(SERVICE_FD as u32),
-    FdSpec::new(SERVICE_FD, 66, 1),
+    FdSpec::new(SERVICE_FD, 66),
     b"",
     OPERATION_BINDING,
 );
 pub const BACKEND_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
     b"service/implement_backend",
     ObjectId(SERVICE_FD as u32),
-    FdSpec::new(SERVICE_FD, 66, 1),
+    FdSpec::new(SERVICE_FD, 66),
     b"",
     OPERATION_BINDING,
 );
 pub const TESTER_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
     b"service/run_integration_tests",
     ObjectId(SERVICE_FD as u32),
-    FdSpec::new(SERVICE_FD, 66, 1),
+    FdSpec::new(SERVICE_FD, 66),
     b"",
     OPERATION_BINDING,
 );
 pub const OUTCOME_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::readable(
     OUTCOME_PATH,
     ObjectId(5),
-    FdSpec::new(5, 2, 1),
+    FdSpec::new(5, 2),
     b"",
     protocol::FdBinding::read(protocol::FdReadRow::Base),
 );

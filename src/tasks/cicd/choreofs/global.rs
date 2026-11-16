@@ -45,7 +45,7 @@ pub type FileExit = g::Msg<241, i32>;
 pub const COMPILE_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
     b"service/compile_and_test",
     ObjectId(4),
-    FdSpec::new(4, 66, 1),
+    FdSpec::new(4, 66),
     b"",
     protocol::FdBinding {
         read: Some(protocol::FdReadRow::Base),
@@ -56,7 +56,7 @@ pub const COMPILE_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
 pub const TEST_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
     b"service/run_integration_tests",
     ObjectId(4),
-    FdSpec::new(4, 66, 1),
+    FdSpec::new(4, 66),
     b"",
     protocol::FdBinding {
         read: Some(protocol::FdReadRow::Base),
@@ -67,7 +67,7 @@ pub const TEST_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
 pub const DEPLOY_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
     b"service/deploy_application",
     ObjectId(4),
-    FdSpec::new(4, 66, 1),
+    FdSpec::new(4, 66),
     b"",
     protocol::FdBinding {
         read: Some(protocol::FdReadRow::Base),

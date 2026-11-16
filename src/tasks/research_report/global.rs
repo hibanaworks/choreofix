@@ -45,7 +45,7 @@ const fn operation(
     ChoreoFsObject::read_write(
         path,
         ObjectId(fd as u32),
-        FdSpec::new(fd, 66, 1),
+        FdSpec::new(fd, 66),
         b"",
         protocol::FdBinding {
             read: Some(protocol::FdReadRow::Base),
@@ -62,7 +62,7 @@ pub const AUTHOR_FILES: [hibana_wasip1_runtime::choreofs::ChoreoFsObject<'static
     hibana_wasip1_runtime::choreofs::ChoreoFsObject::readable(
         b"service/feedback",
         hibana_wasip1_runtime::choreofs::ObjectId(19),
-        hibana_wasip1_runtime::choreofs::FdSpec::new(19, 2, 1),
+        hibana_wasip1_runtime::choreofs::FdSpec::new(19, 2),
         b"",
         hibana_wasip1_runtime::protocol::FdBinding::read(
             hibana_wasip1_runtime::protocol::FdReadRow::Base,

@@ -837,6 +837,16 @@
         "files": 76,
         "scope": "Manual source review includes tests and supporting references, not 76 independent defects.",
         "current_review": false
+      },
+      "latest_6H_mechanism": {
+        "evidence": "output/experiments/staged-integration-direct-20261116/mechanism-directory-v98.json",
+        "runtime_binary_sha256": "295b8bdf4ae086fd2e22cced011c66d531954799fd7ec13794ffdd63b5edcfc2",
+        "conditions": 2,
+        "model_calls": 0,
+        "scored_runs": 0,
+        "real_model_qualified": false,
+        "all_family_requalification_complete": false,
+        "scope": "Actual seven-guest Wasm nested-directory listings, baseline and failed-result recovery; complete EPF, request/effect/reply agreement and neutral world completion. No core progress change."
       }
     },
     "historical_pre_direct_boundary": {

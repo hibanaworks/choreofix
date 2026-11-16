@@ -21,9 +21,13 @@ fn validate<P: WirePayload>(f: &journal::Frame) -> Result<()> {
     P::validate_payload(Payload::new(&f.bytes)).map_err(|e| format!("WASI payload: {e:?}").into())
 }
 fn same_path(bytes: &[u8], path: &str) -> bool {
-    use hibana_wasip1_runtime::choreofs::{ChoreoFsFact, ChoreoFsFacts, ObjectId};
-    let facts = [ChoreoFsFact::new(path.as_bytes(), ObjectId(0))];
-    ChoreoFsFacts::new(&facts).resolve(bytes) == Some(ObjectId(0))
+    use hibana_wasip1_runtime::choreofs::{ChoreoFsObject, ChoreoFsObjectSet, FdSpec, ObjectId};
+    let objects = ChoreoFsObjectSet::new([ChoreoFsObject::new(
+        path.as_bytes(),
+        ObjectId(0),
+        FdSpec::new(0, 0),
+    )]);
+    objects.choreofs().resolve(bytes) == Some(ObjectId(0))
 }
 pub fn audit(path: &Path) -> Result<Value> {
     let artifact = crate::projection::load(path)?;

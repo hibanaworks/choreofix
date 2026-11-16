@@ -22,7 +22,7 @@ impl FileData {
             flags: 0,
         }
     }
-    pub fn objects(&self) -> ChoreoFsObjectSet<'_, 1> {
+    pub fn objects(&self) -> ChoreoFsObjectSet<[ChoreoFsObject<'_>; 1]> {
         ChoreoFsObjectSet::new([ChoreoFsObject::read_write(
             self.object.path(),
             self.object.object(),

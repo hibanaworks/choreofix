@@ -23,9 +23,13 @@ fn validate<P: WirePayload>(frame: &journal::Frame) -> Result<()> {
 }
 
 fn same_path(observed: &[u8], expected: &str) -> bool {
-    use hibana_wasip1_runtime::choreofs::{ChoreoFsFact, ChoreoFsFacts, ObjectId};
-    let facts = [ChoreoFsFact::new(expected.as_bytes(), ObjectId(0))];
-    ChoreoFsFacts::new(&facts).resolve(observed) == Some(ObjectId(0))
+    use hibana_wasip1_runtime::choreofs::{ChoreoFsObject, ChoreoFsObjectSet, FdSpec, ObjectId};
+    let objects = ChoreoFsObjectSet::new([ChoreoFsObject::new(
+        expected.as_bytes(),
+        ObjectId(0),
+        FdSpec::new(0, 0),
+    )]);
+    objects.choreofs().resolve(observed) == Some(ObjectId(0))
 }
 
 fn check(rows: &[Value], artifact: &Value) -> Result<Value> {

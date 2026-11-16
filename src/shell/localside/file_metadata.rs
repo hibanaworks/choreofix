@@ -72,7 +72,7 @@ pub async fn run<'run, const FILE: u8, const DATA: u8, const N: usize>(
             }
             protocol::LABEL_WASI_FD_FILESTAT_GET => {
                 let request = io.recv::<protocol::FdFilestatGetReqMsg>().await?;
-                let material = core::array::from_fn(|i| {
+                let material: [_; N] = core::array::from_fn(|i| {
                     ChoreoFsObject::read_write(
                         objects[i].path(),
                         objects[i].object(),
@@ -85,14 +85,14 @@ pub async fn run<'run, const FILE: u8, const DATA: u8, const N: usize>(
                         },
                     )
                 });
-                let reply = ChoreoFsObjectSet::<N>::new(material)
+                let reply = ChoreoFsObjectSet::new(material)
                     .choreofs()
                     .fd_filestat_get(request);
                 io.send::<protocol::FdFilestatGetRetMsg>(&reply).await?;
             }
             protocol::LABEL_WASI_PATH_FILESTAT_GET => {
                 let request = io.recv::<protocol::PathFilestatGetReqMsg>().await?;
-                let material = core::array::from_fn(|i| {
+                let material: [_; N] = core::array::from_fn(|i| {
                     ChoreoFsObject::read_write(
                         objects[i].path(),
                         objects[i].object(),
@@ -105,7 +105,7 @@ pub async fn run<'run, const FILE: u8, const DATA: u8, const N: usize>(
                         },
                     )
                 });
-                let reply = ChoreoFsObjectSet::<N>::new(material)
+                let reply = ChoreoFsObjectSet::new(material)
                     .choreofs()
                     .path_filestat_get(request);
                 io.send::<protocol::PathFilestatGetRetMsg>(&reply).await?;

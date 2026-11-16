@@ -6,11 +6,11 @@ use hibana_wasip1_runtime::{
     choreofs::{ChoreoFsObject, ChoreoFsObjectSet, FdSpec, ObjectId},
     protocol,
 };
-pub(crate) fn outcome_objects(bytes: &[u8]) -> ChoreoFsObjectSet<'_, 1> {
+pub(crate) fn outcome_objects(bytes: &[u8]) -> ChoreoFsObjectSet<[ChoreoFsObject<'_>; 1]> {
     ChoreoFsObjectSet::new([ChoreoFsObject::readable(
         OUTCOME_PATH,
         ObjectId(u32::from(OUTCOME_FD)),
-        FdSpec::new(OUTCOME_FD, 1 << 1, 1),
+        FdSpec::new(OUTCOME_FD, 1 << 1),
         bytes,
         protocol::FdBinding::read(protocol::FdReadRow::Base),
     )])

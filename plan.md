@@ -5113,3 +5113,33 @@ staging失敗を各2回、実rollbackを2回含む。同じruntime hashは
 状態を記録し、診断のため明示的に停止した。controller終了143、最大1,409,597,440 bytes、
 設定budgetは1,800秒。完了した実験やtimeoutへ数えず、partialなモデル記録と停止理由を
 保持する。モデルのterminal usageがないため、使用token数を0とも推計値とも報告しない。
+
+
+## 2026-11-16: ChoreoFSの階層表示と一重のファイル記述
+
+`live-v95`は全7guestがmerge前の読出しで待ったため診断停止した。完了・時間切れ・
+使用token数0へは数えない。最初に疑った無条件拒否の前提は誤りだった。elasticな再訪前に
+送信済みの継続は、後の未完の交換中にも到着し得る。実Endpointと既存Leanのqueued-
+continuation定理で確認し、本体の進行規則は変更していない。非ブロッキングの機構probeは
+4回のEACCESと、その後のEAGAINを確認して53実効果まで完走する。
+
+実AI記録で別途確認した`ls /service/review`等の失敗は、親パスを作らず末尾名だけを
+一覧化したファイルデータ側の不具合だった。実際の投影パスから親ディレクトリと直下の子を
+導出し、WASI要求→実Endpoint→ChoreoFSの境界を保って修正した。WASI側もpath・fd・
+materialの三重配列を廃止し、呼出側のarray/sliceを直接借りる。未使用の記述用generationを
+削除し、実行時のbinding generationは維持した。別の権限表・workflowは追加していない。
+
+変更後のWASI全ローカルgateが成功した。native lib 110件・example 8件、compile-fail
+15件、library Miri 108件・example Miri 8件、Leanのpoll 520入力・path権限160入力、
+Pico 2 link、実Wasm shell例、Cargo packageを確認した。Miriで解釈しない2件はLeanへ
+データを出力する試験であり、native側では実行済み。Pico 2測定fixtureは予約stack24KiBを
+含むRAM152,296 bytes、flash333,524 bytes。実機実行・最大stack・wash全体の実機容量の
+認定ではない。ユーザーの許可に従い、必要なWASI容量はPico 2の実容量内で拡張できる。
+
+`wasi-directory-v97`は同じ変更後runtimeで7人の実Wasm全2条件に成功した。
+通常21効果・EPF15,906記録、回復53効果・EPF32,918記録で、完全EPF、要求／効果／返答、
+中立な共通採点は両方成功し違反0。実washの`/service`・`review`・`interface`一覧も検査した。
+試験53.68秒、build込みの全子孫最大1,067,155,456 bytes。runtime SHA-256は
+`295b8bdf4ae086fd2e22cced011c66d531954799fd7ec13794ffdd63b5edcfc2`。
+集約は`mechanism-directory-v98.json`と`wasi-storage-v98.json`。モデル呼出し0、採点比較0、
+現在sourceの実AIと全family再認定は未完。23/48課題・残り25課題を維持する。

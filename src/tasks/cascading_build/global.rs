@@ -124,7 +124,7 @@ const fn object(
     ChoreoFsObject::read_write(
         path,
         ObjectId(fd as u32),
-        FdSpec::new(fd, 66, 1),
+        FdSpec::new(fd, 66),
         b"",
         protocol::FdBinding {
             read: Some(protocol::FdReadRow::Base),

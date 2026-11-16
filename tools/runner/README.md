@@ -18,6 +18,13 @@ that the same guest recovers by consuming its actual inputs. The shell chooses
 its commands; the runner does not drain those messages on its behalf.
 The malformed-JSON probe checks that wash names the failed close and path,
 then accepts corrected data from the same guest without an extra domain effect.
+The later `wasi-directory-v97` checks actual nested `ls` output and the recovery
+path's nonblocking early reads. Both seven-Wasm conditions pass: 21 / 53 effects,
+15,906 / 32,918 complete EPF records, common-world completion and zero
+violations. Runtime SHA-256 is
+`295b8bdf4ae086fd2e22cced011c66d531954799fd7ec13794ffdd63b5edcfc2`.
+These records include the caller-owned ChoreoFS object-storage and directory
+repair; the older `wasi-v92` results remain bound to their earlier source.
 These finite mechanism conditions do not qualify the unfinished depth-2 live
 model trial or add 6H to the 23 qualified tasks. The normal runner accepts 6H;
 saved executions use `--audit-staged-integration EVENTS`, with record

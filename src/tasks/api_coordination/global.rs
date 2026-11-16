@@ -46,35 +46,35 @@ const OPERATION_BINDING: protocol::FdBinding = protocol::FdBinding {
 pub const DEFINE_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
     b"service/define_api",
     ObjectId(4),
-    FdSpec::new(4, 66, 1),
+    FdSpec::new(4, 66),
     b"",
     OPERATION_BINDING,
 );
 pub const BACKEND_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
     b"service/implement_feature",
     ObjectId(5),
-    FdSpec::new(5, 66, 1),
+    FdSpec::new(5, 66),
     b"",
     OPERATION_BINDING,
 );
 pub const FRONTEND_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
     b"service/implement_feature",
     ObjectId(4),
-    FdSpec::new(4, 66, 1),
+    FdSpec::new(4, 66),
     b"",
     OPERATION_BINDING,
 );
 pub const AGREEMENT_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
     b"service/agree_api",
     ObjectId(5),
-    FdSpec::new(5, 66, 1),
+    FdSpec::new(5, 66),
     b"",
     OPERATION_BINDING,
 );
 pub const TESTER_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
     b"service/run_tests",
     ObjectId(4),
-    FdSpec::new(4, 66, 1),
+    FdSpec::new(4, 66),
     b"",
     OPERATION_BINDING,
 );
@@ -82,14 +82,14 @@ pub const OUTCOME_PATH: &[u8] = b"service/outcome";
 pub const BACKEND_OUTCOME_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::readable(
     OUTCOME_PATH,
     ObjectId(7),
-    FdSpec::new(7, 2, 1),
+    FdSpec::new(7, 2),
     b"",
     protocol::FdBinding::read(protocol::FdReadRow::Base),
 );
 pub const FRONTEND_OUTCOME_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::readable(
     OUTCOME_PATH,
     ObjectId(6),
-    FdSpec::new(6, 2, 1),
+    FdSpec::new(6, 2),
     b"",
     protocol::FdBinding::read(protocol::FdReadRow::Base),
 );
