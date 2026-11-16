@@ -507,7 +507,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
     let contracts = crate::projection::contracts(&artifact["compiled"])?;
     let publication_wire = one(contracts
         .iter()
-        .filter(|(_, header)| Value::from(header[3]) == publication_label))?
+        .filter(|(_, header)| header[3] == publication_label))?
     .0;
     let publication = rows
         .iter()

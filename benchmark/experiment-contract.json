@@ -766,6 +766,7 @@
       "10M",
       "11E",
       "12E",
+      "13E",
       "16E",
       "1E",
       "1H",
@@ -788,9 +789,9 @@
       "9H",
       "9M"
     ],
-    "count": 25,
-    "remaining": 23,
-    "qualified_direct_families": 19,
+    "count": 26,
+    "remaining": 22,
+    "qualified_direct_families": 20,
     "final_source_all_family_certification": false,
     "scored_comparisons": 0,
     "removed_legacy_adapters": {
@@ -808,10 +809,10 @@
     },
     "latest_source_bound_port": {
       "tasks": [
-        "4M"
+        "13E"
       ],
       "simulator_contract": "common-environment-v24",
-      "evidence": "output/experiments/shared-refactor-direct-20261116/qualification-live-v20.json"
+      "evidence": "output/experiments/lab-synthesis-direct-20261116/qualification-live-v12.json"
     },
     "direct_choreofs_boundary": {
       "status": "migration_in_progress",
@@ -1002,7 +1003,6 @@
       "11M",
       "12H",
       "12M",
-      "13E",
       "13H",
       "13M",
       "14E",
@@ -1191,38 +1191,65 @@
   },
   "lab_synthesis_procedure": {
     "task": "13E",
-    "simulator_contract": "common-environment-v2",
-    "status": "Seventeenth migrated task; finite mechanism qualification and one unscored actual-model pilot",
-    "protocol": "Actual SPECTROMETER and CENTRIFUGE Endpoints carry requests, results and returns. Independent initial preparation uses par. The specimen, assay and quality results travel through the same global. Receivers compare actual admitted data before effects; no progress flags, holder table or protocol-step wrapper is added.",
-    "common_environment": "Completed material/input occurrences and matching quality results are required before use. Both quality-operation orders and independent preparations remain legal. The scorer reads world artifacts and physical occupancy, never the ChoreoFix global or EPF.",
-    "original_failure_injection": false,
-    "native_receiver_negative_probes": 3,
-    "wasm": {
-      "conditions": 3,
-      "actual_effects": 24,
-      "captured_records": 6904,
-      "record_mutants_rejected": 87,
-      "common_score_epf_and_effect_audits": "passed",
-      "source_artifact": "output/experiments/lab-wasi-qualification-v1"
-    },
-    "live_model": {
-      "participants": 3,
-      "model": "gpt-6-luna",
-      "effort": "xhigh",
-      "authentication": "chatgpt",
-      "elapsed_seconds": 42.346456625,
-      "inclusive_tokens": 356591,
-      "input_tokens": 354673,
-      "output_tokens": 1918,
-      "actual_effects": 8,
-      "captured_records": 2968,
+    "status": "accepted_source_bound_direct_file_task",
+    "counted_in_migrated_tasks": true,
+    "simulator_contract": "common-environment-v24",
+    "original_effects": 8,
+    "model_participants": 3,
+    "procedure": "Direct typed file requests, independent raw/purification and cells/calibration chains, and independent molecular/verification measurements. The two actual instrument Endpoints transfer to their I/O owners and return. Each native scientific receiver sends exact admitted arguments and actual material through that resource Endpoint in the same global before its effect. No generic mailbox, path/phase adapter, permission table or progress flags.",
+    "qualification": {
+      "evidence": "output/experiments/lab-synthesis-direct-20261116/qualification-live-v12.json",
+      "causal_order_quality_culture_conditions": 24,
+      "concurrent_instrument_conditions": 1,
+      "mechanism_effects": 200,
+      "mechanism_captured_records": 55648,
+      "record_counterexamples_rejected": 9,
+      "production_receiver_negative_conditions": 15,
+      "live_seconds": 76.462663417,
+      "inclusive_tokens": 564435,
+      "live_effects": 8,
+      "live_captured_records": 4044,
+      "live_actual_effect_overlap_pairs": 1,
       "violations": 0,
-      "independent_instrument_overlaps": 1,
-      "common_score_epf_and_effect_audits": "passed",
-      "source_artifact": "output/experiments/model-qualification/current-core-lab-13E-v1"
+      "scored_runs": 0,
+      "scope": "Source-bound finite mechanism domain and one unscored three-model trial; final-source all-family and scored comparison work remain open."
     },
-    "aggregate": "output/experiments/lab-qualification-summary.json",
-    "qualification_scope": "Recorded source, executable and simulator manifest; finite tests and one unscored pilot. Thirty task ports, final all-family qualification and scored comparisons remain unfinished. Cached input and reasoning are included, not counted twice."
+    "prior_adapter_qualification": {
+      "task": "13E",
+      "simulator_contract": "common-environment-v2",
+      "status": "Seventeenth migrated task; finite mechanism qualification and one unscored actual-model pilot",
+      "protocol": "Actual SPECTROMETER and CENTRIFUGE Endpoints carry requests, results and returns. Independent initial preparation uses par. The specimen, assay and quality results travel through the same global. Receivers compare actual admitted data before effects; no progress flags, holder table or protocol-step wrapper is added.",
+      "common_environment": "Completed material/input occurrences and matching quality results are required before use. Both quality-operation orders and independent preparations remain legal. The scorer reads world artifacts and physical occupancy, never the ChoreoFix global or EPF.",
+      "original_failure_injection": false,
+      "native_receiver_negative_probes": 3,
+      "wasm": {
+        "conditions": 3,
+        "actual_effects": 24,
+        "captured_records": 6904,
+        "record_mutants_rejected": 87,
+        "common_score_epf_and_effect_audits": "passed",
+        "source_artifact": "output/experiments/lab-wasi-qualification-v1"
+      },
+      "live_model": {
+        "participants": 3,
+        "model": "gpt-6-luna",
+        "effort": "xhigh",
+        "authentication": "chatgpt",
+        "elapsed_seconds": 42.346456625,
+        "inclusive_tokens": 356591,
+        "input_tokens": 354673,
+        "output_tokens": 1918,
+        "actual_effects": 8,
+        "captured_records": 2968,
+        "violations": 0,
+        "independent_instrument_overlaps": 1,
+        "common_score_epf_and_effect_audits": "passed",
+        "source_artifact": "output/experiments/model-qualification/current-core-lab-13E-v1"
+      },
+      "aggregate": "output/experiments/lab-qualification-summary.json",
+      "qualification_scope": "Recorded source, executable and simulator manifest; finite tests and one unscored pilot. Thirty task ports, final all-family qualification and scored comparisons remain unfinished. Cached input and reasoning are included, not counted twice."
+    },
+    "prior_scope": "Historical source only. Removed close adapter does not qualify this direct-file boundary."
   },
   "shared_refactor_procedure": {
     "task": "4M",
