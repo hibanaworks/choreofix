@@ -1,5 +1,6 @@
 //! Scientific value correspondence, without ownership or workflow state.
 use crate::shell::{ShellError, ShellResult};
+use hibana::runtime::wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload};
 use serde_json::{Value, json};
 
 pub fn decode(bytes: &[u8]) -> ShellResult<Value> {
@@ -69,10 +70,83 @@ pub fn specimen(materials: &Value) -> ShellResult<(u64, u64)> {
     }
     Ok((synthesis, purification))
 }
-pub fn qc_inputs(arguments: &Value, materials: &Value) -> ShellResult<Value> {
+
+pub fn bio_arguments(arguments: &Value, actual_compound: &Value) -> ShellResult<()> {
+    let bytes = encode(arguments)?;
+    super::arguments::Arguments::<5>::try_from(bytes.as_slice())?;
+    if !actual_compound.is_string() || arguments["compound"] != *actual_compound {
+        return Err(ShellError::message(
+            "biological trial names another actual synthesized batch",
+        ));
+    }
+    Ok(())
+}
+
+pub fn bio_inputs(materials: &Value) -> ShellResult<Value> {
     let (synthesis, purification) = specimen(materials)?;
+    let cells = record(
+        &materials["cells"],
+        (
+            "run_separation",
+            "BIOLOGIST",
+            &json!({"material":"cell_cultures"}),
+        ),
+        &json!({}),
+    )?;
+    let calibration = record(
+        &materials["calibration"],
+        (
+            "run_analysis",
+            "BIOLOGIST",
+            &json!({"sample":"fluorescence"}),
+        ),
+        &json!({"prepared_cells":cells}),
+    )?;
+    Ok(
+        json!({"synthesis":synthesis,"purification":purification,"prepared_cells":cells,"calibration":calibration}),
+    )
+}
+
+pub fn bio_result(result: &Value, arguments: &Value, materials: &Value) -> ShellResult<()> {
+    let inputs = bio_inputs(materials)?;
+    let data = &result["data"];
+    let valid_arguments =
+        bio_arguments(arguments, &materials["synthesis"]["data"]["compound"]).is_ok();
+    let success = result["success"]
+        .as_bool()
+        .ok_or_else(|| ShellError::message("biological response lacks its actual result"))?;
+    let culture = arguments
+        .get("cell_type")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if result["tool_name"] != "run_bioassay"
+        || data["scientist"] != "BIOLOGIST"
+        || data["compound"] != arguments["compound"]
+        || data["cell_type"] != culture
+        || data["inputs"] != inputs
+        || data["missing_inputs"] != json!([])
+        || if success {
+            !valid_arguments || data["status"] != "complete" || !data["artifact_id"].is_u64()
+        } else {
+            data["status"]
+                != if valid_arguments {
+                    "bioassay_failed"
+                } else {
+                    "invalid_arguments"
+                }
+                || !data["artifact_id"].is_null()
+        }
+    {
+        return Err(ShellError::message(
+            "biological result or refusal differs from its actual arguments and material",
+        ));
+    }
+    Ok(())
+}
+pub fn qc_inputs(arguments: &Value, materials: &Value) -> ShellResult<Value> {
     match arguments["scientist"].as_str() {
         Some("CHEMIST") => {
+            let (synthesis, purification) = specimen(materials)?;
             let bytes = encode(arguments)?;
             super::arguments::Arguments::<9>::try_from(bytes.as_slice())?;
             let analysis = record(
@@ -89,32 +163,16 @@ pub fn qc_inputs(arguments: &Value, materials: &Value) -> ShellResult<Value> {
         Some("BIOLOGIST") => {
             let bytes = encode(arguments)?;
             super::arguments::Arguments::<10>::try_from(bytes.as_slice())?;
-            let cells = record(
-                &materials["cells"],
-                (
-                    "run_separation",
-                    "BIOLOGIST",
-                    &json!({"material":"cell_cultures"}),
-                ),
-                &json!({}),
-            )?;
-            let calibration = record(
-                &materials["calibration"],
-                (
-                    "run_analysis",
-                    "BIOLOGIST",
-                    &json!({"sample":"fluorescence"}),
-                ),
-                &json!({"prepared_cells":cells}),
-            )?;
+            let inputs = bio_inputs(materials)?;
             let compound = &materials["synthesis"]["data"]["compound"];
             let bioassay = record(
                 &materials["bioassay"],
                 ("run_bioassay", "BIOLOGIST", &json!({"compound":compound})),
-                &json!({"synthesis":synthesis,"purification":purification,
-                    "prepared_cells":cells,"calibration":calibration}),
+                &inputs,
             )?;
-            Ok(json!({"synthesis":synthesis,"purification":purification,"bioassay":bioassay}))
+            Ok(
+                json!({"synthesis":inputs["synthesis"],"purification":inputs["purification"],"bioassay":bioassay}),
+            )
         }
         _ => Err(ShellError::message("unknown scientific QC subject")),
     }
@@ -154,8 +212,7 @@ pub fn qc_result(result: &Value, arguments: &Value, inputs: &Value) -> ShellResu
     Ok(())
 }
 
-/// The final instrument sees the same actual batch, approved trials and quality data.
-pub fn final_inputs(quality: &Value) -> ShellResult<Value> {
+pub fn approved_inputs(quality: &Value) -> ShellResult<Value> {
     let materials = &quality["materials"];
     let (synthesis, purification) = specimen(materials)?;
     let chem_args = json!({"scientist":"CHEMIST","data_type":"purification"});
@@ -172,8 +229,12 @@ pub fn final_inputs(quality: &Value) -> ShellResult<Value> {
     let bioassay = bio_inputs["bioassay"]
         .as_u64()
         .ok_or_else(|| ShellError::message("missing actual successful biological trial"))?;
-    let measured_inputs =
-        json!({"synthesis":synthesis,"purification":purification,"bioassay":bioassay});
+    Ok(json!({"synthesis":synthesis,"purification":purification,"bioassay":bioassay}))
+}
+
+/// The final instrument sees the same actual batch, approved trials and quality data.
+pub fn final_inputs(quality: &Value) -> ShellResult<Value> {
+    let measured_inputs = approved_inputs(quality)?;
     let molecular = record(
         &quality["molecular"],
         (
@@ -193,9 +254,58 @@ pub fn final_inputs(quality: &Value) -> ShellResult<Value> {
         &measured_inputs,
     )?;
     Ok(
-        json!({"synthesis":synthesis,"purification":purification,"bioassay":bioassay,
+        json!({"synthesis":measured_inputs["synthesis"],"purification":measured_inputs["purification"],"bioassay":measured_inputs["bioassay"],
         "purification_qc":quality["chemist_qc"]["data"]["artifact_id"],
         "bioassay_qc":quality["biologist_qc"]["data"]["artifact_id"],
         "molecular":molecular,"verification":verification}),
     )
+}
+
+/// A wire result whose scientific subject and actual verdict agree with its branch.
+pub struct QcReply<'r, const WHO: u8, const APPROVED: bool>(&'r [u8]);
+impl<'r, const WHO: u8, const APPROVED: bool> QcReply<'r, WHO, APPROVED> {
+    pub fn from_bytes(bytes: &'r [u8]) -> ShellResult<Self> {
+        Self::validate_payload(Payload::new(bytes))?;
+        Ok(Self(bytes))
+    }
+}
+impl<'r, const WHO: u8, const APPROVED: bool> WireEncode for QcReply<'r, WHO, APPROVED> {
+    fn encode_into(&self, out: &mut [u8]) -> Result<usize, CodecError> {
+        out.get_mut(..self.0.len())
+            .ok_or(CodecError::Truncated)?
+            .copy_from_slice(self.0);
+        Ok(self.0.len())
+    }
+}
+impl<'r, const WHO: u8, const APPROVED: bool> WirePayload for QcReply<'r, WHO, APPROVED> {
+    const SCHEMA_ID: u32 = 0xac13_2000 | ((WHO as u32) << 1) | APPROVED as u32;
+    type Decoded<'a> = &'a [u8];
+    fn validate_payload(payload: Payload<'_>) -> Result<(), CodecError> {
+        let value: Value =
+            serde_json::from_slice(payload.as_bytes()).map_err(|_| CodecError::Malformed)?;
+        let (subject, kind, evidence) = match WHO {
+            super::global::CHEMIST => ("CHEMIST", "purification", "analysis"),
+            super::global::BIOLOGIST => ("BIOLOGIST", "bioassay", "bioassay"),
+            _ => return Err(CodecError::Malformed),
+        };
+        let inputs = &value["data"]["inputs"];
+        if value["success"].as_bool() != Some(APPROVED)
+            || inputs.as_object().is_none_or(|fields| fields.len() != 3)
+            || !inputs["synthesis"].is_u64()
+            || !inputs["purification"].is_u64()
+            || !inputs[evidence].is_u64()
+            || qc_result(
+                &value,
+                &json!({"scientist":subject,"data_type":kind}),
+                inputs,
+            )
+            .is_err()
+        {
+            return Err(CodecError::Malformed);
+        }
+        Ok(())
+    }
+    fn decode_validated_payload<'a>(payload: ReceivedPayload<'a, Self>) -> &'a [u8] {
+        payload.as_bytes()
+    }
 }

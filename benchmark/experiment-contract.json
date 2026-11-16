@@ -1067,7 +1067,7 @@
     "counted_in_migrated_tasks": false,
     "source_notes": "benchmark/ports/13M.md",
     "current_boundary": {
-      "native_tests": 5,
+      "native_tests": 9,
       "actual_runtime_conditions": 8,
       "actual_resource_request_orders": 2,
       "missing_resource_effects": 0,
@@ -1080,12 +1080,22 @@
       "model_calls": 0,
       "wasm_conditions": 0,
       "scored_runs": 0,
-      "evidence": "output/experiments/lab-quality-direct-20261116/receiver-v3.json",
-      "scope": "Controlled native production-receiver/data fixtures only. Complete direct-file global, reconsideration, Wasm, live-model, EPF and effect/score qualification remain unfinished."
+      "evidence": "output/experiments/lab-quality-direct-20261116/source-v15.json",
+      "scope": "Full protocol projection, compiled direct scientist localsides, controlled QC Endpoint/data fixtures. Physical instrument and QC control localsides, whole Wasm/live/EPF qualification remain unfinished.",
+      "global_source_events": 776,
+      "projected_views": 29,
+      "global_const_eval": "forbid",
+      "scientist_localsides_compiled": [
+        "CHEMIST",
+        "BIOLOGIST",
+        "ANALYST"
+      ],
+      "scientist_localsides_executed": false
     },
     "remaining": [
-      "Complete direct-file choreography with candidate Endpoint custody, rejection/retry and free QC subject selection",
-      "Actual Wasm, autonomous model, complete EPF and independent effect/reply/common-score qualification"
+      "Complete QC control and physical instrument localsides",
+      "Wire four Wasm guests, common runner and independent EPF/effect auditor",
+      "Qualify legal alternative/retry/parallel execution, rejection and actual live models under the neutral scorer"
     ],
     "previous_adapter_qualification": {
       "task": "13M",

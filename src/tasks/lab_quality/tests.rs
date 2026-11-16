@@ -11,6 +11,38 @@ use hibana::{
 };
 use serde_json::{Value, json};
 
+#[test]
+fn complete_direct_file_source_has_no_projection_diagnostic() {
+    assert_eq!(hibana::g::diagnose(&source()), None);
+}
+
+#[test]
+fn whole_source_projects_all_views_and_the_scientists_file_operations() {
+    use hibana::g::Message;
+    use hibana::runtime::tap;
+    let p = programs();
+    let observed = p.observation();
+    let images = observed["programs"].as_array().unwrap();
+    assert_eq!(images.len(), 29);
+    assert_eq!(images.len(), observed["roles"].as_object().unwrap().len());
+    let events = images[0]["rows"][0][3].as_u64().unwrap() >> 16;
+    assert!(events > 600);
+    for image in images {
+        assert_eq!(image["rows"][0][3].as_u64().unwrap() >> 16, events);
+    }
+    assert!(
+        tap::projected(&p.chemist).any(|row| row.id() == tap::PROJECTED_SEND
+            && row.arg1() >> 24 == u32::from(CHEM_FILE)
+            && (row.arg0() & 255) == u32::from(FileAnalysis::LOGICAL_LABEL))
+    );
+    assert!(
+        tap::projected(&p.chemist).any(|row| row.id() == tap::PROJECTED_RECV
+            && row.arg1() >> 24 == u32::from(QC)
+            && (row.arg0() & 255) == u32::from(ChemistRejected::LOGICAL_LABEL))
+    );
+    println!("13M direct source: views={} events={events}", images.len());
+}
+
 struct Effects {
     result: Value,
     calls: Cell<Vec<Value>>,
@@ -118,6 +150,70 @@ fn scientific_arguments_preserve_free_batch_and_culture_text() {
         let bytes = imp::encode(&args).unwrap();
         assert!(Arguments::<9>::try_from(bytes.as_slice()).is_err());
         assert!(Arguments::<10>::try_from(bytes.as_slice()).is_err());
+    }
+}
+
+#[test]
+fn biological_input_refusal_does_not_impersonate_a_physical_trial_failure() {
+    let materials = material();
+    let actual_compound = materials["synthesis"]["data"]["compound"].clone();
+    for wrong_batch in [false, true] {
+        let compound = if wrong_batch {
+            json!("another batch")
+        } else {
+            actual_compound.clone()
+        };
+        let arguments = json!({"compound":compound,"cell_type":"free β culture"});
+        assert_eq!(
+            imp::bio_arguments(&arguments, &actual_compound).is_err(),
+            wrong_batch
+        );
+        for input_refusal in [false, true] {
+            let mut result = materials["bioassay"].clone();
+            result["success"] = json!(false);
+            result["data"]["compound"] = arguments["compound"].clone();
+            result["data"]["artifact_id"] = Value::Null;
+            result["data"]["status"] = json!(if input_refusal {
+                "invalid_arguments"
+            } else {
+                "bioassay_failed"
+            });
+            assert_eq!(
+                imp::bio_result(&result, &arguments, &materials).is_ok(),
+                wrong_batch == input_refusal
+            );
+            result["data"]["inputs"]["purification"] = json!(90);
+            assert!(imp::bio_result(&result, &arguments, &materials).is_err());
+        }
+    }
+}
+
+#[test]
+fn typed_qc_replies_bind_both_their_actual_subject_and_verdict() {
+    let materials = material();
+    for subject in 0..2 {
+        let arguments = arguments(subject);
+        let inputs = imp::qc_inputs(&arguments, &materials).unwrap();
+        for approved in [false, true] {
+            let result = verdict(&arguments, &inputs, approved);
+            let bytes = imp::encode(&result).unwrap();
+            assert_eq!(
+                imp::QcReply::<CHEMIST, true>::from_bytes(&bytes).is_ok(),
+                subject == 0 && approved
+            );
+            assert_eq!(
+                imp::QcReply::<CHEMIST, false>::from_bytes(&bytes).is_ok(),
+                subject == 0 && !approved
+            );
+            assert_eq!(
+                imp::QcReply::<BIOLOGIST, true>::from_bytes(&bytes).is_ok(),
+                subject == 1 && approved
+            );
+            assert_eq!(
+                imp::QcReply::<BIOLOGIST, false>::from_bytes(&bytes).is_ok(),
+                subject == 1 && !approved
+            );
+        }
     }
 }
 #[hibana_runtime::main]
