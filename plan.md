@@ -5,6 +5,10 @@
 研究の中心は、**実資源の唯一の操作権、残存手順、実際の共有効果を結ぶ保証**である。
 
 現在は直接ファイル境界の27/48課題をsource別に認定し、残り21課題である。
+次の13Hは4装置の安全検査componentを実装した。直接委譲globalと2つのlocalsideについて、
+要求到着の全24順序・不足要求の待機と再開・引数差し替え4件の効果0での拒否・実結果と
+4本すべての返却をnativeで確認した。科学処理全体と実Wasm・EPF・実AIへの接続は未完で、
+13Hを移行済み件数へ加えない。詳細は`benchmark/ports/13H.md`に記録した。
 13Mは776イベント・29 viewの直接global、7つのlocalside、4 Wasmと共通runnerを実装した。
 全8条件の実Wasm（112効果・37,128記録）と実AI4人のrunについて、それぞれ同じ実行記録で
 EPF・実要求／材料／効果／返答・共通採点まで成功した。実AIは113.926317333秒、872,510 inclusive tokens、40 shell calls、
@@ -5340,3 +5344,34 @@ source・共通採点の通し監査は約11.99秒で成功した。この時間
 production sourceも実Wasmを認定した保存版と一致した。これは通常生成検査71割当の全完了、
 一般refinement、最終sourceの全family認定や採点比較の成功ではない。それらは別の未完項目とする。
 現在27/48・残り21、採点比較0件で、次は13Hの直接委譲global・localsidesを進める。
+
+### 13H：4装置の安全検査component（11月16日）
+
+`src/tasks/lab_cascading/`へglobalと直接のofficer／effect receiverを実装した。
+各装置の「要求→実Endpoint貸出」をparに置き、受信した4台の実要求すべてがファイルで
+受理した入力と一致した後だけ、安全検査のDomain効果を呼ぶ。4つの実結果の一致を確認して
+各装置へ返却し、ファイルへ実結果を返す。独立した装置取得を待機境界で逐次化せず、
+localsideの順序変更、保持者表、進行flagや手順helperでglobalを補っていない。
+
+初期の取得globalは「全要求→全貸出」という2つのparをseqにしていたため、各枝で
+要求→貸出を進めるlocalsideと不一致になり、nativeでPhaseInvariantを検出した。
+意図した独立取得をglobalの各par枝へ直接表現し直し、localsideを逐次化して合わせてはいない。
+Hibana本体には変更を加えていない。旧sourceと失敗logは`failure-v2/`に残した。
+
+最終componentはRust 1.100.0でnative4試験、Clippy（warnings deny）、整形に成功した。
+24通りの実要求順序で最後の要求を一度保留し、効果0を確認して同じEndpointで再開した。
+各装置への正しい型の別引数4件は、本番receiverが実効果0で拒否した。正・負の実結果2条件では、
+本番officerも使い、4台の実Endpointの別runtimeへの委譲・返却と同じ実結果の返送を確認した。
+これは合計30条件のnative fixtureである。正・負の本番officer2条件では、実際に使ったsealed
+projectionと3producerの完全capture（各107記録、source 23イベント）によるEPF動的検査も
+成功した。capture・checkpoint・transport frame・制御した実効果と返答を同じ原本へ保存した。
+これは13H全体の実Wasm、実AI、共通simulatorや実効果の一般的な認定ではない。
+
+選択したtest自体のCargo生成は成功したが、その後の無関係な全binary生成は停止した。
+以後は同じCargo生成の依存artifactを使って対象testのみを直接rustcでコンパイルし、全4試験を
+実行した。停止したCargo全体をビルド成功に数えない。最終対象のコンパイルは最大
+292,126,720 bytes、native実行は5,537,792 bytes。最終Clippyと整形も成功した。
+原本は`lab-cascading-direct-20261116/component-native-v4.json`とsource／command／log。
+使用済みの再生成可能なtarget・binaryはユーザーの削除指示に従って撤去し、原記録・source・
+hashを残す。13H全体の科学global・ChoreoFS/Wasm・EPF・実AIを引き続き進める。
+現在27/48・残り21、採点比較0件を維持する。
