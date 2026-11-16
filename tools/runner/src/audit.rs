@@ -425,6 +425,7 @@ pub fn run(root: &Path) -> Result<Value> {
         "4E" => crate::coordination_audit::audit(&root.join("events.jsonl"))?,
         "4M" => crate::refactor_audit::audit(&root.join("events.jsonl"))?,
         "13E" => crate::lab_audit::audit(&root.join("events.jsonl"))?,
+        "13M" => crate::lab_quality_audit::audit(&root.join("events.jsonl"))?,
         "5E" => crate::medical_audit::audit(&root.join("events.jsonl"))?,
         "5M" => crate::multi_specialty_audit::audit(&root.join("events.jsonl"))?,
         "5H" => crate::critical_care_audit::audit(&root.join("events.jsonl"))?,

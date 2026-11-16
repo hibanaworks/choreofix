@@ -13,8 +13,10 @@ use std::{
 
 pub const REFACTOR_CASES: usize = 1 << 3;
 pub const LAB_CASES: usize = 25;
+pub const LAB_QUALITY_CASES: usize = 8;
 
-const FAMILIES: [&str; 20] = [
+const FAMILIES: [&str; 21] = [
+    "lab_quality",
     "lab",
     "refactor",
     "kitchen",
@@ -240,6 +242,7 @@ fn execute(command: &mut Command, output: &Path, name: &str) -> Result<String> {
         "CHOREOFIX_FEATURE_DELIVERY_CASE",
         "CHOREOFIX_REFACTOR_CASE",
         "CHOREOFIX_LAB_CASE",
+        "CHOREOFIX_LAB_QUALITY_CASE",
         "CHOREOFIX_KITCHEN_CASE",
         "CHOREOFIX_REGULATORY_DISCOVERY_CASE",
         "CHOREOFIX_MULTI_ROUND_DISCOVERY_CASE",
@@ -426,6 +429,7 @@ pub fn build_only(output: &Path, selection: &str) -> Result<Value> {
 /// Build the real guest and run each selected family's declared WASI boundary.
 pub fn run(output: &Path, filter: Option<&str>) -> Result<Value> {
     if std::env::var_os("CHOREOFIX_LAB_CASE").is_some()
+        || std::env::var_os("CHOREOFIX_LAB_QUALITY_CASE").is_some()
         || std::env::var_os("CHOREOFIX_REFACTOR_CASE").is_some()
         || std::env::var_os("CHOREOFIX_FEATURE_DELIVERY_CASE").is_some()
         || std::env::var_os("CHOREOFIX_KITCHEN_CASE").is_some()
@@ -528,6 +532,50 @@ pub fn run(output: &Path, filter: Option<&str>) -> Result<Value> {
         }
         if filter.is_none() && family == "manufacturing" && completed != 2 {
             return Err("manufacturing qualification must execute both the total-order/recovery and contended-choice groups".into());
+        }
+        if family == "lab_quality" && test_filter == "lab_quality_boundary::" {
+            let report: Value = serde_json::from_slice(&fs::read(
+                output.join("evidence/lab-quality-mechanism.json"),
+            )?)?;
+            let cases = report["cases"].as_array().ok_or("QC condition reports")?;
+            let ids = cases
+                .iter()
+                .filter_map(|case| case["case_index"].as_u64())
+                .collect::<BTreeSet<_>>();
+            if completed != 1
+                || report["complete_finite_domain"] != true
+                || report["application_effect_correspondence_certified"] != true
+                || report["declared_cases"] != LAB_QUALITY_CASES
+                || cases.len() != LAB_QUALITY_CASES
+                || ids != (0..LAB_QUALITY_CASES as u64).collect()
+                || cases.iter().any(|case| {
+                    let depth = match case["case_index"].as_u64() {
+                        Some(0..=5) => case["case_index"].as_u64().unwrap() / 2,
+                        Some(6) => 2,
+                        Some(7) => 0,
+                        _ => return true,
+                    };
+                    case["status"] != "passed"
+                        || case["depth"] != depth
+                        || case["domain_calls"] != 11 + 3 * depth
+                        || case["application_effect_correspondence_certified"] != true
+                })
+                || [0, 4].into_iter().any(|index| {
+                    cases
+                        .iter()
+                        .find(|case| case["case_index"] == index)
+                        .and_then(|case| {
+                            case["counterexamples"]["record_counterexamples"].as_array()
+                        })
+                        .is_none_or(|items| {
+                            items.len() != 9 || items.iter().any(|item| item["rejected"] != true)
+                        })
+                })
+            {
+                return Err(
+                    "QC qualification omits a required real-Wasm condition or effect audit".into(),
+                );
+            }
         }
         if family == "lab" && test_filter == "lab_boundary::" {
             let report: Value =

@@ -5,10 +5,11 @@
 研究の中心は、**実資源の唯一の操作権、残存手順、実際の共有効果を結ぶ保証**である。
 
 現在は直接ファイル境界の26/48課題をsource別に認定し、残り22課題である。
-13Mは直接境界への書き換え中。776イベント・29 viewの全体globalをconst抑制なしで投影し、
-CHEMIST／BIOLOGIST／ANALYSTの直接localsideを書いた。9試験とClippyが成功した。
-QCの別runtime間の正負・到着順8条件、効果前拒否14条件、最終材料の12反例等も含む。
-QC制御・実装置3系統・Wasm起動と監査接続は残り、まだ13M全体の実行認定ではない。
+13Mは776イベント・29 viewの直接global、7つのlocalside、4 Wasmと共通runnerを実装した。
+全8条件の実Wasmが112効果・37,128記録で、EPF・実要求／材料／効果／返答・共通採点まで成功した。
+実AI4人も113.926317333秒で17効果・業務完了・違反0となったが、その独立監査は実行中であり、
+まだ認定件数へ加えない。WASIの実パス容量不足は64バイトへ拡張し、長すぎる入力は
+Endpoint操作前にENAMETOOLONGを返して正当な再試行を可能にした。基盤の全gateは成功した。
 13EはLuna/xhigh 3人が76.462663417秒で完走し、同じrunの完全EPF4,044記録、
 8実効果・科学的入力・返答照合・共通採点が成功し違反0。inclusive tokensは564,435。
 25条件の実Wasm（200効果・55,648記録）、本番receiverの15負例と監査記録の9反例も確認した。
@@ -5276,3 +5277,33 @@ binary SHA-256は`c1fdeae7413301547a4aeb5e7b4b84651de925a17c44531d9961ca39dcda5a
 Pico 2への収容実測と取り違えない。残りは共通runner・EPF／実効果監査への接続と、
 実4 Wasm・実4モデル・共通採点の同一runでの確認である。13Mは未認定、26/48課題・
 残り22課題、採点比較0件を維持する。
+
+## 2026-11-16: 13Mの全8実Wasm条件とWASIパス容量
+
+共通runnerの`lab_quality_boundary::`へ8条件の有限入力域を接続した。深さ0/1/2、初回QCの
+両subject、同じ相手の再審査と相手の切替え、品質測定の両順序、任意／空batch名、
+省略／Unicode cultureを含む。各条件で誤ったbatchを実効果前に拒否してから同じguestが
+続行する。通常遅延の条件ではQC／生物試験と、分析者の独立した2装置の実効果が重なる。
+全8条件が112実効果・37,128完全capture記録でEPF、要求・実材料・実効果・返答と共通採点まで
+成功した。全case index、深さ別の効果数、各監査成功を共通認定入口が要求し、部分実行を
+全条件合格へ読み替えない。深さ0と2の各9件の記録反例も拒否した。実行時攻撃18件という
+意味ではない。runner 53 native試験と全target Clippyも成功した。
+
+実Wasmで旧40バイトのパス容量不足が露呈した。アプリの名前を切り詰めず、WASI runtimeを
+64バイトへ拡張した。超過するopen/statはEndpoint操作前にENAMETOOLONGを返し、guestの
+出力領域を変更せず、その後の正当なopen/stat/closeが成功することを実Wasmで検査した。
+WASI runtimeの全gate、109件のMiriと8例、Leanのpoll 20定理・520実判断、path-rights
+14定理・160実判断、no_std・Clippy・packageが成功した。最大子孫メモリ702,726,144 bytes。
+Pico 2 fixtureは24KiB予約stackを含むRAM152,296 bytes、flash333,580 bytesで、
+実機実行・最大実stackの測定とは区別する。library commit `34c17e6`をmainへpushした。
+
+監査実装では、実transport受理とEndpointの受信commitを区別した。生物資源の移譲送信は
+intentの受信より先に受理され得るが、実効果の前にはその資源の受信commitを要求する。
+別subjectへの選択通知の受信完了を、独立した選択先の実効果の前提にする誤期待も除去した。
+必要な実要求の受信条件は維持し、global・localside・本体の意味を変更して合わせてはいない。
+
+同じruntime binaryを使う`live-v52`のLuna/xhigh 4人は113.926317333秒、872,510 inclusive
+tokens、40 shell callsで全員正常終了した。元深さ2の生物試験失敗2回・QC拒否2回から回復し、
+17実効果・業務完了・違反0となった。完全な5,873記録の独立監査は実行中であり、ここでは
+13Mを認定数へ加えない。26/48・残り22、採点比較0件のままとする。
+原本は`output/experiments/lab-quality-direct-20261116/qualified-v51`と`live-v52`。

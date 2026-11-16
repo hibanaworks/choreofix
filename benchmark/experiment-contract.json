@@ -1063,12 +1063,12 @@
   },
   "lab_quality_procedure": {
     "task": "13M",
-    "status": "direct_file_rewrite_in_progress",
+    "status": "finite_direct_file_mechanism_passed_live_audit_pending",
     "counted_in_migrated_tasks": false,
     "source_notes": "benchmark/ports/13M.md",
     "current_boundary": {
       "native_tests": 9,
-      "actual_runtime_conditions": 8,
+      "native_runtime_conditions": 8,
       "actual_resource_request_orders": 2,
       "missing_resource_effects": 0,
       "forged_request_conditions": 14,
@@ -1077,11 +1077,17 @@
       "clippy": "passed",
       "application_miri": false,
       "restored_old_implementation": false,
-      "model_calls": 0,
-      "wasm_conditions": 0,
+      "mechanism_model_calls": 0,
+      "wasm_conditions": 8,
+      "wasm_effects": 112,
+      "wasm_captured_records": 37128,
+      "complete_declared_wasm_domain": true,
+      "wasm_epf_material_request_effect_reply_and_score": "passed",
+      "record_counterexamples_rejected": 18,
+      "runtime_binary_sha256": "cd6b1523d7cb0f1a80289cf6c3f0f7547910b9c25ea127db5fa9b5d370e3d93c",
       "scored_runs": 0,
-      "evidence": "output/experiments/lab-quality-direct-20261116/source-v29.json",
-      "scope": "Full protocol projection, all seven direct localsides and four-Wasm startup compile. Actual production QC receiver prefixes cover 8 request-order/subject/verdict and 14 refusal conditions; the legitimate synthesis prefix is distinct from the zero refused QC effects. Whole Wasm/live/EPF qualification remains unfinished.",
+      "evidence": "output/experiments/lab-quality-direct-20261116/qualified-v51/evidence/lab-quality-mechanism.json",
+      "scope": "All eight declared actual four-Wasm conditions pass complete EPF and independent scientific request/material/effect/reply/common-score checks, including normal-delay physical overlap, retry and subject changes. Native production QC prefixes additionally check 8 arrival-order/subject/verdict and 14 refusal conditions; the legitimate synthesis prefix is distinct from the zero refused QC effects. The autonomous pilot's complete independent run audit remains pending.",
       "global_source_events": 776,
       "projected_views": 29,
       "global_const_eval": "forbid",
@@ -1090,16 +1096,41 @@
         "BIOLOGIST",
         "ANALYST"
       ],
-      "scientist_localsides_executed": false,
+      "scientist_localsides_executed": true,
       "device_and_qc_localsides_compiled": true,
       "four_wasm_startup_compiled": true,
       "runtime_projection_output_checked": true,
       "qc_prefix_uses_production_receiver": true,
-      "qc_candidate_retirement_executed": false
+      "qc_candidate_retirement_executed": true
+    },
+    "live_model": {
+      "directory": "output/experiments/lab-quality-direct-20261116/live-v52",
+      "status": "actual_run_completed_independent_audit_pending",
+      "participants": 4,
+      "elapsed_seconds": 113.926317333,
+      "inclusive_tokens": 872510,
+      "tool_calls": 40,
+      "effects": 17,
+      "actual_negative_bioassays": 2,
+      "actual_negative_qc": 2,
+      "simulator_complete": true,
+      "violations": 0,
+      "scored_runs": 0
+    },
+    "wasi_path_capacity": {
+      "revision": "34c17e6989eb05a1ed78c447d0edcbc75d926341",
+      "path_bytes": 64,
+      "oversized_import": "ENAMETOOLONG before an Endpoint operation; output memory unchanged; a valid later request succeeds",
+      "library_full_gates": "passed",
+      "pico2_fixture_reserved_ram_bytes": 152296,
+      "pico2_fixture_stack_reserved_bytes": 24576,
+      "pico2_fixture_flash_bytes": 333580,
+      "physical_execution_and_worst_case_stack": "not measured",
+      "evidence": "output/experiments/lab-quality-direct-20261116/wasi-gates-v39.log"
     },
     "remaining": [
-      "Execute four Wasm guests through the common runner and independent EPF/effect auditor",
-      "Qualify legal alternative/retry/parallel execution, rejection and actual live models under the neutral scorer"
+      "Complete the independent EPF/effect/model/source audit of the saved four-model pilot",
+      "Final-source all-family certification and scored experiment matrix"
     ],
     "previous_adapter_qualification": {
       "task": "13M",

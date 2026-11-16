@@ -208,6 +208,30 @@ impl Simulator {
                     inputs.insert(key, json_value(&value)?);
                 }
             }
+            if task == "13M" {
+                // Public scientific target sets are input data, not a workflow.
+                // The current common world has no former dataclass step tables.
+                let scientific = PyModule::import(py, "benchmark.tools.sim_lab_qc")?;
+                for (table, key) in [("_ANALYSES", "sample"), ("_SEPARATIONS", "material")] {
+                    let mut targets = scientific
+                        .getattr(table)?
+                        .try_iter()?
+                        .map(|value| value?.extract::<(String, String)>())
+                        .collect::<PyResult<Vec<_>>>()?;
+                    targets.sort();
+                    inputs.insert(
+                        table.into(),
+                        json!(
+                            targets
+                                .into_iter()
+                                .map(|(scientist, value)| {
+                                    json!({"scientist_id":scientist,key:value})
+                                })
+                                .collect::<Vec<_>>()
+                        ),
+                    );
+                }
+            }
             if task == "7E" {
                 for (attribute, name) in [
                     ("_write_steps", "_WRITE_STEPS"),

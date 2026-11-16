@@ -4,6 +4,14 @@ The runner records model requests, tool events, versions and usage. Hibana task
 permissions belong to the projected Endpoints, not this process interface.
 The direct-WASI command currently produces unscored qualification records.
 
+The 13M direct QC port's `lab_quality_boundary::` entry requires all eight
+actual four-Wasm conditions: both initial subjects, depths 0/1/2, reconsideration
+and a normal-delay overlap case. All pass EPF and independent scientific
+request/material/effect/reply/common-world checks (112 effects, 37,128 capture
+records). Eighteen record counterexamples are refused. The four-Luna/xhigh
+pilot also completes, but its independent run audit is pending; 13M is not yet
+included in the qualified task count. See [13M](../../benchmark/ports/13M.md).
+
 The 13E direct scientific port is source-bound qualified as task 26 of 48. Its declared
 `lab_boundary::` domain has 24 causal-order/quality-order/culture combinations
 and one normal-delay parallel-instrument case. The physical instrument owners
@@ -100,14 +108,15 @@ that its implementation or task outcome is correct.
 The normal command and live subscription tests use the same execution path.
 It supports `1E`, `1M`, `1H`, `2E`, `2M`, `2H`, `3E`, `4E`, `4M`, `5E`, `5M`,
 `5H`, `6E`, `6M`, `6H`, `7E`, `8E`, `9E`, `9M`, `9H`, `10E`, `10M`, `11E`, `12E`,
-`13E` and `16E`, with the original failure conditions `0`, `1` and `2`.
+`13E`, `13M` and `16E`, with the original failure conditions `0`, `1` and `2`.
 Each qualification retains its exact source and simulator version. Twenty-six
 source-bound tasks have completed direct-projection mechanism and live-model
 checks; the other 22 remain unqualified. The older 4M, 13E/13M and 14E/14M/14H
 adapters and their execution/audit commands have been removed. Their original
 worlds, descriptions and historical source-bound results remain. These tasks
-other than 4M/13E still require direct ports; their new direct qualification is
-separate from that retired adapter.
+other than 4M/13E still require direct qualification; 13M's current mechanism
+domain is implemented above. The new qualification is separate from those
+retired adapters.
 The rewritten 7E passes
 twelve real-wash mechanism cases, EPF/effect audits and 1,503 record mutations.
 Three Luna/xhigh participants also completed depth 2 on the same runtime binary;
