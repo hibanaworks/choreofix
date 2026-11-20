@@ -1,0 +1,223 @@
+{
+  "task": "7E",
+  "source_commit": "91643d90624781d9d6bb6d1b497e5552bd396ba1",
+  "archive": "output/verification/7e-received-effects-20261121.DwOK36",
+  "source_manifest_sha256": "7af8d9a27d0cfe77a5ea0433c25a6c43ad9cb7dd2d46dc2151cba12a238c56bf",
+  "runtime_sha256": "87dd8dd3c73231a42894950c40f18a71a64a84f5fe8833a6fa71a392059372a9",
+  "build_receipt_sha256": "2594eb967a12d2271b76e8386e0a06df99a9141fdc0a01039dbbf728cb779c15",
+  "working_source": "The frozen source includes three pre-existing 7H working-tree changes. The committed 7E inputs are the ones checked below.",
+  "scored_comparison": false,
+  "wasm": {
+    "conditions": 12,
+    "totals": {
+      "effects": 123,
+      "capture_records": 68440,
+      "revisions": 13,
+      "rejected_record_mutations": 1503
+    },
+    "cases": [
+      {
+        "directory": "wasm/document-wasi-1795197210265045000/case0",
+        "depth": 1,
+        "initial_writer": "WRITER_A",
+        "first_review": "CHAPTER_1",
+        "cross_chapter_revision": false,
+        "revisions": 1,
+        "effects": 10,
+        "capture_records": 22165,
+        "rejected_record_mutations": 122,
+        "events_sha256": "bb13cb485ec65119e393e0ab94180e93c8393898e8cbf046f70e486f1764e15a",
+        "audit_sha256": "0fbf39fcf6bca615814af4e9598b9749899573c883ebd100c3e43bf4f92058d9"
+      },
+      {
+        "directory": "wasm/document-wasi-1795197266230205000/case0",
+        "depth": 0,
+        "initial_writer": "WRITER_B",
+        "first_review": "CHAPTER_2",
+        "cross_chapter_revision": false,
+        "revisions": 1,
+        "effects": 10,
+        "capture_records": 3839,
+        "rejected_record_mutations": 122,
+        "events_sha256": "cd9a9cfabacd1be95645118cbe39ad42b0135a2bd8a131e806b10599f68ea442",
+        "audit_sha256": "0b41c9801777452908bfba302d6fca38a75bbc850a738ca6c1768e4ec86912e7"
+      },
+      {
+        "directory": "wasm/document-wasi-1795197270271042000/case0",
+        "depth": 0,
+        "initial_writer": "WRITER_A",
+        "first_review": "CHAPTER_1",
+        "cross_chapter_revision": false,
+        "revisions": 0,
+        "effects": 7,
+        "capture_records": 2347,
+        "rejected_record_mutations": 83,
+        "events_sha256": "f46bed39e06aa63bff319750730bc0fb355d907a7e3cc2d8ce1db169366cfb36",
+        "audit_sha256": "2be2977a7ac5fc3811a551a8eb0bb6e6a2631d8fbb77ee8a1be9e0a0dab00a7b"
+      },
+      {
+        "directory": "wasm/document-wasi-1795197270271042000/case1",
+        "depth": 0,
+        "initial_writer": "WRITER_B",
+        "first_review": "CHAPTER_2",
+        "cross_chapter_revision": false,
+        "revisions": 0,
+        "effects": 7,
+        "capture_records": 2347,
+        "rejected_record_mutations": 83,
+        "events_sha256": "5c7e6f1dcc19fe6909167fb42e9b1f0f5ea5a4abb50bd9130858601f3c24d0a8",
+        "audit_sha256": "0597a8442cb9a02d3bcc560454e2b34e0e702b412dbe229ccf2815c64cd58724"
+      },
+      {
+        "directory": "wasm/document-wasi-1795197274737467000/case0",
+        "depth": 0,
+        "initial_writer": "WRITER_A",
+        "first_review": "CHAPTER_1",
+        "cross_chapter_revision": false,
+        "revisions": 0,
+        "effects": 7,
+        "capture_records": 2446,
+        "rejected_record_mutations": 83,
+        "events_sha256": "7f8688231220eb732fc70bb011e9b9cecb5cc5f90d66ae048c3d4cde5469ccd9",
+        "audit_sha256": "545ee0262a2768665c2735eecdfe41d567869b99cc4349e20d7590591605ee00"
+      },
+      {
+        "directory": "wasm/document-wasi-1795197277024565000/case0",
+        "depth": 1,
+        "initial_writer": "WRITER_A",
+        "first_review": "CHAPTER_1",
+        "cross_chapter_revision": false,
+        "revisions": 1,
+        "effects": 10,
+        "capture_records": 3960,
+        "rejected_record_mutations": 122,
+        "events_sha256": "148ff809e08b3dda7eed282f81d43a3f77b8bd880572720e2f32110df8205231",
+        "audit_sha256": "a9ced2b964655ada9fcd24c10dd232cfb45f2def146c881b4efb91bc282dac7c"
+      },
+      {
+        "directory": "wasm/document-wasi-1795197281098192000/case0",
+        "depth": 2,
+        "initial_writer": "WRITER_A",
+        "first_review": "CHAPTER_2",
+        "cross_chapter_revision": false,
+        "revisions": 1,
+        "effects": 10,
+        "capture_records": 3883,
+        "rejected_record_mutations": 122,
+        "events_sha256": "651e9a81aba6a7920924401129a671e6b766f4b0803255df7df57ab0864271a6",
+        "audit_sha256": "a588b7775c03b9362b65f919c26903736e2a3f66a72b74f9080c8c6828eab55f"
+      },
+      {
+        "directory": "wasm/document-wasi-1795197281098192000/case1",
+        "depth": 2,
+        "initial_writer": "WRITER_B",
+        "first_review": "CHAPTER_1",
+        "cross_chapter_revision": true,
+        "revisions": 1,
+        "effects": 10,
+        "capture_records": 3883,
+        "rejected_record_mutations": 122,
+        "events_sha256": "5348b042c0fdf189c4cd58d08bbd89dcae900a916b69d431777119c952941c4a",
+        "audit_sha256": "8651af92770422eaeabbe7ff1752c77cee288309f17c61e2bf6e915ef8be6375"
+      },
+      {
+        "directory": "wasm/document-wasi-1795197281098192000/case2",
+        "depth": 0,
+        "initial_writer": "WRITER_A",
+        "first_review": "CHAPTER_1",
+        "cross_chapter_revision": true,
+        "revisions": 3,
+        "effects": 16,
+        "capture_records": 7233,
+        "rejected_record_mutations": 200,
+        "events_sha256": "3b7377abd187d65d3e0bc267cae4f11b3df06f9444337a2d6534690a8add501b",
+        "audit_sha256": "1a675f650c2afb90678961b275a9cb09654201975a2f604995bda20b496b6fcb"
+      },
+      {
+        "directory": "wasm/document-wasi-1795197281098192000/case3",
+        "depth": 0,
+        "initial_writer": "WRITER_B",
+        "first_review": "CHAPTER_2",
+        "cross_chapter_revision": false,
+        "revisions": 4,
+        "effects": 19,
+        "capture_records": 8941,
+        "rejected_record_mutations": 239,
+        "events_sha256": "5dbc7147b2c301ef56b5096376c7145ac149d0e8a6e33dd98f5233c70fed686e",
+        "audit_sha256": "d2cffe0e58c15b61d6754e065e092ef722aa6f07b103efe23588e1ea0eea9ea3"
+      },
+      {
+        "directory": "wasm/document-wasi-1795197281098192000/case4",
+        "depth": 0,
+        "initial_writer": "WRITER_A",
+        "first_review": "CHAPTER_2",
+        "cross_chapter_revision": false,
+        "revisions": 0,
+        "effects": 7,
+        "capture_records": 2930,
+        "rejected_record_mutations": 83,
+        "events_sha256": "9efbbcf126e01d27aeb6a40ab33aa262815e1220e69f1b8b5d1beed7ff2917c9",
+        "audit_sha256": "a9d8a4e14bb53a61e77544c7b224a56053e9dba0b5b970f595c8e7b80daa0006"
+      },
+      {
+        "directory": "wasm/document-wasi-1795197281098192000/case5",
+        "depth": 2,
+        "initial_writer": "WRITER_B",
+        "first_review": "CHAPTER_1",
+        "cross_chapter_revision": true,
+        "revisions": 1,
+        "effects": 10,
+        "capture_records": 4466,
+        "rejected_record_mutations": 122,
+        "events_sha256": "71d13d4e2721608e449f2e3d5aa699a9d3a4faa5d7acb7e79bdde7b7927d4c77",
+        "audit_sha256": "4b0d47dd535bbbc42b39506e52ffee7b644b0bc1bd319211f34e62dcdd2e58c7"
+      }
+    ]
+  },
+  "live": {
+    "directory": "live-2",
+    "depth": 2,
+    "model": "gpt-6-luna",
+    "effort": "xhigh",
+    "completed_participants": [
+      "EDITOR",
+      "WRITER_B",
+      "WRITER_A"
+    ],
+    "elapsed_seconds": 152.153306083,
+    "inclusive_tokens": 986715,
+    "capture_records": 12705,
+    "effects": 10,
+    "actual_document_requests": 4,
+    "review_failures": 2,
+    "revisions": 1,
+    "review_results": [
+      [
+        "CHAPTER_1",
+        false
+      ],
+      [
+        "CHAPTER_2",
+        false
+      ],
+      [
+        "CHAPTER_1",
+        true
+      ],
+      [
+        "CHAPTER_2",
+        true
+      ]
+    ],
+    "simulator_complete": true,
+    "violations": 0,
+    "result_sha256": "7ab89e3f3ef1fe2e41f79af5760381bed7a8e5bb488d642d7c8b1ae1e3a85046",
+    "events_sha256": "b58af33b422bdc5fc8f27b4b2f91012d27d23522cd68e1f4ab522d3d5dfa245c",
+    "run_audit_sha256": "230b3a91986516de59851b75e9220dd715ed97756d965a23548947398ccae1d0",
+    "effect_audit_sha256": "ca4538f0038aee9d014339ba2f4b6caaf7c68ec2ed8c3df49c4da02bb698643f",
+    "projection_sha256": "8cda29d71b9f888028b0f3b8feae6a5046a2a6665cf59272def0cd973216705e",
+    "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+    "runner_sha256": "771b1d7c57239ca75f2f2ed55323ed1978ce04337abc1d987f5adfa2bc12f8bb"
+  },
+  "audits": "All twelve original Wasm event journals were also rechecked with the live runner. The per-case frozen effect audit equals the original effect audit, including the EPF witness."
+}

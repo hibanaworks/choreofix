@@ -220,6 +220,13 @@ binary. The live trials preserved both the successful outcome at depth 0 and
 the terminal test failure at depth 2. The [receipts and hashes](8e-received-effects.json)
 supplement the original 43 selected conditions.
 
+The new [7E receiver trials](7e-received-effects.json) likewise supplement the
+original cohort. Both initial writer orders and revisions across chapters passed
+the twelve scripted conditions. The depth-two live trial on the same binary
+completed after two negative reviews, a revision and two positive reviews.
+Seven production tasks still use the caller-selected simulator API on this
+revision: 3E, 13E/M/H and 14E/M/H.
+
 The cohort-wide measurement is reproducible from the same source-bound trials.
 From the repository root, supply the verified cohort and a new output file:
 
