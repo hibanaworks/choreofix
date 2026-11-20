@@ -23,6 +23,14 @@ pub const STEPPER: u8 = 6;
 pub const METROLOGY: u8 = 7;
 pub const STAGE: u8 = 8;
 pub const MONITOR: u8 = 21;
+pub const CVD_STAGE: u8 = 32;
+pub type Growth = g::Msg<60, InstrumentRequest<CVD_STAGE>>;
+pub type Grown<'a> = g::Msg<61, &'a [u8]>;
+const DEPOSITION_RATE: u8 = 62;
+pub type Rate = g::Msg<DEPOSITION_RATE, InstrumentRequest<DEPOSITION_RATE>>;
+pub type RateResult<'a> = g::Msg<63, &'a [u8]>;
+pub type RatePassed<'a> = g::Msg<64, ReviewReply<'a, true>>;
+pub type RateFailed<'a> = g::Msg<65, ReviewReply<'a, false>>;
 pub const CD: u8 = 50;
 pub const THICKNESS: u8 = 51;
 pub const PROFILE: u8 = 52;
@@ -133,6 +141,8 @@ impl<const CHAMBER: u8> WirePayload for InstrumentRequest<CHAMBER> {
             DEPOSITION_CHAMBER => ("process", "film_integrity_check"),
             ETCH_CHAMBER => ("process", "etch_uniformity_check"),
             STEPPER => ("process", "overlay_alignment"),
+            CVD_STAGE => ("process", "cvd_growth"),
+            DEPOSITION_RATE => ("check_type", "deposition_rate"),
             MONITOR => ("check_type", "cross_reference"),
             METROLOGY => ("measurement", "overlay_alignment"),
             other => (
@@ -169,6 +179,14 @@ impl SimulatorOperation for InstrumentRequest<ETCH_CHAMBER> {
 
 impl SimulatorOperation for InstrumentRequest<MONITOR> {
     const RPC: (&'static str, &'static str) = ("PROCESS_CONTROLLER", "check_monitoring");
+}
+
+impl SimulatorOperation for InstrumentRequest<CVD_STAGE> {
+    const RPC: (&'static str, &'static str) = ("DEPOSITOR", "run_deposition");
+}
+
+impl SimulatorOperation for InstrumentRequest<DEPOSITION_RATE> {
+    const RPC: (&'static str, &'static str) = ("DEPOSITOR", "check_monitoring");
 }
 
 impl SimulatorOperation for InstrumentRequest<STEPPER> {

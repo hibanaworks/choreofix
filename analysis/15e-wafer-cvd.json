@@ -1,0 +1,278 @@
+{
+  "task": "15E",
+  "scope": "Six scripted wash guests. CVD growth and in-situ monitoring are initiated by the depositor through its bound ChoreoFS files. Lithography and etching preparation and the two post-validation measurements still use fixtures.",
+  "model_calls": 0,
+  "scored_benchmark": false,
+  "archive": "output/verification/wafer-cvd-15e-20261121.UGJM2Q",
+  "build_receipt_sha256": "d5eb70980d18b3200f6bfeab0730b7a190c6fdd786ba25178f0e1ea64fedb4eb",
+  "source_manifest_sha256": "b4ba39b87b56f695a31cf0bb101a6bb00c12549dd61663aae49e703e94243db4",
+  "test_binary_sha256": "fc6873b9282b7d65581b722c4f0be16426b8dc60e149173cb91603e67a1ca020",
+  "runtime_sha256": "f8146d5efa6ded036eac5ea4e726f5f94f65d14406b7f937edfe9168e6835f73",
+  "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+  "totals": {
+    "shell_effects": 70,
+    "fabrication_fixture_calls": 38,
+    "fixture_post_validation_calls": 14,
+    "epf_records": 34589
+  },
+  "cases": [
+    {
+      "case": "dep-litho-etch",
+      "wasm_participants": 6,
+      "shell_effects": 11,
+      "fabrication_fixture_calls": 6,
+      "fixture_post_validation_calls": 2,
+      "epf_records": 5825,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "cvd_growth": {
+        "rpc_id": 8,
+        "request_frame": 65,
+        "receive_row": 446,
+        "effect_start_row": 449,
+        "effect_end_row": 706,
+        "reply_frame": 107,
+        "reply_received_row": 712,
+        "success": true,
+        "receipt": 1,
+        "inputs": []
+      },
+      "rate_checks": [
+        {
+          "rpc_id": 10,
+          "request_frame": 81,
+          "receive_row": 551,
+          "effect_start_row": 554,
+          "effect_end_row": 565,
+          "reply_frame": 90,
+          "reply_received_row": 599,
+          "success": true,
+          "receipt": 2,
+          "inputs": [
+            1
+          ]
+        }
+      ],
+      "events_sha256": "7732dec7bfe8b2be6f6c36e4a69b103ad3e4a3c14568d7bb5f96a418420360d9",
+      "result_sha256": "000a488beb474590c9e3ab6678763090dfa56856567ca5aabfc096a274584fd0"
+    },
+    {
+      "case": "etch-dep-litho",
+      "wasm_participants": 6,
+      "shell_effects": 11,
+      "fabrication_fixture_calls": 6,
+      "fixture_post_validation_calls": 2,
+      "epf_records": 5814,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "cvd_growth": {
+        "rpc_id": 9,
+        "request_frame": 82,
+        "receive_row": 559,
+        "effect_start_row": 562,
+        "effect_end_row": 817,
+        "reply_frame": 124,
+        "reply_received_row": 825,
+        "success": true,
+        "receipt": 3,
+        "inputs": []
+      },
+      "rate_checks": [
+        {
+          "rpc_id": 11,
+          "request_frame": 98,
+          "receive_row": 664,
+          "effect_start_row": 666,
+          "effect_end_row": 667,
+          "reply_frame": 107,
+          "reply_received_row": 712,
+          "success": true,
+          "receipt": 4,
+          "inputs": [
+            3
+          ]
+        }
+      ],
+      "events_sha256": "6c452670d27d51817409e7f52d7434b570545d0722bc882a981d82903da78d57",
+      "result_sha256": "971ac3adc19ff15d086544596e3d7c8bcc6054cf9eba0b663203e7450010699d"
+    },
+    {
+      "case": "etch-first",
+      "wasm_participants": 6,
+      "shell_effects": 11,
+      "fabrication_fixture_calls": 6,
+      "fixture_post_validation_calls": 2,
+      "epf_records": 5374,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "cvd_growth": {
+        "rpc_id": 8,
+        "request_frame": 65,
+        "receive_row": 446,
+        "effect_start_row": 449,
+        "effect_end_row": 706,
+        "reply_frame": 107,
+        "reply_received_row": 712,
+        "success": true,
+        "receipt": 1,
+        "inputs": []
+      },
+      "rate_checks": [
+        {
+          "rpc_id": 10,
+          "request_frame": 81,
+          "receive_row": 551,
+          "effect_start_row": 554,
+          "effect_end_row": 566,
+          "reply_frame": 90,
+          "reply_received_row": 599,
+          "success": true,
+          "receipt": 2,
+          "inputs": [
+            1
+          ]
+        }
+      ],
+      "events_sha256": "030b8a04e9236e0cfde9e2fc3d56121b1ac1aa1485c0c72a735085f93228d7fc",
+      "result_sha256": "3af17c6fe73c94b71027d72c82d33d1a0fdd17db64ec9f3605563a7fa4f6f50d"
+    },
+    {
+      "case": "film-first",
+      "wasm_participants": 6,
+      "shell_effects": 11,
+      "fabrication_fixture_calls": 6,
+      "fixture_post_validation_calls": 2,
+      "epf_records": 5385,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "cvd_growth": {
+        "rpc_id": 15,
+        "request_frame": 183,
+        "receive_row": 1230,
+        "effect_start_row": 1233,
+        "effect_end_row": 1490,
+        "reply_frame": 225,
+        "reply_received_row": 1496,
+        "success": true,
+        "receipt": 7,
+        "inputs": []
+      },
+      "rate_checks": [
+        {
+          "rpc_id": 17,
+          "request_frame": 199,
+          "receive_row": 1335,
+          "effect_start_row": 1338,
+          "effect_end_row": 1349,
+          "reply_frame": 208,
+          "reply_received_row": 1383,
+          "success": true,
+          "receipt": 8,
+          "inputs": [
+            7
+          ]
+        }
+      ],
+      "events_sha256": "9736a0f276eec5ab7a71f058c0e8ec9aefaf5e869847b12bac3fe8ac6d2bde57",
+      "result_sha256": "423572791e851ce8968d68c36b9f6fed5ebfc929a57d9414ffe7ae529483d5a1"
+    },
+    {
+      "case": "litho-etch-dep",
+      "wasm_participants": 6,
+      "shell_effects": 13,
+      "fabrication_fixture_calls": 8,
+      "fixture_post_validation_calls": 2,
+      "epf_records": 6278,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "cvd_growth": {
+        "rpc_id": 10,
+        "request_frame": 99,
+        "receive_row": 684,
+        "effect_start_row": 687,
+        "effect_end_row": 1212,
+        "reply_frame": 182,
+        "reply_received_row": 1220,
+        "success": true,
+        "receipt": 9,
+        "inputs": []
+      },
+      "rate_checks": [
+        {
+          "rpc_id": 12,
+          "request_frame": 115,
+          "receive_row": 789,
+          "effect_start_row": 792,
+          "effect_end_row": 803,
+          "reply_frame": 123,
+          "reply_received_row": 832,
+          "success": false,
+          "receipt": null,
+          "inputs": null
+        },
+        {
+          "rpc_id": 15,
+          "request_frame": 156,
+          "receive_row": 1060,
+          "effect_start_row": 1063,
+          "effect_end_row": 1074,
+          "reply_frame": 165,
+          "reply_received_row": 1107,
+          "success": true,
+          "receipt": 11,
+          "inputs": [
+            9
+          ]
+        }
+      ],
+      "events_sha256": "956319093875114871cb78f89d9efb23bcb5d6eaebe1145ad3fb7dee67b2f445",
+      "result_sha256": "473c3a30092cc7e690edeb43cf39bc17a809d3cbdc5125a521aafd3baab98b49"
+    },
+    {
+      "case": "overlay-retry",
+      "wasm_participants": 6,
+      "shell_effects": 13,
+      "fabrication_fixture_calls": 6,
+      "fixture_post_validation_calls": 4,
+      "epf_records": 5913,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "cvd_growth": {
+        "rpc_id": 23,
+        "request_frame": 315,
+        "receive_row": 2103,
+        "effect_start_row": 2106,
+        "effect_end_row": 2363,
+        "reply_frame": 357,
+        "reply_received_row": 2369,
+        "success": true,
+        "receipt": 11,
+        "inputs": []
+      },
+      "rate_checks": [
+        {
+          "rpc_id": 25,
+          "request_frame": 331,
+          "receive_row": 2208,
+          "effect_start_row": 2211,
+          "effect_end_row": 2221,
+          "reply_frame": 340,
+          "reply_received_row": 2256,
+          "success": true,
+          "receipt": 12,
+          "inputs": [
+            11
+          ]
+        }
+      ],
+      "events_sha256": "b8799a3430395e3153243f94459ce3e73a320b02f49d2bdc3227f89f2b3ad4fd",
+      "result_sha256": "47adab7e786f649df91f8877fe4a7e59000f111b86f62762d9fd64e6c35e0a37"
+    }
+  ]
+}

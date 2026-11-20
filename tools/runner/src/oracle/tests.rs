@@ -916,10 +916,10 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
         world
             .set_test_delays(json!({"run_stepper_exposure":[0.5,0.5],
             "run_metrology_measurement":[0.0,0.0],"check_monitoring":[0.0,0.0],
-            "run_etch_process":[0.0,0.0],"run_deposition":[0.0,0.0]}))
+            "run_etch_process":[0.0,0.0],"run_deposition":[0.5,0.5]}))
             .await?;
-        let fabrication_calls = 8 + 3 * usize::from(retry_control);
-        let guest_effects = 9 + 2 * usize::from(retry) + usize::from(retry_control);
+        let fabrication_calls = 6 + 2 * usize::from(retry_control);
+        let guest_effects = 11 + 2 * usize::from(retry) + 2 * usize::from(retry_control);
         let (guest, runtime) =
             process::guest(&binary, &wash, &[], &directory, trace, world.clone())?;
         let ((), outcome) = hibana_runtime::race(
@@ -941,10 +941,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                             ("run_etch_process", "process", "pattern_transfer_etch"),
                             ("check_monitoring", "check_type", "etch_endpoint"),
                         ],
-                        &[
-                            ("run_deposition", "process", "cvd_growth"),
-                            ("check_monitoring", "check_type", "deposition_rate"),
-                        ],
+                        &[],
                         &[
                             ("run_etch_process", "process", "reactive_ion_etch"),
                             ("check_monitoring", "check_type", "etch_rate"),
@@ -973,6 +970,27 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                         let dimension = dimensions[i];
                         if prepare {
                             let mut receipts = Vec::new();
+                            if who == "DEPOSITOR" {
+                                let growth = "/service/run_deposition";
+                                let rate = "/service/check_monitoring";
+                                let grow = format!("echo '{{\"process\":\"cvd_growth\"}}' > {growth}");
+                                let sample = format!("echo '{{\"check_type\":\"deposition_rate\"}}' > {rate}; cat {rate}");
+                                let early = guest.command(who, format!("echo '{{\"check_type\":\"deposition_rate\"}}' | dd of={rate} oflag=nonblock")).await?;
+                                assert!(early["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{early}");
+                                assert_eq!(guest.command(who, grow).await?["stdout"], "wash> ");
+                                let mut measured = wafer_shell_result(&guest.command(who, sample.clone()).await?)?;
+                                if retry_control {
+                                    assert_eq!(measured["data"]["status"], "check_failed");
+                                    let early = guest.command(who, "echo ready | dd of=/service/fab_ready oflag=nonblock".into()).await?;
+                                    assert!(early["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{early}");
+                                    measured = wafer_shell_result(&guest.command(who, sample).await?)?;
+                                }
+                                let grown = wafer_shell_result(&guest.command(who, format!("cat {growth}")).await?)?;
+                                assert_eq!(grown["success"], true, "{grown}");
+                                assert_eq!(measured["success"], true, "{measured}");
+                                assert_eq!(measured["data"]["inputs"], json!([grown["data"]["receipt"]]));
+                                receipts.extend([grown["data"]["receipt"].clone(), measured["data"]["receipt"].clone()]);
+                            }
                             for &(tool, field, operation) in processing[i] {
                                 let result =
                                     wafer_fixture_call(&world, who, tool, field, operation, operation).await?;
@@ -1773,6 +1791,12 @@ fn check_wafer_effects(
     let completed = by_label(CrossReferencePassed::LOGICAL_LABEL);
     assert_eq!(completed.len(), 1);
     checks.extend(completed);
+    let mut rates = by_label(RateFailed::LOGICAL_LABEL);
+    assert_eq!(rates.len(), usize::from(retry_control));
+    let stable = by_label(RatePassed::LOGICAL_LABEL);
+    assert_eq!(stable.len(), 1);
+    rates.extend(stable);
+    let depositor_file: u8 = serde_json::from_value(roles["DEP_INBOX"].clone())?;
     let operator: u8 = serde_json::from_value(roles["CONTROL_OPERATOR"].clone())?;
     let control_file: u8 = serde_json::from_value(roles["CONTROL_FILE"].clone())?;
     for (agent, tool, actor, resource, caller, responder, request_label, reply_label, count) in [
@@ -1797,6 +1821,28 @@ fn check_wafer_effects(
             Measure::LOGICAL_LABEL,
             Measured::LOGICAL_LABEL,
             reports.len(),
+        ),
+        (
+            "DEPOSITOR",
+            "run_deposition",
+            DEPOSITION_CHAMBER,
+            CVD_STAGE,
+            depositor_file,
+            DEPOSITION_CHAMBER,
+            Growth::LOGICAL_LABEL,
+            Grown::LOGICAL_LABEL,
+            1,
+        ),
+        (
+            "DEPOSITOR",
+            "check_monitoring",
+            operator,
+            CVD_STAGE,
+            depositor_file,
+            DEPOSITION_CHAMBER,
+            Rate::LOGICAL_LABEL,
+            RateResult::LOGICAL_LABEL,
+            rates.len(),
         ),
         (
             "PROCESS_CONTROLLER",
@@ -1838,12 +1884,13 @@ fn check_wafer_effects(
             assert_eq!(replies[i]["receive_commit"]["view"], caller);
             let effect =
                 wafer_instrument_effect(rows, requests[i], replies[i], starts[i], scored[i])?;
-            if actor == METROLOGY || actor == operator {
-                let report = if actor == METROLOGY {
-                    reports[i]
-                } else {
-                    checks[i]
-                };
+            let confirmation = match request_label {
+                Measure::LOGICAL_LABEL => Some(reports[i]),
+                CrossReference::LOGICAL_LABEL => Some(checks[i]),
+                Rate::LOGICAL_LABEL => Some(rates[i]),
+                _ => None,
+            };
+            if let Some(report) = confirmation {
                 let (reported_at, reported) = wafer_frame(rows, report)?;
                 assert_eq!(report["send_actor"], actor);
                 assert_eq!(report["receive_commit"]["actor"], responder);
@@ -1857,6 +1904,19 @@ fn check_wafer_effects(
             evidence.push(effect);
         }
     }
+    let growth = evidence
+        .iter()
+        .find(|e| e["arguments"]["process"] == "cvd_growth")
+        .ok_or("missing CVD growth")?;
+    let rate = evidence
+        .iter()
+        .find(|e| e["arguments"]["check_type"] == "deposition_rate")
+        .ok_or("missing in-situ rate")?;
+    assert!(
+        growth["effect_start_row"].as_u64().unwrap() < rate["effect_start_row"].as_u64().unwrap()
+            && rate["effect_start_row"].as_u64().unwrap()
+                < growth["effect_end_row"].as_u64().unwrap()
+    );
     let mount = &evidence[0];
     let first_measure = &evidence[1];
     assert!(

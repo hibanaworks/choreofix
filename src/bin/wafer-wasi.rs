@@ -185,6 +185,29 @@ async fn main() -> ShellResult<()> {
             ),
         ),
     );
+    let rate = g::send::<DEP_INBOX, CVD_STAGE, Rate>();
+    let rate_result = g::send::<DEPOSITION_CHAMBER, DEP_INBOX, RateResult>();
+    let stable = g::seq(
+        g::send::<CVD_STAGE, DEPOSITION_CHAMBER, RatePassed>(),
+        g::seq(
+            g::send::<MONITOR, DEPOSITION_CHAMBER, Loan<CVD_STAGE>>(),
+            rate_result,
+        ),
+    );
+    let recheck = g::seq(
+        g::send::<CVD_STAGE, DEPOSITION_CHAMBER, RateFailed>(),
+        g::seq(rate_result, rate),
+    );
+    let growth = g::seq(
+        g::send::<DEP_INBOX, CVD_STAGE, Growth>(),
+        g::seq(
+            g::send::<DEPOSITION_CHAMBER, MONITOR, Loan<CVD_STAGE>>(),
+            g::par(
+                g::send::<DEPOSITION_CHAMBER, DEP_INBOX, Grown>(),
+                g::seq(rate, g::route(stable, g::seq(recheck.roll(), stable))),
+            ),
+        ),
+    );
     let confirmations = g::par(
         g::par(
             g::send::<CONTROL_FILE, LITHO_INBOX, Confirmation<CONFIRM_LITHO>>(),
@@ -243,7 +266,7 @@ async fn main() -> ShellResult<()> {
                                 g::par(
                                     measure_wafer::<LITHO_INBOX, CD>(),
                                     g::par(
-                                        measure_wafer::<DEP_INBOX, THICKNESS>(),
+                                        g::seq(growth, measure_wafer::<DEP_INBOX, THICKNESS>()),
                                         measure_wafer::<ETCH_INBOX, PROFILE>(),
                                     ),
                                 ),
@@ -273,6 +296,7 @@ async fn main() -> ShellResult<()> {
     let stepper = project::<STEPPER>(&source);
     let metrology = project::<METROLOGY>(&source);
     let stage = project::<STAGE>(&source);
+    let cvd_stage = project::<CVD_STAGE>(&source);
     let terminal = project::<TERMINAL>(&source);
     let p_litho = project::<LITHO>(&source);
     let p_litho_inbox = project::<LITHO_INBOX>(&source);
@@ -302,7 +326,7 @@ async fn main() -> ShellResult<()> {
         "roles":{
             "ALIGNER":ALIGNER, "ENGINEER":ENGINEER, "WAFER":WAFER, "TERMINAL":TERMINAL,
             "DEPOSITION_CHAMBER":DEPOSITION_CHAMBER, "ETCH_CHAMBER":ETCH_CHAMBER,
-            "STEPPER":STEPPER, "METROLOGY":METROLOGY, "STAGE":STAGE,
+            "STEPPER":STEPPER, "METROLOGY":METROLOGY, "STAGE":STAGE, "CVD_STAGE":CVD_STAGE,
             "LITHO":LITHO, "LITHO_INBOX":LITHO_INBOX, "LITHO_FILES":LITHO_FILES, "LITHO_TERM":LITHO_TERM,
             "DEP":DEP, "DEP_INBOX":DEP_INBOX, "DEP_FILES":DEP_FILES, "DEP_TERM":DEP_TERM,
             "ETCH":ETCH, "ETCH_INBOX":ETCH_INBOX, "ETCH_FILES":ETCH_FILES, "ETCH_TERM":ETCH_TERM,
@@ -315,7 +339,7 @@ async fn main() -> ShellResult<()> {
             rows(&p_litho), rows(&p_litho_inbox), rows(&p_litho_files), rows(&p_litho_term),
             rows(&p_dep), rows(&p_dep_inbox), rows(&p_dep_files), rows(&p_dep_term),
             rows(&p_etch), rows(&p_etch_inbox), rows(&p_etch_files), rows(&p_etch_term),rows(&p_monitor),rows(&p_control_operator),rows(&p_monitor_station),rows(&p_control),rows(&p_control_file),rows(&p_control_files),rows(&p_control_term),
-            rows(&p_measurer), rows(&p_measure_file), rows(&p_measure_files), rows(&p_measure_term)
+            rows(&p_measurer), rows(&p_measure_file), rows(&p_measure_files), rows(&p_measure_term), rows(&cvd_stage)
         ]
     });
     if path == "--projection" {
@@ -347,6 +371,7 @@ async fn main() -> ShellResult<()> {
         [
             (session, WAFER),
             (session, STAGE),
+            (session, CVD_STAGE),
             (session, LITHO_INBOX),
             (session, DEP_INBOX),
             (session, ETCH_INBOX),
@@ -387,6 +412,13 @@ async fn main() -> ShellResult<()> {
             FdBinding::read(FdReadRow::Base),
         )
     };
+    let depositor_files = [
+        INBOX_FILE,
+        VALIDATION_FILE,
+        READY_FILE,
+        instrument(b"service/run_deposition", 7),
+        instrument(b"service/check_monitoring", 8),
+    ];
     let measure_files = [
         instrument(b"service/pattern", 4),
         instrument(b"service/film", 5),
@@ -437,6 +469,7 @@ async fn main() -> ShellResult<()> {
         let mut stepper = rv.enter(session, &stepper)?;
         let mut metrology = rv.enter(session, &metrology)?;
         let mut stage = rv.enter(session, &stage)?;
+        let mut cvd_stage = rv.enter(session, &cvd_stage)?;
         let mut operator = rv.enter(session, &p_control_operator)?;
         let mut monitor = rv.enter(session, &p_monitor)?;
         let mut station = rv.enter(session, &p_monitor_station)?;
@@ -468,19 +501,48 @@ async fn main() -> ShellResult<()> {
             )
             .await
         };
-        async { fabrication_guest::<DEP, DEP_INBOX, CONFIRM_DEP>(dep_ep, &module).await };
         async {
-            localside::file_metadata::run(
-                &mut dep_files_ep,
-                dep_inbox_ep,
-                [INBOX_FILE, VALIDATION_FILE, READY_FILE],
-            )
-            .await
+            let mut vm = dep_ep;
+            let inbox = vm.recv::<Loan<DEP_INBOX>>().await?;
+            let [
+                mut disposition,
+                mut validation,
+                mut ready,
+                mut grow,
+                mut grown,
+                mut rate,
+                mut checked,
+            ] = [(); 7].map(|_| vec![0; GUEST_MEMORY_BYTES]);
+            let file = ChoreoFsFile::new(INBOX_FILE, inbox)
+                .read_as::<Disposition<DEP_INBOX>>(&mut disposition)
+                .file(VALIDATION_FILE)?
+                .read_as::<Confirmation<CONFIRM_DEP>>(&mut validation)
+                .file(READY_FILE)?
+                .write_as::<FabReady<DEP_INBOX>>(&mut ready)
+                .file(depositor_files[3])?
+                .write_as::<Growth>(&mut grow)
+                .read_as::<Grown>(&mut grown)
+                .file(depositor_files[4])?
+                .write_as::<Rate>(&mut rate)
+                .read_as::<RateResult>(&mut checked);
+            let files = ChoreoFsFiles::new(vm).file(file)?;
+            let mut memory = vec![0; GUEST_MEMORY_BYTES];
+            let mut storage = Box::new(HibanaWasiGuestStorage::uninit());
+            let guest = storage.init(&module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut vm, (file, ())) = files.into_parts();
+            file.into_endpoint().send::<FileExit>(&status).await?;
+            vm.send::<Exit>(&status).await?;
+            Ok(())
+        };
+        async {
+            localside::file_metadata::run(&mut dep_files_ep, dep_inbox_ep, depositor_files).await
         };
         async {
             localside::private_io::run(
                 &mut dep_term_ep,
-                PrivateFs::new(dep_shell, bus, &[INBOX_FILE, VALIDATION_FILE, READY_FILE]),
+                PrivateFs::new(dep_shell, bus, &depositor_files),
             )
             .await
         };
@@ -610,6 +672,21 @@ async fn main() -> ShellResult<()> {
             Ok(())
         };
         async {
+            let mut loaded = monitor.recv::<Loan<CVD_STAGE>>().await?;
+            loop {
+                let measured = effects.apply(loaded.recv::<Rate>().await?).await?;
+                let bytes = encode(&measured)?;
+                if measured["success"] == true {
+                    loaded
+                        .send::<RatePassed>(&ReviewReply::from_bytes(&bytes)?)
+                        .await?;
+                    monitor.send::<Loan<CVD_STAGE>>(loaded).await?;
+                    break;
+                }
+                loaded
+                    .send::<RateFailed>(&ReviewReply::from_bytes(&bytes)?)
+                    .await?;
+            }
             loop {
                 let actual = effects
                     .apply(monitor.recv::<CrossReference>().await?)
@@ -742,7 +819,43 @@ async fn main() -> ShellResult<()> {
             let _returned = aligner.recv::<Loan<WAFER>>().await?;
             Ok(())
         };
-        async { deposition(&mut dep, &effects).await };
+        async {
+            let growth = effects.submit(cvd_stage.recv::<Growth>().await?)?;
+            dep.send::<Loan<CVD_STAGE>>(cvd_stage).await?;
+            async {
+                let [mut load, mut release] = dep.par()?;
+                async {
+                    load.send::<Grown>(&encode(&growth.await?)?.as_slice())
+                        .await?;
+                    Ok(())
+                };
+                async {
+                    loop {
+                        let report = release.offer().await?;
+                        match report.label() {
+                            RateFailed::LOGICAL_LABEL => {
+                                let bytes = report.recv::<RateFailed>().await?.to_vec();
+                                release.send::<RateResult>(&bytes.as_slice()).await?;
+                            }
+                            RatePassed::LOGICAL_LABEL => {
+                                let bytes = report.recv::<RatePassed>().await?.to_vec();
+                                let _returned = release.recv::<Loan<CVD_STAGE>>().await?;
+                                release.send::<RateResult>(&bytes.as_slice()).await?;
+                                return Ok(());
+                            }
+                            label => {
+                                return Err(ShellError::message(format!(
+                                    "unexpected deposition rate result {label}"
+                                )));
+                            }
+                        }
+                    }
+                };
+                Ok(())
+            }
+            .await?;
+            deposition(&mut dep, &effects).await
+        };
         async { etching(&mut etch, &effects).await };
         async {
             localside::private_io::run(&mut terminal, PrivateFs::new(shell, bus, &files)).await
