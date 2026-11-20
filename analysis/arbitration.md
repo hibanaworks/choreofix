@@ -264,6 +264,8 @@ Every module was rebuilt first in at least one trial. The first two rows also is
 
 The runtime SHA-256 was `a6a95a2f92881be1a91dcc9a623f96a66783fedee928a66df66e01f6c50fdc3d`. The journals have SHA-256 `106d0ad5ed6be29a3c21b043ba8f685027dc88ed2dd6a9cac0a2cad065f4930d` and `6d19548df1247ad3c67d2f2e309209a5ca44256ea58b9a3392d27a28b638e5aa`. The [Wasm regression](../tools/runner/src/cascading_build_boundary.rs) includes these two conditions in the `cascading_build_boundary::` qualification.
 
+Across all 27 scripted conditions on that executable, the common simulator finished and the EPF and effect audits passed. A separate depth-2 pilot used the same executable with five Luna xhigh participants. At 164.51 seconds the integrator selected module B for a rebuild. After that selection, builder B tried the update, compile and outcome files and did not read its reconsideration file. At 308.68 seconds it issued `exit 0` before a final link. Hibana reported `EndpointDropped`. The simulator recorded eight effects and an incomplete task with zero violations. This live pilot failed. Its journal SHA-256 is `455b05f96c448df8045db7df6e33d3474da5e6eb5fab2ac6e21a5225bca7d334`.
+
 ## Admission to a mechanism comparison
 
 For each paired task, record which first contenders are legal, which independent effects may overlap, when the agent receives a reply, and how the same agent proceeds after an early or malformed request. Use the same legal and prohibited examples, simulator, prompt information, action interface, budget and deadlines on both arms. Exercise an early call followed by a corrected call in the same session and observe whether either call produced an effect. A blocked call, a recoverable error and a terminated run are different outcomes.
