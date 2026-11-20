@@ -60,7 +60,7 @@ pub(super) async fn run(
             "environments":[],"sandbox":"read-only","approvalPolicy":"never",
             "baseInstructions":format!("{}\nUse only the supplied experiment tools. Do not use native tools or start other agents. Finish with a brief final response.",person.participant.instructions),
             "config":{"model_reasoning_effort":EFFORT,"features.shell_tool":false,"features.multi_agent":false,"project_doc_max_bytes":0},
-            "dynamicTools":[{"type":"function","name":"shell","description":"Run a command in your WASI wash guest over ChoreoFS. If a tool call is interrupted, call shell with {} to collect the original terminal output. This waits for your oldest interrupted command without running it again.","inputSchema":{"type":"object","properties":{"command":{"type":"string"}},"additionalProperties":false}}]
+            "dynamicTools":[{"type":"function","name":"shell","description":"Run a command in your WASI wash guest over ChoreoFS. An empty object {} retrieves the output of your oldest interrupted command, even after the guest has exited. After an interruption, repeat {} until no_interrupted_command; this never runs a guest command.","inputSchema":{"type":"object","properties":{"command":{"type":"string"}},"additionalProperties":false}}]
         }});
         person.trace.record("send", &request)?;
         let reply = wire

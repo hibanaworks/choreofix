@@ -118,6 +118,7 @@ async fn exchange(mode: &str) -> Result<(Vec<Conversation>, Vec<Value>)> {
                 "tool":"shell","arguments":{},"status":"completed","success":true,"contentItems":reply["result"]["contentItems"]}}})
             };
             let finish = |thread: &str| json!({"method":"turn/completed","params":{"threadId":thread,"turn":{"status":"completed","error":null}}});
+            let command = |id: &str, script: &str| json!({"id":id,"method":"item/tool/call","params":{"threadId":"t0","turnId":"turn-0","callId":id,"tool":"shell","arguments":{"command":script}}});
             if mode == "recover_after" {
                 let original: Value = serde_json::from_str(
                     &incoming
@@ -135,6 +136,18 @@ async fn exchange(mode: &str) -> Result<(Vec<Conversation>, Vec<Value>)> {
             if mode == "closed_before_reply" {
                 wire::send(&mut server_write, &finish("t0")).await?;
                 return Ok(());
+            }
+            if mode == "recover_after" {
+                wire::send(&mut server_write, &command("second", "work-1")).await?;
+                let reply: Value = serde_json::from_str(
+                    &incoming.next_line().await?.ok_or("second output missing")?,
+                )?;
+                assert_eq!(reply["id"], "second");
+                wire::send(
+                    &mut server_write,
+                    &cancelled("t0", "turn-0", "second", json!({"command":"work-1"})),
+                )
+                .await?;
             }
             if mode == "recover_before" {
                 // A different conversation cannot collect our command, and cancelling the
@@ -183,6 +196,42 @@ async fn exchange(mode: &str) -> Result<(Vec<Conversation>, Vec<Value>)> {
                 json!({"original_call":"exec-0","command":"work-0"})
             );
             wire::send(&mut server_write, &ack("t0", "turn-0", &received)).await?;
+            if mode == "recover_after" {
+                wire::send(&mut server_write, &command("exit-call", "exit 0")).await?;
+                let exit: Value = serde_json::from_str(
+                    &incoming.next_line().await?.ok_or("exit reply missing")?,
+                )?;
+                assert_eq!(exit["id"], "exit-call");
+                assert_eq!(
+                    serde_json::from_str::<Value>(
+                        exit["result"]["contentItems"][0]["text"].as_str().unwrap()
+                    )?["exit_status"],
+                    0
+                );
+                let mut exit_ack = ack("t0", "turn-0", &exit);
+                exit_ack["params"]["item"]["arguments"] = json!({"command":"exit 0"});
+                wire::send(&mut server_write, &exit_ack).await?;
+                for (id, expected) in [
+                    ("remaining", shell_result(mode, "agent-0", "work-1")),
+                    ("empty", json!({"status":"no_interrupted_command"})),
+                ] {
+                    wire::send(&mut server_write, &collect(id, "t0", "turn-0")).await?;
+                    let reply: Value = serde_json::from_str(
+                        &incoming
+                            .next_line()
+                            .await?
+                            .ok_or("collection reply missing")?,
+                    )?;
+                    assert_eq!(reply["id"], id);
+                    assert_eq!(
+                        serde_json::from_str::<Value>(
+                            reply["result"]["contentItems"][0]["text"].as_str().unwrap()
+                        )?,
+                        expected
+                    );
+                    wire::send(&mut server_write, &ack("t0", "turn-0", &reply)).await?;
+                }
+            }
             wire::send(&mut server_write, &finish("t0")).await?;
             if mode == "recover_before" {
                 let other: Value = serde_json::from_str(
@@ -301,6 +350,22 @@ async fn exchange(mode: &str) -> Result<(Vec<Conversation>, Vec<Value>)> {
                 )),
             )?;
         }
+        if mode == "recover_after" {
+            for expected in ["work-1", "exit 0"] {
+                let (request, reply) = wire::receive(&commands, &mut ready)
+                    .await?
+                    .ok_or("guest command missing")??;
+                assert_eq!(request["command"], expected);
+                wire::respond(
+                    &reply,
+                    request["id"].clone(),
+                    Ok(shell_result(mode, "agent-0", expected)),
+                )?;
+            }
+            // Closing the guest transport also exposes any attempt to run a
+            // new command when the model collects output after exit.
+            drop(commands);
+        }
         Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
     };
     let mut completed = Vec::new();
@@ -339,12 +404,18 @@ async fn exchange(mode: &str) -> Result<(Vec<Conversation>, Vec<Value>)> {
                 .collect::<serde_json::Result<Vec<_>>>()?;
             let commands =
                 crate::audit::shell_exchanges(&rows, &json!(person.observed.tool_calls), true)?;
-            let expected = if index == 0 {
+            let first = if index == 0 {
                 ("work-0".to_owned(), shell_result(mode, "agent-0", "work-0"))
             } else {
                 ("other work".to_owned(), json!({"stdout":"other"}))
             };
-            assert_eq!(commands, [expected]);
+            let mut expected = vec![first];
+            if mode == "recover_after" {
+                for script in ["work-1", "exit 0"] {
+                    expected.push((script.to_owned(), shell_result(mode, "agent-0", script)));
+                }
+            }
+            assert_eq!(commands, expected);
         }
     }
     fs::remove_dir_all(root)?;
@@ -356,7 +427,7 @@ fn shell_result(mode: &str, agent: &str, command: &str) -> Value {
         return json!({"stdout":"cat: Permission denied"});
     }
     let mut result = json!({"stdout":format!("{agent}/{command}")});
-    if mode.starts_with("late") {
+    if mode.starts_with("late") || command == "exit 0" {
         result["exit_status"] = json!(0);
     }
     result

@@ -754,7 +754,10 @@ waiting for its dependency does not block the other guests.
 Ordinary shell errors and invalid argument data can be corrected. Use actual
 responses to reconsider your work. When your assigned work is finished,
 close your guest with exit 0 before your final response. After an exit_status
-reply, do not call shell again. Leaving before doing the work fails the run.
+reply the guest accepts no further commands. If any shell calls were interrupted,
+collect their saved replies with empty shell calls ({{}}) until the response is
+no_interrupted_command. Collection also works after exit. Leaving before doing
+the work fails the run.
 "#,
         files_heading = if large_document {
             "Your role has these service files."
