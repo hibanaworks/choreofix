@@ -1,8 +1,11 @@
 //! Every effect request uses its actual infrastructure Endpoint.
 use super::{arguments::Arguments, global::*};
 use crate::{
-    imp::json::encode,
-    shell::{ShellError, ShellResult, imp::service::Domain},
+    imp::json::{decode, encode},
+    shell::{
+        ShellError, ShellResult,
+        imp::service::{PairedEffects, ReceivedEffects},
+    },
 };
 use hibana::Endpoint;
 
@@ -12,9 +15,8 @@ use hibana::g::Message;
 #[hibana_runtime::scope]
 pub async fn developer<const DEVELOPER: u8, const COMPONENT: u8>(
     endpoint: &mut Endpoint<DEVELOPER>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
-    let agent = Arguments::<DEVELOPER>::AGENT;
     loop {
         let next = endpoint.offer().await?;
         let mut workspace = match next.label() {
@@ -41,11 +43,8 @@ pub async fn developer<const DEVELOPER: u8, const COMPONENT: u8>(
         };
 
         workspace.send::<WorkspaceAvailable>(&()).await?;
-        let arguments = workspace.recv::<Compile<COMPONENT>>().await?.into_value();
-        let compiled = domain
-            .execute(agent, "compile_code", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let arguments = workspace.recv::<Compile<COMPONENT>>().await?;
+        let compiled = effects.apply(arguments).await?;
         let bytes = encode(&compiled)?;
         if compiled["success"] != true {
             workspace
@@ -60,11 +59,8 @@ pub async fn developer<const DEVELOPER: u8, const COMPONENT: u8>(
         }
         workspace.send::<Compiled>(&bytes.as_slice()).await?;
 
-        let arguments = workspace.recv::<UnitTest<COMPONENT>>().await?.into_value();
-        let tested = domain
-            .execute(agent, "run_unit_tests", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let arguments = workspace.recv::<UnitTest<COMPONENT>>().await?;
+        let tested = effects.apply(arguments).await?;
         let bytes = encode(&tested)?;
         if tested["success"] != true {
             workspace
@@ -82,16 +78,18 @@ pub async fn developer<const DEVELOPER: u8, const COMPONENT: u8>(
             .send::<RegistryAccepted<DEVELOPER>>(&ReviewReply::from_bytes(&bytes)?)
             .await?;
 
-        let admitted = endpoint.recv::<Publish<DEVELOPER>>().await?;
+        let admitted =
+            Arguments::from_bytes(endpoint.recv::<Publish<DEVELOPER>>().await?.as_bytes())?;
         endpoint
             .send::<RegistryIntent<DEVELOPER>>(&admitted)
             .await?;
+        let resources = admitted.into();
         let mut registry = endpoint.recv::<RegistryLoan>().await?;
         async {
-            async { workspace.send::<ReadBuild<DEVELOPER>>(&admitted).await };
+            async { workspace.send::<ReadBuild<DEVELOPER>>(&resources).await };
             async {
                 registry
-                    .send::<RegisterArtifact<DEVELOPER>>(&admitted)
+                    .send::<RegisterArtifact<DEVELOPER>>(&resources)
                     .await
             };
             Ok::<(), ShellError>(())
@@ -111,56 +109,62 @@ pub async fn developer<const DEVELOPER: u8, const COMPONENT: u8>(
 pub async fn registry_owner<'run>(
     endpoint: &mut Endpoint<'run, REGISTRY_OWNER>,
     mut registry: Endpoint<'run, ARTIFACT_STORE>,
-    domain: &impl Domain,
+    effects: &impl PairedEffects,
 ) -> ShellResult<()> {
     loop {
         let next = endpoint.offer().await?;
-        let (agent, component, tested, admitted, workspace, artifact) = match next.label() {
+        let result = match next.label() {
             RegistryAccepted::<FRONTEND_DEV>::LOGICAL_LABEL => {
                 let tested =
                     crate::imp::json::decode(next.recv::<RegistryAccepted<FRONTEND_DEV>>().await?)?;
-                let admitted = endpoint
-                    .recv::<RegistryIntent<FRONTEND_DEV>>()
-                    .await?
-                    .into_value();
+                let admitted = decode(
+                    endpoint
+                        .recv::<RegistryIntent<FRONTEND_DEV>>()
+                        .await?
+                        .as_bytes(),
+                )?;
                 endpoint.send::<RegistryLoan>(registry).await?;
-                let (workspace, artifact) = async {
-                    let [mut workspace, mut artifact] = endpoint.par()?;
+                let [mut workspace, mut artifact] = endpoint.par()?;
+                let (build, store) = async {
                     async { workspace.recv::<ReadBuild<FRONTEND_DEV>>().await };
                     async { artifact.recv::<RegisterArtifact<FRONTEND_DEV>>().await };
                 }
                 .await?;
-                (
-                    "FRONTEND_DEV",
-                    "frontend",
-                    tested,
-                    admitted,
-                    workspace.into_value(),
-                    artifact.into_value(),
-                )
+                if tested["data"]["component"] != "frontend"
+                    || tested["data"]["developer"] != "FRONTEND_DEV"
+                    || decode(build.as_bytes())? != admitted
+                {
+                    return Err(ShellError::message(
+                        "publish requirements differ from the admitted artifact",
+                    ));
+                }
+                effects.apply_pair(build, store).await?
             }
             RegistryAccepted::<BACKEND_DEV>::LOGICAL_LABEL => {
                 let tested =
                     crate::imp::json::decode(next.recv::<RegistryAccepted<BACKEND_DEV>>().await?)?;
-                let admitted = endpoint
-                    .recv::<RegistryIntent<BACKEND_DEV>>()
-                    .await?
-                    .into_value();
+                let admitted = decode(
+                    endpoint
+                        .recv::<RegistryIntent<BACKEND_DEV>>()
+                        .await?
+                        .as_bytes(),
+                )?;
                 endpoint.send::<RegistryLoan>(registry).await?;
-                let (workspace, artifact) = async {
-                    let [mut workspace, mut artifact] = endpoint.par()?;
+                let [mut workspace, mut artifact] = endpoint.par()?;
+                let (build, store) = async {
                     async { workspace.recv::<ReadBuild<BACKEND_DEV>>().await };
                     async { artifact.recv::<RegisterArtifact<BACKEND_DEV>>().await };
                 }
                 .await?;
-                (
-                    "BACKEND_DEV",
-                    "backend",
-                    tested,
-                    admitted,
-                    workspace.into_value(),
-                    artifact.into_value(),
-                )
+                if tested["data"]["component"] != "backend"
+                    || tested["data"]["developer"] != "BACKEND_DEV"
+                    || decode(build.as_bytes())? != admitted
+                {
+                    return Err(ShellError::message(
+                        "publish requirements differ from the admitted artifact",
+                    ));
+                }
+                effects.apply_pair(build, store).await?
             }
             RegistryRejected::LOGICAL_LABEL => {
                 next.recv::<RegistryRejected>().await?;
@@ -182,11 +186,8 @@ pub async fn registry_owner<'run>(
             }
             QaSnapshot::LOGICAL_LABEL => {
                 next.recv::<QaSnapshot>().await?;
-                let arguments = registry.recv::<PullForQa>().await?.into_value();
-                let result = domain
-                    .execute("QA_ENGINEER", "pull_artifacts", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let arguments = registry.recv::<PullForQa>().await?;
+                let result = effects.apply(arguments).await?;
                 registry
                     .send::<QaPulled>(&ReviewReply::from_bytes(&encode(&result)?)?)
                     .await?;
@@ -194,11 +195,8 @@ pub async fn registry_owner<'run>(
             }
             ReleaseApproved::LOGICAL_LABEL => {
                 next.recv::<ReleaseApproved>().await?;
-                let arguments = registry.recv::<PullForRelease>().await?.into_value();
-                let result = domain
-                    .execute("RELEASE_ENGINEER", "pull_artifacts", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let arguments = registry.recv::<PullForRelease>().await?;
+                let result = effects.apply(arguments).await?;
                 registry
                     .send::<ReleasePulled>(&ReviewReply::from_bytes(&encode(&result)?)?)
                     .await?;
@@ -214,19 +212,6 @@ pub async fn registry_owner<'run>(
                 )));
             }
         };
-        if tested["data"]["component"] != component
-            || tested["data"]["developer"] != agent
-            || workspace != admitted
-            || artifact != admitted
-        {
-            return Err(ShellError::message(
-                "publish requirements differ from the admitted artifact",
-            ));
-        }
-        let result = domain
-            .execute(agent, "publish_artifact", admitted)
-            .await
-            .map_err(ShellError::message)?;
         let bytes = encode(&result)?;
         endpoint.send::<Published>(&bytes.as_slice()).await?;
         registry = endpoint.recv::<RegistryLoan>().await?;
@@ -236,42 +221,30 @@ pub async fn registry_owner<'run>(
 pub async fn qa<'run>(
     endpoint: &mut Endpoint<'run, QA>,
     mut test: Endpoint<'run, TEST_ENV>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     loop {
         let workspace = endpoint.recv::<WorkspaceLoan>().await?;
         let first = test.offer().await?;
         let (integration, e2e) = match first.label() {
             Integration::LOGICAL_LABEL => {
-                let arguments = first.recv::<Integration>().await?.into_value();
-                let integration = domain
-                    .execute("QA_ENGINEER", "run_integration_tests", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let arguments = first.recv::<Integration>().await?;
+                let integration = effects.apply(arguments).await?;
                 test.send::<Integrated>(&encode(&integration)?.as_slice())
                     .await?;
 
-                let arguments = test.recv::<E2e>().await?.into_value();
-                let e2e = domain
-                    .execute("QA_ENGINEER", "run_e2e_tests", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let arguments = test.recv::<E2e>().await?;
+                let e2e = effects.apply(arguments).await?;
                 test.send::<E2eTested>(&encode(&e2e)?.as_slice()).await?;
                 (integration, e2e)
             }
             E2e::LOGICAL_LABEL => {
-                let arguments = first.recv::<E2e>().await?.into_value();
-                let e2e = domain
-                    .execute("QA_ENGINEER", "run_e2e_tests", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let arguments = first.recv::<E2e>().await?;
+                let e2e = effects.apply(arguments).await?;
                 test.send::<E2eTested>(&encode(&e2e)?.as_slice()).await?;
 
-                let arguments = test.recv::<Integration>().await?.into_value();
-                let integration = domain
-                    .execute("QA_ENGINEER", "run_integration_tests", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let arguments = test.recv::<Integration>().await?;
+                let integration = effects.apply(arguments).await?;
                 test.send::<Integrated>(&encode(&integration)?.as_slice())
                     .await?;
                 (integration, e2e)
@@ -318,7 +291,7 @@ pub async fn qa<'run>(
 
 pub async fn release<'run>(
     endpoint: &mut Endpoint<'run, RELEASE>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     let permission = endpoint.offer().await?;
     match permission.label() {
@@ -339,11 +312,8 @@ pub async fn release<'run>(
         }
     }
     let mut test = endpoint.recv::<Loan<TEST_ENV>>().await?;
-    let arguments = test.recv::<Stage>().await?.into_value();
-    let deployed = domain
-        .execute("RELEASE_ENGINEER", "deploy_staging", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let arguments = test.recv::<Stage>().await?;
+    let deployed = effects.apply(arguments).await?;
     let bytes = encode(&deployed)?;
     test.send::<Staged>(&bytes.as_slice()).await?;
 
@@ -351,11 +321,8 @@ pub async fn release<'run>(
         endpoint
             .send::<StagingReady>(&ReviewReply::from_bytes(&bytes)?)
             .await?;
-        let arguments = test.recv::<SmokeStaging>().await?.into_value();
-        let checked = domain
-            .execute("RELEASE_ENGINEER", "run_smoke_tests", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let arguments = test.recv::<SmokeStaging>().await?;
+        let checked = effects.apply(arguments).await?;
         let bytes = encode(&checked)?;
         test.send::<StagingResult>(&bytes.as_slice()).await?;
         (checked, bytes)
@@ -378,20 +345,14 @@ pub async fn release<'run>(
         .await?;
 
     let mut production = endpoint.recv::<Loan<PROD_ENV>>().await?;
-    let arguments = production.recv::<Deploy>().await?.into_value();
-    let result = domain
-        .execute("RELEASE_ENGINEER", "deploy_production", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let arguments = production.recv::<Deploy>().await?;
+    let result = effects.apply(arguments).await?;
     production
         .send::<Deployed>(&ReviewReply::from_bytes(&encode(&result)?)?)
         .await?;
 
-    let arguments = production.recv::<SmokeProduction>().await?.into_value();
-    let result = domain
-        .execute("RELEASE_ENGINEER", "run_smoke_tests", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let arguments = production.recv::<SmokeProduction>().await?;
+    let result = effects.apply(arguments).await?;
     let production_result = encode(&result)?;
     production
         .send::<ProductionSmoke>(&production_result.as_slice())
@@ -478,7 +439,7 @@ pub async fn master<'run>(
         QaFailed::LOGICAL_LABEL => {
             let failure = verdict.recv::<QaFailed>().await?.to_vec();
             endpoint.send::<QaReport>(&failure.as_slice()).await?;
-            let repair = endpoint.recv::<RepairDecision>().await?.into_value();
+            let repair = decode(endpoint.recv::<RepairDecision>().await?.as_bytes())?;
             endpoint.send::<ReconsiderQa>(&()).await?;
             let mut workspace = endpoint.recv::<WorkspaceLoan>().await?;
             let component = repair["component"]

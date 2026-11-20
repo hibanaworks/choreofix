@@ -10,8 +10,9 @@ pub const FRONTEND_FILE: u8 = 6;
 pub const BACKEND_FILE: u8 = 7;
 
 pub type Publish<const DEVELOPER: u8> = g::Msg<80, Arguments<DEVELOPER>>;
-pub type ReadBuild<const DEVELOPER: u8> = g::Msg<81, Arguments<DEVELOPER>>;
-pub type RegisterArtifact<const DEVELOPER: u8> = g::Msg<82, Arguments<DEVELOPER>>;
+pub type ReadBuild<const DEVELOPER: u8> = g::Msg<81, Arguments<DEVELOPER, ARTIFACT_PUBLICATION>>;
+pub type RegisterArtifact<const DEVELOPER: u8> =
+    g::Msg<82, Arguments<DEVELOPER, ARTIFACT_PUBLICATION>>;
 pub type Published<'a> = g::Msg<83, &'a [u8]>;
 pub type RegistryIntent<const DEVELOPER: u8> = g::Msg<DEVELOPER, Arguments<DEVELOPER>>;
 pub type WorkspaceLoan<'run> = g::Msg<86, Endpoint<'run, BUILD_SERVER>>;
@@ -44,8 +45,9 @@ pub(super) fn publication<const DEVELOPER: u8, const FILE: u8>() -> impl Project
 }
 
 use super::arguments::{
-    Arguments, BACKEND_COMPONENT, E2E_SUITE, FRONTEND_COMPONENT, FULL_STACK, INTEGRATION_SUITE,
-    PRODUCTION, QA_WORKSPACE, RELEASE_WORKSPACE, STAGING,
+    ARTIFACT_PUBLICATION, Arguments, BACKEND_COMPONENT, COMPILE, DEPLOY, E2E_SUITE,
+    FRONTEND_COMPONENT, FULL_STACK, INTEGRATION_SUITE, PRODUCTION, QA_WORKSPACE, RELEASE_WORKSPACE,
+    STAGE, STAGING, UNIT_TEST,
 };
 use crate::shell::{global::Loan, imp::review_reply::ReviewReply};
 
@@ -78,9 +80,9 @@ pub const SESSION: u32 = 162;
 pub type BeginFrontend = g::Msg<88, ()>;
 pub type BeginBackend = g::Msg<89, ()>;
 pub type BuildReport<'a, const DEVELOPER: u8> = g::Msg<DEVELOPER, &'a [u8]>;
-pub type Compile<const COMPONENT: u8> = g::Msg<91, Arguments<COMPONENT>>;
+pub type Compile<const COMPONENT: u8> = g::Msg<COMPILE, Arguments<COMPONENT, COMPILE>>;
 pub type Compiled<'a> = g::Msg<92, &'a [u8]>;
-pub type UnitTest<const COMPONENT: u8> = g::Msg<93, Arguments<COMPONENT>>;
+pub type UnitTest<const COMPONENT: u8> = g::Msg<UNIT_TEST, Arguments<COMPONENT, UNIT_TEST>>;
 pub type UnitTested<'a> = g::Msg<94, &'a [u8]>;
 pub type PullForQa = g::Msg<95, Arguments<QA_WORKSPACE>>;
 pub type PullForRelease = g::Msg<96, Arguments<RELEASE_WORKSPACE>>;
@@ -90,11 +92,11 @@ pub type Integration = g::Msg<99, Arguments<INTEGRATION_SUITE>>;
 pub type E2e = g::Msg<100, Arguments<E2E_SUITE>>;
 pub type Integrated<'a> = g::Msg<101, &'a [u8]>;
 pub type E2eTested<'a> = g::Msg<102, &'a [u8]>;
-pub type Stage = g::Msg<103, Arguments<FULL_STACK>>;
+pub type Stage = g::Msg<STAGE, Arguments<FULL_STACK, STAGE>>;
 pub type Staged<'a> = g::Msg<104, &'a [u8]>;
 pub type SmokeStaging = g::Msg<105, Arguments<STAGING>>;
 pub type StagingSmoke<'a> = g::Msg<106, ReviewReply<'a, true>>;
-pub type Deploy = g::Msg<107, Arguments<FULL_STACK>>;
+pub type Deploy = g::Msg<DEPLOY, Arguments<FULL_STACK, DEPLOY>>;
 pub type Deployed<'a> = g::Msg<108, ReviewReply<'a, true>>;
 pub type SmokeProduction = g::Msg<109, Arguments<PRODUCTION>>;
 pub type ProductionSmoke<'a> = g::Msg<110, &'a [u8]>;

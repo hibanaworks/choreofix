@@ -40,6 +40,12 @@ the stage check and compares the reply with the requested service and previous
 validations. The pending simulator call owns its arguments and sends them only
 when awaited after those checks. Dropping it before then issues no RPC.
 
+In 16M the build workspace and artifact store each deliver a publish request.
+The registry owner checks the successful test result and the admitted artifact,
+then consumes both receives for one publication. Compile and unit-test
+requests have distinct payload identities, as do staging and production
+deployment requests.
+
 The other task receivers using `Domain::execute(agent, tool, arguments)` still
 select the operation and arguments in native code. The experiment trusts their
 implementation to match the received request and satisfy any additional resource

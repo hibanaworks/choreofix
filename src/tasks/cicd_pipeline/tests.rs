@@ -3,7 +3,10 @@ use crate::{
     imp::json::decode,
     shell::{
         ShellError, ShellResult,
-        imp::{bus::Bus, service::Domain},
+        imp::{
+            bus::Bus,
+            service::{PairedEffects, ReceivedEffects, SimulatorOperation},
+        },
     },
 };
 use hibana::{
@@ -22,13 +25,13 @@ use std::{cell::Cell, time::Duration};
 #[derive(Default)]
 struct Calls(Cell<Vec<Value>>, Option<(&'static str, &'static str)>);
 
-impl Domain for Calls {
-    async fn execute(
+impl Calls {
+    fn record(
         &self,
         agent: &'static str,
         tool: &'static str,
         arguments: Value,
-    ) -> Result<Value, String> {
+    ) -> ShellResult<Value> {
         let mut calls = self.0.take();
         let success = !self.1.is_some_and(|(operation, target)| {
             tool == operation
@@ -49,6 +52,30 @@ impl Domain for Calls {
     }
 }
 
+impl ReceivedEffects for Calls {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        received: ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+        let value = decode(received.as_bytes());
+        async move { self.record(P::RPC.0, P::RPC.1, value?) }
+    }
+}
+
+impl PairedEffects for Calls {
+    async fn apply_pair<P: SimulatorOperation<2>>(
+        &self,
+        build: ReceivedPayload<'_, P>,
+        store: ReceivedPayload<'_, P>,
+    ) -> ShellResult<Value> {
+        let value = decode(build.as_bytes())?;
+        if decode(store.as_bytes())? != value {
+            return Err(ShellError::message("resource requests differ"));
+        }
+        self.record(P::RPC.0, P::RPC.1, value)
+    }
+}
+
 // The adversarial sender claims the wire type of the authorized request.
 struct Substituted;
 
@@ -64,7 +91,8 @@ impl WireEncode for Substituted {
 }
 
 impl WirePayload for Substituted {
-    const SCHEMA_ID: u32 = Arguments::<FRONTEND_DEV>::SCHEMA_ID;
+    const SCHEMA_ID: u32 =
+        Arguments::<FRONTEND_DEV, { super::arguments::ARTIFACT_PUBLICATION }>::SCHEMA_ID;
     type Decoded<'a> = &'a [u8];
 
     fn validate_payload(_: Payload<'_>) -> Result<(), CodecError> {
@@ -132,10 +160,10 @@ async fn one_valid_request_cannot_publish_and_a_substituted_second_is_rejected()
                     build.send::<RegistryAccepted<FRONTEND_DEV>>(&crate::shell::imp::review_reply::ReviewReply::from_bytes(
                         br#"{"success":true,"data":{"component":"frontend","developer":"FRONTEND_DEV"}}"#,
                     )?).await?;
-                    let admitted = developer.recv::<Publish<FRONTEND_DEV>>().await?;
+                    let admitted = Arguments::from_bytes(developer.recv::<Publish<FRONTEND_DEV>>().await?.as_bytes())?;
                     developer.send::<RegistryIntent<FRONTEND_DEV>>(&admitted).await?;
                     let mut store = developer.recv::<RegistryLoan>().await?;
-                    build.send::<ReadBuild<FRONTEND_DEV>>(&admitted).await?;
+                    build.send::<ReadBuild<FRONTEND_DEV>>(&admitted.into()).await?;
                     while !capture.any(|record| {
                         record.id() == tap::ENDPOINT_RECV
                             && record.causal_key() >> 8 == u16::from(REGISTRY_OWNER)
@@ -246,11 +274,11 @@ async fn projected_pipeline_runs_every_effect_through_the_actual_resources() -> 
                 };
                 async {
                     frontend_file.recv::<BeginFrontend>().await?;
-                    let component = Arguments::from_bytes(br#"{"component":"frontend"}"#)?;
+                    let component = br#"{"component":"frontend"}"#;
                     loop {
                     frontend_file.recv::<WorkspaceAvailable>().await?;
                     frontend_file
-                        .send::<Compile<FRONTEND_COMPONENT>>(&component)
+                        .send::<Compile<FRONTEND_COMPONENT>>(&Arguments::from_bytes(component)?)
                         .await?;
                     let compiled = frontend_file.recv::<Compiled>().await?.to_vec();
                     if decode(&compiled)?["success"] == false {
@@ -258,7 +286,7 @@ async fn projected_pipeline_runs_every_effect_through_the_actual_resources() -> 
                         continue;
                     }
                     frontend_file
-                        .send::<UnitTest<FRONTEND_COMPONENT>>(&component)
+                        .send::<UnitTest<FRONTEND_COMPONENT>>(&Arguments::from_bytes(component)?)
                         .await?;
                     let tested = frontend_file.recv::<UnitTested>().await?.to_vec();
                     if decode(&tested)?["success"] == false {
@@ -279,11 +307,11 @@ async fn projected_pipeline_runs_every_effect_through_the_actual_resources() -> 
                 };
                 async {
                     backend_file.recv::<BeginBackend>().await?;
-                    let component = Arguments::from_bytes(br#"{"component":"backend"}"#)?;
+                    let component = br#"{"component":"backend"}"#;
                     loop {
                     backend_file.recv::<WorkspaceAvailable>().await?;
                     backend_file
-                        .send::<Compile<BACKEND_COMPONENT>>(&component)
+                        .send::<Compile<BACKEND_COMPONENT>>(&Arguments::from_bytes(component)?)
                         .await?;
                     let compiled = backend_file.recv::<Compiled>().await?.to_vec();
                     if decode(&compiled)?["success"] == false {
@@ -291,7 +319,7 @@ async fn projected_pipeline_runs_every_effect_through_the_actual_resources() -> 
                         continue;
                     }
                     backend_file
-                        .send::<UnitTest<BACKEND_COMPONENT>>(&component)
+                        .send::<UnitTest<BACKEND_COMPONENT>>(&Arguments::from_bytes(component)?)
                         .await?;
                     let tested = backend_file.recv::<UnitTested>().await?.to_vec();
                     if decode(&tested)?["success"] == false {
@@ -335,8 +363,8 @@ async fn projected_pipeline_runs_every_effect_through_the_actual_resources() -> 
                         )?)
                         .await?;
                     release_file.recv::<ReleasePulled>().await?;
-                    let stack = Arguments::from_bytes(br#"{"component":"full_stack"}"#)?;
-                    release_file.send::<Stage>(&stack).await?;
+                    let stack = br#"{"component":"full_stack"}"#;
+                    release_file.send::<Stage>(&Arguments::from_bytes(stack)?).await?;
                     let deployed = release_file.recv::<Staged>().await?.to_vec();
                     let staging = if decode(&deployed)?["success"] == true {
                         assert_eq!(release_file.recv::<StagingReady>().await?, deployed);
@@ -356,7 +384,7 @@ async fn projected_pipeline_runs_every_effect_through_the_actual_resources() -> 
                         }
                         Promote::LOGICAL_LABEL => {
                             assert_eq!(decision.recv::<Promote>().await?, staging);
-                            release_file.send::<Deploy>(&stack).await?;
+                            release_file.send::<Deploy>(&Arguments::from_bytes(stack)?).await?;
                             release_file.recv::<Deployed>().await?;
                             release_file
                                 .send::<SmokeProduction>(&Arguments::from_bytes(
