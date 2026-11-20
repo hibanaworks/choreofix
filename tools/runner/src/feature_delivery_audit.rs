@@ -67,6 +67,27 @@ fn consume<'a>(
     used.insert(frame.sent);
     Ok(frame)
 }
+const BUSINESS_ROLES: [&str; 18] = [
+    "MERGE_REQUESTS",
+    "REPO_OWNER",
+    "REVIEW_INITIAL",
+    "REVIEW_REPAIR_A",
+    "REVIEW_REPAIR_B",
+    "REPO",
+    "TEST_ENV",
+    "BUILD_SERVER",
+    "REVIEW_A",
+    "REVIEW_B",
+    "A_FILE",
+    "B_FILE",
+    "A_MERGE_FILE",
+    "B_MERGE_FILE",
+    "A_REVIEW_FILE",
+    "B_REVIEW_FILE",
+    "TEST_FILE",
+    "CI_FILE",
+];
+
 fn business(frame: &Frame, roles: &BTreeSet<u64>) -> bool {
     frame.identity["source"]
         .as_u64()
@@ -134,22 +155,10 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
     .map(|(vm, io)| Ok((role(vm)?, role(io)?)))
     .collect::<Result<Vec<_>>>()?;
     crate::journal::check_close_pairs(&frames, &pairs)?;
-    let roles = [
-        "REPO",
-        "TEST_ENV",
-        "BUILD_SERVER",
-        "REVIEW_A",
-        "REVIEW_B",
-        "A_FILE",
-        "B_FILE",
-        "A_REVIEW_FILE",
-        "B_REVIEW_FILE",
-        "TEST_FILE",
-        "CI_FILE",
-    ]
-    .into_iter()
-    .map(role)
-    .collect::<Result<BTreeSet<_>>>()?;
+    let roles = BUSINESS_ROLES
+        .into_iter()
+        .map(role)
+        .collect::<Result<BTreeSet<_>>>()?;
     let mut scored = score["events"]
         .as_array()
         .ok_or("scored actual effects")?
@@ -170,7 +179,11 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         } else {
             "payment_processing"
         };
-        let file = role(if f == 0 { "A_FILE" } else { "B_FILE" })?;
+        let merge_file = role(if f == 0 {
+            "A_MERGE_FILE"
+        } else {
+            "B_MERGE_FILE"
+        })?;
         let review_file = role(if f == 0 {
             "A_REVIEW_FILE"
         } else {
@@ -253,13 +266,13 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
             .unwrap_or(rows.len());
         let (from, to, request_name, reply_name) = match tool {
             "implement_feature" => (
-                file,
+                merge_file,
                 repo,
                 format!("Implement{suffix}"),
                 format!("Implementation{suffix}"),
             ),
             "merge_code" => (
-                file,
+                merge_file,
                 repo,
                 format!("Merge{suffix}"),
                 format!("Merged{suffix}"),
@@ -284,11 +297,30 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
             ),
             _ => unreachable!(),
         };
+        let merge = tool == "merge_code";
         let request = consume(
             (&frames, &mut used),
-            (from, to, label(&request_name)?),
+            (
+                from,
+                if merge { role("MERGE_REQUESTS")? } else { to },
+                label(&request_name)?,
+            ),
             (arguments, 0, call.emitted),
         )?;
+        if merge {
+            let authorized = consume(
+                (&frames, &mut used),
+                (
+                    role("REPO_OWNER")?,
+                    repo,
+                    label(&format!("InitialMerge{suffix}"))?,
+                ),
+                (arguments, request.received()?, call.emitted),
+            )?;
+            if authorized.received()? >= call.emitted {
+                return Err("initial merge predates receipt by the repository".into());
+            }
+        }
         if request.received()? >= call.emitted {
             return Err("effect before its checked request receive".into());
         }
@@ -363,9 +395,25 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                     }))?;
                     let committed = accepted.received()?;
                     used.insert(accepted.sent);
+                    if result["success"] == true && u64::from(accepted.logical_label) == outcomes[0]
+                    {
+                        consume(
+                            (&frames, &mut used),
+                            (
+                                reviewer,
+                                role(if f == 0 {
+                                    "REVIEW_REPAIR_A"
+                                } else {
+                                    "REVIEW_REPAIR_B"
+                                })?,
+                                outcomes[0],
+                            ),
+                            (result, at, accepted.sent),
+                        )?;
+                    }
                     for peer in [
-                        role("A_FILE")?,
-                        role("B_FILE")?,
+                        merge_file,
+                        role(if f == 0 { "B_FILE" } else { "A_FILE" })?,
                         role("TEST_FILE")?,
                         environment,
                     ] {
@@ -412,7 +460,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                 }
                 let ready = consume(
                     (&frames, &mut used),
-                    (repo, file, label(&format!("MergeReady{suffix}"))?),
+                    (reviewer, merge_file, label(&format!("MergeReady{suffix}"))?),
                     (approved, review.result()?.0, call.emitted),
                 )?;
                 if ready.received()? >= request.received()? {
@@ -439,13 +487,43 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                     .as_array()
                     .filter(|t| t.len() == 2)
                     .ok_or("publication tests")?;
-                for (f, test) in tests.iter().enumerate() {
-                    let actual = material(&calls, "write_tests", receipt(test)?)?;
-                    if feature(actual)? != f
-                        || *actual.result()?.1 != *test
-                        || actual.ended()?.0 >= call.started()?.0
+                let published = result["data"]["published_candidates"]
+                    .as_object()
+                    .ok_or("published features")?;
+                for (index, (name, tested)) in [
+                    ("user_authentication", label("TestedA")?),
+                    ("payment_processing", label("TestedB")?),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let received = frames
+                        .values()
+                        .filter(|frame| {
+                            frame.direction(environment, repo)
+                                && u64::from(frame.logical_label) == tested
+                                && frame.received.is_some_and(|row| row < call.emitted)
+                        })
+                        .max_by_key(|frame| frame.received);
+                    let test = &tests[index];
+                    if let Some(frame) = received {
+                        if frame.value()? != *test {
+                            return Err("publication changed a received test definition".into());
+                        }
+                        let actual = material(&calls, "write_tests", receipt(test)?)?;
+                        if feature(actual)? != index
+                            || actual.result()?.1 != test
+                            || actual.ended()?.0 >= call.started()?.0
+                        {
+                            return Err("publication carries another actual test definition".into());
+                        }
+                    } else if !test.is_null() || published.contains_key(name) {
+                        return Err("publication lacks a received test for its candidate or invents a peer test".into());
+                    }
+                    if let Some(candidate) = published.get(name)
+                        && test["data"]["candidate_sha256"] != *candidate
                     {
-                        return Err("publication carries another actual test definition".into());
+                        return Err("publication carries a test for another candidate".into());
                     }
                 }
                 publication.received()?;
@@ -509,36 +587,51 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                 if incoming.received()? >= call.emitted {
                     return Err("CI request before actual publication delivery".into());
                 }
-                let outcomes = if result["success"] == true {
-                    vec![
-                        label(&format!("CiPassed{suffix}"))?,
-                        label(&format!("LastCiPassed{suffix}"))?,
-                    ]
+                let publisher = role(if f == 0 {
+                    "REVIEW_REPAIR_A"
                 } else {
-                    vec![label(&format!("CiFailed{suffix}"))?]
-                };
-                let outcome = one(frames.values().filter(|v| {
-                    v.direction(build, repo)
-                        && outcomes.contains(&u64::from(v.logical_label))
-                        && at < v.sent
-                        && v.sent < next
-                        && !used.contains(&v.sent)
-                        && v.value().is_ok_and(|v| v == *result)
-                }))?;
+                    "REVIEW_REPAIR_B"
+                })?;
+                let decision = label(&format!(
+                    "Ci{}{suffix}",
+                    if result["success"] == true {
+                        "Passed"
+                    } else {
+                        "Failed"
+                    }
+                ))?;
+                let gate = consume(
+                    (&frames, &mut used),
+                    (build, role("REPO_OWNER")?, decision),
+                    (result, at, next),
+                )?;
+                let to_reviewer = consume(
+                    (&frames, &mut used),
+                    (build, publisher, label(&format!("CiResult{suffix}"))?),
+                    (result, gate.sent, next),
+                )?;
+                let outcome = consume(
+                    (&frames, &mut used),
+                    (reviewer, repo, decision),
+                    (result, to_reviewer.received()?, next),
+                )?;
                 let committed = outcome.received()?;
-                used.insert(outcome.sent);
+                consume(
+                    (&frames, &mut used),
+                    (repo, build, decision),
+                    (result, committed, next),
+                )?;
                 for peer in [
                     role("A_FILE")?,
                     role("B_FILE")?,
                     review_file,
                     role("TEST_FILE")?,
-                    reviewer,
                     environment,
                 ] {
                     consume(
                         (&frames, &mut used),
-                        (repo, peer, label("CiUpdate")?),
-                        (result, committed, next),
+                        (publisher, peer, label("CiUpdate")?),
+                        (result, outcome.sent, next),
                     )?;
                 }
             }
@@ -597,22 +690,10 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .as_array()
         .ok_or("actors")?;
     let journal = crate::journal::read(&rows, &headers, actors)?;
-    let roles = [
-        "REPO",
-        "TEST_ENV",
-        "BUILD_SERVER",
-        "REVIEW_A",
-        "REVIEW_B",
-        "A_FILE",
-        "B_FILE",
-        "A_REVIEW_FILE",
-        "B_REVIEW_FILE",
-        "TEST_FILE",
-        "CI_FILE",
-    ]
-    .into_iter()
-    .map(|name| named(&projection["compiled"], "roles", name))
-    .collect::<Result<BTreeSet<_>>>()?;
+    let roles = BUSINESS_ROLES
+        .into_iter()
+        .map(|name| named(&projection["compiled"], "roles", name))
+        .collect::<Result<BTreeSet<_>>>()?;
     let selected = journal
         .frames
         .iter()

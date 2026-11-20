@@ -31,6 +31,32 @@ fn response(reply: &Value) -> Result<Value> {
 #[test]
 #[ignore = "requires the current 6H runtime, source receipt, wash and neutral simulator"]
 async fn seven_actual_wasm_guests_complete_staged_publication() -> Result<()> {
+    clean_publication(Schedule::Concurrent).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires the fixed 6H executable, actual wash and common simulator"]
+async fn each_release_can_finish_before_the_next_developer_starts() -> Result<()> {
+    clean_publication(Schedule::StageEach).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires the current 6H executable, wash and common simulator"]
+async fn reverse_merge_order_preserves_required_deployment_order() -> Result<()> {
+    clean_publication(Schedule::MergeInReverse).await
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Schedule {
+    Concurrent,
+    StageEach,
+    MergeInReverse,
+}
+
+#[hibana_runtime::scope]
+async fn clean_publication(schedule: Schedule) -> Result<()> {
     std::env::set_current_dir(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
@@ -56,7 +82,7 @@ async fn seven_actual_wasm_guests_complete_staged_publication() -> Result<()> {
     crate::projection::archive(&binary, &directory, "6H")?;
     save(
         &directory.join("case.json"),
-        &json!({"task":"6H","depth":0,"model_calls":0,"scored_benchmark":false,
+        &json!({"task":"6H","depth":0,"model_calls":0,"scored_benchmark":false,"developer_starts":match schedule {Schedule::Concurrent=>"concurrent",Schedule::StageEach=>"after preceding staging validation",Schedule::MergeInReverse=>"all reviewed, then C, B, A integrate before staging"},
         "build":receipt,"simulator_contract":choreofix_inputs::SIMULATOR_CONTRACT,"delay_multiplier":0.01,
         "runtime_binary_sha256":digest(&binary)?,"guest_wasm_sha256":digest(module)?,
         "compiled_projection_sha256":digest(&directory.join("projection.json"))?,
@@ -67,7 +93,18 @@ async fn seven_actual_wasm_guests_complete_staged_publication() -> Result<()> {
     let trace = Trace::create(&directory.join("events.jsonl"))?;
     let (simulator, _) = oracle::Simulator::new("6H", 0, 0.01, trace.clone(), &[])?;
     let (guest, runtime) = process::guest(&binary, module, &["6H"], &directory, trace, simulator)?;
-    let (_,(),(),(),(),result)=hibana_runtime::race(async {
+    let result = if schedule != Schedule::Concurrent {
+        let ((), result) = hibana_runtime::race(
+            async {
+                async { staged_one_at_a_time(&guest, schedule).await };
+                async { runtime.await };
+            },
+            hibana_runtime::host::deadline(Duration::from_secs(60)),
+        )
+        .await?;
+        result
+    } else {
+        let (_,(),(),(),(),result)=hibana_runtime::race(async {
         let guest=&guest;
         for (agent,own) in [("DEVELOPER_A",0),("DEVELOPER_B",1),("DEVELOPER_C",2)] {
             async move {
@@ -104,14 +141,8 @@ async fn seven_actual_wasm_guests_complete_staged_publication() -> Result<()> {
                 if own == 2 {
                     let review=guest.command(agent,format!("cat /service/review/{feature}")).await?;
                     assert_eq!(response(&review)?["success"],true,"{agent}: {review}");
-                    // The live agent read only its own approval, leaving the peer
-                    // outcomes and preceding CI unread. Neither request may skip
-                    // those actual incoming operations. The same guest recovers.
-                    for command in [format!("echo '{}' > /service/merge_code",json!({"branch":feature})),
-                                    "cat /service/release/user_authentication".into()] {
-                        let early=guest.command(agent,command).await?;
-                        assert!(early["stdout"].as_str().is_some_and(|text|text.contains("Permission denied")),"unread prerequisites were skipped: {early}");
-                    }
+                    let early=guest.command(agent,"cat /service/release/user_authentication".into()).await?;
+                    assert!(early["stdout"].as_str().is_some_and(|text|text.contains("Permission denied")),"unread CI was skipped: {early}");
                 }
                 let initial_reviews=if own == 0 {&FEATURES[..1]} else {&FEATURES[..]};
                 for target in initial_reviews {
@@ -186,6 +217,8 @@ async fn seven_actual_wasm_guests_complete_staged_publication() -> Result<()> {
             Result::Ok(())
         };
         async {
+            let early=guest.command("RELEASE_MANAGER",format!("echo '{}' > /service/deploy/payment_processing",json!({"service":FEATURES[1]}))).await?;
+            assert!(early["stdout"].as_str().is_some_and(|text|text.contains("Permission denied")),"deployment B skipped its required prior stage: {early}");
             for target in FEATURES {
                 let ready=guest.command("RELEASE_MANAGER",format!("cat /service/release/{target}")).await?;
                 assert_eq!(response(&ready)?["ci"]["success"],true,"{ready}");
@@ -199,19 +232,236 @@ async fn seven_actual_wasm_guests_complete_staged_publication() -> Result<()> {
         };
         async {runtime.await};
     },async {hibana_runtime::host::sleep(Duration::from_secs(240)).await?;Err("seven-guest staged-integration timeout".into())}).await?;
+        result
+    };
     assert_eq!(result["error"], Value::Null, "{result}");
     save(&directory.join("runtime-result.json"), &result)?;
     let audit = crate::staged_integration_audit::audit(&directory.join("events.jsonl"))?;
     assert_eq!(audit["domain_calls"], 21);
-    save(
-        &directory.join("boundary.json"),
-        &json!({"task":"6H","conditions":1,"model_calls":0,
-        "late_edit_rejected":true,"premature_merge_rejected_then_retried":true,
-        "own_review_does_not_replace_peer_outcomes":true,"unread_ci_prevents_later_stage_read":true,
-        "malformed_json_close_identified_then_corrected":true,
-        "rejected_probes":5,"scored_benchmark":false,"audit":audit}),
-    )?;
+    let mut boundary = json!({"task":"6H","conditions":1,"model_calls":0,
+        "scored_benchmark":false,"audit":audit});
+    if schedule == Schedule::StageEach {
+        let events = result["score"]["events"]
+            .as_array()
+            .ok_or("simulator events")?;
+        let (stages, remainder) = events.as_chunks::<7>();
+        assert!(remainder.is_empty());
+        assert_eq!(stages.len(), FEATURES.len());
+        for (feature, chunk) in FEATURES.into_iter().zip(stages) {
+            let tools = [
+                "implement_feature",
+                "write_tests",
+                "code_review",
+                "merge_code",
+                "run_tests",
+                "deploy_service",
+                "validate_staging",
+            ];
+            for (event, tool) in chunk.iter().zip(tools) {
+                assert_eq!(event["tool"], tool);
+                assert_eq!(event["success"], true);
+            }
+            assert_eq!(chunk[0]["args"]["feature"], feature);
+            assert_eq!(chunk[6]["args"]["service"], feature);
+        }
+        boundary["developer_starts"] = json!("after preceding staging validation");
+    } else if schedule == Schedule::MergeInReverse {
+        let events = result["score"]["events"]
+            .as_array()
+            .ok_or("simulator events")?;
+        let actual = |tool: &str, field: &str| -> Result<Vec<&str>> {
+            events
+                .iter()
+                .filter(|event| event["tool"] == tool)
+                .map(|event| {
+                    if event["success"] != true {
+                        return Err("operation in reverse-order fixture failed".into());
+                    }
+                    event["args"][field]
+                        .as_str()
+                        .ok_or_else(|| "missing original operation target".into())
+                })
+                .collect()
+        };
+        assert_eq!(
+            actual("merge_code", "branch")?,
+            [FEATURES[2], FEATURES[1], FEATURES[0]]
+        );
+        assert_eq!(actual("deploy_service", "service")?, FEATURES);
+        assert_eq!(actual("validate_staging", "service")?, FEATURES);
+        let last_ci = events
+            .iter()
+            .rposition(|e| e["tool"] == "run_tests")
+            .ok_or("missing CI")?;
+        let first_deploy = events
+            .iter()
+            .position(|e| e["tool"] == "deploy_service")
+            .ok_or("missing deployment")?;
+        assert!(last_ci < first_deploy);
+        boundary["merge_order"] = json!(actual("merge_code", "branch")?);
+        boundary["deployment_order"] = json!(actual("deploy_service", "service")?);
+    } else {
+        boundary["late_edit_rejected"] = json!(true);
+        boundary["premature_merge_rejected_then_retried"] = json!(true);
+        boundary["deployment_b_before_validated_a_rejected"] = json!(true);
+        boundary["unread_ci_prevents_later_stage_read"] = json!(true);
+        boundary["malformed_json_close_identified_then_corrected"] = json!(true);
+        boundary["rejected_probes"] = json!(5);
+    }
+    save(&directory.join("boundary.json"), &boundary)?;
     println!("{}", directory.display());
+    Ok(())
+}
+
+// Only the test sets the submission times. Every read and write goes through wash.
+async fn staged_one_at_a_time(guest: &process::Guest, schedule: Schedule) -> Result<()> {
+    let read = async |agent: &str, path: String| -> Result<Value> {
+        let reply = guest.command(agent, format!("cat /service/{path}")).await?;
+        response(&reply).map_err(|error| format!("{agent} reading {path}: {error}").into())
+    };
+    let call = async |agent: &str, path: String, args: Value| -> Result<()> {
+        let command = format!("echo '{args}' > /service/{path} && cat /service/{path}");
+        let reply = guest.command(agent, command).await?;
+        assert_eq!(
+            response(&reply)?["success"],
+            true,
+            "{agent} {path}: {reply}"
+        );
+        Ok(())
+    };
+    let developers = ["DEVELOPER_A", "DEVELOPER_B", "DEVELOPER_C"];
+    let suites = [
+        "full_suite_after_auth",
+        "full_suite_after_payment",
+        "full_suite_after_notification",
+    ];
+    let stage = async |feature: &str| -> Result<()> {
+        assert_eq!(
+            read("RELEASE_MANAGER", format!("release/{feature}")).await?["ci"]["success"],
+            true
+        );
+        for operation in ["deploy", "validate"] {
+            call(
+                "RELEASE_MANAGER",
+                format!("{operation}/{feature}"),
+                json!({"service":feature}),
+            )
+            .await?;
+        }
+        for agent in developers
+            .into_iter()
+            .chain(["TEST_WRITER", "REVIEWER", "CI_RUNNER"])
+        {
+            assert_eq!(
+                read(agent, format!("release/{feature}")).await?["success"],
+                true
+            );
+        }
+        Ok(())
+    };
+    let prepare = async |index: usize| -> Result<()> {
+        let (feature, developer) = (FEATURES[index], developers[index]);
+        call(
+            developer,
+            "implement_feature".into(),
+            json!({"feature_name":feature}),
+        )
+        .await?;
+        for peer in developers.into_iter().filter(|peer| *peer != developer) {
+            assert_eq!(
+                read(peer, format!("interface/{feature}")).await?["success"],
+                true
+            );
+        }
+        assert_eq!(
+            read("TEST_WRITER", format!("candidate/{feature}")).await?["success"],
+            true
+        );
+        call(
+            "TEST_WRITER",
+            format!("write_tests/{feature}"),
+            json!({"target":feature}),
+        )
+        .await?;
+        assert_eq!(
+            read("REVIEWER", format!("candidate/{feature}")).await?["tests"]["success"],
+            true
+        );
+        call(
+            "REVIEWER",
+            format!("code_review/{feature}"),
+            json!({"pr_id":feature}),
+        )
+        .await?;
+        for agent in developers.into_iter().chain(["TEST_WRITER"]) {
+            assert_eq!(
+                read(agent, format!("review/{feature}")).await?["success"],
+                true
+            );
+        }
+        Ok(())
+    };
+    let integrate = async |index: usize| -> Result<()> {
+        let (feature, developer, suite) = (FEATURES[index], developers[index], suites[index]);
+        call(developer, "merge_code".into(), json!({"branch":feature})).await?;
+        if schedule == Schedule::MergeInReverse && index == 2 {
+            let unavailable = guest
+                .command(
+                    "CI_RUNNER",
+                    "dd if=/service/publication/user_authentication iflag=nonblock".into(),
+                )
+                .await?;
+            let output = unavailable["stdout"].as_str().ok_or("CI probe output")?;
+            assert!(
+                output.contains("Resource temporarily unavailable")
+                    || output.contains("Permission denied"),
+                "{unavailable}"
+            );
+        }
+        let publication = read("CI_RUNNER", format!("publication/{feature}")).await?;
+        assert_eq!(publication["success"], true);
+        assert_eq!(publication["data"]["feature"], feature);
+        call(
+            "CI_RUNNER",
+            format!("run_tests/{feature}"),
+            json!({"suite":suite}),
+        )
+        .await?;
+        for agent in developers.into_iter().chain(["TEST_WRITER", "REVIEWER"]) {
+            assert_eq!(
+                read(agent, format!("integration/{feature}")).await?["success"],
+                true
+            );
+        }
+        Ok(())
+    };
+    if schedule == Schedule::MergeInReverse {
+        for index in 0..FEATURES.len() {
+            prepare(index).await?;
+        }
+        for index in (0..FEATURES.len()).rev() {
+            integrate(index).await?;
+        }
+        for feature in FEATURES {
+            stage(feature).await?;
+        }
+    } else {
+        for (index, feature) in FEATURES.into_iter().enumerate() {
+            prepare(index).await?;
+            integrate(index).await?;
+            stage(feature).await?;
+        }
+    }
+    for agent in
+        developers
+            .into_iter()
+            .chain(["TEST_WRITER", "REVIEWER", "CI_RUNNER", "RELEASE_MANAGER"])
+    {
+        assert_eq!(
+            guest.command(agent, "exit 0".into()).await?["exit_status"],
+            0
+        );
+    }
     Ok(())
 }
 
@@ -258,28 +508,29 @@ async fn seven_actual_wasm_guests_repair_review_ci_and_staging_failures() -> Res
     let trace = Trace::create(&directory.join("events.jsonl"))?;
     let (simulator, _) = oracle::Simulator::new("6H", 2, 0.01, trace.clone(), &[])?;
     let (guest, runtime) = process::guest(&binary, module, &["6H"], &directory, trace, simulator)?;
-    let ((),_,(),(),(),(),result) = hibana_runtime::race(async {
+    let (release_probes,_,(),(),(),(),result) = hibana_runtime::race(async {
         let guest = &guest;
         async {
             for peer in &FEATURES[1..] {
                 let value = guest.command("DEVELOPER_A",format!("cat /service/interface/{peer}")).await?;
                 assert_eq!(response(&value)?["success"],true,"{value}");
             }
-            let mut expected_probe_errors = [2, 2, 2, 2, 6].into_iter();
+            let mut release_probes = Vec::new();
             loop {
                 let value = guest.command("DEVELOPER_A",
                     "echo '{\"feature_name\":\"user_authentication\"}' > /service/implement_feature; cat /service/implement_feature".into()).await?;
                 assert_eq!(response(&value)?["success"],true,"{value}");
                 let review = guest.command("DEVELOPER_A","cat /service/review/user_authentication".into()).await?;
                 if response(&review)?["success"] != true {continue;}
-                // After a completed elastic visit, an older in-flight suffix
-                // remains possible. Its absence is EAGAIN, not permission to
-                // claim that the whole public receive contract is impossible.
+                // The approval arrived from REPO on the results FIFO. An older
+                // release cannot follow it, and the next release needs A's merge.
                 let premature = guest.command("DEVELOPER_A",
                     "dd if=/service/release/user_authentication iflag=nonblock".into()).await?;
-                let errno = expected_probe_errors.next().expect("unexpected extra approval");
-                assert!(premature["stdout"].as_str().is_some_and(|text| text.contains(&format!("os error {errno}"))),
-                    "unexpected release-stream admission: {premature}");
+                let output = premature["stdout"].as_str().ok_or("missing nonblocking release reply")?;
+                if response(&premature).is_ok() {
+                    return Err(format!("unexpected release before merge: {premature}").into());
+                }
+                release_probes.push(output.to_owned());
                 let merged = guest.command("DEVELOPER_A",
                     "echo '{\"branch\":\"user_authentication\"}' > /service/merge_code; cat /service/merge_code".into()).await?;
                 assert_eq!(response(&merged)?["success"],true,"{merged}");
@@ -288,7 +539,6 @@ async fn seven_actual_wasm_guests_repair_review_ci_and_staging_failures() -> Res
                 let stage = guest.command("DEVELOPER_A","cat /service/release/user_authentication".into()).await?;
                 if response(&stage)?["success"] == true {break;}
             }
-            assert!(expected_probe_errors.next().is_none(), "recovery skipped a declared probe");
             for feature in &FEATURES[1..] {
                 let value = guest.command("DEVELOPER_A",format!("cat /service/review/{feature}")).await?;
                 assert_eq!(response(&value)?["success"],true,"{value}");
@@ -298,7 +548,7 @@ async fn seven_actual_wasm_guests_repair_review_ci_and_staging_failures() -> Res
                 assert_eq!(response(&value)?["success"],true,"{value}");
             }}
             assert_eq!(guest.command("DEVELOPER_A","exit 0".into()).await?["exit_status"],0);
-            Result::Ok(())
+            Result::Ok(release_probes)
         };
         for (agent,feature,peer) in [
             ("DEVELOPER_B",FEATURES[1],FEATURES[2]),
@@ -434,6 +684,23 @@ async fn seven_actual_wasm_guests_repair_review_ci_and_staging_failures() -> Res
     save(&directory.join("runtime-result.json"), &result)?;
     let audit = crate::staged_integration_audit::audit(&directory.join("events.jsonl"))?;
     assert_eq!(audit["domain_calls"], 53, "{audit}");
+    save(&directory.join("effect-audit.json"), &audit)?;
+    save(
+        &directory.join("premerge-release-probes.json"),
+        &json!(release_probes),
+    )?;
+    assert_eq!(
+        release_probes.len(),
+        5,
+        "each approved candidate tested before merging"
+    );
+    for (index, probe) in release_probes.iter().enumerate() {
+        assert!(
+            probe.contains("Permission denied (os error 2)"),
+            "premature release read {}: {probe}",
+            index + 1
+        );
+    }
     save(
         &directory.join("boundary.json"),
         &json!({

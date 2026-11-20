@@ -16,29 +16,33 @@ pub async fn run<'borrow, 'run, const AUTHOR: u8, const SECTION: u8, C: ChapterM
         match branch.label() {
             label if label == C::FactMaterial::LOGICAL_LABEL => {
                 let snapshot = branch.recv::<C::FactMaterial>().await?.into_value();
-                let arguments = endpoint.recv::<C::FactRequest>().await?.into_value();
                 let mut section = endpoint.recv::<Section<SECTION>>().await?;
+                let arguments = endpoint.recv::<C::FactRequest>().await?.into_value();
                 let result = domain
                     .execute("FACT_CHECKER", "fact_check", arguments)
                     .await
                     .map_err(ShellError::message)?;
                 imp::checked(AUTHOR, &result, &snapshot)?;
                 factual_result = Some(result.clone());
+                let reply = imp::Reply::<AUTHOR, 5>::new(result.clone())?;
                 if result["success"] == true {
                     let result = imp::Verdict::<AUTHOR, 5, true>::new(result)?;
                     section.send::<C::FactPassed>(&result).await?;
+                    endpoint.send::<C::FactResult>(&reply).await?;
                     section.send::<C::FactsForEditor>(&result).await?;
                     endpoint.send::<Section<SECTION>>(section).await?;
                 } else {
                     let result = imp::Verdict::<AUTHOR, 5, false>::new(result)?;
                     section.send::<C::FactRejected>(&result).await?;
                     async {
-                        let [mut editor, mut returned] = endpoint.par()?;
+                        let [mut facts, mut returned] = endpoint.par()?;
                         async {
-                            editor.send::<C::FailedFactsForEditor>(&result).await?;
+                            facts.send::<C::FactResult>(&reply).await?;
                         };
                         async {
+                            section.send::<C::FailedFactsForEditor>(&result).await?;
                             section.send::<C::FactRejectionForAuthor>(&result).await?;
+                            section.send::<C::FactRejectionForDocument>(&result).await?;
                             returned.send::<Section<SECTION>>(section).await?;
                         };
                         Ok::<(), ShellError>(())
@@ -48,8 +52,8 @@ pub async fn run<'borrow, 'run, const AUTHOR: u8, const SECTION: u8, C: ChapterM
             }
             label if label == C::ReviewMaterial::LOGICAL_LABEL => {
                 let material = branch.recv::<C::ReviewMaterial>().await?.into_value();
-                let arguments = endpoint.recv::<C::ReviewRequest>().await?.into_value();
                 let mut section = endpoint.recv::<Section<SECTION>>().await?;
+                let arguments = endpoint.recv::<C::ReviewRequest>().await?.into_value();
                 let facts = factual_result
                     .as_ref()
                     .ok_or_else(|| ShellError::message("review has no actual factual result"))?;
@@ -65,20 +69,44 @@ pub async fn run<'borrow, 'run, const AUTHOR: u8, const SECTION: u8, C: ChapterM
                     .await
                     .map_err(ShellError::message)?;
                 imp::reviewed(AUTHOR, &result, (&material["snapshot"], facts))?;
+                let reply = imp::Reply::<AUTHOR, 6>::new(result.clone())?;
                 if result["success"] == true {
                     let actual = result.clone();
                     let result = imp::Verdict::<AUTHOR, 6, true>::new(result)?;
                     section.send::<C::ReviewPassed>(&result).await?;
-                    section.send::<C::FinalForAuthor>(&result).await?;
-                    section.send::<C::FinalForDocument>(&result).await?;
-                    endpoint.send::<Section<SECTION>>(section).await?;
+                    async {
+                        let [mut file, mut returned] = endpoint.par()?;
+                        async {
+                            file.send::<C::ReviewResult>(&reply).await?;
+                        };
+                        async {
+                            section.send::<C::FinalForAuthor>(&result).await?;
+                            section.send::<C::FinalForDocument>(&result).await?;
+                            returned.send::<Section<SECTION>>(section).await?;
+                        };
+                        Ok::<(), ShellError>(())
+                    }
+                    .await?;
                     endpoint.send::<C::FinalForFact>(&result).await?;
                     return Ok((facts.clone(), actual));
                 } else {
                     let result = imp::Verdict::<AUTHOR, 6, false>::new(result)?;
                     section.send::<C::ReviewRejected>(&result).await?;
-                    section.send::<C::ReviewRejectionForAuthor>(&result).await?;
-                    endpoint.send::<Section<SECTION>>(section).await?;
+                    async {
+                        let [mut file, mut returned] = endpoint.par()?;
+                        async {
+                            file.send::<C::ReviewResult>(&reply).await?;
+                        };
+                        async {
+                            section.send::<C::ReviewRejectionForAuthor>(&result).await?;
+                            section
+                                .send::<C::ReviewRejectionForDocument>(&result)
+                                .await?;
+                            returned.send::<Section<SECTION>>(section).await?;
+                        };
+                        Ok::<(), ShellError>(())
+                    }
+                    .await?;
                 }
             }
             _ => return Err(ShellError::message("unexpected paper review request")),

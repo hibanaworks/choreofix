@@ -19,6 +19,9 @@ enum Schedule {
     Alternate,
     BothRejectedThenFirst,
     BothRejectedThenOther,
+    WriterFirst,
+    ReferencesFirst,
+    EarlyReview,
 }
 struct Case {
     depth: u8,
@@ -39,12 +42,13 @@ fn response(reply: &Value) -> Result<Value> {
         .map_err(Into::into)
 }
 
-async fn researcher(
+async fn prepare(
     guest: &process::Guest,
     agent: &str,
     section: &str,
     adversarial_inputs: bool,
-) -> Result<Vec<Value>> {
+    references_first: bool,
+) -> Result<()> {
     let topic = if section == "section_a" {
         "subtopic_a"
     } else {
@@ -73,14 +77,18 @@ async fn researcher(
             );
         }
     }
-    for (tool, arguments) in [
+    let mut steps = [
         ("research_topic", json!({"topic":topic})),
         (
             "write_section",
             json!({"section_name":section,"content_notes":"independently selected research notes"}),
         ),
         ("update_references", json!({"section_name":section})),
-    ] {
+    ];
+    if references_first {
+        steps.swap(1, 2);
+    }
+    for (tool, arguments) in steps {
         let reply = guest
             .command(
                 agent,
@@ -89,6 +97,25 @@ async fn researcher(
             .await?;
         assert_eq!(response(&reply)?["success"], true, "{reply}");
     }
+    Ok(())
+}
+
+async fn researcher(
+    guest: &process::Guest,
+    agent: &str,
+    section: &str,
+    adversarial_inputs: bool,
+) -> Result<Vec<Value>> {
+    prepare(guest, agent, section, adversarial_inputs, false).await?;
+    feedback(guest, agent, section, adversarial_inputs).await
+}
+
+async fn feedback(
+    guest: &process::Guest,
+    agent: &str,
+    section: &str,
+    adversarial_inputs: bool,
+) -> Result<Vec<Value>> {
     let mut reviews = Vec::new();
     loop {
         let reply = guest.command(agent, "cat /service/feedback".into()).await?;
@@ -171,7 +198,10 @@ async fn editor(
         results.push((section, accepted));
         if !accepted {
             match schedule {
-                Schedule::FinishFirst => requests.push_front(section),
+                Schedule::FinishFirst
+                | Schedule::WriterFirst
+                | Schedule::ReferencesFirst
+                | Schedule::EarlyReview => requests.push_front(section),
                 Schedule::Alternate => requests.push_back(section),
                 Schedule::BothRejectedThenFirst | Schedule::BothRejectedThenOther => {
                     if results.len() == 1 {
@@ -203,6 +233,10 @@ async fn editor(
                 .1
         );
     }
+    publish(guest, adversarial_inputs).await
+}
+
+async fn publish(guest: &process::Guest, adversarial_inputs: bool) -> Result<()> {
     let result = guest.command("EDITOR","echo '{\"sections\":\" section_b, section_a \"}' > /service/combine_sections; cat /service/combine_sections".into()).await?;
     assert_eq!(response(&result)?["success"], true);
     if !adversarial_inputs {
@@ -347,6 +381,53 @@ async fn actual_wasi_report_rejects_invalid_and_post_completion_requests() -> Re
     .await
 }
 
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires the report WASI binary and original simulator"]
+async fn either_author_can_finish_preparation_before_peer_research() -> Result<()> {
+    let mut cases = Vec::new();
+    for first in ["section_b", "section_a"] {
+        for schedule in [Schedule::WriterFirst, Schedule::ReferencesFirst] {
+            cases.push(Case {
+                depth: 0,
+                first,
+                schedule,
+                delay: 0.01,
+                extra: &[],
+                adversarial_inputs: false,
+            });
+        }
+    }
+    run(cases).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires the report WASI binary and original simulator"]
+async fn first_section_review_returns_before_peer_research() -> Result<()> {
+    run(["section_a", "section_b"]
+        .map(|first| Case {
+            depth: 0,
+            first,
+            schedule: Schedule::EarlyReview,
+            delay: 0.01,
+            extra: &[],
+            adversarial_inputs: false,
+        })
+        .into())
+    .await
+}
+
+async fn approve(guest: &process::Guest, section: &str) -> Result<()> {
+    let arguments = json!({"section_name":section});
+    let request =
+        format!("echo '{arguments}' > /service/review_{section}; cat /service/review_{section}");
+    let reply = response(&guest.command("EDITOR", request).await?)?;
+    assert_eq!(reply["success"], true);
+    assert_eq!(reply["data"]["scope"], section);
+    Ok(())
+}
+
 #[hibana_runtime::scope]
 async fn run(cases: Vec<Case>) -> Result<()> {
     if cases.is_empty() {
@@ -377,7 +458,7 @@ async fn run(cases: Vec<Case>) -> Result<()> {
     let module = Path::new("vendor/hibana-wash/target/wasm32-wasip1/release/hibana-wash.wasm");
     let assignments = cases.iter().map(|case| json!({"depth":case.depth,"first":case.first,"schedule":format!("{:?}",case.schedule),"delay":case.delay,"extra_failures":case.extra,"adversarial_inputs":case.adversarial_inputs})).collect::<Vec<_>>();
     save(&directory.join("assignments.json"), &json!(assignments))?;
-    let mut outcomes = Vec::new();
+    let mut executions = Vec::new();
     for case in cases {
         let output = directory.join(format!(
             "depth{}-{}-{:?}-delay{}-extra{:?}",
@@ -407,7 +488,55 @@ async fn run(cases: Vec<Case>) -> Result<()> {
         let (guest, runtime) = process::guest(&binary, module, &["3E"], &output, trace, simulator)?;
         let (a, b, result) = hibana_runtime::race(
             async {
-                if case.adversarial_inputs {
+                if case.schedule == Schedule::EarlyReview {
+                    let ((a, b), result) = async {
+                        async {
+                            let (first, other) = if case.first == "section_a" {
+                                (("RESEARCHER_A","section_a"), ("RESEARCHER_B","section_b"))
+                            } else {
+                                (("RESEARCHER_B","section_b"), ("RESEARCHER_A","section_a"))
+                            };
+                            prepare(&guest, first.0, first.1, false, false).await?;
+                            let (one, two) = async {
+                                async { feedback(&guest, first.0, first.1, false).await };
+                                async {
+                                    approve(&guest, first.1).await?;
+                                    prepare(&guest, other.0, other.1, false, false).await?;
+                                    let (other_feedback, ()) = async {
+                                        async { feedback(&guest, other.0, other.1, false).await };
+                                        async {
+                                            approve(&guest, other.1).await?;
+                                            publish(&guest, false).await
+                                        };
+                                    }.await?;
+                                    Ok(other_feedback)
+                                };
+                            }.await?;
+                            Ok(if case.first == "section_a" { (one, two) } else { (two, one) })
+                        };
+                        async { runtime.await };
+                    }.await?;
+                    Ok((a,b,result))
+                } else if matches!(case.schedule, Schedule::WriterFirst | Schedule::ReferencesFirst) {
+                    let ((a,b),result) = async {
+                        async {
+                            let authors = [("RESEARCHER_A", "section_a"), ("RESEARCHER_B", "section_b")];
+                            let first = usize::from(case.first == "section_b");
+                            for index in [first, 1-first] {
+                                let (agent, section) = authors[index];
+                                prepare(&guest, agent, section, false, matches!(case.schedule, Schedule::ReferencesFirst)).await?;
+                            }
+                            let (a,b,()) = async {
+                                async { feedback(&guest, "RESEARCHER_A", "section_a", false).await };
+                                async { feedback(&guest, "RESEARCHER_B", "section_b", false).await };
+                                async { editor(&guest, case.first, case.schedule, false).await };
+                            }.await?;
+                            Ok((a,b))
+                        };
+                        async { runtime.await };
+                    }.await?;
+                    Ok((a,b,result))
+                } else if case.adversarial_inputs {
                     let ((a, b), result) = async {
                         async {
                             let (a, b, ()) = async {
@@ -497,11 +626,55 @@ async fn run(cases: Vec<Case>) -> Result<()> {
                 .len(),
             9 + 2 * rejected
         );
+        if matches!(
+            case.schedule,
+            Schedule::WriterFirst | Schedule::ReferencesFirst
+        ) {
+            let first = if case.first == "section_a" {
+                "RESEARCHER_A"
+            } else {
+                "RESEARCHER_B"
+            };
+            let second = if case.first == "section_a" {
+                "RESEARCHER_B"
+            } else {
+                "RESEARCHER_A"
+            };
+            let tools = if case.schedule == Schedule::WriterFirst {
+                ["research_topic", "write_section", "update_references"]
+            } else {
+                ["research_topic", "update_references", "write_section"]
+            };
+            let events = result["score"]["events"]
+                .as_array()
+                .ok_or("simulator events")?;
+            for (author, chunk) in [first, second].into_iter().zip(events[..6].chunks_exact(3)) {
+                for (event, tool) in chunk.iter().zip(tools) {
+                    assert_eq!(event["agent"], author);
+                    assert_eq!(event["tool"], tool);
+                }
+            }
+        }
+        if case.schedule == Schedule::EarlyReview {
+            let events = result["score"]["events"]
+                .as_array()
+                .ok_or("simulation events")?;
+            assert_eq!(events[3]["tool"], "review_sections");
+            assert_eq!(events[3]["args"]["section_name"], case.first);
+            assert_eq!(events[4]["tool"], "research_topic");
+            assert_ne!(events[0]["agent"], events[4]["agent"]);
+            assert_eq!(events[8]["tool"], "combine_sections");
+        }
+        save(&output.join("score.json"), &result["score"])?;
+        executions.push((case, output, rejected, result["score"].clone()));
+    }
+    let mut outcomes = Vec::new();
+    for (case, output, rejected, score) in executions {
         let status = Command::new(&auditor)
             .arg("--check-report-mutants")
             .arg(output.join("events.jsonl"))
             .arg(output.join("resource-mutants"))
-            .stdout(Stdio::from(fs::File::create(output.join("mutants.log"))?))
+            .stdout(Stdio::null())
             .stderr(Stdio::from(fs::File::create(
                 output.join("mutants-stderr.log"),
             )?))
@@ -547,7 +720,7 @@ async fn run(cases: Vec<Case>) -> Result<()> {
             }
         }
         outcomes.push(
-            json!({"case":output.file_name().and_then(|name| name.to_str()).ok_or("report case name")?,"audit":audit,"record_mutants":mutants["record_mutations_rejected"],"original_score":result["score"]}),
+            json!({"case":output.file_name().and_then(|name| name.to_str()).ok_or("report case name")?,"audit":audit,"record_mutants":mutants["record_mutations_rejected"],"original_score":score}),
         );
     }
     assert_eq!(outcomes.len(), assignments.len());

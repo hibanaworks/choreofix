@@ -49,6 +49,10 @@
           "feedback": {
             "type": "string",
             "description": "Feedback to address"
+          },
+          "review_id": {
+            "type": "string",
+            "description": "Apply the exact minor edit from this completed review of the current section. Omit for a substantive revision."
           }
         },
         "required": [
@@ -86,7 +90,7 @@
     "type": "function",
     "function": {
       "name": "review_sections",
-      "description": "Review sections for quality.",
+      "description": "Review completed, fact-checked sections. Accept them, request a substantive revision and re-review, or specify exact minor edits.",
       "agent_ids": [
         "REVIEWER"
       ],
@@ -96,7 +100,31 @@
         "properties": {
           "section_name": {
             "type": "string",
-            "description": "Name of the section"
+            "description": "Scope of the review"
+          },
+          "decision": {
+            "type": "string",
+            "enum": ["accept", "major", "minor"],
+            "description": "Review decision. Defaults to accept when omitted."
+          },
+          "feedback": {
+            "type": "string",
+            "description": "Optional comments for the author, delivered verbatim with this review of this manuscript."
+          },
+          "minor_edits": {
+            "type": "array",
+            "description": "Required for a minor decision. Each edit replaces a unique passage within the review scope. Passages in a section must be disjoint.",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "section_name": {"type": "string"},
+                "before": {"type": "string"},
+                "after": {"type": "string"}
+              },
+              "required": ["section_name", "before", "after"],
+              "additionalProperties": false
+            }
           }
         },
         "required": [

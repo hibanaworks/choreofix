@@ -586,9 +586,7 @@ async fn actual_five_wasm_build_test_repair_and_link() -> Result<()> {
             .arg("--check-cascading-build-mutants")
             .arg(output.join("events.jsonl"))
             .arg(output.join("record-mutants"))
-            .stdout(Stdio::from(fs::File::create_new(
-                output.join("mutant-result.json"),
-            )?))
+            .stdout(Stdio::null())
             .stderr(Stdio::from(fs::File::create_new(
                 output.join("mutant-stderr.log"),
             )?))

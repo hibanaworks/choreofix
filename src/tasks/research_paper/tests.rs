@@ -18,14 +18,16 @@ fn material(author: u8, operation: u8, notes: &str) -> Value {
 #[test]
 fn typed_paper_arguments_keep_free_notes_and_reject_other_sections() {
     for author in 0..3 {
-        for operation in 1..=6 {
-            let value = if operation == 1 {
-                json!({"topic":"a freely chosen additional topic"})
-            } else {
-                json!({"section_name":imp::SECTIONS[usize::from(author)]})
+        let assigned = json!({"topic":imp::TOPICS[usize::from(author)]});
+        let supplemental = json!({"topic":"a freely chosen additional topic"});
+        for operation in 1..=7 {
+            let value = match operation {
+                1 => assigned.clone(),
+                7 => supplemental.clone(),
+                _ => json!({"section_name":imp::SECTIONS[usize::from(author)]}),
             };
             imp::arguments(author, operation, &value).unwrap();
-            if operation != 1 {
+            if matches!(operation, 2..=6) {
                 let mut wrong = value.clone();
                 wrong["section_name"] = json!(imp::SECTIONS[usize::from((author + 1) % 3)]);
                 assert!(imp::arguments(author, operation, &wrong).is_err());
@@ -40,6 +42,8 @@ fn typed_paper_arguments_keep_free_notes_and_reject_other_sections() {
                 assert!(imp::arguments(author, operation, &bad).is_err());
             }
         }
+        assert!(imp::arguments(author, 1, &supplemental).is_err());
+        assert!(imp::arguments(author, 7, &assigned).is_err());
     }
     let notes = br#"{"section_name":"section_a","content_notes":"an independent claim"}"#;
     assert_eq!(

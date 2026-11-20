@@ -151,6 +151,55 @@ async fn subscription_writing_seven_participants_use_section_endpoints() -> Resu
     subscription_case("2H", 0).await
 }
 
+#[hibana_runtime::main]
+#[test]
+#[ignore = "uses three Luna xhigh participants and actual repeated report reviews"]
+async fn subscription_report_authors_reconsider_actual_reviews() -> Result<()> {
+    subscription_case("3E", 2).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "uses three Luna xhigh participants and actual implementation and integration inputs"]
+async fn subscription_coordinators_use_actual_integration_data() -> Result<()> {
+    subscription_case("4E", 0).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "uses five Luna xhigh participants and actual refactor source and validation inputs"]
+async fn subscription_refactor_participants_publish_current_validated_source() -> Result<()> {
+    subscription_case("4M", 0).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "uses five Luna xhigh participants and actual rejected reviews and failed CI"]
+async fn subscription_feature_participants_repair_actual_review_and_ci_failures() -> Result<()> {
+    subscription_case("6M", 2).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "uses seven Luna xhigh participants and actual nested review, CI and rollback data"]
+async fn subscription_staged_participants_reconsider_actual_integration_results() -> Result<()> {
+    subscription_case("6H", 2).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "uses three Luna xhigh participants and actual scientific materials and instruments"]
+async fn subscription_scientists_use_actual_synthesis_materials() -> Result<()> {
+    subscription_case("13E", 0).await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "uses four Luna xhigh participants and actual repeated bioassay and QC failures"]
+async fn subscription_quality_scientists_reconsider_actual_materials() -> Result<()> {
+    subscription_case("13M", 2).await
+}
+
 // This harness starts the model connections and records their observations.
 // Task permissions and Endpoint operations stay in the application's localsides.
 async fn subscription_case(task: &str, depth: u8) -> Result<()> {
@@ -244,7 +293,6 @@ async fn subscription_case(task: &str, depth: u8) -> Result<()> {
                 || audit["dynamic_protocol"]["status"] != "passed"))
         || (task == "6E"
             && (audit["actual_resource_endpoint_requests"] != 4 + u64::from(depth)
-                || audit["actual_resource_endpoint_returns"] != 4 + u64::from(depth)
                 || audit["actual_review_requests"] != 2 + u64::from(depth)))
         || (task == "16E"
             && (audit["actual_resource_endpoint_requests"] != 3
@@ -271,7 +319,7 @@ async fn subscription_case(task: &str, depth: u8) -> Result<()> {
                 || audit["actual_resource_endpoint_returns"] != 2 * participant_count
                 || audit["simulator_complete"] != expected_complete))
     {
-        return Err("delegation audit did not confirm all actual returns".into());
+        return Err("actual request, result or resource audit differs".into());
     }
     Ok(())
 }

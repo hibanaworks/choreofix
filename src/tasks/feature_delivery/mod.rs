@@ -22,36 +22,6 @@ fn actual_outcome(input: &Cell<Option<Value>>) -> Result<DecisionArm, ResolverEr
     input.set(value);
     result
 }
-fn approval_order(input: &Cell<Option<[Value; 2]>>) -> Result<DecisionArm, ResolverError> {
-    let values = input.take();
-    let result = values
-        .as_ref()
-        .and_then(|reviews| {
-            let receipt = |review: &Value| {
-                if review["success"] != true {
-                    return None;
-                }
-                review["data"]["artifact_id"]
-                    .as_str()?
-                    .strip_prefix("development:")?
-                    .parse::<u64>()
-                    .ok()
-            };
-            let a = receipt(&reviews[0])?;
-            let b = receipt(&reviews[1])?;
-            if a == b {
-                None
-            } else if a < b {
-                Some(DecisionArm::Left)
-            } else {
-                Some(DecisionArm::Right)
-            }
-        })
-        .ok_or_else(ResolverError::reject);
-    input.set(values);
-    result
-}
-
 #[hibana_runtime::scope]
 pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
     use crate::shell::{
@@ -81,10 +51,15 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
         ],
         [
             (session, REPO),
+            (session, MERGE_REQUESTS),
             (session, TEST_ENV),
             (session, BUILD_SERVER),
+            (session, REVIEW_A),
+            (session, REVIEW_B),
             (session, A_FILE),
+            (session, A_MERGE_FILE),
             (session, B_FILE),
+            (session, B_MERGE_FILE),
             (session, A_REVIEW_FILE),
             (session, B_REVIEW_FILE),
             (session, TEST_FILE),
@@ -94,10 +69,8 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
     let participants = async {
         let p = programs();
         bus.observe(p.observation());
-        let order = Cell::new(None);
         let review_a_actual = Cell::new(None);
         let review_b_actual = Cell::new(None);
-        let ci_actual = Cell::new(None);
         let capture = |event| {
             bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,"records":[crate::imp::projection::record(event)]}))
         };
@@ -107,11 +80,6 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
         let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
         rv.observe(&capture);
         let observations = rv.tap();
-        rv.set_resolver(
-            &p.repo,
-            ResolverRef::<MERGE_ORDER>::decision_state(&order, approval_order),
-        )
-        .map_err(|e| ShellError::message(format!("{e:?}")))?;
         rv.set_resolver(
             &p.review_a,
             ResolverRef::<REVIEW_DECISION_A>::decision_state(&review_a_actual, actual_outcome),
@@ -123,20 +91,33 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
         )
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
         rv.set_resolver(
-            &p.build,
-            ResolverRef::<CI_DECISION_A>::decision_state(&ci_actual, actual_outcome),
+            &p.review_a,
+            ResolverRef::<REPAIR_DECISION_A>::decision_state(&review_a_actual, actual_outcome),
         )
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
         rv.set_resolver(
-            &p.build,
-            ResolverRef::<CI_DECISION_B>::decision_state(&ci_actual, actual_outcome),
+            &p.review_b,
+            ResolverRef::<REPAIR_DECISION_B>::decision_state(&review_b_actual, actual_outcome),
+        )
+        .map_err(|e| ShellError::message(format!("{e:?}")))?;
+        rv.set_resolver(
+            &p.review_a,
+            ResolverRef::<CI_DECISION_A>::decision_state(&review_a_actual, actual_outcome),
+        )
+        .map_err(|e| ShellError::message(format!("{e:?}")))?;
+        rv.set_resolver(
+            &p.review_b,
+            ResolverRef::<CI_DECISION_B>::decision_state(&review_b_actual, actual_outcome),
         )
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
         let result = async {
             let mut repo_owner = rv.enter(session, &p.repo_owner)?;
             let mut resource_init = rv.enter(session, &p.resource_init)?;
-            let mut review_a = rv.enter(session, &p.review_a)?;
-            let mut review_b = rv.enter(session, &p.review_b)?;
+            let mut review_initial = rv.enter(session, &p.review_initial)?;
+            let mut review_repair_a = rv.enter(session, &p.review_repair_a)?;
+            let mut review_repair_b = rv.enter(session, &p.review_repair_b)?;
+            let review_a = rv.enter(session, &p.review_a)?;
+            let review_b = rv.enter(session, &p.review_b)?;
             let mut test_owner = rv.enter(session, &p.test_owner)?;
             let mut ci_owner = rv.enter(session, &p.ci_owner)?;
             let mut a_io = rv.enter(session, &p.a_io)?;
@@ -150,11 +131,16 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             let mut test_vm = rv.enter(session, &p.test_vm)?;
             let mut ci_vm = rv.enter(session, &p.ci_vm)?;
             let mut a_data = rv.enter(session, &p.a_data)?;
+            let mut a_merge_data = rv.enter(session, &p.a_merge_data)?;
+            let a_merge_file = rv.enter(session, &p.a_merge_file)?;
             let mut b_data = rv.enter(session, &p.b_data)?;
+            let mut b_merge_data = rv.enter(session, &p.b_merge_data)?;
+            let b_merge_file = rv.enter(session, &p.b_merge_file)?;
             let mut a_review_data = rv.enter(session, &p.a_review_data)?;
             let mut b_review_data = rv.enter(session, &p.b_review_data)?;
             let mut test_data = rv.enter(session, &p.test_data)?;
             let mut ci_data = rv.enter(session, &p.ci_data)?;
+            let merge_requests = rv.enter(session, &p.merge_requests)?;
             let repo_resource = rv.enter(session, &p.repo)?;
             let environment = rv.enter(session, &p.environment)?;
             let build = rv.enter(session, &p.build)?;
@@ -165,9 +151,11 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             let test_file = rv.enter(session, &p.test_file)?;
             let ci_file = rv.enter(session, &p.ci_file)?;
             async {
-                let [mut repo, mut test, mut ci] = resource_init.par()?;
+                let [mut repo, mut test, mut ci, mut reviews] = resource_init.par()?;
                 async {
                     repo.send::<RepoLoan>(repo_resource).await?;
+                    repo.send::<crate::shell::global::Loan<MERGE_REQUESTS>>(merge_requests)
+                        .await?;
                 };
                 async {
                     test.send::<TestLoan>(environment).await?;
@@ -175,29 +163,59 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 async {
                     ci.send::<BuildLoan>(build).await?;
                 };
+                async {
+                    reviews
+                        .send::<crate::shell::global::Loan<REVIEW_A>>(review_a)
+                        .await?;
+                    reviews
+                        .send::<crate::shell::global::Loan<REVIEW_B>>(review_b)
+                        .await?;
+                };
                 Ok(())
             }
             .await?;
             async {
-                localside::repository::run(&mut repo_owner, (&bus, &order)).await?;
+                localside::repository::run(&mut repo_owner, &bus).await?;
             };
             async {
-                localside::reviews::feature_a(&mut review_a, (&bus, &review_a_actual)).await?;
-            };
-            async {
-                localside::reviews::feature_b(&mut review_b, (&bus, &review_b_actual)).await?;
+                localside::reviews::initial(
+                    &mut review_initial,
+                    (&bus, &review_a_actual, &review_b_actual),
+                )
+                .await?;
             };
             async {
                 localside::tests::run(&mut test_owner, &bus).await?;
             };
             async {
-                localside::ci::run(&mut ci_owner, (&bus, &ci_actual)).await?;
+                let mut build = ci_owner.recv::<BuildLoan>().await?;
+                localside::ci::run(&mut build, &bus).await?;
             };
             async {
-                file_metadata::run(&mut a_data, a_file, DEVELOPER_FILES).await?;
+                file_metadata::run(&mut a_merge_data, a_merge_file, FEATURE_FILES).await?;
+            };
+            let a_merge_file = review_repair_a
+                .recv::<crate::shell::global::Loan<A_MERGE_FILE>>()
+                .await?;
+            async {
+                localside::reviews::feature_a(&mut review_repair_a, (&bus, &review_a_actual))
+                    .await?;
             };
             async {
-                file_metadata::run(&mut b_data, b_file, DEVELOPER_FILES).await?;
+                file_metadata::run(&mut b_merge_data, b_merge_file, FEATURE_FILES).await?;
+            };
+            let b_merge_file = review_repair_b
+                .recv::<crate::shell::global::Loan<B_MERGE_FILE>>()
+                .await?;
+            async {
+                localside::reviews::feature_b(&mut review_repair_b, (&bus, &review_b_actual))
+                    .await?;
+            };
+            async {
+                file_metadata::run(&mut a_data, a_file, UPDATE_FILES).await?;
+            };
+            async {
+                file_metadata::run(&mut b_data, b_file, UPDATE_FILES).await?;
             };
             async {
                 file_metadata::run(
@@ -247,29 +265,33 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 let mut ci = vec![0; incoming_capacity];
                 let mut interface = vec![0; incoming_capacity];
                 let mut peer_review = vec![0; incoming_capacity];
-                let file = ChoreoFsFile::new(DEVELOPER_FILES[0], a_file)
+                let file = ChoreoFsFile::new(UPDATE_FILES[0], a_file)
+                    .read_as::<CiUpdate>(&mut ci)
+                    .file(UPDATE_FILES[1])?
+                    .read_as::<InterfaceB>(&mut interface)
+                    .file(UPDATE_FILES[2])?
+                    .read_as::<ReviewFeedbackB>(&mut peer_review);
+                let merge_file = ChoreoFsFile::new(FEATURE_FILES[0], a_merge_file)
                     .write_as::<ImplementA>(&mut request)
                     .read_as::<ImplementationA>(&mut implementation)
-                    .file(DEVELOPER_FILES[1])?
+                    .file(FEATURE_FILES[1])?
                     .write_as::<MergeA>(&mut merge)
                     .read_as::<MergedA>(&mut merged)
-                    .file(DEVELOPER_FILES[2])?
+                    .file(FEATURE_FILES[2])?
                     .read_as::<ReviewFeedbackA>(&mut reviewed)
-                    .file(DEVELOPER_FILES[3])?
-                    .read_as::<MergeReadyA>(&mut ready)
-                    .file(DEVELOPER_FILES[4])?
-                    .read_as::<CiUpdate>(&mut ci)
-                    .file(DEVELOPER_FILES[5])?
-                    .read_as::<InterfaceB>(&mut interface)
-                    .file(DEVELOPER_FILES[6])?
-                    .read_as::<ReviewFeedbackB>(&mut peer_review);
-                let files = ChoreoFsFiles::new(a_vm).file(file)?;
+                    .file(FEATURE_FILES[3])?
+                    .read_as::<MergeReadyA>(&mut ready);
+                let files = ChoreoFsFiles::new(a_vm).file(file)?.file(merge_file)?;
                 let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
                 let mut storage = HibanaWasiGuestStorage::uninit();
                 let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
                 let (exit, files) = guest.run().await?;
                 let status = exit.status() as i32;
-                let (mut root, (file, ())) = files.into_parts();
+                let (mut root, (merge_file, (file, ()))) = files.into_parts();
+                merge_file
+                    .into_endpoint()
+                    .send::<crate::shell::global::FileExit>(&status)
+                    .await?;
                 file.into_endpoint()
                     .send::<crate::shell::global::FileExit>(&status)
                     .await?;
@@ -292,29 +314,33 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 let mut ci = vec![0; incoming_capacity];
                 let mut interface = vec![0; incoming_capacity];
                 let mut peer_review = vec![0; incoming_capacity];
-                let file = ChoreoFsFile::new(DEVELOPER_FILES[0], b_file)
+                let file = ChoreoFsFile::new(UPDATE_FILES[0], b_file)
+                    .read_as::<CiUpdate>(&mut ci)
+                    .file(UPDATE_FILES[1])?
+                    .read_as::<InterfaceA>(&mut interface)
+                    .file(UPDATE_FILES[2])?
+                    .read_as::<ReviewFeedbackA>(&mut peer_review);
+                let merge_file = ChoreoFsFile::new(FEATURE_FILES[0], b_merge_file)
                     .write_as::<ImplementB>(&mut request)
                     .read_as::<ImplementationB>(&mut implementation)
-                    .file(DEVELOPER_FILES[1])?
+                    .file(FEATURE_FILES[1])?
                     .write_as::<MergeB>(&mut merge)
                     .read_as::<MergedB>(&mut merged)
-                    .file(DEVELOPER_FILES[2])?
+                    .file(FEATURE_FILES[2])?
                     .read_as::<ReviewFeedbackB>(&mut reviewed)
-                    .file(DEVELOPER_FILES[3])?
-                    .read_as::<MergeReadyB>(&mut ready)
-                    .file(DEVELOPER_FILES[4])?
-                    .read_as::<CiUpdate>(&mut ci)
-                    .file(DEVELOPER_FILES[5])?
-                    .read_as::<InterfaceA>(&mut interface)
-                    .file(DEVELOPER_FILES[6])?
-                    .read_as::<ReviewFeedbackA>(&mut peer_review);
-                let files = ChoreoFsFiles::new(b_vm).file(file)?;
+                    .file(FEATURE_FILES[3])?
+                    .read_as::<MergeReadyB>(&mut ready);
+                let files = ChoreoFsFiles::new(b_vm).file(file)?.file(merge_file)?;
                 let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
                 let mut storage = HibanaWasiGuestStorage::uninit();
                 let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
                 let (exit, files) = guest.run().await?;
                 let status = exit.status() as i32;
-                let (mut root, (file, ())) = files.into_parts();
+                let (mut root, (merge_file, (file, ()))) = files.into_parts();
+                merge_file
+                    .into_endpoint()
+                    .send::<crate::shell::global::FileExit>(&status)
+                    .await?;
                 file.into_endpoint()
                     .send::<crate::shell::global::FileExit>(&status)
                     .await?;

@@ -11,11 +11,25 @@ use std::{
     process::{Command, Stdio},
 };
 
-pub const REFACTOR_CASES: usize = 1 << 3;
+pub const REFACTOR_CASES: usize = 1 << 4;
 pub const LAB_CASES: usize = 25;
 pub const LAB_QUALITY_CASES: usize = 8;
+pub const LAB_CASCADING_CASES: usize = 11;
+const REGULATORY_DISCOVERY_CASES: usize = 7;
+const MULTI_ROUND_DISCOVERY_CASES: usize = 3;
+const RESEARCH_PAPER_CASES: usize = 2;
+const SURVEY_PAPER_DEPTHS: [usize; 2] = [0, 2];
 
-const FAMILIES: [&str; 21] = [
+const FAMILIES: [&str; 30] = [
+    "large_document",
+    "cicd_pipeline",
+    "full_stack_api",
+    "survey_paper",
+    "research_paper",
+    "multi_round_discovery",
+    "regulatory_discovery",
+    "drug_discovery",
+    "lab_cascading",
     "lab_quality",
     "lab",
     "refactor",
@@ -39,9 +53,46 @@ const FAMILIES: [&str; 21] = [
     "cicd",
 ];
 
-fn dining_reports(reports: &[Value]) -> Result<()> {
+pub const DINING_9E_ORDERS: &[(&str, &str)] = &[
+    ("reconsider", "abBacCaA"),
+    ("ABC", "aAbBcC"),
+    ("ACB", "aAcCbB"),
+    ("BAC", "bBaAcC"),
+    ("BCA", "bBcCaA"),
+    ("CAB", "cCaAbB"),
+    ("CBA", "cCbBaA"),
+];
+pub const DINING_9M_ORDERS: &[(&str, &str)] = &[
+    ("ABCDE", "aAbBcCdDeE"),
+    ("AEDCB", "aAeEdDcCbB"),
+    ("BCDEA", "bBcCdDeEaA"),
+    ("BAEDC", "bBaAeEdDcC"),
+    ("CDEAB", "cCdDeEaAbB"),
+    ("CBAED", "cCbBaAeEdD"),
+    ("DEABC", "dDeEaAbBcC"),
+    ("DCBAE", "dDcCbBaAeE"),
+    ("EABCD", "eEaAbBcCdD"),
+    ("EDCBA", "eEdDcCbBaA"),
+];
+pub const DINING_9H_ORDERS: &[(&str, &str)] = &[
+    ("ABCDEFG", "aAbBcCdDeEfFgG"),
+    ("AGFEDCB", "aAgGfFeEdDcCbB"),
+    ("BCDEFGA", "bBcCdDeEfFgGaA"),
+    ("BAGFEDC", "bBaAgGfFeEdDcC"),
+    ("CDEFGAB", "cCdDeEfFgGaAbB"),
+    ("CBAGFED", "cCbBaAgGfFeEdD"),
+    ("DEFGABC", "dDeEfFgGaAbBcC"),
+    ("DCBAGFE", "dDcCbBaAgGfFeE"),
+    ("EFGABCD", "eEfFgGaAbBcCdD"),
+    ("EDCBAGF", "eEdDcCbBaAgGfF"),
+    ("FGABCDE", "fFgGaAbBcCdDeE"),
+    ("FEDCBAG", "fFeEdDcCbBaAgG"),
+    ("GABCDEF", "gGaAbBcCdDeEfF"),
+    ("GFEDCBA", "gGfFeEdDcCbBaA"),
+];
+
+fn dining_reports(reports: &[Value], runtime_hash: &str) -> Result<()> {
     let mut completed = BTreeSet::new();
-    let mut binaries = BTreeSet::new();
     for report in reports {
         let task = report["task"].as_str().ok_or("dining task")?;
         let count = match task {
@@ -68,18 +119,15 @@ fn dining_reports(reports: &[Value]) -> Result<()> {
         {
             return Err("dining qualification has a missing, failed or duplicate condition".into());
         }
-        binaries.insert(
-            audit["runtime_binary_sha256"]
-                .as_str()
-                .filter(|hash| hash.len() == 64)
-                .ok_or("dining runtime hash")?,
-        );
+        if audit["runtime_binary_sha256"] != runtime_hash {
+            return Err("dining report belongs to a different runtime binary".into());
+        }
     }
     let expected = ["9E", "9M", "9H"]
         .into_iter()
         .flat_map(|task| [false, true].map(|input| (task.to_owned(), input)))
         .collect();
-    if completed != expected || binaries.len() != 1 {
+    if completed != expected {
         return Err("dining evidence omits conditions or combines runtime binaries".into());
     }
     Ok(())
@@ -124,12 +172,23 @@ fn kitchen_reports(reports: &[Value]) -> Result<()> {
     Ok(())
 }
 
-pub const FEATURE_DELIVERY_INITIAL_ORDERS: [(bool, bool); 4] =
-    [(false, false), (false, true), (true, false), (true, true)];
+// Independent review, test and initial merge orders for the two developers.
+pub const FEATURE_DELIVERY_INITIAL_ORDERS: [(bool, bool, bool); 8] = [
+    (false, false, false),
+    (false, true, false),
+    (true, false, true),
+    (true, true, true),
+    (false, false, true),
+    (false, true, true),
+    (true, false, false),
+    (true, true, false),
+];
 type FailureSchedule = &'static [(&'static str, u32)];
-pub const FEATURE_DELIVERY_RECOVERY_CASES: [(u8, bool, bool, FailureSchedule); 2] = [
+pub const FEATURE_DELIVERY_RECOVERY_CASES: [(u8, bool, bool, FailureSchedule); 3] = [
     (1, false, true, &[("code_review", 3)]),
     (2, true, false, &[("code_review", 4), ("code_review", 5)]),
+    // Both initial features are rejected before either is approved.
+    (2, false, true, &[]),
 ];
 
 fn boundary_assignments(family: &str, filter: &str) -> Result<Vec<(String, Option<usize>)>> {
@@ -170,6 +229,9 @@ fn boundary_assignments(family: &str, filter: &str) -> Result<Vec<(String, Optio
     }
     if family == "philosophers" {
         let assignments = [
+            "three_philosophers_all_meal_orders",
+            "five_philosophers_any_first_seat",
+            "seven_philosophers_any_first_seat",
             "three_philosophers_normal",
             "five_philosophers_normal",
             "seven_philosophers_normal",
@@ -196,6 +258,43 @@ fn boundary_assignments(family: &str, filter: &str) -> Result<Vec<(String, Optio
             .map(|index| (name.to_owned(), Some(index)))
             .collect());
     }
+    if family == "regulatory_discovery" {
+        let name = "regulatory_discovery_boundary::actual_wasm_reconsideration";
+        if !name.contains(filter) {
+            return Err("unknown regulatory discovery finite assignment filter".into());
+        }
+        return Ok((0..REGULATORY_DISCOVERY_CASES)
+            .map(|index| (name.to_owned(), Some(index)))
+            .collect());
+    }
+    if family == "multi_round_discovery" {
+        let name = "multi_round_discovery_boundary::actual_wasm_runs_multi_round_study";
+        if !name.contains(filter) {
+            return Err("unknown multi-round discovery finite assignment filter".into());
+        }
+        return Ok((0..MULTI_ROUND_DISCOVERY_CASES)
+            .map(|index| (name.to_owned(), Some(index)))
+            .collect());
+    }
+    if family == "research_paper" {
+        let name = "research_paper_boundary::actual_wasm_publishes_three_independent_chapters";
+        if !name.contains(filter) {
+            return Err("unknown research paper finite assignment filter".into());
+        }
+        return Ok((0..RESEARCH_PAPER_CASES)
+            .map(|index| (name.to_owned(), Some(index)))
+            .collect());
+    }
+    if family == "survey_paper" {
+        let name = "survey_paper_boundary::seven_wasm_guests_publish_the_current_survey";
+        if !name.contains(filter) {
+            return Err("unknown survey paper finite assignment filter".into());
+        }
+        return Ok(SURVEY_PAPER_DEPTHS
+            .into_iter()
+            .map(|depth| (name.to_owned(), Some(depth)))
+            .collect());
+    }
     if family != "feature_delivery" {
         return Ok(vec![(filter.to_owned(), None)]);
     }
@@ -203,7 +302,7 @@ fn boundary_assignments(family: &str, filter: &str) -> Result<Vec<(String, Optio
     for (name, conditions) in [
         (
             "feature_delivery_boundary::actual_wasi_initial_orders_and_integrated_ci",
-            FEATURE_DELIVERY_INITIAL_ORDERS.len(),
+            FEATURE_DELIVERY_INITIAL_ORDERS.len() + 2,
         ),
         (
             "feature_delivery_boundary::actual_wasi_review_rejection_and_ci_repair",
@@ -241,6 +340,7 @@ fn execute(command: &mut Command, output: &Path, name: &str) -> Result<String> {
         "PYTHONHASHSEED",
         "CHOREOFIX_FEATURE_DELIVERY_CASE",
         "CHOREOFIX_REFACTOR_CASE",
+        "CHOREOFIX_CODEBASE_CASES",
         "CHOREOFIX_LAB_CASE",
         "CHOREOFIX_LAB_QUALITY_CASE",
         "CHOREOFIX_KITCHEN_CASE",
@@ -431,10 +531,12 @@ pub fn run(output: &Path, filter: Option<&str>) -> Result<Value> {
     if std::env::var_os("CHOREOFIX_LAB_CASE").is_some()
         || std::env::var_os("CHOREOFIX_LAB_QUALITY_CASE").is_some()
         || std::env::var_os("CHOREOFIX_REFACTOR_CASE").is_some()
+        || std::env::var_os("CHOREOFIX_CODEBASE_CASES").is_some()
         || std::env::var_os("CHOREOFIX_FEATURE_DELIVERY_CASE").is_some()
         || std::env::var_os("CHOREOFIX_KITCHEN_CASE").is_some()
         || std::env::var_os("CHOREOFIX_REGULATORY_DISCOVERY_CASE").is_some()
         || std::env::var_os("CHOREOFIX_MULTI_ROUND_DISCOVERY_CASE").is_some()
+        || std::env::var_os("CHOREOFIX_RESEARCH_PAPER_CASE").is_some()
     {
         return Err(
             "WASI qualification assigns every declared condition; use the direct boundary test for a diagnostic condition".into(),
@@ -511,10 +613,23 @@ pub fn run(output: &Path, filter: Option<&str>) -> Result<Value> {
                     format!("CHOREOFIX_{}_BUILD_RECEIPT", family.to_uppercase()),
                     &receipt,
                 );
+            // Libtest filters are substring matches: build_boundary also
+            // matches cascading_build_boundary. Keep each family's assignment
+            // disjoint, including when its peers ran in an earlier group.
+            command.args(
+                FAMILIES
+                    .iter()
+                    .filter(|other| **other != family && other.ends_with(family))
+                    .flat_map(|other| ["--skip".to_owned(), format!("{other}_boundary::")]),
+            );
             if let Some(condition) = condition {
                 command.env(
                     match family {
                         "kitchen" => "CHOREOFIX_KITCHEN_CASE",
+                        "regulatory_discovery" => "CHOREOFIX_REGULATORY_CASE",
+                        "multi_round_discovery" => "CHOREOFIX_MULTI_ROUND_DISCOVERY_CASE",
+                        "research_paper" => "CHOREOFIX_RESEARCH_PAPER_CASE",
+                        "survey_paper" => "CHOREOFIX_SURVEY_PAPER_DEPTH",
                         _ => "CHOREOFIX_FEATURE_DELIVERY_CASE",
                     },
                     condition.to_string(),
@@ -527,11 +642,179 @@ pub fn run(output: &Path, filter: Option<&str>) -> Result<Value> {
             }
             completed += passed;
         }
-        if filter.is_none() && family == "report" && completed != 3 {
-            return Err("report qualification must execute the ordinary, extended-rejection and adversarial groups".into());
+        if filter.is_none() && family == "report" && completed != 5 {
+            return Err("report qualification requires ordinary reviews, repeated rejections, invalid requests, independent author preparation and early section review".into());
         }
         if filter.is_none() && family == "manufacturing" && completed != 2 {
             return Err("manufacturing qualification must execute both the total-order/recovery and contended-choice groups".into());
+        }
+        if family == "cicd_pipeline" {
+            let report: Value = serde_json::from_slice(&fs::read(
+                output.join("evidence/cicd-pipeline-wasi/boundary.json"),
+            )?)?;
+            if completed != 1
+                || report["task"] != "16M"
+                || report["status"] != "passed"
+                || report["runtime_binary_sha256"] != digest(&binary)?
+            {
+                return Err("16M qualification requires its audited actual-Wasm boundary".into());
+            }
+        }
+        if family == "large_document" {
+            let report: Value = serde_json::from_slice(&fs::read(
+                output.join("evidence/large-document-wasi/boundary.json"),
+            )?)?;
+            if completed != 1
+                || report["task"] != "7H"
+                || report["status"] != "passed"
+                || report["runtime_binary_sha256"] != digest(&binary)?
+            {
+                return Err("7H qualification requires its audited actual-Wasm boundary".into());
+            }
+        }
+        if family == "full_stack_api" {
+            let report: Value = serde_json::from_slice(&fs::read(
+                output.join("evidence/full-stack-api-wasi/boundary.json"),
+            )?)?;
+            if completed != 1
+                || report["task"] != "8M"
+                || report["status"] != "passed"
+                || report["simulator_complete"] != true
+                || report["violations"] != 0
+                || report["runtime_binary_sha256"] != digest(&binary)?
+            {
+                return Err(
+                    "8M qualification requires the audited actual-Wasm recovery case".into(),
+                );
+            }
+        }
+        if family == "regulatory_discovery" {
+            if completed != REGULATORY_DISCOVERY_CASES as u64 {
+                return Err("14M did not execute every finite condition".into());
+            }
+            let runtime = digest(&binary)?;
+            for index in 0..REGULATORY_DISCOVERY_CASES {
+                let report: Value = serde_json::from_slice(&fs::read(output.join(format!(
+                    "evidence/regulatory-discovery-wasi-{index}/audit.json"
+                )))?)?;
+                if report["task"] != "14M"
+                    || report["status"] != "passed"
+                    || report["dynamic_protocol"]["status"] != "passed"
+                    || report["violations"] != 0
+                    || report["runtime_binary_sha256"] != runtime
+                {
+                    return Err("14M qualification requires all audited runs on one runtime".into());
+                }
+            }
+        }
+        if family == "multi_round_discovery" {
+            if completed != MULTI_ROUND_DISCOVERY_CASES as u64 {
+                return Err("14H did not execute every finite condition".into());
+            }
+            let runtime = digest(&binary)?;
+            for index in 0..MULTI_ROUND_DISCOVERY_CASES {
+                let report: Value = serde_json::from_slice(&fs::read(output.join(format!(
+                    "evidence/multi-round-discovery-wasi-{index}/audit.json"
+                )))?)?;
+                if report["task"] != "14H"
+                    || report["status"] != "passed"
+                    || report["dynamic_protocol"]["status"] != "passed"
+                    || report["violations"] != 0
+                    || report["runtime_binary_sha256"] != runtime
+                {
+                    return Err("14H qualification requires all audited runs on one runtime".into());
+                }
+            }
+        }
+        if family == "research_paper" {
+            if completed != RESEARCH_PAPER_CASES as u64 {
+                return Err("3M did not execute every finite condition".into());
+            }
+            let runtime = digest(&binary)?;
+            for (index, effect_count) in [16, 24].into_iter().enumerate() {
+                let report: Value = serde_json::from_slice(&fs::read(output.join(format!(
+                    "evidence/research-paper-wasi-{index}/effect-audit.json"
+                )))?)?;
+                if report["task"] != "3M"
+                    || report["status"] != "passed"
+                    || report["dynamic_protocol"]["status"] != "passed"
+                    || report["violations"] != 0
+                    || report["domain_calls"] != effect_count
+                    || report["runtime_binary_sha256"] != runtime
+                {
+                    return Err("3M qualification requires both audited runs on one runtime".into());
+                }
+            }
+        }
+        if family == "survey_paper" {
+            if completed != SURVEY_PAPER_DEPTHS.len() as u64 {
+                return Err("3H did not execute every finite condition".into());
+            }
+            let runtime = digest(&binary)?;
+            for depth in SURVEY_PAPER_DEPTHS {
+                let report: Value = serde_json::from_slice(&fs::read(output.join(format!(
+                    "evidence/survey-paper-wasi-{depth}/effect-audit.json"
+                )))?)?;
+                if report["task"] != "3H"
+                    || report["status"] != "passed"
+                    || report["dynamic_protocol"]["status"] != "passed"
+                    || report["simulator_complete"] != true
+                    || report["violations"] != 0
+                    || report["domain_calls"] != 26 + 2 * depth
+                    || report["runtime_binary_sha256"] != runtime
+                {
+                    return Err(
+                        "3H qualification requires both audited conditions on one runtime".into(),
+                    );
+                }
+            }
+        }
+        if family == "drug_discovery" {
+            let report: Value = serde_json::from_slice(&fs::read(
+                output.join("evidence/drug-discovery-wasi/mechanism.json"),
+            )?)?;
+            let cases = report["cases"].as_array().ok_or("14E case reports")?;
+            let runtime = digest(&binary)?;
+            if completed != 1
+                || report["task"] != "14E"
+                || report["status"] != "passed"
+                || cases.len() != 2
+                || cases[0]["case"] != "reference-first-no-go"
+                || cases[1]["case"] != "baseline-first-go"
+                || cases[0]["audit"]["decision"] != false
+                || cases[1]["audit"]["decision"] != true
+                || cases.iter().any(|case| {
+                    let audit = &case["audit"];
+                    audit["status"] != "passed"
+                        || audit["violations"] != 0
+                        || audit["runtime_binary_sha256"] != runtime
+                })
+            {
+                return Err("14E qualification requires both decision cases on one runtime".into());
+            }
+        }
+        if family == "lab_cascading" {
+            let report: Value = serde_json::from_slice(&fs::read(
+                output.join("evidence/lab-cascading-wasi/mechanism.json"),
+            )?)?;
+            let cases = report["cases"].as_array().ok_or("13H case reports")?;
+            let names = cases
+                .iter()
+                .filter_map(|case| case["case"].as_str())
+                .collect::<BTreeSet<_>>();
+            let runtime = digest(&binary)?;
+            if completed != 1
+                || report["task"] != "13H"
+                || report["status"] != "passed"
+                || report["declared_cases"] != LAB_CASCADING_CASES
+                || names.len() != LAB_CASCADING_CASES
+                || cases.len() != LAB_CASCADING_CASES
+                || cases
+                    .iter()
+                    .any(|case| case["violations"] != 0 || case["runtime_binary_sha256"] != runtime)
+            {
+                return Err("13H qualification requires every case on the selected runtime".into());
+            }
         }
         if family == "lab_quality" && test_filter == "lab_quality_boundary::" {
             let report: Value = serde_json::from_slice(&fs::read(
@@ -639,17 +922,17 @@ pub fn run(output: &Path, filter: Option<&str>) -> Result<Value> {
         }
         if family == "staged_integration"
             && test_filter == "staged_integration_boundary::"
-            && completed != 2
+            && completed != 4
         {
             return Err(
-                "staged integration must execute both baseline and failed-result recovery".into(),
+                "staged integration must execute concurrent, paced, reverse-merge and failed-result recovery trials".into(),
             );
         }
         if family == "kitchen" && completed != KITCHEN_CASES as u64 {
             return Err("kitchen qualification omitted a declared condition".into());
         }
         if family == "philosophers" {
-            if completed != 6 {
+            if completed != 9 {
                 return Err("dining qualification omitted a declared condition".into());
             }
             let mut reports = Vec::new();
@@ -665,7 +948,58 @@ pub fn run(output: &Path, filter: Option<&str>) -> Result<Value> {
                     )?)?);
                 }
             }
-            dining_reports(&reports)?;
+            let runtime_hash = digest(&binary)?;
+            dining_reports(&reports, &runtime_hash)?;
+            for (task, group, seats, schedules) in [
+                ("9E", "three-diner-orders", 3, DINING_9E_ORDERS),
+                ("9M", "five-first-seats", 5, DINING_9M_ORDERS),
+                ("9H", "seven-first-seats", 7, DINING_9H_ORDERS),
+            ] {
+                let directory = output.join("evidence").join(group);
+                for &(name, word) in schedules {
+                    let case = directory.join(name);
+                    let audit: Value = serde_json::from_slice(&fs::read(case.join("audit.json"))?)?;
+                    let journal = case.join("events.jsonl");
+                    let records = crate::journal::records(&journal)?;
+                    let effects = records
+                        .iter()
+                        .filter(|row| row["direction"] == "domain_start")
+                        .map(|row| {
+                            (
+                                row["message"]["agent"].as_str(),
+                                row["message"]["tool"].as_str(),
+                            )
+                        });
+                    let expected: Vec<_> = word
+                        .chars()
+                        .map(|action| {
+                            let seat = action.to_ascii_uppercase();
+                            let tool = if action.is_ascii_lowercase() {
+                                "think"
+                            } else {
+                                "eat"
+                            };
+                            (format!("PHILOSOPHER_{seat}"), tool)
+                        })
+                        .collect();
+                    if !effects.eq(expected
+                        .iter()
+                        .map(|(seat, tool)| (Some(seat.as_str()), Some(*tool))))
+                        || audit["task"] != task
+                        || audit["status"] != "passed"
+                        || audit["runtime_binary_sha256"] != runtime_hash
+                        || audit["source_events_sha256"] != digest(&journal)?
+                        || audit["dynamic_protocol"]["status"] != "passed"
+                        || audit["actual_resource_endpoint_returns"] != 2 * seats
+                        || audit["simulator_complete"] != true
+                        || audit["violations"] != 0
+                    {
+                        return Err(
+                            format!("{task} case {name} lacks matching audited evidence").into(),
+                        );
+                    }
+                }
+            }
         }
         if family == "kitchen" {
             let mut reports = Vec::new();
@@ -739,8 +1073,8 @@ mod tests {
     fn isolated_feature_conditions_cover_the_complete_declared_matrix_once() {
         let assigned =
             boundary_assignments("feature_delivery", "feature_delivery_boundary::").unwrap();
-        assert_eq!(assigned.len(), 6);
-        assert_eq!(assigned.iter().collect::<BTreeSet<_>>().len(), 6);
+        assert_eq!(assigned.len(), 13);
+        assert_eq!(assigned.iter().collect::<BTreeSet<_>>().len(), 13);
         let initial: Vec<_> = assigned
             .iter()
             .filter(|(name, _)| name.ends_with("actual_wasi_initial_orders_and_integrated_ci"))
@@ -751,13 +1085,20 @@ mod tests {
             .filter(|(name, _)| name.ends_with("actual_wasi_review_rejection_and_ci_repair"))
             .map(|(_, index)| index.unwrap())
             .collect();
-        assert_eq!(initial, [0, 1, 2, 3]);
-        assert_eq!(recovery, [0, 1]);
+        assert_eq!(initial, (0..10).collect::<Vec<_>>());
+        assert_eq!(recovery, [0, 1, 2]);
         assert_eq!(
             FEATURE_DELIVERY_INITIAL_ORDERS
                 .into_iter()
                 .collect::<BTreeSet<_>>(),
-            BTreeSet::from([(false, false), (false, true), (true, false), (true, true)])
+            [false, true]
+                .into_iter()
+                .flat_map(
+                    |review| [false, true].into_iter().flat_map(move |test| [false, true]
+                        .into_iter()
+                        .map(move |merge| (review, test, merge)))
+                )
+                .collect()
         );
     }
 

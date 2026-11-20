@@ -1,4 +1,4 @@
-"""Document effects and content-bound evidence shared by 3M and 7E/7M/7H.
+"""Document effects and content-bound evidence for research and writing tasks.
 
 The journal owns material history. Task configuration names actual required
 inputs and outputs, never a preferred communication or resource-acquisition order.
@@ -64,6 +64,7 @@ class EditorialStep:
 
 
 class DocumentSim(SimContext):
+    _REVIEW_TOOL = "review_sections"
     _DECISION_TOOLS = {
         "review_sections": 0.3,
         "fact_check": 0.2,
@@ -103,7 +104,7 @@ class DocumentSim(SimContext):
 
     def make_tools(self):
         names = ["write_section", "revise_section", "read_section", "update_references",
-                 "review_sections", "combine_sections"]
+                 self._REVIEW_TOOL, "combine_sections"]
         if self._research_steps:
             names.append("research_topic")
         if self._fact_check_steps:
@@ -116,6 +117,10 @@ class DocumentSim(SimContext):
 
     def _sections(self):
         return tuple(dict.fromkeys(step.section for step in self._write_steps))
+
+    def _can_edit(self, agent, section):
+        return (section in self._sections()
+                and any(step.agent_id == agent for step in self._write_steps))
 
     def _scope(self, value):
         if value in self._sections():
@@ -210,7 +215,12 @@ class DocumentSim(SimContext):
             event = latest.get(("figures", step.section))
             if event is None or event.completed_at is None or event.agent != step.agent_id:
                 return False
-            inserted.append(event.result["artifact"]["id"])
+            figure = event.result["artifact"]
+            if self._research_steps and (
+                figure["research_inputs"].get(step.section) != self._research(step.section)
+            ):
+                return False
+            inserted.append(figure["id"])
         return len(inserted) == len(set(inserted))
 
     def _latest(self, tool, agent, key, value):
@@ -234,15 +244,20 @@ class DocumentSim(SimContext):
     def _reviews(self, snapshot):
         receipts = {}
         for step in self._review_steps:
-            event = self._latest("review_sections", step.agent_id, "scope", step.scope)
             inputs = step.sections or self._scope(step.scope)
             expected = {category: {section: value for section, value in values.items()
                                   if section in inputs}
                         for category, values in snapshot.items()}
-            if event is None or not event.success or event.result["input_snapshot"] != expected:
+            receipt = self._review_receipt(step, expected)
+            if receipt is None:
                 return None
-            receipts[step.scope] = event.result["review_id"]
+            receipts[step.scope] = receipt
         return receipts
+
+    def _review_receipt(self, step, expected):
+        event = self._latest(self._REVIEW_TOOL, step.agent_id, "scope", step.scope)
+        if event is not None and event.success and event.result["input_snapshot"] == expected:
+            return event.result["review_id"]
 
     def _editorial(self, snapshot):
         receipts = {}
@@ -274,9 +289,7 @@ class DocumentSim(SimContext):
         section = self._get_param(kwargs, "section_name", "section")
         content = kwargs.get("content_notes", f"{section} written by {agent_id}")
         research = self._research(section)
-        valid = (agent_id in {step.agent_id for step in self._write_steps}
-                 and section in self._sections() and isinstance(content, str)
-                 and research is not None)
+        valid = self._can_edit(agent_id, section) and isinstance(content, str) and research is not None
         artifact = {"id": f"document:{len(self.events) + 1}", "content": content}
         if self._research_steps:
             artifact["research_inputs"] = research
@@ -304,7 +317,7 @@ class DocumentSim(SimContext):
         prior = latest.get(("sections", section))
         feedback = kwargs.get("feedback", "Cross-chapter consistency revision")
         research = self._research(section)
-        valid = (agent_id in {step.agent_id for step in self._write_steps}
+        valid = (self._can_edit(agent_id, section)
                  and prior is not None and prior.completed_at is not None
                  and isinstance(feedback, str) and research is not None)
         previous = snapshot["sections"].get(section, {}).get("content", section)
@@ -322,8 +335,7 @@ class DocumentSim(SimContext):
     def update_references(self, agent_id, **kwargs):
         section = self._get_param(kwargs, "section_name", "scope")
         research = self._research(section)
-        valid = (agent_id in {step.agent_id for step in self._write_steps}
-                 and section in self._sections() and research is not None)
+        valid = self._can_edit(agent_id, section) and research is not None
         artifact = {"id": f"references:{len(self.events) + 1}",
                     "content": f"References for {section} by {agent_id}"}
         if self._research_steps:
@@ -342,11 +354,22 @@ class DocumentSim(SimContext):
         unchanged = (previous is not None and not previous.success
                      and previous.result["status"] == "needs_revision"
                      and previous.result["input_snapshot"] == snapshot)
-        failed = self.should_fail(tool, agent)
+        if tool == "peer_review":
+            if valid:
+                content = snapshot["sections"][value]["content"]
+                unchanged = any(
+                    event.tool == tool and event.agent == agent and event.completed_at is not None
+                    and event.result[key] == value and event.result["status"] == "needs_revision"
+                    and event.result["input_snapshot"]["sections"][value]["content"] == content
+                    for event in self.events
+                )
+            failed = valid and not unchanged and self.should_fail(tool, agent)
+        else:
+            failed = self.should_fail(tool, agent)
         success = bool(valid and not failed and not unchanged)
-        identifier = {"review_sections": "review_id", "fact_check": "check_id",
+        identifier = {"review_sections": "review_id", "peer_review": "review_id", "fact_check": "check_id",
                       "make_editorial_decision": "decision_id"}[tool]
-        prefix = {"review_sections": "review", "fact_check": "fact",
+        prefix = {"review_sections": "review", "peer_review": "review", "fact_check": "fact",
                   "make_editorial_decision": "editorial"}[tool]
         result = {key: value, "agent": agent,
                   "status": "reviewed" if success else (
@@ -357,14 +380,21 @@ class DocumentSim(SimContext):
 
     def review_sections(self, agent_id, **kwargs):
         scope = self._get_param(kwargs, "section_name", "scope")
+        return self._review(agent_id, scope, kwargs)
+
+    def peer_review(self, agent_id, **kwargs):
+        return self._review(agent_id, kwargs.get("manuscript"), kwargs)
+
+    def _review(self, agent_id, scope, arguments):
         step = next((step for step in self._review_steps
                      if step.agent_id == agent_id and step.scope == scope), None)
         inputs = (step.sections or self._scope(scope)) if step else ()
         valid = step is not None and self._prepared(inputs) and self._facts(inputs) is not None
-        success, result = self._decision("review_sections", agent_id, ("scope", scope), inputs, valid)
+        tool = self._REVIEW_TOOL
+        success, result = self._decision(tool, agent_id, ("scope", scope), inputs, valid)
         if self._fact_check_steps:
             result["fact_receipts"] = self._facts(inputs) if valid else None
-        return self._record("review_sections", agent_id, kwargs, success, result)
+        return self._record(tool, agent_id, arguments, success, result)
 
     def fact_check(self, agent_id, **kwargs):
         section = self._get_param(kwargs, "section", "section_name")
@@ -381,13 +411,18 @@ class DocumentSim(SimContext):
         valid = (any(step.agent_id == agent_id for step in self._insert_figure_steps)
                  and isinstance(description, str) and bool(description.strip()))
         artifact = {"id": f"figure:{len(self.events) + 1}", "content": description}
+        if self._research_steps:
+            artifact["research_inputs"] = {
+                section: research for section in self._sections()
+                if (research := self._research(section)) is not None
+            }
         result = {"figure_id": artifact["id"], "agent": agent_id,
                   "status": "created" if valid else "invalid_figure", "artifact": artifact}
         return self._record("create_figure", agent_id, kwargs, valid, result)
 
     def insert_figure(self, agent_id, **kwargs):
         figure_id = kwargs.get("figure_id")
-        section = self._get_param(kwargs, "section", "section_name")
+        section = self._get_param(kwargs, "section_name")
         figure = self._latest("create_figure", agent_id, "figure_id", figure_id)
         _, latest = self._material()
         written = latest.get(("sections", section))
@@ -395,6 +430,10 @@ class DocumentSim(SimContext):
                      for step in self._insert_figure_steps)
                  and written is not None and written.completed_at is not None
                  and figure is not None and figure.success)
+        if valid and self._research_steps:
+            research = self._research(section)
+            valid = (research is not None
+                     and figure.result["artifact"]["research_inputs"].get(section) == research)
         result = {"figure_id": figure_id, "section": section, "agent": agent_id,
                   "status": "inserted" if valid else "missing_material",
                   "artifact": copy.deepcopy(figure.result["artifact"]) if valid else None}

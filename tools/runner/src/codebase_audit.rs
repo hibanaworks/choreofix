@@ -23,21 +23,14 @@ fn pair(value: &Value) -> Result<Vec<&str>> {
 }
 #[track_caller]
 fn take<'a>(
-    frames: &'a BTreeMap<u64, Frame>,
+    frames: impl Iterator<Item = (u64, &'a Frame)>,
     used: &mut BTreeSet<u64>,
     matches: impl Fn(&Frame) -> bool,
 ) -> Result<&'a Frame> {
-    let (id, frame) = one(frames
-        .iter()
-        .filter(|(id, f)| !used.contains(*id) && matches(f)))
-    .map_err(|e| {
-        format!(
-            "{e} at {}:{}",
-            std::panic::Location::caller().file(),
-            std::panic::Location::caller().line()
-        )
-    })?;
-    used.insert(*id);
+    let location = std::panic::Location::caller();
+    let (id, frame) = one(frames.filter(|(id, f)| !used.contains(id) && matches(f)))
+        .map_err(|e| format!("{e} at {location}"))?;
+    used.insert(id);
     Ok(frame)
 }
 fn prior<'a>(calls: &'a BTreeMap<u64, Call>, call: &Call, tool: &str) -> Result<&'a Value> {
@@ -76,6 +69,19 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let headers = crate::projection::contracts(compiled)?;
     let mut journal = crate::journal::read(rows, &labels, actors)?;
     journal.bind_receives(dynamic)?;
+    // This immutable index only narrows observation searches. Keep every
+    // occurrence and all original matching/uniqueness checks below; it owns
+    // neither protocol progress nor resource permissions.
+    let mut frames_by_contract = BTreeMap::<_, Vec<_>>::new();
+    for (&id, frame) in &journal.frames {
+        let key = (
+            frame.identity["source"].as_u64().ok_or("frame source")?,
+            frame.identity["target"].as_u64().ok_or("frame target")?,
+            u64::from(frame.logical_label),
+        );
+        frames_by_contract.entry(key).or_default().push((id, frame));
+    }
+    let frames_for = |key| frames_by_contract.get(&key).into_iter().flatten().copied();
     let mut used = BTreeSet::new();
     let mut seen = BTreeSet::new();
     let mut latest_tests = BTreeMap::new();
@@ -156,18 +162,109 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             "run_local_tests" => (4, 8),
             _ => return Err("unknown effect".into()),
         };
-        take(&journal.frames, &mut used, |f| {
-            f.direction(file, role)
-                && f.logical_label == request_label
-                && f.received.is_some_and(|at| at < call.emitted)
-                && f.value().is_ok_and(|v| v == *args)
-        })?;
-        let reply = take(&journal.frames, &mut used, |f| {
-            f.direction(role, file)
-                && f.logical_label == reply_label
-                && f.received.is_some_and(|at| at > result_at)
-                && f.value().is_ok_and(|v| v == *result)
-        })?;
+        if matches!(task, "1E" | "1M") && tool == "commit_changes" {
+            let inbox = compiled["submissions"]
+                .as_u64()
+                .ok_or("repository requests")?;
+            let repository = compiled["repository"].as_u64().ok_or("repository")?;
+            let submission = take(frames_for((file, inbox, role)), &mut used, |f| {
+                f.value().is_ok_and(|v| v == *args)
+            })?
+            .received()?;
+            let (sender, dispatched) = if task == "1M" {
+                let bindings = actor["modules"].as_array().ok_or("assigned modules")?;
+                let mut sources = Vec::new();
+                for module in bindings {
+                    let service =
+                        compiled["resources"][module.as_str().ok_or("module name")?]["service"]
+                            .as_u64()
+                            .ok_or("module service")?;
+                    let primary = headers.values().any(|header| {
+                        u64::from(header[1]) == service
+                            && u64::from(header[2]) == role
+                            && u64::from(header[3]) == request_label
+                            && header[4] == 0
+                    });
+                    sources.push((primary, service));
+                }
+                sources.sort_unstable();
+                let [(false, second), (true, first)] = sources.as_slice() else {
+                    return Err("commit needs a primary and a secondary module".into());
+                };
+                let grant = take(frames_for((repository, *first, role)), &mut used, |f| {
+                    submission < f.sent && f.value().is_ok_and(|v| v == *args)
+                })?
+                .received()?;
+                let followup = take(frames_for((*first, inbox, file)), &mut used, |f| {
+                    grant < f.sent && f.value().is_ok_and(|v| v == *args)
+                })?
+                .received()?;
+                take(frames_for((repository, *second, file)), &mut used, |f| {
+                    followup < f.sent
+                        && f.received.is_some_and(|at| at < call.emitted)
+                        && f.value().is_ok_and(|v| v == *args)
+                })?;
+                (*first, grant)
+            } else {
+                (repository, submission)
+            };
+            take(frames_for((sender, role, request_label)), &mut used, |f| {
+                dispatched < f.sent
+                    && f.received.is_some_and(|at| at < call.emitted)
+                    && f.value().is_ok_and(|v| v == *args)
+            })?;
+        } else if task == "1H" && tool == "commit_changes" {
+            let mut owners = Vec::new();
+            for module in actor["modules"].as_array().ok_or("assigned modules")? {
+                let binding = &compiled["resources"][module.as_str().ok_or("module")?];
+                let service = binding["service"].as_u64().ok_or("module service")?;
+                let inbox = binding["requests"]
+                    .as_u64()
+                    .ok_or("module request endpoint")?;
+                let primary = headers.values().any(|h| {
+                    u64::from(h[1]) == service
+                        && u64::from(h[2]) == role
+                        && u64::from(h[3]) == request_label
+                        && h[4] == 0
+                });
+                owners.push((primary, service, inbox));
+            }
+            owners.sort_unstable();
+            let [(false, _, second_inbox), (true, first, first_inbox)] = owners.as_slice() else {
+                return Err("missing primary or secondary module for this commit".into());
+            };
+            let submission = take(frames_for((file, *first_inbox, role)), &mut used, |f| {
+                f.received.is_some_and(|t| t < call.emitted) && f.value().is_ok_and(|v| v == *args)
+            })?
+            .received()?;
+            take(frames_for((*first, *second_inbox, file)), &mut used, |f| {
+                submission < f.sent
+                    && f.received.is_some_and(|t| t < call.emitted)
+                    && f.value().is_ok_and(|v| v == *args)
+            })?;
+            take(frames_for((*first, role, request_label)), &mut used, |f| {
+                submission < f.sent
+                    && f.received.is_some_and(|t| t < call.emitted)
+                    && f.value().is_ok_and(|v| v == *args)
+            })?;
+        } else {
+            take(frames_for((file, role, request_label)), &mut used, |f| {
+                f.direction(file, role)
+                    && u64::from(f.logical_label) == request_label
+                    && f.received.is_some_and(|at| at < call.emitted)
+                    && f.value().is_ok_and(|v| v == *args)
+            })?;
+        }
+        let reply = take(
+            frames_for((role, file, reply_label as u64)),
+            &mut used,
+            |f| {
+                f.direction(role, file)
+                    && f.logical_label == reply_label
+                    && f.received.is_some_and(|at| at > result_at)
+                    && f.value().is_ok_and(|v| v == *result)
+            },
+        )?;
         let resources = actor["modules"]
             .as_array()
             .ok_or("physical modules")?
@@ -229,13 +326,13 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     return Err("commit lacks its actual implementation".into());
                 }
                 for &resource in &resources {
-                    take(&journal.frames, &mut used, |f| {
+                    take(frames_for((resource, role, resource)), &mut used, |f| {
                         f.direction(resource, role)
                             && f.logical_label as u64 == resource
                             && f.received.is_some_and(|at| at < call.emitted)
                             && f.value().is_ok_and(|v| v == *args)
                     })?;
-                    take(&journal.frames, &mut used, |f| {
+                    take(frames_for((role, resource, resource)), &mut used, |f| {
                         f.direction(role, resource)
                             && f.logical_label as u64 == resource
                             && f.received.is_some_and(|at| at > result_at)
@@ -278,18 +375,6 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     if matched == 0 {
                         return Err("test result lacks its actual resolver decision".into());
                     }
-                    for i in 0..2 {
-                        let service = compiled["resources"]
-                            [actor["modules"][i].as_str().ok_or("module")?]["service"]
-                            .as_u64()
-                            .ok_or("module service")?;
-                        take(&journal.frames, &mut used, |f| {
-                            f.direction(role, service)
-                                && f.logical_label as u64 == resources[1 - i]
-                                && f.received.is_some_and(|at| at > result_at)
-                                && f.value().is_ok_and(|v| v == *result)
-                        })?;
-                    }
                 }
             }
             _ => unreachable!(),
@@ -317,7 +402,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     {
         return Err("incomplete original work or invalid score/decision evidence".into());
     }
-    let business = compiled["participants"]
+    let mut business = compiled["participants"]
         .as_object()
         .ok_or("participants")?
         .values()
@@ -331,6 +416,56 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         )
         .collect::<Option<BTreeSet<_>>>()
         .ok_or("compiled business role")?;
+    if matches!(task, "1E" | "1M") {
+        business.insert(compiled["repository"].as_u64().ok_or("repository")?);
+        business.insert(
+            compiled["submissions"]
+                .as_u64()
+                .ok_or("repository requests")?,
+        );
+    }
+    if task == "1H" {
+        for module in compiled["resources"]
+            .as_object()
+            .ok_or("module resources")?
+            .values()
+        {
+            business.insert(module["service"].as_u64().ok_or("module service")?);
+            business.insert(
+                module["requests"]
+                    .as_u64()
+                    .ok_or("module request endpoint")?,
+            );
+        }
+    }
+    if task == "1H" {
+        for actor in actors {
+            let declaration =
+                &compiled["participants"][actor["agent"].as_str().ok_or("developer")?];
+            let file = declaration["file"].as_u64().ok_or("file")?;
+
+            let last_test = journal
+                .calls
+                .values()
+                .filter(|call| {
+                    call.request["agent"] == actor["agent"]
+                        && call.request["tool"] == "run_local_tests"
+                })
+                .map(|call| call.result().map(|r| r.0))
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .max()
+                .ok_or("final test")?;
+            for module in actor["modules"].as_array().ok_or("modules")? {
+                let binding = &compiled["resources"][module.as_str().ok_or("module")?];
+                let service = binding["service"].as_u64().ok_or("module service")?;
+                let inbox = binding["requests"].as_u64().ok_or("module requests")?;
+                take(frames_for((file, inbox, service)), &mut used, |f| {
+                    f.sent > last_test && f.received.is_some() && f.bytes == [0; 4]
+                })?;
+            }
+        }
+    }
     for (id, frame) in &journal.frames {
         let wire = u16::try_from(frame.identity["frame_label"].as_u64().ok_or("wire label")?)?;
         let header = headers.get(&wire).ok_or("compiled frame")?;

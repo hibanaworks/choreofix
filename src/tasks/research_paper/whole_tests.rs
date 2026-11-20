@@ -172,9 +172,8 @@ impl Domain for Effects {
 // Each function below is one entire controlled fixture participant, never a
 // product phase helper. Production effect receivers are called unchanged.
 #[hibana_runtime::scope]
-async fn author<'r, const AUTHOR: u8, const SECTION: u8, C: ChapterMessages<AUTHOR>>(
-    endpoint: &mut Endpoint<'r, AUTHOR>,
-    mut section: Endpoint<'r, SECTION>,
+async fn author<'r, const AUTHOR: u8, const FILE: u8, C: ChapterMessages<AUTHOR>>(
+    mut file: Endpoint<'r, FILE>,
     start: usize,
 ) -> ShellResult<()> {
     for _ in 0..start {
@@ -183,11 +182,11 @@ async fn author<'r, const AUTHOR: u8, const SECTION: u8, C: ChapterMessages<AUTH
     let research = imp::Arguments::<AUTHOR, 1>::from_bytes(&imp::encode(
         &json!({"topic":imp::TOPICS[usize::from(AUTHOR)]}),
     )?)?;
-    section.send::<C::Research>(&research).await?;
-    let researched = endpoint.recv::<C::Researched>().await?.into_value();
+    file.send::<C::Research>(&research).await?;
+    let researched = file.recv::<C::Researched>().await?.into_value();
     imp::research(AUTHOR, &researched)?;
     async {
-        let [mut writing,mut references]=section.par()?;
+        let [mut writing,mut references]=file.par()?;
         async {
             let args=json!({"section_name":imp::SECTIONS[usize::from(AUTHOR)],"content_notes":format!("independent findings {AUTHOR}")});
             writing.send::<C::Write>(&imp::Arguments::<AUTHOR,2>::from_bytes(&imp::encode(&args)?)?).await?;
@@ -202,38 +201,27 @@ async fn author<'r, const AUTHOR: u8, const SECTION: u8, C: ChapterMessages<AUTH
         };
         Ok::<(),ShellError>(())
     }.await?;
-    endpoint.send::<Section<SECTION>>(section).await?;
     loop {
-        let branch = endpoint.offer().await?;
-        let rejected = match branch.label() {
-            label if label == C::FactRejectionForAuthor::LOGICAL_LABEL => branch
-                .recv::<C::FactRejectionForAuthor>()
-                .await?
-                .into_value(),
-            label if label == C::ReviewRejectionForAuthor::LOGICAL_LABEL => branch
-                .recv::<C::ReviewRejectionForAuthor>()
-                .await?
-                .into_value(),
-            label if label == C::FinalForAuthor::LOGICAL_LABEL => {
-                assert_eq!(
-                    branch.recv::<C::FinalForAuthor>().await?.into_value()["success"],
-                    true
-                );
-                return Ok(());
+        let notice = match file.recv::<C::AuthorNotice>().await {
+            Ok(notice) => notice.into_value(),
+            // Opening the notification file before the next attempt is
+            // enabled returns a recoverable error to the shell.
+            Err(error) if error.is_unavailable() => {
+                hibana_runtime::yield_now().await;
+                continue;
             }
-            _ => return Err(ShellError::message("unexpected author input")),
+            Err(error) => return Err(error.into()),
         };
-        assert_eq!(rejected["success"], false);
-        let mut section = endpoint.recv::<Section<SECTION>>().await?;
-        let args = json!({"section_name":imp::SECTIONS[usize::from(AUTHOR)],"feedback":format!("address actual {}",rejected["tool_name"])});
-        section
-            .send::<C::Revise>(&imp::Arguments::<AUTHOR, 3>::from_bytes(&imp::encode(
-                &args,
-            )?)?)
-            .await?;
-        let revised = section.recv::<C::Revised>().await?.into_value();
+        if notice["success"] == true {
+            return Ok(());
+        }
+        let args = json!({"section_name":imp::SECTIONS[usize::from(AUTHOR)],"feedback":format!("address actual {}",notice["tool_name"])});
+        file.send::<C::Revise>(&imp::Arguments::<AUTHOR, 3>::from_bytes(&imp::encode(
+            &args,
+        )?)?)
+        .await?;
+        let revised = file.recv::<C::Revised>().await?.into_value();
         imp::material(AUTHOR, 3, &revised, (&args, &researched))?;
-        endpoint.send::<Section<SECTION>>(section).await?;
     }
 }
 
@@ -258,15 +246,9 @@ async fn fact<'borrow, 'run, const AUTHOR: u8, const SECTION: u8, C: ChapterMess
     let mut section = endpoint.recv::<Section<SECTION>>().await?;
     loop {
         let snapshot = imp::snapshot(AUTHOR, &written, &references)?;
-        endpoint
-            .send::<C::FactMaterial>(&imp::Material::new(snapshot.clone())?)
-            .await?;
-        let args = json!({"section_name":imp::SECTIONS[usize::from(AUTHOR)]});
-        section
-            .send::<C::FactRequest>(&imp::Arguments::<AUTHOR, 5>::from_bytes(&imp::encode(
-                &args,
-            )?)?)
-            .await?;
+        let snapshot_wire = imp::Material::new(snapshot.clone())?;
+        endpoint.send::<C::FactInput>(&snapshot_wire).await?;
+        endpoint.send::<C::FactMaterial>(&snapshot_wire).await?;
         endpoint.send::<Section<SECTION>>(section).await?;
         let branch = endpoint.offer().await?;
         match branch.label() {
@@ -317,51 +299,46 @@ async fn fact<'borrow, 'run, const AUTHOR: u8, const SECTION: u8, C: ChapterMess
     }
 }
 
-#[hibana_runtime::scope]
-async fn editor_chapter<
-    'borrow,
-    'run,
-    const AUTHOR: u8,
-    const SECTION: u8,
-    C: ChapterMessages<AUTHOR>,
->(
-    endpoint: &mut EndpointBorrow<'borrow, 'run, EDITOR>,
+async fn fact_file<const AUTHOR: u8, C: ChapterMessages<AUTHOR>>(
+    file: &mut EndpointBorrow<'_, '_, FACT_FILE>,
 ) -> ShellResult<()> {
+    let arguments = imp::Arguments::<AUTHOR, 5>::from_bytes(&imp::encode(
+        &json!({"section_name":imp::SECTIONS[usize::from(AUTHOR)]}),
+    )?)?;
     loop {
-        let branch = endpoint.offer().await?;
-        let facts = match branch.label() {
-            label if label == C::FactsForEditor::LOGICAL_LABEL => {
-                branch.recv::<C::FactsForEditor>().await?.into_value()
+        let branch = file.offer().await?;
+        let snapshot = match branch.label() {
+            label if label == C::FactInput::LOGICAL_LABEL => {
+                branch.recv::<C::FactInput>().await?.into_value()
             }
-            label if label == C::FailedFactsForEditor::LOGICAL_LABEL => {
-                branch.recv::<C::FailedFactsForEditor>().await?;
-                continue;
-            }
-            _ => return Err(ShellError::message("unexpected editorial factual input")),
-        };
-        let mut section = endpoint.recv::<Section<SECTION>>().await?;
-        endpoint
-            .send::<C::ReviewMaterial>(&imp::Material::new(
-                json!({"snapshot":facts["data"]["input_snapshot"],"facts":facts}),
-            )?)
-            .await?;
-        let args = json!({"section_name":imp::SECTIONS[usize::from(AUTHOR)]});
-        section
-            .send::<C::ReviewRequest>(&imp::Arguments::<AUTHOR, 6>::from_bytes(&imp::encode(
-                &args,
-            )?)?)
-            .await?;
-        endpoint.send::<Section<SECTION>>(section).await?;
-        let branch = endpoint.offer().await?;
-        match branch.label() {
-            label if label == C::ReviewPassed::LOGICAL_LABEL => {
-                branch.recv::<C::ReviewPassed>().await?;
+            label if label == C::FactFinished::LOGICAL_LABEL => {
+                assert_eq!(
+                    branch.recv::<C::FactFinished>().await?.into_value()["success"],
+                    true
+                );
                 return Ok(());
             }
-            label if label == C::ReviewRejected::LOGICAL_LABEL => {
-                branch.recv::<C::ReviewRejected>().await?;
-            }
-            _ => return Err(ShellError::message("unexpected editorial result")),
+            _ => return Err(ShellError::message("unexpected factual file receipt")),
+        };
+        file.send::<C::FactRequest>(&arguments).await?;
+        let actual = file.recv::<C::FactResult>().await?.into_value();
+        imp::checked(AUTHOR, &actual, &snapshot)?;
+    }
+}
+
+async fn editor_file<const AUTHOR: u8, C: ChapterMessages<AUTHOR>>(
+    file: &mut EndpointBorrow<'_, '_, EDITOR_FILE>,
+) -> ShellResult<()> {
+    let arguments = imp::Arguments::<AUTHOR, 6>::from_bytes(&imp::encode(
+        &json!({"section_name":imp::SECTIONS[usize::from(AUTHOR)]}),
+    )?)?;
+    loop {
+        let material = file.recv::<C::ReviewInput>().await?.into_value();
+        file.send::<C::ReviewRequest>(&arguments).await?;
+        let actual = file.recv::<C::ReviewResult>().await?.into_value();
+        imp::reviewed(AUTHOR, &actual, (&material["snapshot"], &material["facts"]))?;
+        if actual["success"] == true {
+            return Ok(());
         }
     }
 }
@@ -383,6 +360,16 @@ async fn exercise(
     let database_program = project::<DATABASE>(&source);
     let review_program = project::<REVIEW_SERVICE>(&source);
     let archive_program = project::<ARCHIVE>(&source);
+    let author_a_data_program = project::<AUTHOR_A_DATA>(&source);
+    let author_b_data_program = project::<AUTHOR_B_DATA>(&source);
+    let author_c_data_program = project::<AUTHOR_C_DATA>(&source);
+    let fact_data_program = project::<FACT_DATA>(&source);
+    let editor_data_program = project::<EDITOR_DATA>(&source);
+    let a_file_program = project::<AUTHOR_A_FILE>(&source);
+    let b_file_program = project::<AUTHOR_B_FILE>(&source);
+    let c_file_program = project::<AUTHOR_C_FILE>(&source);
+    let fact_file_program = project::<FACT_FILE>(&source);
+    let editor_file_program = project::<EDITOR_FILE>(&source);
     let a_view = project::<SECTION_A>(&source);
     let b_view = project::<SECTION_B>(&source);
     let c_view = project::<SECTION_C>(&source);
@@ -411,6 +398,11 @@ async fn exercise(
             (session, SECTION_A),
             (session, SECTION_B),
             (session, SECTION_C),
+            (session, AUTHOR_A_FILE),
+            (session, AUTHOR_B_FILE),
+            (session, AUTHOR_C_FILE),
+            (session, FACT_FILE),
+            (session, EDITOR_FILE),
         ],
     );
     let mut slab = vec![0; 2 * 1024 * 1024];
@@ -428,6 +420,16 @@ async fn exercise(
     let database = rv.enter(session, &database_program)?;
     let mut review = rv.enter(session, &review_program)?;
     let mut archive = rv.enter(session, &archive_program)?;
+    let mut author_a_data = rv.enter(session, &author_a_data_program)?;
+    let mut author_b_data = rv.enter(session, &author_b_data_program)?;
+    let mut author_c_data = rv.enter(session, &author_c_data_program)?;
+    let mut fact_data = rv.enter(session, &fact_data_program)?;
+    let mut editor_data = rv.enter(session, &editor_data_program)?;
+    let a_file = rv.enter(session, &a_file_program)?;
+    let b_file = rv.enter(session, &b_file_program)?;
+    let c_file = rv.enter(session, &c_file_program)?;
+    let fact_files = rv.enter(session, &fact_file_program)?;
+    let editor_files = rv.enter(session, &editor_file_program)?;
     let section_a = rv.enter(session, &a_view)?;
     let section_b = rv.enter(session, &b_view)?;
     let section_c = rv.enter(session, &c_view)?;
@@ -443,29 +445,77 @@ async fn exercise(
             async {localside::research::run::<AUTHOR_C,c::Research>(&mut c,domain).await?;};
             Ok::<(),ShellError>(())
         };
-        async {author::<AUTHOR_A,SECTION_A,a::Research>(&mut a,section_a,starts[0]).await?;};
-        async {author::<AUTHOR_B,SECTION_B,b::Research>(&mut b,section_b,starts[1]).await?;};
-        async {author::<AUTHOR_C,SECTION_C,c::Research>(&mut c,section_c,starts[2]).await?;};
+        async {author_a_data.send::<Loan<AUTHOR_A_FILE>>(a_file).await?;};
+        async {author_b_data.send::<Loan<AUTHOR_B_FILE>>(b_file).await?;};
+        async {author_c_data.send::<Loan<AUTHOR_C_FILE>>(c_file).await?;};
+        async {fact_data.send::<Loan<FACT_FILE>>(fact_files).await?;};
+        async {editor_data.send::<Loan<EDITOR_FILE>>(editor_files).await?;};
         async {
-            let [mut a,mut b,mut c]=fact.par()?;
-            async {self::fact::<AUTHOR_A,SECTION_A,a::Research>(&mut a,attack==Some("early_archive")).await?;};
-            async {self::fact::<AUTHOR_B,SECTION_B,b::Research>(&mut b,false).await?;};
-            async {self::fact::<AUTHOR_C,SECTION_C,c::Research>(&mut c,false).await?;};
+            let file = a.recv::<Loan<AUTHOR_A_FILE>>().await?;
+            async {localside::author::run::<AUTHOR_A,SECTION_A,a::Research>(&mut a,section_a).await?;};
+            async {author::<AUTHOR_A,AUTHOR_A_FILE,a::Research>(file,starts[0]).await?;};
             Ok::<(),ShellError>(())
         };
         async {
-            let arguments=ReportArguments::<6>::from_bytes(br#"{"sections":"section_a,section_b,section_c"}"#)?;
+            let file = b.recv::<Loan<AUTHOR_B_FILE>>().await?;
+            async {localside::author::run::<AUTHOR_B,SECTION_B,b::Research>(&mut b,section_b).await?;};
+            async {author::<AUTHOR_B,AUTHOR_B_FILE,b::Research>(file,starts[1]).await?;};
+            Ok::<(),ShellError>(())
+        };
+        async {
+            let file = c.recv::<Loan<AUTHOR_C_FILE>>().await?;
+            async {localside::author::run::<AUTHOR_C,SECTION_C,c::Research>(&mut c,section_c).await?;};
+            async {author::<AUTHOR_C,AUTHOR_C_FILE,c::Research>(file,starts[2]).await?;};
+            Ok::<(),ShellError>(())
+        };
+        async {
+            let mut file = fact.recv::<Loan<FACT_FILE>>().await?;
+            async {
+                let [mut a,mut b,mut c]=fact.par()?;
+                async {
+                    if attack == Some("early_archive") {
+                        self::fact::<AUTHOR_A,SECTION_A,a::Research>(&mut a,true).await
+                    } else {
+                        localside::fact::run::<AUTHOR_A,SECTION_A,a::Research>(&mut a).await
+                    }
+                };
+                async {localside::fact::run::<AUTHOR_B,SECTION_B,b::Research>(&mut b).await?;};
+                async {localside::fact::run::<AUTHOR_C,SECTION_C,c::Research>(&mut c).await?;};
+                Ok::<(),ShellError>(())
+            };
+            async {
+                let [mut a,mut b,mut c]=file.par()?;
+                async {fact_file::<AUTHOR_A,a::Research>(&mut a).await?;};
+                async {fact_file::<AUTHOR_B,b::Research>(&mut b).await?;};
+                async {fact_file::<AUTHOR_C,c::Research>(&mut c).await?;};
+                Ok::<(),ShellError>(())
+            };
+            Ok::<(),ShellError>(())
+        };
+        async {
+            let mut file = editor.recv::<Loan<EDITOR_FILE>>().await?;
             async {
                 let [mut a,mut b,mut c]=editor.par()?;
-                async {editor_chapter::<AUTHOR_A,SECTION_A,a::Research>(&mut a).await?;};
-                async {editor_chapter::<AUTHOR_B,SECTION_B,b::Research>(&mut b).await?;};
-                async {editor_chapter::<AUTHOR_C,SECTION_C,c::Research>(&mut c).await?;};
+                async {localside::editor::run::<AUTHOR_A,SECTION_A,a::Research>(&mut a).await?;};
+                async {localside::editor::run::<AUTHOR_B,SECTION_B,b::Research>(&mut b).await?;};
+                async {localside::editor::run::<AUTHOR_C,SECTION_C,c::Research>(&mut c).await?;};
                 Ok::<(),ShellError>(())
-            }.await?;
-            editor.send::<Combine>(&arguments).await?;
-            let result=imp::decode(editor.recv::<Published>().await?)?;
-            assert_eq!(result["success"],true);
-            assert!(editor.send::<Combine>(&arguments).await.expect_err("completed publication cannot repeat").is_unavailable());
+            };
+            async {
+                let arguments=ReportArguments::<6>::from_bytes(br#"{"sections":"section_a,section_b,section_c"}"#)?;
+                async {
+                    let [mut a,mut b,mut c]=file.par()?;
+                    async {editor_file::<AUTHOR_A,a::Research>(&mut a).await?;};
+                    async {editor_file::<AUTHOR_B,b::Research>(&mut b).await?;};
+                    async {editor_file::<AUTHOR_C,c::Research>(&mut c).await?;};
+                    Ok::<(),ShellError>(())
+                }.await?;
+                file.send::<Combine>(&arguments).await?;
+                let result=imp::decode(file.recv::<Published>().await?)?;
+                assert_eq!(result["success"],true);
+                assert!(file.send::<Combine>(&arguments).await.expect_err("completed publication cannot repeat").is_unavailable());
+            };
+            Ok::<(),ShellError>(())
         };
         async {
             let (a,b,c)=async {

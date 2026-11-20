@@ -1,23 +1,15 @@
-//! Actual publication inputs and CI results drive the two integration branches.
-use super::super::{actual_outcome, global::*, imp};
-use crate::shell::{
-    ShellError, ShellResult,
-    imp::{review_reply::ReviewReply, service::Domain},
-};
-use core::cell::Cell;
-use hibana::{Endpoint, g::Message, runtime::resolver::DecisionArm};
-use serde_json::Value;
+//! The CI service receives publications, computes actual results and hands them to review.
+use super::super::{global::*, imp};
+use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use hibana::{Endpoint, g::Message};
+
 #[hibana_runtime::scope]
-pub async fn run<D: Domain>(
-    owner: &mut Endpoint<CI_OWNER>,
-    (domain, actual): (&D, &Cell<Option<Value>>),
-) -> ShellResult<()> {
-    let mut build = owner.recv::<BuildLoan>().await?;
-    let first = build.offer().await?;
-    match first.label() {
-        PublicationA::LOGICAL_LABEL => {
-            let mut inputs = imp::decode(first.recv::<PublicationA>().await?)?;
-            loop {
+pub async fn run<D: Domain>(build: &mut Endpoint<BUILD_SERVER>, domain: &D) -> ShellResult<()> {
+    loop {
+        let branch = build.offer().await?;
+        match branch.label() {
+            PublicationA::LOGICAL_LABEL => {
+                let inputs = imp::decode(branch.recv::<PublicationA>().await?)?;
                 let publication = &inputs["publication"];
                 let tests = (&inputs["tests"][0], &inputs["tests"][1]);
                 imp::merged(publication, FEATURE_A)?;
@@ -31,26 +23,38 @@ pub async fn run<D: Domain>(
                     .map_err(ShellError::message)?;
                 imp::ci_result(&result, publication, tests)?;
                 let bytes = imp::encode(&result)?;
-                actual.set(Some(result));
-                match actual_outcome(actual).map_err(|e| ShellError::message(format!("{e:?}")))? {
-                    DecisionArm::Left => {
+                let admitted = match result["success"].as_bool() {
+                    Some(true) => {
                         build
-                            .send::<CiPassedA>(&ReviewReply::<true>::from_bytes(&bytes)?)
+                            .send::<CiPassedA>(
+                                &crate::shell::imp::review_reply::ReviewReply::<true>::from_bytes(
+                                    &bytes,
+                                )?,
+                            )
                             .await?;
-                        build.send::<FileCiResultA>(&bytes.as_slice()).await?;
-                        break;
+                        build.send::<CiResultA>(&bytes.as_slice()).await?;
+                        build.recv::<CiPassedA>().await?.to_vec()
                     }
-                    DecisionArm::Right => {
+                    Some(false) => {
                         build
-                            .send::<CiFailedA>(&ReviewReply::<false>::from_bytes(&bytes)?)
+                            .send::<CiFailedA>(&crate::shell::imp::review_reply::ReviewReply::<
+                                false,
+                            >::from_bytes(&bytes)?)
                             .await?;
-                        build.send::<FileCiResultA>(&bytes.as_slice()).await?;
+                        build.send::<CiResultA>(&bytes.as_slice()).await?;
+                        build.recv::<CiFailedA>().await?.to_vec()
                     }
+                    None => return Err(ShellError::message("missing checked CI outcome")),
+                };
+                if admitted != bytes {
+                    return Err(ShellError::message(
+                        "CI admission changed the actual result",
+                    ));
                 }
-                inputs = imp::decode(build.recv::<PublicationA>().await?)?;
+                build.send::<FileCiResultA>(&admitted.as_slice()).await?;
             }
-            let mut inputs = imp::decode(build.recv::<PublicationB>().await?)?;
-            loop {
+            PublicationB::LOGICAL_LABEL => {
+                let inputs = imp::decode(branch.recv::<PublicationB>().await?)?;
                 let publication = &inputs["publication"];
                 let tests = (&inputs["tests"][0], &inputs["tests"][1]);
                 imp::merged(publication, FEATURE_B)?;
@@ -64,101 +68,47 @@ pub async fn run<D: Domain>(
                     .map_err(ShellError::message)?;
                 imp::ci_result(&result, publication, tests)?;
                 let bytes = imp::encode(&result)?;
-                actual.set(Some(result));
-                match actual_outcome(actual).map_err(|e| ShellError::message(format!("{e:?}")))? {
-                    DecisionArm::Left => {
+                let admitted = match result["success"].as_bool() {
+                    Some(true) => {
                         build
-                            .send::<LastCiPassedB>(&ReviewReply::<true>::from_bytes(&bytes)?)
+                            .send::<CiPassedB>(
+                                &crate::shell::imp::review_reply::ReviewReply::<true>::from_bytes(
+                                    &bytes,
+                                )?,
+                            )
                             .await?;
-                        build.send::<FileCiResultB>(&bytes.as_slice()).await?;
-                        break;
+                        build.send::<CiResultB>(&bytes.as_slice()).await?;
+                        build.recv::<CiPassedB>().await?.to_vec()
                     }
-                    DecisionArm::Right => {
+                    Some(false) => {
                         build
-                            .send::<CiFailedB>(&ReviewReply::<false>::from_bytes(&bytes)?)
+                            .send::<CiFailedB>(&crate::shell::imp::review_reply::ReviewReply::<
+                                false,
+                            >::from_bytes(&bytes)?)
                             .await?;
-                        build.send::<FileCiResultB>(&bytes.as_slice()).await?;
+                        build.send::<CiResultB>(&bytes.as_slice()).await?;
+                        build.recv::<CiFailedB>().await?.to_vec()
                     }
+                    None => return Err(ShellError::message("missing checked CI outcome")),
+                };
+                if admitted != bytes {
+                    return Err(ShellError::message(
+                        "CI admission changed the actual result",
+                    ));
                 }
-                inputs = imp::decode(build.recv::<PublicationB>().await?)?;
+                build.send::<FileCiResultB>(&admitted.as_slice()).await?;
             }
-        }
-        PublicationB::LOGICAL_LABEL => {
-            let mut inputs = imp::decode(first.recv::<PublicationB>().await?)?;
-            loop {
-                let publication = &inputs["publication"];
-                let tests = (&inputs["tests"][0], &inputs["tests"][1]);
-                imp::merged(publication, FEATURE_B)?;
-                imp::ci_tests(publication, tests)?;
-                let bytes = imp::encode(publication)?;
-                build.send::<FilePublicationB>(&bytes.as_slice()).await?;
-                let arguments = build.recv::<CiRequestB>().await?.into_value();
-                let result = domain
-                    .execute("CI_RUNNER", "run_tests", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
-                imp::ci_result(&result, publication, tests)?;
-                let bytes = imp::encode(&result)?;
-                actual.set(Some(result));
-                match actual_outcome(actual).map_err(|e| ShellError::message(format!("{e:?}")))? {
-                    DecisionArm::Left => {
-                        build
-                            .send::<CiPassedB>(&ReviewReply::<true>::from_bytes(&bytes)?)
-                            .await?;
-                        build.send::<FileCiResultB>(&bytes.as_slice()).await?;
-                        break;
-                    }
-                    DecisionArm::Right => {
-                        build
-                            .send::<CiFailedB>(&ReviewReply::<false>::from_bytes(&bytes)?)
-                            .await?;
-                        build.send::<FileCiResultB>(&bytes.as_slice()).await?;
-                    }
+            TaskExit::LOGICAL_LABEL => {
+                if branch.recv::<TaskExit>().await? != 0 {
+                    return Err(ShellError::message("delivery failed"));
                 }
-                inputs = imp::decode(build.recv::<PublicationB>().await?)?;
+                return Ok(());
             }
-            let mut inputs = imp::decode(build.recv::<PublicationA>().await?)?;
-            loop {
-                let publication = &inputs["publication"];
-                let tests = (&inputs["tests"][0], &inputs["tests"][1]);
-                imp::merged(publication, FEATURE_A)?;
-                imp::ci_tests(publication, tests)?;
-                let bytes = imp::encode(publication)?;
-                build.send::<FilePublicationA>(&bytes.as_slice()).await?;
-                let arguments = build.recv::<CiRequestA>().await?.into_value();
-                let result = domain
-                    .execute("CI_RUNNER", "run_tests", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
-                imp::ci_result(&result, publication, tests)?;
-                let bytes = imp::encode(&result)?;
-                actual.set(Some(result));
-                match actual_outcome(actual).map_err(|e| ShellError::message(format!("{e:?}")))? {
-                    DecisionArm::Left => {
-                        build
-                            .send::<LastCiPassedA>(&ReviewReply::<true>::from_bytes(&bytes)?)
-                            .await?;
-                        build.send::<FileCiResultA>(&bytes.as_slice()).await?;
-                        break;
-                    }
-                    DecisionArm::Right => {
-                        build
-                            .send::<CiFailedA>(&ReviewReply::<false>::from_bytes(&bytes)?)
-                            .await?;
-                        build.send::<FileCiResultA>(&bytes.as_slice()).await?;
-                    }
-                }
-                inputs = imp::decode(build.recv::<PublicationA>().await?)?;
+            label => {
+                return Err(ShellError::message(format!(
+                    "unexpected CI operation {label}"
+                )));
             }
-        }
-        label => {
-            return Err(ShellError::message(format!(
-                "unexpected initial publication {label}"
-            )));
         }
     }
-    if build.recv::<TaskExit>().await? != 0 {
-        return Err(ShellError::message("delivery failed"));
-    }
-    Ok(())
 }

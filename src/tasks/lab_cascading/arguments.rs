@@ -86,6 +86,13 @@ impl<const OP: u8> WirePayload for Arguments<OP> {
         let value: Value =
             serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
         let object = value.as_object().ok_or(CodecError::Malformed)?;
+        if OP == 11 {
+            return if object.len() == 1 && value["artifact_id"].as_u64().is_some() {
+                Ok(())
+            } else {
+                Err(CodecError::Malformed)
+            };
+        }
         let (key, fixed) = match OP {
             0 | 5 => ("compound", None),
             1 => ("sample", Some("synthesized_compound")),

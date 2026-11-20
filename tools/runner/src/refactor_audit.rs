@@ -163,6 +163,38 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
     journal::check_close_pairs(&frames, &pairs)?;
     let mut scored = score["events"].as_array().ok_or("scored effects")?.clone();
     let mut used = BTreeSet::new();
+    for (suffix, module) in [("A", "module_a"), ("B", "module_b")] {
+        let candidate_label = label(&format!("Candidate{suffix}"))?;
+        let (repo, owner) = (role("REPO")?, role("REPO_OWNER")?);
+        let snapshot = one(frames.values().filter(|f| {
+            f.direction(repo, owner) && u64::from(f.logical_label) == candidate_label
+        }))?;
+        let request_label = label(&format!("ReadCandidate{suffix}"))?;
+        let request = one(frames
+            .values()
+            .filter(|f| f.direction(owner, repo) && u64::from(f.logical_label) == request_label))?;
+        if !request.bytes.is_empty() || request.received()? >= snapshot.sent {
+            return Err("repository snapshot does not answer its typed read".into());
+        }
+        used.insert(request.sent);
+        let at = snapshot.sent;
+        let latest = calls
+            .values()
+            .filter(|c| c.tool().ok() == Some("refactor_code"))
+            .filter_map(|c| c.ended().ok().map(|(end, _)| (end, c)))
+            .filter(|(end, _)| *end < at)
+            .max_by_key(|(end, _)| *end)
+            .ok_or("candidate lacks repository edit")?
+            .1;
+        let snapshot_value = snapshot.value()?;
+        if snapshot_value != latest.result()?.1["data"]["working_candidates"]
+            || snapshot_value[module] != candidate(&calls, module, at)?
+        {
+            return Err("snapshot differs from the actual repository contents".into());
+        }
+        snapshot.received()?;
+        used.insert(at);
+    }
     let mut matched = BTreeSet::new();
     for call in calls.values() {
         let agent = call.request["agent"].as_str().ok_or("effect agent")?;
@@ -444,7 +476,8 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         if business_roles.contains(&from)
             && business_roles.contains(&to)
             && frame.identity["delegated_role"].is_null()
-            && ![label("ReviewExit")?, label("TestExit")?].contains(&u64::from(frame.logical_label))
+            && ![label("ReviewExit")?, label("TestExit")?, label("RepoExit")?]
+                .contains(&u64::from(frame.logical_label))
             && !used.contains(&frame.sent)
         {
             return Err("unused or extra business observation".into());

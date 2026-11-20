@@ -26,7 +26,7 @@ fn response(reply: &Value) -> Result<Value> {
 #[hibana_runtime::main]
 #[test]
 #[ignore = "requires the current direct-file runtime, wash, source receipt and common world"]
-async fn eight_direct_five_guest_orders_preserve_current_publications() -> Result<()> {
+async fn independent_and_interleaved_modules_preserve_current_publications() -> Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()?;
@@ -70,79 +70,168 @@ async fn eight_direct_five_guest_orders_preserve_current_publications() -> Resul
         let trace = Trace::create(&directory.join("events.jsonl"))?;
         let (simulator, _) = oracle::Simulator::new("4M", 0, 0.01, trace.clone(), &[])?;
         let (guest, runtime) = process::guest(&binary, &module, &[], &directory, trace, simulator)?;
-        let (_,(),runtime)=hibana_runtime::race(async {
+        let run = async {
             async {
-                let order=if case&4==0 {["module_a","module_b"]} else {["module_b","module_a"]};
-                for module in order {
-                    let reply=guest.command("ARCHITECT",format!("echo '{}' > /service/design_proposal/{module}; cat /service/design_proposal/{module}",json!({"title":format!("{module}_refactor")}))).await?;
-                    assert_eq!(response(&reply)?["success"],true,"{reply}");
-                }
-                assert_eq!(guest.command("ARCHITECT","exit 0".into()).await?["exit_status"],0);
-                Result::Ok(())
-            };
-            async {
-                let early=guest.command("DEVELOPER_A","echo '{\"branch\":\"module_a\"}' > /service/merge_code".into()).await?;
-                assert!(early["stdout"].as_str().is_some_and(|s|s.contains("Permission denied")),"early publication: {early}");
-                let wrong=guest.command("DEVELOPER_A","echo '{\"target\":\"module_b\"}' > /service/refactor_code/module_a".into()).await?;
-                assert!(wrong["stdout"].as_str().is_some_and(|s|s.contains("Invalid argument")),"substituted target: {wrong}");
-                let a=if case&1==0 {["module_a","SHARED_LIBRARY"]} else {["SHARED_LIBRARY","module_a"]};
-                let b=if case&2==0 {["module_b","SHARED_LIBRARY"]} else {["SHARED_LIBRARY","module_b"]};
-                let order=if case&4==0 {[("DEVELOPER_A",a[0]),("DEVELOPER_B",b[0]),("DEVELOPER_A",a[1]),("DEVELOPER_B",b[1])]}
-                    else {[("DEVELOPER_B",b[0]),("DEVELOPER_A",a[0]),("DEVELOPER_B",b[1]),("DEVELOPER_A",a[1])]};
-                for (agent,target) in order {
-                    let reply=guest.command(agent,format!("echo '{}' > /service/refactor_code/{target}; cat /service/refactor_code/{target}",json!({"target":target}))).await?;
-                    assert_eq!(response(&reply)?["success"],true,"{reply}");
-                }
-                async {
+                if case < 8 {
                     async {
-                let order=if case&4==0 {[("DEVELOPER_A","module_a"),("DEVELOPER_B","module_b")]}
-                    else {[("DEVELOPER_B","module_b"),("DEVELOPER_A","module_a")]};
-                for (agent,module) in order {
-                    let wrong=guest.command(agent,"echo '{}' > /service/review".into()).await?;
-                    assert!(wrong["stdout"].as_str().is_some_and(|s|s.contains("Permission denied")),"approval overwrite: {wrong}");
-                    for path in ["review","test_result"] {
-                        let reply=guest.command(agent,format!("cat /service/{path}")).await?;
-                        assert_eq!(response(&reply)?["success"],true,"{reply}");
+                        async {
+                            let order=if case&4==0 {["module_a","module_b"]} else {["module_b","module_a"]};
+                            for module in order {
+                                let reply=guest.command("ARCHITECT",format!("echo '{}' > /service/design_proposal/{module}; cat /service/design_proposal/{module}",json!({"title":format!("{module}_refactor")}))).await?;
+                                assert_eq!(response(&reply)?["success"],true,"{reply}");
+                            }
+                            assert_eq!(guest.command("ARCHITECT","exit 0".into()).await?["exit_status"],0);
+                            Result::Ok(())
+                        };
+                        async {
+                            let early=guest.command("DEVELOPER_A","echo '{\"branch\":\"module_a\"}' > /service/merge_code".into()).await?;
+                            assert!(early["stdout"].as_str().is_some_and(|s|s.contains("Permission denied")),"early publication: {early}");
+                            let wrong=guest.command("DEVELOPER_A","echo '{\"target\":\"module_b\"}' > /service/refactor_code/module_a".into()).await?;
+                            assert!(wrong["stdout"].as_str().is_some_and(|s|s.contains("Invalid argument")),"substituted target: {wrong}");
+                            let a=if case&1==0 {["module_a","SHARED_LIBRARY"]} else {["SHARED_LIBRARY","module_a"]};
+                            let b=if case&2==0 {["module_b","SHARED_LIBRARY"]} else {["SHARED_LIBRARY","module_b"]};
+                            let order=if case&4==0 {[("DEVELOPER_A",a[0]),("DEVELOPER_B",b[0]),("DEVELOPER_A",a[1]),("DEVELOPER_B",b[1])]}
+                                else {[("DEVELOPER_B",b[0]),("DEVELOPER_A",a[0]),("DEVELOPER_B",b[1]),("DEVELOPER_A",a[1])]};
+                            for (agent,target) in order {
+                                let reply=guest.command(agent,format!("echo '{}' > /service/refactor_code/{target}; cat /service/refactor_code/{target}",json!({"target":target}))).await?;
+                                assert_eq!(response(&reply)?["success"],true,"{reply}");
+                            }
+                            async {
+                                async {
+                            let order=if case&4==0 {[("DEVELOPER_A","module_a"),("DEVELOPER_B","module_b")]}
+                                else {[("DEVELOPER_B","module_b"),("DEVELOPER_A","module_a")]};
+                            for (agent,module) in order {
+                                let wrong=guest.command(agent,"echo '{}' > /service/review".into()).await?;
+                                assert!(wrong["stdout"].as_str().is_some_and(|s|s.contains("Permission denied")),"approval overwrite: {wrong}");
+                                for path in ["review","test_result"] {
+                                    let reply=guest.command(agent,format!("cat /service/{path}")).await?;
+                                    assert_eq!(response(&reply)?["success"],true,"{reply}");
+                                }
+                                let merged=guest.command(agent,format!("echo '{}' > /service/merge_code; cat /service/merge_code",json!({"branch":module}))).await?;
+                                assert_eq!(response(&merged)?["success"],true,"{merged}");
+                                assert_eq!(guest.command(agent,"exit 0".into()).await?["exit_status"],0);
+                            }
+                                    Result::Ok(())
+                                };
+                                async {
+                                        let order=if (case&1==0)==(case&4==0) {["module_a","module_b"]} else {["module_b","module_a"]};
+                                        for module in order {
+                                            let reply=guest.command("REVIEWER",format!("echo '{}' > /service/code_review/{module}",json!({"pr_id":module}))).await?;
+                                            assert!(!reply["stdout"].as_str().ok_or("review submit")?.contains("denied"),"{reply}");
+                                        }
+                                        for module in order {
+                                            let reply=guest.command("REVIEWER",format!("cat /service/code_review/{module}")).await?;
+                                            assert_eq!(response(&reply)?["success"],true,"{reply}");
+                                        }
+                                        assert_eq!(guest.command("REVIEWER","exit 0".into()).await?["exit_status"],0);
+                                    Result::Ok(())
+                                };
+                                async {
+                                        let order=if (case&2==0)==(case&4==0) {["module_a","module_b"]} else {["module_b","module_a"]};
+                                        for module in order {
+                                            let reply=guest.command("TESTER",format!("echo '{}' > /service/run_tests/{module}_tests",json!({"suite":format!("{module}_tests")}))).await?;
+                                            assert!(!reply["stdout"].as_str().ok_or("test submit")?.contains("denied"),"{reply}");
+                                        }
+                                        for module in order {
+                                            let reply=guest.command("TESTER",format!("cat /service/run_tests/{module}_tests")).await?;
+                                            assert_eq!(response(&reply)?["success"],true,"{reply}");
+                                        }
+                                        assert_eq!(guest.command("TESTER","exit 0".into()).await?["exit_status"],0);
+                                    Result::Ok(())
+                                };
+                                Ok(())
+                            }.await?;
+                            Result::Ok(())
+                        };
+                        Ok(())
+                    }.await?;
+                } else {
+                    let modules = if case & 4 == 0 {
+                        [("DEVELOPER_A", "module_a"), ("DEVELOPER_B", "module_b")]
+                    } else {
+                        [("DEVELOPER_B", "module_b"), ("DEVELOPER_A", "module_a")]
+                    };
+                    for (developer, module) in modules {
+                        let design = guest.command("ARCHITECT", format!(
+                            "echo '{}' > /service/design_proposal/{module}; cat /service/design_proposal/{module}",
+                            json!({"title":format!("{module}_refactor")})
+                        )).await?;
+                        assert_eq!(response(&design)?["success"], true, "{design}");
+                        let edits = if case & 1 == 0 {
+                            [module, "SHARED_LIBRARY"]
+                        } else {
+                            ["SHARED_LIBRARY", module]
+                        };
+                        for target in edits {
+                            let reply = guest.command(developer, format!(
+                                "echo '{}' > /service/refactor_code/{target}; cat /service/refactor_code/{target}",
+                                json!({"target":target})
+                            )).await?;
+                            assert_eq!(response(&reply)?["success"], true, "{reply}");
+                        }
+                        let review = (
+                            "REVIEWER",
+                            format!("code_review/{module}"),
+                            json!({"pr_id":module}),
+                        );
+                        let test = (
+                            "TESTER",
+                            format!("run_tests/{module}_tests"),
+                            json!({"suite":format!("{module}_tests")}),
+                        );
+                        let validations = if case & 2 == 0 {
+                            [review, test]
+                        } else {
+                            [test, review]
+                        };
+                        for (agent, path, request) in validations {
+                            let reply = guest
+                                .command(
+                                    agent,
+                                    format!(
+                                        "echo '{request}' > /service/{path}; cat /service/{path}"
+                                    ),
+                                )
+                                .await?;
+                            assert_eq!(response(&reply)?["success"], true, "{reply}");
+                        }
+                        for path in ["review", "test_result"] {
+                            let reply = guest
+                                .command(developer, format!("cat /service/{path}"))
+                                .await?;
+                            assert_eq!(response(&reply)?["success"], true, "{reply}");
+                        }
+                        let reply = guest
+                            .command(
+                                developer,
+                                format!(
+                                    "echo '{}' > /service/merge_code; cat /service/merge_code",
+                                    json!({"branch":module})
+                                ),
+                            )
+                            .await?;
+                        assert_eq!(response(&reply)?["success"], true, "{reply}");
+                        assert_eq!(
+                            guest.command(developer, "exit 0".into()).await?["exit_status"],
+                            0
+                        );
                     }
-                    let merged=guest.command(agent,format!("echo '{}' > /service/merge_code; cat /service/merge_code",json!({"branch":module}))).await?;
-                    assert_eq!(response(&merged)?["success"],true,"{merged}");
-                    assert_eq!(guest.command(agent,"exit 0".into()).await?["exit_status"],0);
+                    for role in ["ARCHITECT", "REVIEWER", "TESTER"] {
+                        assert_eq!(
+                            guest.command(role, "exit 0".into()).await?["exit_status"],
+                            0
+                        );
+                    }
                 }
-                        Result::Ok(())
-                    };
-                    async {
-                let order=if (case&1==0)==(case&4==0) {["module_a","module_b"]} else {["module_b","module_a"]};
-                for module in order {
-                    let reply=guest.command("REVIEWER",format!("echo '{}' > /service/code_review/{module}",json!({"pr_id":module}))).await?;
-                    assert!(!reply["stdout"].as_str().ok_or("review submit")?.contains("denied"),"{reply}");
-                }
-                for module in order {
-                    let reply=guest.command("REVIEWER",format!("cat /service/code_review/{module}")).await?;
-                    assert_eq!(response(&reply)?["success"],true,"{reply}");
-                }
-                assert_eq!(guest.command("REVIEWER","exit 0".into()).await?["exit_status"],0);
-                        Result::Ok(())
-                    };
-                    async {
-                let order=if (case&2==0)==(case&4==0) {["module_a","module_b"]} else {["module_b","module_a"]};
-                for module in order {
-                    let reply=guest.command("TESTER",format!("echo '{}' > /service/run_tests/{module}_tests",json!({"suite":format!("{module}_tests")}))).await?;
-                    assert!(!reply["stdout"].as_str().ok_or("test submit")?.contains("denied"),"{reply}");
-                }
-                for module in order {
-                    let reply=guest.command("TESTER",format!("cat /service/run_tests/{module}_tests")).await?;
-                    assert_eq!(response(&reply)?["success"],true,"{reply}");
-                }
-                assert_eq!(guest.command("TESTER","exit 0".into()).await?["exit_status"],0);
-                        Result::Ok(())
-                    };
-                    Ok(())
-                }.await?;
                 Result::Ok(())
             };
-            async {runtime.await};
-        },async {hibana_runtime::host::sleep(Duration::from_secs(180)).await?;
-            Err("refactor actual-Wasm mechanism timeout".into())}).await?;
+            async { runtime.await };
+        };
+        let (_, runtime) = hibana_runtime::race(run, async {
+            hibana_runtime::host::sleep(Duration::from_secs(180)).await?;
+            Err("refactor actual-Wasm mechanism timeout".into())
+        })
+        .await?;
         assert_eq!(runtime["runtime_exit_code"], 0, "{runtime}");
         assert_eq!(runtime["protocol"]["status"], "complete", "{runtime}");
         save(&directory.join("runtime-result.json"), &runtime)?;

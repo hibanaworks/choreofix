@@ -1,0 +1,12 @@
+pub mod biologist;
+pub mod cells;
+pub mod chemist;
+pub mod clinician;
+pub mod director;
+pub mod formulation;
+pub mod formulator;
+pub mod hplc;
+pub mod mass;
+pub mod regulator;
+pub mod study;
+pub mod toxicologist;

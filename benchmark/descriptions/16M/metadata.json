@@ -16,7 +16,10 @@
     "run_integration_tests": ["TEST_ENV"],
     "run_e2e_tests": ["TEST_ENV"],
     "deploy_staging": ["TEST_ENV"],
-    "run_smoke_tests": ["TEST_ENV", "PROD_ENV"],
+    "run_smoke_tests": {
+      "argument": "target",
+      "values": { "staging": ["TEST_ENV"], "production": ["PROD_ENV"] }
+    },
     "deploy_production": ["PROD_ENV"]
   }
 }

@@ -49,6 +49,9 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
         let observations = rv.tap();
         let session = SessionId::new(SESSION);
         let result = async {
+            let mut initial_document = rv.enter(session,&p.initial_document)?;
+            let mut write_requests = rv.enter(session,&p.write_requests)?;
+            let mut reference_requests = rv.enter(session,&p.reference_requests)?;
             let mut service = rv.enter(session,&p.document_service)?;
             let mut editor = rv.enter(session,&p.review_wasi)?;
             let review_a = rv.enter(session,&p.review_a)?;
@@ -90,12 +93,13 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 async { editor_owner.send::<Loan<REVIEW_WASI>>(editor).await?; editor_vm.recv::<Loan<REVIEW_WASI>>().await };
                 async { file_owner.recv::<Loan<EDITOR_FILE>>().await };
             }.await?;
-            async { localside::resources::document(&mut service,document,&bus).await?; };
-            async { localside::resources::database(&mut database_service,database,&bus).await?; };
+            async { localside::resources::initial_document(&mut initial_document,(document,&mut write_requests),&bus).await?; };
+            async { localside::resources::document(&mut service,&bus).await?; };
+            async { localside::resources::database(&mut database_service,(database,&mut reference_requests),&bus).await?; };
             async { localside::reviewer_a::run(review_a,research_a,&bus).await?; };
             async { localside::reviewer_b::run(review_b,research_b,&bus).await?; };
-            async { localside::author::run(&mut a).await?; };
-            async { localside::author::run(&mut b).await?; };
+            async { localside::author::run(&mut a,&bus).await?; };
+            async { localside::author::run(&mut b,&bus).await?; };
             async { let (_document,_review_a,_review_b) = localside::editor::run(&mut editor).await?; };
             async {
                 let file = a_vm.recv::<Loan<A_FILE>>().await?;

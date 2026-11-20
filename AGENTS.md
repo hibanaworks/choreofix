@@ -24,6 +24,13 @@ choose another operation or retry without a host-selected command or loan.
 Keep accepted-I/O failures separate: returning an error must not pretend that
 an accepted request or transferred Endpoint never happened.
 
+An EAGAIN probe followed by successful work does not resolve a blocking-wait
+counterexample. Check the original blocking input and the same guest's legal
+continuation. A native loop's break does not close an elastic global roll;
+phase retirement must be in the global's actual Endpoint authority. Keep an
+obsolete receive that remains Pending unresolved, rather than attributing it
+solely to the agent or substituting a nonblocking command for the repair.
+
 Qualify each task through the real model shell -> Wasm import -> Endpoint
 request -> ChoreoFS -> physical effect -> reply path. Use actual Wasm runs,
 real-model pilots, complete EPF captures and independent request/effect audits;
@@ -501,6 +508,14 @@ Start independent work before awaiting its results and join only where the
 global requires both. Keep overlapping participant calls and admitted effects
 visible in the persisted evidence. Treat resource conflicts and data dependencies
 separately from historical procedural order when documenting fidelity.
+Exclusive access alone gives no named participant priority. When the task
+allows either contender to act first, express that choice in the global using
+their actual requests. Test each contender while the others are idle. For a
+shared resource that remains contested after the first grant, hold the first
+grant constant and exercise both subsequent orders. Preserve task-required
+dependencies such as validation of the exact version being published. Vary approval order independently
+from resource request order. Qualify the same global and executable across
+those orders and the applicable rejection and repair paths.
 Async test fixtures establish scheduling behavior, not measured model overlap.
 Keep their controlled delays and barriers labeled in the evidence. Scored runs
 must record overlapping actual model calls and independent admitted effects
@@ -665,7 +680,13 @@ occurrence histories belong in the model, never in a new application authority
 table. Do not expand completion into a proof of arbitrary Rust or all failures.
 
 After a core change, run the complete local gate set, including protocol fuzz,
-on the final source. A consumer-discovered core defect needs an actual Endpoint
+on the final source. Re-execute every previously accepted application experiment
+condition with newly built executables, including actual Wasm mechanism cases
+and previously successful live-model conditions. Bind each new execution to its
+complete EPF capture, request/effect/reply audit and common-simulator score.
+Re-auditing saved records alone does not satisfy this post-core-change regression
+requirement. Keep historical success evidence tied to its original source.
+A consumer-discovered core defect needs an actual Endpoint
 regression and coverage of its structure, repeated message contracts and schedule
 in generated tests. Do not restore old defects for a separate rebuild. Identify whether
 the formal model omitted the execution or the implementation correspondence was

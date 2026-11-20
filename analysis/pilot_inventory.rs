@@ -1,11 +1,12 @@
 //! Source-bound pilot evidence, without rerunning or upgrading saved verdicts.
+mod effect_overlap;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
     fs::{self, File},
-    io::{Read, Write},
+    io::{BufRead, BufReader, Read, Write},
     path::{Component, Path, PathBuf},
 };
 
@@ -27,6 +28,32 @@ fn digest(path: &Path) -> Result<String> {
 
 fn load(path: &Path) -> Result<Value> {
     Ok(serde_json::from_reader(File::open(path)?)?)
+}
+
+fn simulator_score(path: &Path) -> Result<(String, Option<Value>)> {
+    let mut reader = BufReader::new(File::open(path)?);
+    let mut line = Vec::new();
+    let mut hash = Sha256::new();
+    let mut score = None;
+    while reader.read_until(b'\n', &mut line)? != 0 {
+        hash.update(&line);
+        let event: Value = serde_json::from_slice(&line)?;
+        if event["direction"] == "simulator" && event["message"]["type"] == "score" {
+            let message = &event["message"];
+            if score.is_some() {
+                return Err("multiple simulator scores in the same trace".into());
+            }
+            if !message["complete"].is_boolean()
+                || !message["events"].is_array()
+                || !message["violations"].is_array()
+            {
+                return Err("incomplete simulator score".into());
+            }
+            score = Some(message.clone());
+        }
+        line.clear();
+    }
+    Ok((format!("{:x}", hash.finalize()), score))
 }
 
 fn candidates(root: &Path, found: &mut Vec<PathBuf>, skipped: &mut Vec<Value>) -> Result<()> {
@@ -56,11 +83,63 @@ fn candidates(root: &Path, found: &mut Vec<PathBuf>, skipped: &mut Vec<Value>) -
             {
                 candidates(&entry.path(), found, skipped)?;
             }
-        } else if kind.is_file() && entry.file_name() == "result.json" {
-            found.push(entry.path());
+        } else if kind.is_file() {
+            let name = entry.file_name();
+            if name == "result.json"
+                || (name == "harness-error.json" && !root.join("result.json").try_exists()?)
+                || (name == "simulator-fixture.json"
+                    && !root.join("result.json").try_exists()?
+                    && !root.join("harness-error.json").try_exists()?
+                    && root
+                        .join("model-connection")
+                        .symlink_metadata()
+                        .is_ok_and(|m| m.is_dir())
+                    && root
+                        .join("model-connection/events.jsonl")
+                        .symlink_metadata()
+                        .is_ok_and(|m| m.is_file()))
+            {
+                found.push(entry.path());
+            }
         }
     }
     Ok(())
+}
+
+// Missing aggregate reports do not supply a verdict, token total, or model-call count.
+fn unreported(path: &Path, record: &Value) -> Result<Value> {
+    let root = path.parent().ok_or("attempt directory")?;
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("attempt evidence filename")?;
+    let reason = match name {
+        "harness-error.json" if record["kind"] == "harness_error" => "harness_error",
+        "simulator-fixture.json" if record["fixtures"].is_array() => "no_aggregate_result",
+        "result.json" if record["kind"] == "unscored_direct_wasi_model_preflight" => {
+            "no_participant_report"
+        }
+        _ => return Err("unexpected model-run evidence".into()),
+    };
+    let mut row = json!({"path":root, "reason":reason, "task":record["task"],
+        "depth":record["depth"],"error":record["error"],"evidence_file":name,
+        "evidence_sha256":digest(path)?});
+    if name == "harness-error.json" && root.join("simulator-fixture.json").try_exists()? {
+        let fixture = archived_path(root, "simulator-fixture.json")?;
+        let input = load(&fixture)?;
+        row["task"] = input["task"].clone();
+        row["depth"] = input["depth"].clone();
+        row["fixture_sha256"] = json!(digest(&fixture)?);
+    }
+    for (name, field) in [
+        ("events.jsonl", "events_sha256"),
+        ("model-connection/events.jsonl", "connection_trace_sha256"),
+    ] {
+        if root.join(name).try_exists()? {
+            row[field] = json!(digest(&archived_path(root, name)?)?);
+        }
+    }
+    Ok(row)
 }
 
 fn auxiliary(
@@ -99,6 +178,25 @@ fn inclusive_usage(participants: &[&Value]) -> Option<u64> {
         (input.checked_add(output)? == total).then_some(())?;
         sum.checked_add(total)
     })
+}
+
+fn all_participants_reported(fixture: &Value, reports: &[&Value]) -> bool {
+    let Some(agents) = fixture["fixtures"].as_array() else {
+        return false;
+    };
+    let expected: BTreeSet<_> = agents
+        .iter()
+        .filter_map(|actor| actor["agent"].as_str())
+        .filter(|name| !name.is_empty())
+        .collect();
+    let reported: BTreeSet<_> = reports
+        .iter()
+        .filter_map(|report| report["participant"].as_str())
+        .collect();
+    !expected.is_empty()
+        && expected.len() == agents.len()
+        && expected.len() == reports.len()
+        && expected == reported
 }
 
 fn archived_path(root: &Path, name: &str) -> Result<PathBuf> {
@@ -170,6 +268,10 @@ fn inventory((input, path): (&Path, &Path), result: &Value, reference: &Value) -
         }
     };
     let fixture = auxiliary(root, "simulator-fixture.json", object, &mut errors);
+    let protocol = &audit["protocol"];
+    let dynamic = protocol
+        .get("dynamic_protocol")
+        .unwrap_or(&protocol["dynamic"]);
     for (name, value) in [
         ("runtime_binary_sha256", &versions["binaries"]["runtime"]),
         (
@@ -189,13 +291,12 @@ fn inventory((input, path): (&Path, &Path), result: &Value, reference: &Value) -
         ("saved_audit_status", &audit["status"]),
         ("saved_auditor_sha256", &audit["auditor_sha256"]),
         ("saved_effect_audit_status", &audit["protocol"]["status"]),
-        (
-            "saved_dynamic_audit_status",
-            &audit["protocol"]["dynamic_protocol"]["status"],
-        ),
+        ("saved_dynamic_audit_status", &dynamic["status"]),
         (
             "captured_records",
-            &audit["protocol"]["dynamic_protocol"]["captured_records"],
+            dynamic
+                .get("captured_records")
+                .unwrap_or(&protocol["captured_records"]),
         ),
         (
             "max_simultaneous_model_turns",
@@ -219,14 +320,22 @@ fn inventory((input, path): (&Path, &Path), result: &Value, reference: &Value) -
                     && versions["model_connection"]["effort"] == "xhigh"
             })
     );
-    row["model_participants_completed"] = json!(
-        !participants.is_empty()
-            && participants
-                .iter()
-                .all(|p| p["status"] == "completed" && p["error"].is_null())
-    );
-    let tokens = inclusive_usage(&participants);
-    row["inclusive_tokens"] = json!(tokens);
+    let all_reported = all_participants_reported(&fixture, &participants);
+    if !all_reported {
+        errors.push("participant reports differ from the simulator roster".to_owned());
+    }
+    let model_completed = all_reported
+        && participants
+            .iter()
+            .all(|p| p["status"] == "completed" && p["error"].is_null());
+    row["model_participants_completed"] = json!(model_completed);
+    let tokens = if all_reported {
+        inclusive_usage(&participants)
+    } else {
+        None
+    };
+    row["inclusive_tokens"] = json!(tokens.filter(|_| model_completed));
+    row["interrupted_reported_tokens"] = json!(tokens.filter(|_| !model_completed));
     match tokens {
         Some(total) if !audit.is_null() && audit["inclusive_tokens"] != total => {
             errors.push("saved audit token total differs from participant totals".to_owned())
@@ -236,10 +345,11 @@ fn inventory((input, path): (&Path, &Path), result: &Value, reference: &Value) -
         }
         _ => {}
     }
+    let mut score = None;
     if let [guest] = guests.as_slice() {
-        row["world_complete"] = guest["score"]["complete"].clone();
-        row["world_violations"] = json!(guest["score"]["violations"].as_array().map(Vec::len));
-        row["domain_calls"] = json!(guest["score"]["events"].as_array().map(Vec::len));
+        if let Some(value) = guest.get("score").filter(|value| value.is_object()) {
+            score = Some((value.clone(), "guest_runtime"));
+        }
         row["guest_runtime_completed"] = json!(
             guest["runtime_exit_code"] == 0
                 && guest["protocol"]["status"] == "complete"
@@ -280,8 +390,14 @@ fn inventory((input, path): (&Path, &Path), result: &Value, reference: &Value) -
             &fixture["simulator_manifest_sha256"],
         ),
     ] {
-        match digest(&root.join(name)) {
-            Ok(actual) => {
+        let file = root.join(name);
+        let evidence = if name == "events.jsonl" && guests.is_empty() {
+            simulator_score(&file)
+        } else {
+            digest(&file).map(|hash| (hash, None))
+        };
+        match evidence {
+            Ok((actual, observed)) => {
                 if expected.as_str() != Some(actual.as_str()) {
                     errors.push(format!("{name}: recorded hash absent or different"));
                 }
@@ -289,11 +405,30 @@ fn inventory((input, path): (&Path, &Path), result: &Value, reference: &Value) -
                     row["events_sha256"] = json!(actual);
                     if !audit.is_null() && audit["events_sha256"] != actual {
                         errors.push("saved audit refers to other raw events".to_owned());
+                    } else if let Some(value) = observed
+                        && reference["result_sha256"] == row["result_sha256"]
+                        && expected.as_str() == Some(actual.as_str())
+                    {
+                        score = Some((value, "simulator_trace"));
                     }
                 }
             }
-            Err(error) => errors.push(format!("{name}: {error}")),
+            Err(error) => {
+                errors.push(format!("{name}: {error}"));
+                if name == "events.jsonl"
+                    && guests.is_empty()
+                    && let Ok(hash) = digest(&file)
+                {
+                    row["events_sha256"] = json!(hash);
+                }
+            }
         }
+    }
+    if let Some((value, source)) = score {
+        row["world_complete"] = value["complete"].clone();
+        row["world_violations"] = json!(value["violations"].as_array().map(Vec::len));
+        row["domain_calls"] = json!(value["events"].as_array().map(Vec::len));
+        row["world_score_source"] = json!(source);
     }
     if !audit["protocol"].is_null() {
         let runtime = &audit["protocol"]["runtime_binary_sha256"];
@@ -335,10 +470,12 @@ const FIELDS: &[&str] = &[
     "depth",
     "elapsed_seconds",
     "inclusive_tokens",
+    "interrupted_reported_tokens",
     "participant_count",
     "domain_calls",
     "world_complete",
     "world_violations",
+    "world_score_source",
     "simulator_seed",
     "delay_multiplier",
     "simulator_contract",
@@ -370,6 +507,11 @@ fn cell(value: &Value) -> String {
 
 fn main() -> Result<()> {
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
+    if let [mode, cohort, output] = args.as_slice()
+        && mode == "--effect-overlap"
+    {
+        return effect_overlap::write_report(Path::new(cohort), Path::new(output));
+    }
     let [input, references, output] = args.as_slice() else {
         return Err(
             "usage: choreofix-pilot-inventory INPUT_ROOT AUDIT_REFERENCES NEW_OUTPUT".into(),
@@ -384,18 +526,20 @@ fn main() -> Result<()> {
     let mut skipped = Vec::new();
     candidates(input, &mut paths, &mut skipped)?;
     paths.sort();
-    let candidate_count = paths.len();
+    let candidate_count = paths.iter().filter(|p| p.ends_with("result.json")).count();
     let mut rows = Vec::new();
+    let mut unreported_attempts = Vec::new();
     let mut malformed = Vec::new();
     let mut used_references = BTreeSet::new();
     for path in paths {
         match load(&path) {
             Ok(result)
-                if result["outcomes"].as_array().is_some_and(|outcomes| {
-                    outcomes
-                        .iter()
-                        .any(|row| row["kind"] == "model_participant")
-                }) =>
+                if path.ends_with("result.json")
+                    && result["outcomes"].as_array().is_some_and(|outcomes| {
+                        outcomes
+                            .iter()
+                            .any(|row| row["kind"] == "model_participant")
+                    }) =>
             {
                 let name = path
                     .strip_prefix(input)?
@@ -410,11 +554,20 @@ fn main() -> Result<()> {
                     Err(error) => malformed.push(json!({"path":path,"error":error.to_string()})),
                 }
             }
+            Ok(record)
+                if !path.ends_with("result.json")
+                    || record["kind"] == "unscored_direct_wasi_model_preflight" =>
+            {
+                match unreported(&path, &record) {
+                    Ok(row) => unreported_attempts.push(row),
+                    Err(error) => malformed.push(json!({"path":path,"error":error.to_string()})),
+                }
+            }
             Ok(_) => {}
             Err(error) => malformed.push(json!({"path":path,"error":error.to_string()})),
         }
     }
-    if rows.is_empty() {
+    if rows.is_empty() && unreported_attempts.is_empty() {
         return Err("no model pilot records found; no inventory was certified".into());
     }
     if references.len() != used_references.len() {
@@ -446,7 +599,8 @@ fn main() -> Result<()> {
         "inventory_binary_sha256":digest(&std::env::current_exe()?)?,
         "audit_references_sha256":digest(references_path)?,
         "candidate_results":candidate_count,"pilot_records":rows.len(),"distinct_raw_event_streams":unique.len(),
-        "pilots":rows,"malformed_candidates":malformed,"skipped_symlinks":skipped,
+        "pilots":rows,"unreported_attempts":unreported_attempts,
+        "malformed_candidates":malformed,"skipped_symlinks":skipped,
         "statistical_pools_created":false,"comparative_superiority_established":false,"scored_comparisons_counted":0});
     fs::write(
         output.join("inventory.json"),
@@ -477,35 +631,117 @@ fn main() -> Result<()> {
     )?;
     writeln!(
         report,
-        "| Task | Depth | Seconds | Inclusive tokens | Participants | Effects | World complete | Saved audit / dynamic | Hashes agree |\n|---|---:|---:|---:|---:|---:|---|---|---|"
+        "| Task | Depth | Seconds | Inclusive tokens | Last reported at interruption | Participants | Effects | World complete | Score source | Saved audit / dynamic | Hashes agree |\n|---|---:|---:|---:|---:|---:|---:|---|---|---|---|"
     )?;
     for row in &rows {
         writeln!(
             report,
-            "| {} | {} | {} | {} | {} | {} | {} | {} / {} | {} |",
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} / {} | {} |",
             cell(&row["task"]),
             cell(&row["depth"]),
             cell(&row["elapsed_seconds"]),
             cell(&row["inclusive_tokens"]),
+            cell(&row["interrupted_reported_tokens"]),
             cell(&row["participant_count"]),
             cell(&row["domain_calls"]),
             cell(&row["world_complete"]),
+            cell(&row["world_score_source"]),
             cell(&row["saved_audit_status"]),
             cell(&row["saved_dynamic_audit_status"]),
             cell(&row["artifact_hashes_agree"])
         )?;
     }
+    if !unreported_attempts.is_empty() {
+        writeln!(report, "\n## Attempts without an aggregate model report\n")?;
+        writeln!(
+            report,
+            "| Run | Task | Depth | Recorded status |\n|---|---|---|---|"
+        )?;
+        for row in &unreported_attempts {
+            writeln!(
+                report,
+                "| {} | {} | {} | {} |",
+                cell(&row["path"]),
+                cell(&row["task"]),
+                cell(&row["depth"]),
+                cell(&row["reason"])
+            )?;
+        }
+    }
     println!(
         "{}",
         json!({"pilot_records":rows.len(),"hashes_agree":valid,"distinct_raw_event_streams":unique.len(),
-        "tasks":tasks,"scored_comparisons_counted":0})
+        "unreported_attempts":unreported_attempts.len(),"tasks":tasks,"scored_comparisons_counted":0})
     );
+    if rows.is_empty() {
+        return Err(
+            "attempts recorded, but no aggregate participant results were available".into(),
+        );
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interrupted_live_trial_is_counted_once_and_mechanism_fixture_is_excluded() -> Result<()> {
+        let root =
+            std::env::temp_dir().join(format!("choreofix-incomplete-{}", std::process::id()));
+        fs::create_dir(&root)?;
+        let fixture = root.join("simulator-fixture.json");
+        fs::write(&fixture, r#"{"task":"7H","depth":0,"fixtures":[]}"#)?;
+        let scan = || -> Result<Vec<PathBuf>> {
+            let mut found = Vec::new();
+            candidates(&root, &mut found, &mut Vec::new())?;
+            Ok(found)
+        };
+        assert!(scan()?.is_empty());
+        fs::create_dir(root.join("model-connection"))?;
+        fs::write(root.join("model-connection/events.jsonl"), b"")?;
+        assert_eq!(scan()?.as_slice(), std::slice::from_ref(&fixture));
+        let missing = unreported(&fixture, &load(&fixture)?)?;
+        assert_eq!(missing["reason"], "no_aggregate_result");
+        assert!(missing.get("inclusive_tokens").is_none());
+        let error = root.join("harness-error.json");
+        fs::write(
+            &error,
+            r#"{"kind":"harness_error","error":"connection closed"}"#,
+        )?;
+        assert_eq!(scan()?.as_slice(), std::slice::from_ref(&error));
+        let failed = unreported(&error, &load(&error)?)?;
+        assert_eq!(failed["task"], "7H");
+        assert_eq!(failed["depth"], 0);
+        assert_eq!(failed["error"], "connection closed");
+        let result = root.join("result.json");
+        fs::write(
+            &result,
+            r#"{"kind":"unscored_direct_wasi_model_preflight","outcomes":[]}"#,
+        )?;
+        assert_eq!(scan()?.as_slice(), std::slice::from_ref(&result));
+        assert_eq!(
+            unreported(&result, &load(&result)?)?["reason"],
+            "no_participant_report"
+        );
+        fs::remove_dir_all(&root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn trial_totals_require_each_expected_participant_exactly_once() {
+        let fixture = json!({"fixtures":[{"agent":"A"},{"agent":"B"}]});
+        let a = json!({"participant":"A"});
+        let b = json!({"participant":"B"});
+        assert!(all_participants_reported(&fixture, &[&b, &a]));
+        assert!(!all_participants_reported(&fixture, &[&a]));
+        assert!(!all_participants_reported(&fixture, &[&a, &a]));
+        assert!(!all_participants_reported(
+            &fixture,
+            &[&a, &json!({"participant":"C"})]
+        ));
+        assert!(!all_participants_reported(&json!({"fixtures":[]}), &[]));
+    }
 
     #[test]
     fn an_explicit_audit_reference_binds_the_file_and_exact_json_object() {
@@ -540,6 +776,78 @@ mod tests {
         }
         fs::remove_file(file).unwrap();
         fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn a_timeout_keeps_last_reported_usage_separate_from_a_final_total() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("choreofix-usage-{}", std::process::id()));
+        fs::create_dir(&root)?;
+        fs::write(
+            root.join("simulator-fixture.json"),
+            r#"{"fixtures":[{"agent":"WRITER"},{"agent":"EDITOR"}]}"#,
+        )?;
+        let path = root.join("result.json");
+        for (status, final_total, interrupted_total) in [
+            ("timeout", Value::Null, json!(280)),
+            ("completed", json!(280), Value::Null),
+        ] {
+            let mut result = json!({"outcomes":[{"kind":"guest_runtime",
+                "result":{"score":{"complete":false}}}]});
+            for (agent, status) in [("WRITER", "completed"), ("EDITOR", status)] {
+                result["outcomes"].as_array_mut().unwrap().push(json!({
+                    "kind":"model_participant","result":{"participant":agent,"status":status,
+                    "usage":{"inputTokens":100,"outputTokens":40,"totalTokens":140}}
+                }));
+            }
+            fs::write(&path, serde_json::to_vec(&result)?)?;
+            let row = inventory((&root, &path), &result, &Value::Null)?;
+            assert_eq!(row["world_complete"], false);
+            assert_eq!(row["inclusive_tokens"], final_total);
+            assert_eq!(row["interrupted_reported_tokens"], interrupted_total);
+        }
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn interrupted_trial_preserves_only_a_unique_hash_bound_simulator_score() -> Result<()> {
+        let root =
+            std::env::temp_dir().join(format!("choreofix-trace-score-{}", std::process::id()));
+        fs::create_dir(&root)?;
+        let path = root.join("result.json");
+        let trace = root.join("events.jsonl");
+        let score = json!({"type":"score","complete":false,"events":[{}],"violations":[]});
+        let observed = json!({"direction":"simulator","message":score}).to_string();
+        let unrelated = json!({"direction":"to_runtime","message":score}).to_string();
+        for (content, alter_hash, has_score) in [
+            (format!("{unrelated}\n{observed}\n"), false, true),
+            (unrelated, false, false),
+            (format!("{observed}\n{observed}\n"), false, false),
+            (observed.clone(), true, false),
+            (format!("{observed}\n{{"), false, false),
+        ] {
+            fs::write(&trace, content)?;
+            let mut result = json!({"outcomes":[],"events_sha256":digest(&trace)?});
+            if alter_hash {
+                result["events_sha256"] = json!("wrong hash");
+            }
+            fs::write(&path, serde_json::to_vec(&result)?)?;
+            let reference = json!({"result_sha256":digest(&path)?,"audit":null});
+            let row = inventory((&root, &path), &result, &reference)?;
+            assert_eq!(row["guest_runtime_completed"], false);
+            assert_eq!(row["artifact_hashes_agree"], false);
+            if has_score {
+                assert_eq!(row["world_complete"], false);
+                assert_eq!(row["world_violations"], 0);
+                assert_eq!(row["domain_calls"], 1);
+                assert_eq!(row["world_score_source"], "simulator_trace");
+            } else {
+                assert!(row["world_complete"].is_null());
+                assert!(row["world_score_source"].is_null());
+            }
+        }
+        fs::remove_dir_all(root)?;
+        Ok(())
     }
 
     #[test]

@@ -163,9 +163,15 @@ fn dynamic_audit(evidence: &Value) -> ShellResult<Value> {
     let correspondence=audit.execution().order.iter().zip(audit.execution().occurrences).map(|(record,point)|json!({
         "ordinal":record.ordinal,"occurrence":point,"source_event":point.and_then(|event|source.origin(event))
     })).collect::<Vec<_>>();
+    let accepted = audit
+        .execution()
+        .acceptances
+        .iter()
+        .map(|entry| entry.first_poll.ordinal)
+        .collect::<Vec<_>>();
     Ok(
         json!({"complete_capture":true,"dynamic_source_compatible":true,"records":count,
-        "source_events":compiled[0].arg0()>>16,"expanded_events":source.event_count(),"correspondence":correspondence,
+        "source_events":compiled[0].arg0()>>16,"expanded_events":source.event_count(),"correspondence":correspondence,"accepted":accepted,
         "application_effects_certified":false,"session_complete_certified":false}),
     )
 }
@@ -199,42 +205,12 @@ fn effect_receipts(
             .and_then(|n| u32::try_from(n).ok())
             .ok_or("record word".into())
     };
-    let mut sent = BTreeMap::new();
-    let mut delivered = BTreeMap::new();
-    for (index, frame) in evidence["frames"]
-        .as_array()
-        .ok_or("frames")?
-        .iter()
-        .enumerate()
-    {
-        let id = frame["frame_id"].as_u64().ok_or("frame ID")?;
-        if frame["action"] == "send" {
-            if sent.insert(id, frame).is_some() {
-                return Err("reused send frame ID".into());
-            }
-        } else if frame["action"] == "receive" {
-            delivered.insert(id, (index, frame));
-        }
-    }
-    if sent.len() != delivered.len() {
-        return Err("unreceived final frame".into());
-    }
-    let mut delivered = delivered.into_iter().collect::<Vec<_>>();
-    delivered.sort_by_key(|(_, (index, _))| *index);
+    let mut ids = BTreeSet::new();
     let mut lanes = BTreeMap::<u16, VecDeque<(u64, &Value)>>::new();
-    for (id, (_, frame)) in delivered {
-        let before = sent.get(&id).ok_or("receive without send")?;
-        for name in [
-            "session",
-            "source",
-            "target",
-            "lane",
-            "frame_label",
-            "payload",
-        ] {
-            if before[name] != frame[name] {
-                return Err("send/receive contents changed".into());
-            }
+    for frame in evidence["frames"].as_array().ok_or("frames")? {
+        let id = frame["frame_id"].as_u64().ok_or("frame ID")?;
+        if frame["action"] != "send" || !ids.insert(id) {
+            return Err("invalid or reused transport acceptance".into());
         }
         let origin = frame["frame_label"]
             .as_u64()
@@ -250,6 +226,30 @@ fn effect_receipts(
             return Err("frame disagrees with the compiled source".into());
         }
         lanes.entry(origin).or_default().push_back((id, frame));
+    }
+    let mut accepted = BTreeMap::new();
+    for poll in checked["accepted"]
+        .as_array()
+        .ok_or("checked send acceptances")?
+    {
+        let ordinal = usize::try_from(poll.as_u64().ok_or("send poll ordinal")?)
+            .map_err(|e| e.to_string())?;
+        let origin = word(capture.get(ordinal).ok_or("missing accepted send poll")?, 4)? as u16;
+        let point = &checked["correspondence"][ordinal];
+        if point["ordinal"] != ordinal || point["source_event"] != origin {
+            return Err("send acceptance has no checked occurrence".into());
+        }
+        let occurrence = point["occurrence"].as_u64().ok_or("accepted occurrence")?;
+        let frame = lanes
+            .get_mut(&origin)
+            .and_then(VecDeque::pop_front)
+            .ok_or("acceptance has no journal frame")?;
+        if accepted.insert(occurrence, frame).is_some() {
+            return Err("send occurrence accepted twice".into());
+        }
+    }
+    if lanes.values().any(|v| !v.is_empty()) {
+        return Err("frame has no checked send acceptance".into());
     }
     let mut receipts = Vec::new();
     for (ordinal, row) in capture.iter().enumerate() {
@@ -267,13 +267,16 @@ fn effect_receipts(
         {
             return Err("receive has no checked occurrence".into());
         }
-        let (id, frame) = lanes
-            .get_mut(&origin)
-            .and_then(VecDeque::pop_front)
-            .ok_or("receive has no frame occurrence")?;
+        let occurrence = point["occurrence"].as_u64().ok_or("receive occurrence")?;
+        let (id, frame) = accepted
+            .remove(&occurrence)
+            .ok_or("receive has no accepted frame")?;
+        if frame["frame_label"] != origin || frame["target"] != word(row, 4)? >> 24 {
+            return Err("checked frame disagrees with committed receipt".into());
+        }
         receipts.push((ordinal, source(origin)?, frame, word(row, 2)? >> 8, id));
     }
-    if lanes.values().any(|v| !v.is_empty()) {
+    if !accepted.is_empty() {
         return Err("frame has no receive commit".into());
     }
     let mut used_requests = BTreeSet::new();
@@ -386,8 +389,11 @@ fn effect_receipts(
                 .iter()
                 .rev()
                 .find(|(ordinal, meta, _, actor, _)| {
-                    request.0 < *ordinal
-                        && *ordinal < before
+                    (if operation.is_none() {
+                        request.0 < *ordinal
+                    } else {
+                        *ordinal < request.0
+                    }) && *ordinal < before
                         && *actor == request.3
                         && !used_authorities.contains(ordinal)
                         && word(meta, 2).is_ok_and(|kind| kind >> 8 == 1)

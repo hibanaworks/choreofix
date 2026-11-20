@@ -10,19 +10,6 @@ pub async fn run<'run>(
     mut research: Endpoint<'run, RESEARCH_B>,
     domain: &impl Domain,
 ) -> ShellResult<()> {
-    let request = research.recv::<ResearchB>().await?.into_value();
-    if request["topic"] != "subtopic_b" {
-        return Err(ShellError::message(
-            "research topic differs from this participant",
-        ));
-    }
-    let result = domain
-        .execute("RESEARCHER_B", "research_topic", request)
-        .await
-        .map_err(ShellError::message)?;
-    let bytes =
-        serde_json::to_vec(&result).map_err(|error| ShellError::message(error.to_string()))?;
-    research.send::<ResearchResult>(&bytes.as_slice()).await?;
     loop {
         let branch = research.offer().await?;
         let arguments = match branch.label() {
@@ -53,15 +40,39 @@ pub async fn run<'run>(
                 let reply = ReviewReply::<true>::from_bytes(&bytes)?;
                 endpoint.send::<ApprovedB>(&reply).await?;
                 endpoint.send::<ApprovedB>(&reply).await?;
+                let receipt = endpoint.recv::<ApprovedB>().await?;
+                if receipt != bytes.as_slice() {
+                    return Err(ShellError::message(
+                        "author receipt differs from its review",
+                    ));
+                }
                 endpoint.send::<ApprovedB>(&reply).await?;
                 endpoint.send::<ApprovedB>(&reply).await?;
+                let receipt = endpoint.recv::<ApprovedB>().await?;
+                if receipt != bytes.as_slice() {
+                    return Err(ShellError::message(
+                        "author receipt differs from its review",
+                    ));
+                }
             }
             Some(false) => {
                 let reply = ReviewReply::<false>::from_bytes(&bytes)?;
                 endpoint.send::<RejectedB>(&reply).await?;
                 endpoint.send::<RejectedB>(&reply).await?;
+                let receipt = endpoint.recv::<RejectedB>().await?;
+                if receipt != bytes.as_slice() {
+                    return Err(ShellError::message(
+                        "author receipt differs from its review",
+                    ));
+                }
                 endpoint.send::<RejectedB>(&reply).await?;
                 endpoint.send::<RejectedB>(&reply).await?;
+                let receipt = endpoint.recv::<RejectedB>().await?;
+                if receipt != bytes.as_slice() {
+                    return Err(ShellError::message(
+                        "author receipt differs from its review",
+                    ));
+                }
             }
             None => return Err(ShellError::message("review result has no success field")),
         }

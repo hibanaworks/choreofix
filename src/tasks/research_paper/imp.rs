@@ -10,7 +10,7 @@ pub const TOPICS: [&str; 3] = ["subtopic_a", "subtopic_b", "subtopic_c"];
 
 pub(crate) fn tool(operation: u8) -> ShellResult<&'static str> {
     match operation {
-        1 => Ok("research_topic"),
+        1 | 7 => Ok("research_topic"),
         2 => Ok("write_section"),
         3 => Ok("revise_section"),
         4 => Ok("update_references"),
@@ -25,7 +25,7 @@ pub fn arguments(author: u8, operation: u8, value: &Value) -> ShellResult<()> {
         .get(usize::from(author))
         .ok_or_else(|| ShellError::message("unknown paper author"))?;
     tool(operation)?;
-    let key = if operation == 1 {
+    let key = if matches!(operation, 1 | 7) {
         "topic"
     } else {
         "section_name"
@@ -38,13 +38,17 @@ pub fn arguments(author: u8, operation: u8, value: &Value) -> ShellResult<()> {
     let fields = value
         .as_object()
         .ok_or_else(|| ShellError::message("paper arguments must be an object"))?;
-    if fields.get(key).is_none_or(|value| {
-        value
-            .as_str()
-            .is_none_or(|value| value.trim().is_empty() || (operation != 1 && value != *section))
-    }) || fields
-        .iter()
-        .any(|(name, value)| (name != key && Some(name.as_str()) != optional) || !value.is_string())
+    if fields
+        .get(key)
+        .and_then(Value::as_str)
+        .is_none_or(|value| match operation {
+            1 => value != TOPICS[usize::from(author)],
+            7 => value.trim().is_empty() || value == TOPICS[usize::from(author)],
+            _ => value != *section,
+        })
+        || fields.iter().any(|(name, value)| {
+            (name != key && Some(name.as_str()) != optional) || !value.is_string()
+        })
     {
         return Err(ShellError::message(
             "paper arguments name another section or operation",
@@ -56,6 +60,7 @@ pub fn arguments(author: u8, operation: u8, value: &Value) -> ShellResult<()> {
 /// Exact admitted bytes, including the author's freely chosen notes/feedback.
 pub struct Arguments<const AUTHOR: u8, const OPERATION: u8>(Vec<u8>);
 impl<const AUTHOR: u8, const OPERATION: u8> Arguments<AUTHOR, OPERATION> {
+    #[cfg(test)]
     pub fn from_bytes(bytes: &[u8]) -> ShellResult<Self> {
         Self::validate_payload(Payload::new(bytes))
             .map_err(|_| ShellError::message("invalid paper request"))?;
@@ -98,7 +103,7 @@ pub fn result(author: u8, operation: u8, value: &Value) -> ShellResult<()> {
         _ => name,
     };
     let target = match operation {
-        1 => value["data"]["topic"]
+        1 | 7 => value["data"]["topic"]
             .as_str()
             .is_some_and(|s| !s.trim().is_empty()),
         6 => value["data"]["scope"] == SECTIONS[usize::from(author)],

@@ -1,0 +1,715 @@
+use crate::{
+    imp::json::{decode, encode, same},
+    shell::{
+        ShellError, ShellResult,
+        global::Loan,
+        imp::{review_reply::ReviewReply, service::Domain},
+    },
+};
+use hibana::{
+    Endpoint, g,
+    runtime::{
+        program::Projectable,
+        wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload},
+    },
+};
+use serde_json::{Map, Value};
+
+pub(super) const ARCHITECT_FILE: u8 = 0;
+pub(super) const ARCHITECT: u8 = 1;
+pub(super) const DEVELOPER_A: u8 = 2;
+pub(super) const DEVELOPER_B: u8 = 3;
+pub(super) const DEVELOPER_C: u8 = 4;
+pub(super) const DEVELOPER_A_FILE: u8 = 5;
+pub(super) const DEVELOPER_B_FILE: u8 = 6;
+pub(super) const DEVELOPER_C_FILE: u8 = 7;
+pub(super) const REVIEWER_A: u8 = 8;
+pub(super) const REVIEWER_B: u8 = 9;
+pub(super) const REVIEWER_C: u8 = 10;
+pub(super) const REVIEW_FILE: u8 = 11;
+pub(super) const SERVICE_A: u8 = 12;
+pub(super) const SERVICE_B: u8 = 13;
+pub(super) const SERVICE_C: u8 = 14;
+pub(super) const TESTER_A: u8 = 15;
+pub(super) const TEST_FILE: u8 = 16;
+pub(super) const TESTER_B: u8 = 17;
+pub(super) const TESTER_C: u8 = 18;
+pub(super) const TEST_ENV: u8 = 19;
+pub(super) const ENV_OWNER: u8 = 20;
+pub(super) const TEST_COMMAND: u8 = 21;
+
+pub(super) const DEVOPS_FILE: u8 = 41;
+pub(super) const SCHEMAS: u8 = 42;
+pub(super) const STAGING_ENV: u8 = 46;
+pub(super) const SCHEMA_A: u8 = 90;
+pub(super) const SCHEMA_B: u8 = 91;
+pub(super) const SCHEMA_C: u8 = 92;
+pub(super) type Migrate<const S: u8> = g::Msg<S, Arguments<S>>;
+pub(super) type Migrated<'a, const S: u8> = g::Msg<S, &'a [u8]>;
+
+const SERVICES: [&str; 3] = ["microservice_a", "microservice_b", "microservice_c"];
+const PLAN: u8 = 0;
+
+pub(super) type Propose = g::Msg<80, Arguments<PLAN>>;
+pub(super) type Proposed<'a, const VIEW: u8> = g::Msg<VIEW, &'a [u8]>;
+pub(super) type Implement<const DEVELOPER: u8> = g::Msg<82, Arguments<DEVELOPER>>;
+pub(super) type Implemented<'a> = g::Msg<83, &'a [u8]>;
+pub(super) type Candidate<'a, const SERVICE: u8> = g::Msg<SERVICE, &'a [u8]>;
+pub(super) type Review<const SERVICE: u8> = g::Msg<SERVICE, Arguments<SERVICE>>;
+pub(super) type Reviewed<'a, const DEVELOPER: u8> = g::Msg<DEVELOPER, &'a [u8]>;
+type Approved<'a> = g::Msg<84, ReviewReply<'a, true>>;
+type Rejected<'a> = g::Msg<85, ReviewReply<'a, false>>;
+pub(super) type TestCandidate<'a, const SERVICE: u8> = g::Msg<SERVICE, ReviewReply<'a, true>>;
+
+type Passed<'a> = g::Msg<93, ReviewReply<'a, true>>;
+type Failed<'a> = g::Msg<94, ReviewReply<'a, false>>;
+pub(super) type TestReport<'a> = g::Msg<95, &'a [u8]>;
+
+pub(super) type RunTests<const TESTER: u8> = g::Msg<TESTER, Arguments<TESTER>>;
+pub(super) type Tested<'a, const TESTER: u8> = g::Msg<TESTER, &'a [u8]>;
+
+pub(super) struct Arguments<const OPERATION: u8>(Vec<u8>);
+
+impl<const OPERATION: u8> WireEncode for Arguments<OPERATION> {
+    fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
+        output
+            .get_mut(..self.0.len())
+            .ok_or(CodecError::Truncated)?
+            .copy_from_slice(&self.0);
+        Ok(self.0.len())
+    }
+}
+
+impl<const OPERATION: u8> WirePayload for Arguments<OPERATION> {
+    const SCHEMA_ID: u32 = 0xac04_4800 | OPERATION as u32;
+    type Decoded<'a> = Self;
+
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        let value: Value =
+            serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
+        let args = value.as_object().ok_or(CodecError::Malformed)?;
+        if OPERATION == PLAN {
+            if args.get("title").and_then(Value::as_str) != Some("migration_plan")
+                || args
+                    .keys()
+                    .any(|key| key != "title" && key != "dependencies")
+            {
+                return Err(CodecError::Malformed);
+            }
+            dependencies(args.get("dependencies"))?;
+            return Ok(());
+        }
+        let (key, service) = match OPERATION {
+            DEVELOPER_A => ("feature_name", SERVICES[0]),
+            DEVELOPER_B => ("feature_name", SERVICES[1]),
+            DEVELOPER_C => ("feature_name", SERVICES[2]),
+            TESTER_A => ("suite", SERVICES[0]),
+            TESTER_B => ("suite", SERVICES[1]),
+            TESTER_C => ("suite", SERVICES[2]),
+            SCHEMA_A => ("migration_name", "microservice_a_schema"),
+            SCHEMA_B => ("migration_name", "microservice_b_schema"),
+            SCHEMA_C => ("migration_name", "microservice_c_schema"),
+            SERVICE_A => ("pr_id", SERVICES[0]),
+            SERVICE_B => ("pr_id", SERVICES[1]),
+            SERVICE_C => ("pr_id", SERVICES[2]),
+            _ => return Err(CodecError::Malformed),
+        };
+        if args.len() != 1 || args.get(key).and_then(Value::as_str) != Some(service) {
+            return Err(CodecError::Malformed);
+        }
+        Ok(())
+    }
+
+    fn decode_validated_payload(input: ReceivedPayload<'_, Self>) -> Self {
+        Self(input.as_bytes().to_vec())
+    }
+}
+
+/// Keep the authored dependencies and expand omitted services to empty lists.
+fn dependencies(value: Option<&Value>) -> Result<Map<String, Value>, CodecError> {
+    let empty = Map::new();
+    let selected = match value {
+        Some(value) => value.as_object().ok_or(CodecError::Malformed)?,
+        None => &empty,
+    };
+    if selected
+        .keys()
+        .any(|name| !SERVICES.contains(&name.as_str()))
+    {
+        return Err(CodecError::Malformed);
+    }
+    let mut normalized = Map::new();
+    let mut edges = [0_u8; 3];
+    for (service, name) in SERVICES.into_iter().enumerate() {
+        let names = selected
+            .get(name)
+            .map(|value| value.as_array().ok_or(CodecError::Malformed))
+            .transpose()?;
+        for dependency in names.into_iter().flatten() {
+            let required = SERVICES
+                .iter()
+                .position(|other| dependency.as_str() == Some(*other))
+                .ok_or(CodecError::Malformed)?;
+            let edge = 1 << required;
+            if edges[service] & edge != 0 || required == service {
+                return Err(CodecError::Malformed);
+            }
+            edges[service] |= edge;
+        }
+        normalized.insert(
+            name.to_owned(),
+            Value::Array(names.cloned().unwrap_or_default()),
+        );
+    }
+    let mut remaining = (1 << SERVICES.len()) - 1;
+    for _ in SERVICES {
+        let ready = edges
+            .iter()
+            .enumerate()
+            .find(|&(service, edges)| remaining & (1 << service) != 0 && remaining & *edges == 0)
+            .ok_or(CodecError::Malformed)?;
+        remaining &= !(1 << ready.0);
+    }
+    Ok(normalized)
+}
+
+fn review_candidate<const DEVELOPER: u8, const REVIEWER: u8, const SERVICE: u8>()
+-> impl Projectable + Copy {
+    g::seq(
+        g::send::<DEVELOPER, REVIEWER, Loan<SERVICE>>(),
+        g::seq(
+            g::send::<DEVELOPER, REVIEWER, Candidate<SERVICE>>(),
+            g::seq(
+                g::send::<SERVICE, REVIEW_FILE, Candidate<SERVICE>>(),
+                g::send::<REVIEW_FILE, SERVICE, Review<SERVICE>>(),
+            ),
+        ),
+    )
+}
+
+fn build<const DEVELOPER: u8, const FILE: u8, const SERVICE: u8, const TESTER: u8>(
+    review: impl Projectable + Copy,
+    returned: impl Projectable,
+    handoff: impl Projectable,
+) -> impl Projectable {
+    let attempt = g::seq(
+        g::send::<FILE, SERVICE, Implement<DEVELOPER>>(),
+        g::seq(g::send::<SERVICE, FILE, Implemented>(), review),
+    );
+    let report = g::par(
+        g::send::<SERVICE, REVIEW_FILE, Reviewed<DEVELOPER>>(),
+        g::send::<DEVELOPER, FILE, Reviewed<DEVELOPER>>(),
+    );
+    let approved = g::seq(g::send::<SERVICE, DEVELOPER, Approved>(), report);
+    let rejected = g::seq(
+        g::send::<SERVICE, DEVELOPER, Rejected>(),
+        g::seq(report, returned),
+    );
+    g::seq(
+        g::send::<ARCHITECT, DEVELOPER, Proposed<DEVELOPER>>(),
+        g::seq(
+            g::send::<ARCHITECT, FILE, Proposed<DEVELOPER>>(),
+            g::seq(
+                attempt,
+                g::seq(
+                    g::route(approved, g::seq(g::seq(rejected, attempt).roll(), approved)),
+                    g::seq(
+                        g::send::<SERVICE, TESTER, TestCandidate<SERVICE>>(),
+                        handoff,
+                    ),
+                ),
+            ),
+        ),
+    )
+}
+
+fn test_session<const SERVICE: u8, const TESTER: u8>() -> impl Projectable + Copy {
+    g::seq(
+        g::send::<TEST_COMMAND, TEST_ENV, RunTests<TESTER>>(),
+        g::seq(
+            g::send::<TEST_ENV, SERVICE, RunTests<TESTER>>(),
+            g::seq(
+                g::send::<ENV_OWNER, TESTER, Loan<TEST_ENV>>(),
+                g::seq(
+                    g::send::<TEST_ENV, TEST_COMMAND, Tested<TESTER>>(),
+                    g::send::<TESTER, ENV_OWNER, Loan<TEST_ENV>>(),
+                ),
+            ),
+        ),
+    )
+}
+
+fn test_result<const SERVICE: u8, const TESTER: u8, const DEVELOPER: u8, const FILE: u8>()
+-> impl Projectable {
+    let report = g::send::<DEVELOPER, FILE, TestReport>();
+    g::route(
+        g::seq(g::send::<SERVICE, DEVELOPER, Passed>(), report),
+        g::seq(
+            g::send::<SERVICE, DEVELOPER, Failed>(),
+            g::seq(
+                report,
+                g::seq(
+                    g::send::<TESTER, DEVELOPER, Loan<SERVICE>>(),
+                    g::seq(
+                        g::send::<FILE, SERVICE, Implement<DEVELOPER>>(),
+                        g::send::<SERVICE, FILE, Implemented>(),
+                    ),
+                ),
+            ),
+        ),
+    )
+}
+
+fn schema<const S: u8>() -> impl Projectable + Copy {
+    g::seq(
+        g::send::<DEVOPS_FILE, STAGING_ENV, Migrate<S>>(),
+        g::send::<STAGING_ENV, DEVOPS_FILE, Migrated<S>>(),
+    )
+}
+
+pub(super) fn preparation() -> impl Projectable {
+    let ma = schema::<SCHEMA_A>();
+    let mb = schema::<SCHEMA_B>();
+    let mc = schema::<SCHEMA_C>();
+    let migrations = g::route(
+        g::seq(ma, g::route(g::seq(mb, mc), g::seq(mc, mb))),
+        g::route(
+            g::seq(mb, g::route(g::seq(ma, mc), g::seq(mc, ma))),
+            g::seq(mc, g::route(g::seq(ma, mb), g::seq(mb, ma))),
+        ),
+    );
+    let staging = g::seq(
+        g::send::<ARCHITECT, SCHEMAS, Proposed<SCHEMAS>>(),
+        g::seq(
+            g::send::<ARCHITECT, SCHEMAS, Loan<STAGING_ENV>>(),
+            g::seq(
+                g::send::<STAGING_ENV, DEVOPS_FILE, Proposed<DEVOPS_FILE>>(),
+                g::seq(
+                    migrations,
+                    g::send::<SCHEMAS, ARCHITECT, Loan<STAGING_ENV>>(),
+                ),
+            ),
+        ),
+    );
+    let prepare = g::par(
+        build::<DEVELOPER_A, DEVELOPER_A_FILE, SERVICE_A, TESTER_A>(
+            review_candidate::<DEVELOPER_A, REVIEWER_A, SERVICE_A>(),
+            g::send::<REVIEWER_A, DEVELOPER_A, Loan<SERVICE_A>>(),
+            g::send::<REVIEWER_A, TESTER_A, Loan<SERVICE_A>>(),
+        ),
+        g::par(
+            build::<DEVELOPER_B, DEVELOPER_B_FILE, SERVICE_B, TESTER_B>(
+                review_candidate::<DEVELOPER_B, REVIEWER_B, SERVICE_B>(),
+                g::send::<REVIEWER_B, DEVELOPER_B, Loan<SERVICE_B>>(),
+                g::send::<REVIEWER_B, TESTER_B, Loan<SERVICE_B>>(),
+            ),
+            build::<DEVELOPER_C, DEVELOPER_C_FILE, SERVICE_C, TESTER_C>(
+                review_candidate::<DEVELOPER_C, REVIEWER_C, SERVICE_C>(),
+                g::send::<REVIEWER_C, DEVELOPER_C, Loan<SERVICE_C>>(),
+                g::send::<REVIEWER_C, TESTER_C, Loan<SERVICE_C>>(),
+            ),
+        ),
+    );
+    let a = test_session::<SERVICE_A, TESTER_A>();
+    let b = test_session::<SERVICE_B, TESTER_B>();
+    let c = test_session::<SERVICE_C, TESTER_C>();
+    let approvals = g::par(
+        g::send::<SERVICE_A, TEST_FILE, TestCandidate<SERVICE_A>>(),
+        g::par(
+            g::send::<SERVICE_B, TEST_FILE, TestCandidate<SERVICE_B>>(),
+            g::send::<SERVICE_C, TEST_FILE, TestCandidate<SERVICE_C>>(),
+        ),
+    );
+    let reports = g::par(
+        test_result::<SERVICE_A, TESTER_A, DEVELOPER_A, DEVELOPER_A_FILE>(),
+        g::par(
+            test_result::<SERVICE_B, TESTER_B, DEVELOPER_B, DEVELOPER_B_FILE>(),
+            test_result::<SERVICE_C, TESTER_C, DEVELOPER_C, DEVELOPER_C_FILE>(),
+        ),
+    );
+    let tests = g::route(
+        g::seq(a, g::route(g::seq(b, c), g::seq(c, b))),
+        g::route(
+            g::seq(b, g::route(g::seq(a, c), g::seq(c, a))),
+            g::seq(c, g::route(g::seq(a, b), g::seq(b, a))),
+        ),
+    );
+    g::seq(
+        g::send::<ARCHITECT_FILE, ARCHITECT, Propose>(),
+        g::par(
+            g::par(
+                g::send::<ARCHITECT, ARCHITECT_FILE, Proposed<ARCHITECT_FILE>>(),
+                staging,
+            ),
+            g::seq(prepare, g::seq(g::par(approvals, tests), reports)),
+        ),
+    )
+}
+
+#[hibana_runtime::scope]
+pub(super) async fn architect<'run>(
+    endpoint: &mut Endpoint<'run, ARCHITECT>,
+    staging: Endpoint<'run, STAGING_ENV>,
+    domain: &impl Domain,
+) -> ShellResult<()> {
+    let arguments = decode(&endpoint.recv::<Propose>().await?.0)?;
+    let expected = Value::Object(dependencies(arguments.get("dependencies"))?);
+    let result = domain
+        .execute("ARCHITECT", "design_proposal", arguments)
+        .await
+        .map_err(ShellError::message)?;
+    let data = &result["data"];
+    if result["tool_name"] != "design_proposal"
+        || result["success"] != true
+        || data["agent"] != "ARCHITECT"
+        || data["title"] != "migration_plan"
+        || data["status"] != "proposed"
+        || data["receipt"].as_u64().is_none_or(|receipt| receipt == 0)
+    {
+        return Err(ShellError::message(
+            "design result differs from the admitted plan",
+        ));
+    }
+    same(&data["dependencies"], &expected)?;
+    let bytes = encode(&result)?;
+    async {
+        let [mut author, mut schemas, mut a, mut b, mut c] = endpoint.par()?;
+        async {
+            schemas.send::<Proposed<SCHEMAS>>(&bytes.as_slice()).await?;
+            schemas.send::<Loan<STAGING_ENV>>(staging).await?;
+            let _staging = schemas.recv::<Loan<STAGING_ENV>>().await?;
+        };
+        async {
+            author
+                .send::<Proposed<ARCHITECT_FILE>>(&bytes.as_slice())
+                .await
+        };
+        async {
+            a.send::<Proposed<DEVELOPER_A>>(&bytes.as_slice()).await?;
+            a.send::<Proposed<DEVELOPER_A>>(&bytes.as_slice()).await
+        };
+        async {
+            b.send::<Proposed<DEVELOPER_B>>(&bytes.as_slice()).await?;
+            b.send::<Proposed<DEVELOPER_B>>(&bytes.as_slice()).await
+        };
+        async {
+            c.send::<Proposed<DEVELOPER_C>>(&bytes.as_slice()).await?;
+            c.send::<Proposed<DEVELOPER_C>>(&bytes.as_slice()).await
+        };
+        Ok(())
+    }
+    .await?;
+    Ok(())
+}
+
+fn checked_migration(result: &Value, service: &str, name: &Value, plan: &Value) -> ShellResult<()> {
+    let data = &result["data"];
+    if result["tool_name"] != "migrate_schema"
+        || result["success"] != true
+        || data["agent"] != "DEVOPS"
+        || data["status"] != "migrated"
+        || data["service"] != service
+        || &data["migration_name"] != name
+        || &data["plan"] != plan
+        || data["receipt"].as_u64().is_none_or(|id| id == 0)
+    {
+        return Err(ShellError::message(
+            "schema migration reply differs from its request or plan",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) async fn schemas(
+    endpoint: &mut Endpoint<'_, SCHEMAS>,
+    domain: &impl Domain,
+) -> ShellResult<()> {
+    let authored = endpoint.recv::<Proposed<SCHEMAS>>().await?.to_vec();
+    let plan = decode(&authored)?["data"]["receipt"].clone();
+    let mut staging = endpoint.recv::<Loan<STAGING_ENV>>().await?;
+    staging
+        .send::<Proposed<DEVOPS_FILE>>(&authored.as_slice())
+        .await?;
+    for _ in SERVICES {
+        let request = staging.offer().await?;
+        match request.label() {
+            SCHEMA_A => {
+                let args = decode(&request.recv::<Migrate<SCHEMA_A>>().await?.0)?;
+                let name = args["migration_name"].clone();
+                let result = domain
+                    .execute("DEVOPS", "migrate_schema", args)
+                    .await
+                    .map_err(ShellError::message)?;
+                checked_migration(&result, SERVICES[0], &name, &plan)?;
+                staging
+                    .send::<Migrated<SCHEMA_A>>(&encode(&result)?.as_slice())
+                    .await?;
+            }
+            SCHEMA_B => {
+                let args = decode(&request.recv::<Migrate<SCHEMA_B>>().await?.0)?;
+                let name = args["migration_name"].clone();
+                let result = domain
+                    .execute("DEVOPS", "migrate_schema", args)
+                    .await
+                    .map_err(ShellError::message)?;
+                checked_migration(&result, SERVICES[1], &name, &plan)?;
+                staging
+                    .send::<Migrated<SCHEMA_B>>(&encode(&result)?.as_slice())
+                    .await?;
+            }
+            SCHEMA_C => {
+                let args = decode(&request.recv::<Migrate<SCHEMA_C>>().await?.0)?;
+                let name = args["migration_name"].clone();
+                let result = domain
+                    .execute("DEVOPS", "migrate_schema", args)
+                    .await
+                    .map_err(ShellError::message)?;
+                checked_migration(&result, SERVICES[2], &name, &plan)?;
+                staging
+                    .send::<Migrated<SCHEMA_C>>(&encode(&result)?.as_slice())
+                    .await?;
+            }
+            _ => return Err(ShellError::message("unknown migration request on staging")),
+        }
+    }
+    endpoint.send::<Loan<STAGING_ENV>>(staging).await?;
+    Ok(())
+}
+
+fn checked_build(result: &Value, agent: &str, service: &str, plan: &Value) -> ShellResult<()> {
+    let data = &result["data"];
+    if result["tool_name"] != "implement_feature"
+        || result["success"] != true
+        || data["agent"] != agent
+        || data["feature_name"] != service
+        || data["service"] != service
+        || data["status"] != "implemented"
+        || data["plan"] != plan["data"]["receipt"]
+        || data["receipt"].as_u64().is_none_or(|receipt| receipt == 0)
+    {
+        return Err(ShellError::message(
+            "implementation result differs from its service or plan",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) async fn developer<'run, const DEVELOPER: u8, const SERVICE: u8>(
+    endpoint: &mut Endpoint<'run, DEVELOPER>,
+    mut candidate: Endpoint<'run, SERVICE>,
+    domain: &impl Domain,
+) -> ShellResult<()> {
+    let (agent, service) = match DEVELOPER {
+        DEVELOPER_A => ("DEVELOPER_A", SERVICES[0]),
+        DEVELOPER_B => ("DEVELOPER_B", SERVICES[1]),
+        DEVELOPER_C => ("DEVELOPER_C", SERVICES[2]),
+        _ => return Err(ShellError::message("unknown migration developer")),
+    };
+    let plan = decode(endpoint.recv::<Proposed<DEVELOPER>>().await?)?;
+    loop {
+        let arguments = decode(&candidate.recv::<Implement<DEVELOPER>>().await?.0)?;
+        let result = domain
+            .execute(agent, "implement_feature", arguments)
+            .await
+            .map_err(ShellError::message)?;
+        checked_build(&result, agent, service, &plan)?;
+        let implemented = encode(&result)?;
+        candidate
+            .send::<Implemented>(&implemented.as_slice())
+            .await?;
+        endpoint.send::<Loan<SERVICE>>(candidate).await?;
+        endpoint
+            .send::<Candidate<SERVICE>>(&implemented.as_slice())
+            .await?;
+        let branch = endpoint.offer().await?;
+        match branch.label() {
+            <Approved as g::Message>::LOGICAL_LABEL => {
+                let result = branch.recv::<Approved>().await?.to_vec();
+                endpoint
+                    .send::<Reviewed<DEVELOPER>>(&result.as_slice())
+                    .await?;
+                let tested = endpoint.offer().await?;
+                match tested.label() {
+                    <Passed as g::Message>::LOGICAL_LABEL => {
+                        let result = tested.recv::<Passed>().await?.to_vec();
+                        endpoint.send::<TestReport>(&result.as_slice()).await?;
+                        return Ok(());
+                    }
+                    <Failed as g::Message>::LOGICAL_LABEL => {
+                        let result = tested.recv::<Failed>().await?.to_vec();
+                        endpoint.send::<TestReport>(&result.as_slice()).await?;
+                        let failed = decode(&result)?;
+                        let mut returned = endpoint.recv::<Loan<SERVICE>>().await?;
+                        let args = decode(&returned.recv::<Implement<DEVELOPER>>().await?.0)?;
+                        let repair = domain
+                            .execute(agent, "implement_feature", args)
+                            .await
+                            .map_err(ShellError::message)?;
+                        checked_build(&repair, agent, service, &plan)?;
+                        if repair["data"]["receipt"] == failed["data"]["candidate"] {
+                            return Err(ShellError::message("repair reused the failed candidate"));
+                        }
+                        returned
+                            .send::<Implemented>(&encode(&repair)?.as_slice())
+                            .await?;
+                        return Ok(());
+                    }
+                    _ => return Err(ShellError::message("unknown service test outcome")),
+                }
+            }
+            <Rejected as g::Message>::LOGICAL_LABEL => {
+                let result = branch.recv::<Rejected>().await?.to_vec();
+                endpoint
+                    .send::<Reviewed<DEVELOPER>>(&result.as_slice())
+                    .await?;
+                candidate = endpoint.recv::<Loan<SERVICE>>().await?;
+            }
+            _ => return Err(ShellError::message("unknown service review outcome")),
+        }
+    }
+}
+
+pub(super) async fn reviewer<const REVIEWER: u8, const DEVELOPER: u8, const SERVICE: u8>(
+    endpoint: &mut Endpoint<'_, REVIEWER>,
+    domain: &impl Domain,
+) -> ShellResult<()> {
+    loop {
+        let mut service = endpoint.recv::<Loan<SERVICE>>().await?;
+        let bytes = endpoint.recv::<Candidate<SERVICE>>().await?.to_vec();
+        let candidate = decode(&bytes)?;
+        service
+            .send::<Candidate<SERVICE>>(&bytes.as_slice())
+            .await?;
+        let arguments = decode(&service.recv::<Review<SERVICE>>().await?.0)?;
+        let pr = arguments["pr_id"].clone();
+        same(&pr, &candidate["data"]["service"])?;
+        let result = domain
+            .execute("REVIEWER", "code_review", arguments)
+            .await
+            .map_err(ShellError::message)?;
+        let data = &result["data"];
+        if result["tool_name"] != "code_review"
+            || data["agent"] != "REVIEWER"
+            || data["pr_id"] != pr
+            || data["service"] != pr
+            || data["candidate"] != candidate["data"]["receipt"]
+            || data["plan"] != candidate["data"]["plan"]
+            || data["receipt"].as_u64().is_none_or(|receipt| receipt == 0)
+        {
+            return Err(ShellError::message(
+                "review result differs from its admitted candidate",
+            ));
+        }
+        let result_bytes = encode(&result)?;
+        match (result["success"].as_bool(), data["status"].as_str()) {
+            (Some(true), Some("reviewed")) => {
+                let approval = ReviewReply::<true>::from_bytes(&result_bytes)?;
+                service.send::<Approved>(&approval).await?;
+                service
+                    .send::<Reviewed<DEVELOPER>>(&result_bytes.as_slice())
+                    .await?;
+                service.send::<TestCandidate<SERVICE>>(&approval).await?;
+                endpoint.send::<Loan<SERVICE>>(service).await?;
+                return Ok(());
+            }
+            (Some(false), Some("changes_requested")) => {
+                service
+                    .send::<Rejected>(&ReviewReply::<false>::from_bytes(result_bytes.as_slice())?)
+                    .await?;
+                service
+                    .send::<Reviewed<DEVELOPER>>(&result_bytes.as_slice())
+                    .await?;
+                endpoint.send::<Loan<SERVICE>>(service).await?;
+            }
+            _ => {
+                return Err(ShellError::message(
+                    "unknown result from the migration reviewer",
+                ));
+            }
+        }
+    }
+}
+
+pub(super) async fn tester<'run, const TESTER: u8, const SERVICE: u8>(
+    endpoint: &mut Endpoint<'run, TESTER>,
+    domain: &impl Domain,
+) -> ShellResult<Value> {
+    let approval = endpoint.recv::<TestCandidate<SERVICE>>().await?.to_vec();
+    let mut service = endpoint.recv::<Loan<SERVICE>>().await?;
+    service
+        .send::<TestCandidate<SERVICE>>(&ReviewReply::from_bytes(&approval)?)
+        .await?;
+    let reviewed = decode(&approval)?;
+    let arguments = decode(&service.recv::<RunTests<TESTER>>().await?.0)?;
+    same(&arguments["suite"], &reviewed["data"]["service"])?;
+    let mut environment = endpoint.recv::<Loan<TEST_ENV>>().await?;
+    let result = domain
+        .execute("TESTER", "run_tests", arguments)
+        .await
+        .map_err(ShellError::message)?;
+    let data = &result["data"];
+    if result["tool_name"] != "run_tests"
+        || data["agent"] != "TESTER"
+        || data["suite"] != reviewed["data"]["service"]
+        || data["service"] != data["suite"]
+        || data["candidate"] != reviewed["data"]["candidate"]
+        || data["review"] != reviewed["data"]["receipt"]
+        || data["plan"] != reviewed["data"]["plan"]
+        || data["receipt"].as_u64().is_none_or(|id| id == 0)
+        || !matches!(
+            (result["success"].as_bool(), data["status"].as_str()),
+            (Some(true), Some("tests passed")) | (Some(false), Some("tests_failed"))
+        )
+    {
+        return Err(ShellError::message(
+            "test result differs from its approved service",
+        ));
+    }
+    environment
+        .send::<Tested<TESTER>>(&encode(&result)?.as_slice())
+        .await?;
+    endpoint.send::<Loan<TEST_ENV>>(environment).await?;
+    let bytes = encode(&result)?;
+    if result["success"] == true {
+        service
+            .send::<Passed>(&ReviewReply::from_bytes(&bytes)?)
+            .await?;
+    } else {
+        service
+            .send::<Failed>(&ReviewReply::from_bytes(&bytes)?)
+            .await?;
+        endpoint.send::<Loan<SERVICE>>(service).await?;
+    }
+    Ok(result)
+}
+
+pub(super) async fn test_environment<'run>(
+    owner: &mut Endpoint<'run, ENV_OWNER>,
+    mut environment: Endpoint<'run, TEST_ENV>,
+) -> ShellResult<Endpoint<'run, TEST_ENV>> {
+    for _ in SERVICES {
+        let request = environment.offer().await?;
+        match request.label() {
+            TESTER_A => {
+                let arguments = request.recv::<RunTests<TESTER_A>>().await?;
+                environment.send::<RunTests<TESTER_A>>(&arguments).await?;
+            }
+            TESTER_B => {
+                let arguments = request.recv::<RunTests<TESTER_B>>().await?;
+                environment.send::<RunTests<TESTER_B>>(&arguments).await?;
+            }
+            TESTER_C => {
+                let arguments = request.recv::<RunTests<TESTER_C>>().await?;
+                environment.send::<RunTests<TESTER_C>>(&arguments).await?;
+            }
+            _ => return Err(ShellError::message("unknown migration test suite")),
+        }
+        owner.send::<Loan<TEST_ENV>>(environment).await?;
+        environment = owner.recv::<Loan<TEST_ENV>>().await?;
+    }
+    Ok(environment)
+}
+
+#[cfg(test)]
+#[path = "preparation_tests.rs"]
+mod tests;

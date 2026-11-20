@@ -40,7 +40,8 @@ fn ci_binds_each_input_to_the_exact_publication_and_test_occurrence() {
                         data::ci_result(&stale, &inputs["publication"], &tests, feature).is_err()
                     );
                     if success {
-                        let altered = json!({"publication":inputs["publication"],"ci":stale});
+                        let mut altered = inputs.clone();
+                        altered["ci"] = stale;
                         assert!(data::staging_inputs(&altered, feature).is_err());
                     }
                 }
@@ -74,6 +75,7 @@ fn material_checks_do_not_encode_the_global_feature_publication_order() {
     ci["publication_event"] = json!(40);
     ci["artifact_id"] = json!("development:42");
     ci["publication_events"] = json!({FEATURES[0]:40,FEATURES[1]:20,FEATURES[2]:30});
+    inputs["integrated_publication"] = inputs["publication"].clone();
     data::ci_result(&inputs["ci"], &inputs["publication"], &tests, 0).unwrap();
     data::staging_inputs(&inputs, 0).unwrap();
 }
@@ -179,4 +181,31 @@ fn validation_and_rollback_bind_the_actual_deployment_and_negative_result() {
             assert!(data::rolled_back(&substitute, &deployment, &validation, feature).is_err());
         }
     }
+}
+
+#[test]
+fn deployment_of_an_earlier_merge_uses_ci_for_the_current_repository() {
+    let (first, mut deployment, _, _) = material::material(0);
+    let (current, _, _, _) = material::material(2);
+    let inputs = json!({
+        "publication": first["publication"],
+        "integrated_publication": current["publication"],
+        "ci": current["ci"],
+    });
+    let prior = [Value::Null, Value::Null, Value::Null];
+    deployment["data"]["repository_sha256"] = current["ci"]["data"]["repository_sha256"].clone();
+    deployment["data"]["ci_receipt"] = json!(data::receipt(&current["ci"]).unwrap());
+    deployment["data"]["artifact_id"] = json!("development:40");
+    deployment["data"]["deployment_event"] = json!(40);
+    data::deployed(&deployment, &inputs, (0, &prior)).unwrap();
+
+    let mut stale_ci = inputs.clone();
+    stale_ci["ci"] = first["ci"].clone();
+    assert!(data::deploy_input(&json!({"service":FEATURES[0]}), &stale_ci, (0, &prior)).is_err());
+    let mut replaced = inputs.clone();
+    replaced["integrated_publication"]["data"]["base_publication_events"][FEATURES[0]] = json!(1);
+    assert!(data::staging_inputs(&replaced, 0).is_err());
+    let mut wrong_deployment = deployment;
+    wrong_deployment["data"]["ci_receipt"] = json!(data::receipt(&first["ci"]).unwrap());
+    assert!(data::deployed(&wrong_deployment, &inputs, (0, &prior)).is_err());
 }

@@ -30,6 +30,9 @@ pub const EDITOR_DATA: u8 = 23;
 pub const A_VM: u8 = 24;
 pub const B_VM: u8 = 25;
 pub const EDITOR_VM: u8 = 26;
+pub const WRITE_REQUESTS: u8 = 27;
+pub const REFERENCE_REQUESTS: u8 = 28;
+pub const INITIAL_DOCUMENT: u8 = 29;
 pub const SECTION_A: &str = "section_a";
 pub const SECTION_B: &str = "section_b";
 pub const SESSION: u32 = 3;
@@ -89,6 +92,7 @@ pub type RevisionResultA<'a> = g::Msg<104, &'a [u8]>;
 pub type RevisionResultB<'a> = g::Msg<105, &'a [u8]>;
 pub type ReferenceMaterialA<'a> = g::Msg<106, &'a [u8]>;
 pub type ReferenceMaterialB<'a> = g::Msg<107, &'a [u8]>;
+pub type ReportMaterial<'a> = g::Msg<226, &'a [u8]>;
 pub type FeedbackA<'a> = g::Msg<108, &'a [u8]>;
 pub type FeedbackB<'a> = g::Msg<109, &'a [u8]>;
 pub type DocumentLoan<'r> = g::Msg<10, Endpoint<'r, DOCUMENT>>;
@@ -131,21 +135,32 @@ fn review_input<M: g::Message>() -> impl Projectable {
     )
 }
 
-fn writing_a() -> impl Projectable {
+fn section_review_a() -> impl Projectable {
     g::seq(
-        g::send::<DOCUMENT_SERVICE, A_WASI, DocumentLoan>(),
+        g::send::<REVIEW_WASI, A_WASI, ReviewA>(),
+        g::send::<A_WASI, RESEARCH_A, ReviewA>(),
+    )
+}
+
+fn section_review_b() -> impl Projectable {
+    g::seq(
+        g::send::<REVIEW_WASI, B_WASI, ReviewB>(),
+        g::send::<B_WASI, RESEARCH_B, ReviewB>(),
+    )
+}
+
+fn writing_a() -> impl Projectable + Copy {
+    g::seq(
+        g::send::<INITIAL_DOCUMENT, A_WASI, WriteArgumentsA>(),
         g::seq(
-            g::send::<A_FILE, DOCUMENT_SERVICE, WriteA>(),
+            g::send::<INITIAL_DOCUMENT, A_WASI, DocumentLoan>(),
             g::seq(
-                g::send::<DOCUMENT_SERVICE, A_WASI, WriteArgumentsA>(),
+                g::send::<DOCUMENT, INITIAL_DOCUMENT, WriteOnDocument>(),
                 g::seq(
-                    g::send::<DOCUMENT, DOCUMENT_SERVICE, WriteOnDocument>(),
-                    g::seq(
-                        g::send::<DOCUMENT_SERVICE, DOCUMENT, DocumentResult>(),
-                        g::par(
-                            g::send::<A_WASI, A_FILE, WriteResultA>(),
-                            g::send::<A_WASI, DOCUMENT_SERVICE, DocumentLoan>(),
-                        ),
+                    g::send::<INITIAL_DOCUMENT, DOCUMENT, DocumentResult>(),
+                    g::par(
+                        g::send::<A_WASI, A_FILE, WriteResultA>(),
+                        g::send::<A_WASI, INITIAL_DOCUMENT, DocumentLoan>(),
                     ),
                 ),
             ),
@@ -153,21 +168,18 @@ fn writing_a() -> impl Projectable {
     )
 }
 
-fn writing_b() -> impl Projectable {
+fn writing_b() -> impl Projectable + Copy {
     g::seq(
-        g::send::<DOCUMENT_SERVICE, B_WASI, DocumentLoan>(),
+        g::send::<INITIAL_DOCUMENT, B_WASI, WriteArgumentsB>(),
         g::seq(
-            g::send::<B_FILE, DOCUMENT_SERVICE, WriteB>(),
+            g::send::<INITIAL_DOCUMENT, B_WASI, DocumentLoan>(),
             g::seq(
-                g::send::<DOCUMENT_SERVICE, B_WASI, WriteArgumentsB>(),
+                g::send::<DOCUMENT, INITIAL_DOCUMENT, WriteOnDocument>(),
                 g::seq(
-                    g::send::<DOCUMENT, DOCUMENT_SERVICE, WriteOnDocument>(),
-                    g::seq(
-                        g::send::<DOCUMENT_SERVICE, DOCUMENT, DocumentResult>(),
-                        g::par(
-                            g::send::<B_WASI, B_FILE, WriteResultB>(),
-                            g::send::<B_WASI, DOCUMENT_SERVICE, DocumentLoan>(),
-                        ),
+                    g::send::<INITIAL_DOCUMENT, DOCUMENT, DocumentResult>(),
+                    g::par(
+                        g::send::<B_WASI, B_FILE, WriteResultB>(),
+                        g::send::<B_WASI, INITIAL_DOCUMENT, DocumentLoan>(),
                     ),
                 ),
             ),
@@ -216,48 +228,42 @@ fn revise_b() -> impl Projectable {
         ),
     )
 }
-fn references_a() -> impl Projectable {
+fn references_a() -> impl Projectable + Copy {
     g::seq(
-        g::send::<DATABASE_SERVICE, A_WASI, DatabaseLoan>(),
+        g::send::<DATABASE_SERVICE, A_WASI, ReferenceArgumentsA>(),
         g::seq(
-            g::send::<A_FILE, DATABASE_SERVICE, ReferencesA>(),
+            g::send::<DATABASE_SERVICE, A_WASI, DatabaseLoan>(),
             g::seq(
-                g::send::<DATABASE_SERVICE, A_WASI, ReferenceArgumentsA>(),
+                g::send::<DATABASE, DATABASE_SERVICE, ReferencesOnDatabase>(),
                 g::seq(
-                    g::send::<DATABASE, DATABASE_SERVICE, ReferencesOnDatabase>(),
-                    g::seq(
-                        g::par(
-                            g::send::<DATABASE_SERVICE, DATABASE, DatabaseResult>(),
-                            g::send::<DATABASE_SERVICE, DOCUMENT_SERVICE, ReferenceMaterialA>(),
-                        ),
-                        g::par(
-                            g::send::<A_WASI, A_FILE, ReferenceResultA>(),
-                            g::send::<A_WASI, DATABASE_SERVICE, DatabaseLoan>(),
-                        ),
+                    g::par(
+                        g::send::<DATABASE_SERVICE, DATABASE, DatabaseResult>(),
+                        g::send::<DATABASE_SERVICE, INITIAL_DOCUMENT, ReferenceMaterialA>(),
+                    ),
+                    g::par(
+                        g::send::<A_WASI, A_FILE, ReferenceResultA>(),
+                        g::send::<A_WASI, DATABASE_SERVICE, DatabaseLoan>(),
                     ),
                 ),
             ),
         ),
     )
 }
-fn references_b() -> impl Projectable {
+fn references_b() -> impl Projectable + Copy {
     g::seq(
-        g::send::<DATABASE_SERVICE, B_WASI, DatabaseLoan>(),
+        g::send::<DATABASE_SERVICE, B_WASI, ReferenceArgumentsB>(),
         g::seq(
-            g::send::<B_FILE, DATABASE_SERVICE, ReferencesB>(),
+            g::send::<DATABASE_SERVICE, B_WASI, DatabaseLoan>(),
             g::seq(
-                g::send::<DATABASE_SERVICE, B_WASI, ReferenceArgumentsB>(),
+                g::send::<DATABASE, DATABASE_SERVICE, ReferencesOnDatabase>(),
                 g::seq(
-                    g::send::<DATABASE, DATABASE_SERVICE, ReferencesOnDatabase>(),
-                    g::seq(
-                        g::par(
-                            g::send::<DATABASE_SERVICE, DATABASE, DatabaseResult>(),
-                            g::send::<DATABASE_SERVICE, DOCUMENT_SERVICE, ReferenceMaterialB>(),
-                        ),
-                        g::par(
-                            g::send::<B_WASI, B_FILE, ReferenceResultB>(),
-                            g::send::<B_WASI, DATABASE_SERVICE, DatabaseLoan>(),
-                        ),
+                    g::par(
+                        g::send::<DATABASE_SERVICE, DATABASE, DatabaseResult>(),
+                        g::send::<DATABASE_SERVICE, INITIAL_DOCUMENT, ReferenceMaterialB>(),
+                    ),
+                    g::par(
+                        g::send::<B_WASI, B_FILE, ReferenceResultB>(),
+                        g::send::<B_WASI, DATABASE_SERVICE, DatabaseLoan>(),
                     ),
                 ),
             ),
@@ -302,6 +308,8 @@ fn combine() -> impl Projectable {
         g::seq(approvals, g::seq(retired, publication)),
     )
 }
+// Both observers consume the current result before the editor can select
+// another review. Author feedback remains independent of the other observer.
 fn outcome_a<M: g::Message>() -> impl Projectable {
     g::seq(
         g::send::<REVIEW_A, DOCUMENT_SERVICE, M>(),
@@ -310,10 +318,16 @@ fn outcome_a<M: g::Message>() -> impl Projectable {
             g::par(
                 g::send::<A_WASI, A_FILE, FeedbackA>(),
                 g::seq(
-                    g::send::<REVIEW_A, B_WASI, M>(),
+                    g::send::<A_WASI, REVIEW_A, M>(),
                     g::seq(
                         g::send::<REVIEW_A, REVIEW_WASI, M>(),
-                        g::send::<REVIEW_WASI, EDITOR_FILE, ReviewResultA>(),
+                        g::par(
+                            g::send::<REVIEW_WASI, EDITOR_FILE, ReviewResultA>(),
+                            g::seq(
+                                g::send::<REVIEW_A, B_WASI, M>(),
+                                g::send::<B_WASI, REVIEW_A, M>(),
+                            ),
+                        ),
                     ),
                 ),
             ),
@@ -328,10 +342,16 @@ fn outcome_b<M: g::Message>() -> impl Projectable {
             g::par(
                 g::send::<B_WASI, B_FILE, FeedbackB>(),
                 g::seq(
-                    g::send::<REVIEW_B, A_WASI, M>(),
+                    g::send::<B_WASI, REVIEW_B, M>(),
                     g::seq(
                         g::send::<REVIEW_B, REVIEW_WASI, M>(),
-                        g::send::<REVIEW_WASI, EDITOR_FILE, ReviewResultB>(),
+                        g::par(
+                            g::send::<REVIEW_WASI, EDITOR_FILE, ReviewResultB>(),
+                            g::seq(
+                                g::send::<REVIEW_B, A_WASI, M>(),
+                                g::send::<A_WASI, REVIEW_B, M>(),
+                            ),
+                        ),
                     ),
                 ),
             ),
@@ -374,7 +394,7 @@ fn review_a_result(review: impl Projectable) -> impl Projectable {
 fn review_a_until_approved(approved: impl Projectable) -> impl Projectable {
     let next = g::seq(
         review_input::<ReviewA>(),
-        g::seq(revise_a(), g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>()),
+        g::seq(revise_a(), section_review_a()),
     );
     g::seq(
         next,
@@ -386,7 +406,7 @@ fn review_a_until_approved(approved: impl Projectable) -> impl Projectable {
                         outcome_a::<RejectedA>(),
                         g::seq(
                             review_input::<ReviewA>(),
-                            g::seq(revise_a(), g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>()),
+                            g::seq(revise_a(), section_review_a()),
                         ),
                     )
                     .roll(),
@@ -400,7 +420,7 @@ fn review_a_until_approved(approved: impl Projectable) -> impl Projectable {
 fn review_b_until_approved(approved: impl Projectable) -> impl Projectable {
     let next = g::seq(
         review_input::<ReviewB>(),
-        g::seq(revise_b(), g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>()),
+        g::seq(revise_b(), section_review_b()),
     );
     g::seq(
         next,
@@ -412,7 +432,7 @@ fn review_b_until_approved(approved: impl Projectable) -> impl Projectable {
                         outcome_b::<RejectedB>(),
                         g::seq(
                             review_input::<ReviewB>(),
-                            g::seq(revise_b(), g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>()),
+                            g::seq(revise_b(), section_review_b()),
                         ),
                     )
                     .roll(),
@@ -429,20 +449,20 @@ fn both_rejected_a_ready() -> impl Projectable {
         g::seq(
             review_input::<ReviewA>(),
             g::seq(
-                g::par(revise_b(), g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>()),
+                g::par(revise_b(), section_review_a()),
                 g::route(
                     g::seq(
                         outcome_a::<ApprovedA>(),
                         g::seq(
                             review_input::<ReviewB>(),
-                            review_b_result(g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>()),
+                            review_b_result(section_review_b()),
                         ),
                     ),
                     g::seq(
                         outcome_a::<RejectedA>(),
                         review_a_until_approved(g::seq(
                             review_input::<ReviewB>(),
-                            review_b_result(g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>()),
+                            review_b_result(section_review_b()),
                         )),
                     ),
                 ),
@@ -453,20 +473,20 @@ fn both_rejected_a_ready() -> impl Projectable {
             g::seq(
                 revise_b(),
                 g::seq(
-                    g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>(),
+                    section_review_b(),
                     g::route(
                         g::seq(
                             outcome_b::<ApprovedB>(),
                             g::seq(
                                 review_input::<ReviewA>(),
-                                review_a_result(g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>()),
+                                review_a_result(section_review_a()),
                             ),
                         ),
                         g::seq(
                             outcome_b::<RejectedB>(),
                             review_b_until_approved(g::seq(
                                 review_input::<ReviewA>(),
-                                review_a_result(g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>()),
+                                review_a_result(section_review_a()),
                             )),
                         ),
                     ),
@@ -482,20 +502,20 @@ fn both_rejected_b_ready() -> impl Projectable {
             g::seq(
                 revise_a(),
                 g::seq(
-                    g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>(),
+                    section_review_a(),
                     g::route(
                         g::seq(
                             outcome_a::<ApprovedA>(),
                             g::seq(
                                 review_input::<ReviewB>(),
-                                review_b_result(g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>()),
+                                review_b_result(section_review_b()),
                             ),
                         ),
                         g::seq(
                             outcome_a::<RejectedA>(),
                             review_a_until_approved(g::seq(
                                 review_input::<ReviewB>(),
-                                review_b_result(g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>()),
+                                review_b_result(section_review_b()),
                             )),
                         ),
                     ),
@@ -505,20 +525,20 @@ fn both_rejected_b_ready() -> impl Projectable {
         g::seq(
             review_input::<ReviewB>(),
             g::seq(
-                g::par(revise_a(), g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>()),
+                g::par(revise_a(), section_review_b()),
                 g::route(
                     g::seq(
                         outcome_b::<ApprovedB>(),
                         g::seq(
                             review_input::<ReviewA>(),
-                            review_a_result(g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>()),
+                            review_a_result(section_review_a()),
                         ),
                     ),
                     g::seq(
                         outcome_b::<RejectedB>(),
                         review_b_until_approved(g::seq(
                             review_input::<ReviewA>(),
-                            review_a_result(g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>()),
+                            review_a_result(section_review_a()),
                         )),
                     ),
                 ),
@@ -534,13 +554,13 @@ fn repeat_a_before_b() -> impl Projectable {
             g::seq(
                 revise_a(),
                 g::seq(
-                    g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>(),
+                    section_review_a(),
                     g::route(
                         g::seq(
                             outcome_a::<ApprovedA>(),
                             g::seq(
                                 review_input::<ReviewB>(),
-                                review_b_result(g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>()),
+                                review_b_result(section_review_b()),
                             ),
                         ),
                         outcome_a::<RejectedA>(),
@@ -551,13 +571,13 @@ fn repeat_a_before_b() -> impl Projectable {
         g::seq(
             review_input::<ReviewB>(),
             g::seq(
-                g::par(revise_a(), g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>()),
+                g::par(revise_a(), section_review_b()),
                 g::route(
                     g::seq(
                         outcome_b::<ApprovedB>(),
                         g::seq(
                             review_input::<ReviewA>(),
-                            review_a_result(g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>()),
+                            review_a_result(section_review_a()),
                         ),
                     ),
                     g::seq(outcome_b::<RejectedB>(), both_rejected_a_ready()),
@@ -572,13 +592,13 @@ fn repeat_b_before_a() -> impl Projectable {
         g::seq(
             review_input::<ReviewA>(),
             g::seq(
-                g::par(revise_b(), g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>()),
+                g::par(revise_b(), section_review_a()),
                 g::route(
                     g::seq(
                         outcome_a::<ApprovedA>(),
                         g::seq(
                             review_input::<ReviewB>(),
-                            review_b_result(g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>()),
+                            review_b_result(section_review_b()),
                         ),
                     ),
                     g::seq(outcome_a::<RejectedA>(), both_rejected_b_ready()),
@@ -590,13 +610,13 @@ fn repeat_b_before_a() -> impl Projectable {
             g::seq(
                 revise_b(),
                 g::seq(
-                    g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>(),
+                    section_review_b(),
                     g::route(
                         g::seq(
                             outcome_b::<ApprovedB>(),
                             g::seq(
                                 review_input::<ReviewA>(),
-                                review_a_result(g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>()),
+                                review_a_result(section_review_a()),
                             ),
                         ),
                         outcome_b::<RejectedB>(),
@@ -607,20 +627,27 @@ fn repeat_b_before_a() -> impl Projectable {
     )
     .roll()
 }
+fn transfer_initial_document<M: g::Message>() -> impl Projectable {
+    g::seq(g::send::<DOCUMENT_SERVICE, INITIAL_DOCUMENT, M>(), g::seq(
+        g::send::<INITIAL_DOCUMENT, DOCUMENT_SERVICE, ReportMaterial>(),
+        g::send::<INITIAL_DOCUMENT, DOCUMENT_SERVICE, DocumentLoan>(),
+    ))
+}
+
 fn first_a() -> impl Projectable {
     g::seq(
         review_input::<ReviewA>(),
         g::seq(
-            g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>(),
+            section_review_a(),
             g::route(
                 g::seq(
-                    outcome_a::<ApprovedA>(),
+                    g::seq(outcome_a::<ApprovedA>(), transfer_initial_document::<ApprovedA>()),
                     g::seq(
                         review_input::<ReviewB>(),
-                        review_b_result(g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>()),
+                        review_b_result(section_review_b()),
                     ),
                 ),
-                g::seq(outcome_a::<RejectedA>(), repeat_a_before_b()),
+                g::seq(g::seq(outcome_a::<RejectedA>(), transfer_initial_document::<RejectedA>()), repeat_a_before_b()),
             ),
         ),
     )
@@ -629,22 +656,25 @@ fn first_b() -> impl Projectable {
     g::seq(
         review_input::<ReviewB>(),
         g::seq(
-            g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>(),
+            section_review_b(),
             g::route(
                 g::seq(
-                    outcome_b::<ApprovedB>(),
+                    g::seq(outcome_b::<ApprovedB>(), transfer_initial_document::<ApprovedB>()),
                     g::seq(
                         review_input::<ReviewA>(),
-                        review_a_result(g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>()),
+                        review_a_result(section_review_a()),
                     ),
                 ),
-                g::seq(outcome_b::<RejectedB>(), repeat_b_before_a()),
+                g::seq(g::seq(outcome_b::<RejectedB>(), transfer_initial_document::<RejectedB>()), repeat_b_before_a()),
             ),
         ),
     )
 }
 
 pub struct Programs {
+    pub initial_document: RoleProgram<INITIAL_DOCUMENT>,
+    pub write_requests: RoleProgram<WRITE_REQUESTS>,
+    pub reference_requests: RoleProgram<REFERENCE_REQUESTS>,
     pub a_wasi: RoleProgram<A_WASI>,
     pub b_wasi: RoleProgram<B_WASI>,
     pub review_wasi: RoleProgram<REVIEW_WASI>,
@@ -694,6 +724,7 @@ impl Programs {
                 ("RevisionResultB", RevisionResultB::LOGICAL_LABEL),
                 ("ReferenceMaterialA", ReferenceMaterialA::LOGICAL_LABEL),
                 ("ReferenceMaterialB", ReferenceMaterialB::LOGICAL_LABEL),
+                ("ReportMaterial", ReportMaterial::LOGICAL_LABEL),
                 ("FeedbackA", FeedbackA::LOGICAL_LABEL),
                 ("FeedbackB", FeedbackB::LOGICAL_LABEL),
                 ("CombinedA", CombinedA::LOGICAL_LABEL),
@@ -732,7 +763,8 @@ impl Programs {
             "session":SESSION,
             "roles":{
                 "RESEARCHER_A":A_WASI,"RESEARCHER_B":B_WASI,"EDITOR":REVIEW_WASI,
-                "DOCUMENT":DOCUMENT,"DOCUMENT_SERVICE":DOCUMENT_SERVICE,
+                "WRITE_REQUESTS":WRITE_REQUESTS,"REFERENCE_REQUESTS":REFERENCE_REQUESTS,
+                "INITIAL_DOCUMENT":INITIAL_DOCUMENT,"DOCUMENT":DOCUMENT,"DOCUMENT_SERVICE":DOCUMENT_SERVICE,
                 "DATABASE":DATABASE,"DATABASE_SERVICE":DATABASE_SERVICE,
                 "RESEARCH_A":RESEARCH_A,"RESEARCH_B":RESEARCH_B,
                 "REVIEW_A":REVIEW_A,"REVIEW_B":REVIEW_B,
@@ -740,7 +772,7 @@ impl Programs {
                 "A_FILE":A_FILE,"B_FILE":B_FILE,"A_DATA":A_DATA,"B_DATA":B_DATA,"EDITOR_DATA":EDITOR_DATA,"A_VM":A_VM,"B_VM":B_VM,"EDITOR_VM":EDITOR_VM
             },
             "labels":labels,
-            "programs":[rows(&self.a_wasi), rows(&self.b_wasi), rows(&self.review_wasi),
+            "programs":[rows(&self.initial_document),rows(&self.write_requests),rows(&self.reference_requests),rows(&self.a_wasi), rows(&self.b_wasi), rows(&self.review_wasi),
             rows(&self.a_file), rows(&self.b_file), rows(&self.a_data), rows(&self.b_data), rows(&self.editor_data), rows(&self.a_vm), rows(&self.b_vm), rows(&self.editor_vm), rows(&self.editor_file), rows(&self.review_a), rows(&self.review_b), rows(&self.document_service), rows(&self.document), rows(&self.database),
             rows(&self.database_service), rows(&self.research_a), rows(&self.research_b),
             rows(&self.a_io), rows(&self.b_io), rows(&self.review_io)]})
@@ -750,19 +782,35 @@ impl Programs {
 pub fn source() -> impl Projectable {
     let research = g::par(
         g::seq(
-            g::send::<A_FILE, RESEARCH_A, ResearchA>(),
-            g::send::<RESEARCH_A, A_FILE, ResearchResult>(),
+            g::send::<A_FILE, A_WASI, ResearchA>(),
+            g::send::<A_WASI, A_FILE, ResearchResult>(),
         ),
         g::seq(
-            g::send::<B_FILE, RESEARCH_B, ResearchB>(),
-            g::send::<RESEARCH_B, B_FILE, ResearchResult>(),
+            g::send::<B_FILE, B_WASI, ResearchB>(),
+            g::send::<B_WASI, B_FILE, ResearchResult>(),
         ),
+    );
+    let written_requests = g::par(
+        g::send::<A_FILE, WRITE_REQUESTS, WriteA>(),
+        g::send::<B_FILE, WRITE_REQUESTS, WriteB>(),
+    );
+    let reference_requests = g::par(
+        g::send::<A_FILE, REFERENCE_REQUESTS, ReferencesA>(),
+        g::send::<B_FILE, REFERENCE_REQUESTS, ReferencesB>(),
+    );
+    let writes = g::route(
+        g::seq(writing_a(), writing_b()),
+        g::seq(writing_b(), writing_a()),
+    );
+    let references = g::route(
+        g::seq(references_a(), references_b()),
+        g::seq(references_b(), references_a()),
     );
     let initial = g::seq(
         research,
-        g::seq(
-            writing_a(),
-            g::seq(g::par(references_a(), writing_b()), references_b()),
+        g::par(
+            g::seq(written_requests, writes),
+            g::seq(reference_requests, references),
         ),
     );
     let reviews = g::route(first_a(), first_b());
@@ -843,6 +891,9 @@ pub fn source() -> impl Projectable {
 pub fn programs() -> Programs {
     let protocol = source();
     Programs {
+        initial_document: project(&protocol),
+        write_requests: project(&protocol),
+        reference_requests: project(&protocol),
         a_wasi: project(&protocol),
         b_wasi: project(&protocol),
         review_wasi: project(&protocol),

@@ -149,8 +149,14 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
     crate::journal::check_close_pairs(&frames, &pairs)?;
     let business_roles = [
         "REPO",
+        "REPO_OWNER",
+        "MERGE_REQUESTS",
+        "STAGE_OWNER",
+        "STAGE_OWNER_B",
+        "STAGE_OWNER_C",
         "TEST_ENV",
         "BUILD_SERVER",
+        "CI_OWNER",
         "STAGING_ENV",
         "REVIEW_A",
         "REVIEW_B",
@@ -187,8 +193,11 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         let review_file = role(&format!("{suffix}_REVIEW_FILE"))?;
         let reviewer = role(&format!("REVIEW_{suffix}"))?;
         let repo = role("REPO")?;
+        let owner = role("REPO_OWNER")?;
+        let requests = role("MERGE_REQUESTS")?;
         let environment = role("TEST_ENV")?;
         let build = role("BUILD_SERVER")?;
+        let ci_owner = role("CI_OWNER")?;
         let stage = role("STAGING_ENV")?;
         let arguments = &call.request["arguments"];
         let agent = call.request["agent"].as_str().ok_or("effect actor")?;
@@ -284,7 +293,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
             ),
             "merge_code" => (
                 developer,
-                repo,
+                requests,
                 format!("MergeRequest{suffix}"),
                 format!("Merged{suffix}"),
             ),
@@ -324,7 +333,11 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         }
         consume(
             (&frames, &mut used),
-            (to, from, &[label(&reply)?]),
+            (
+                if tool == "merge_code" { repo } else { to },
+                from,
+                &[label(&reply)?],
+            ),
             (result, at, next),
         )?;
         match tool {
@@ -426,6 +439,16 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                 }
             }
             "merge_code" => {
+                let admitted = consume(
+                    (&frames, &mut used),
+                    (owner, repo, &[label(&format!("Admit{suffix}"))?]),
+                    (arguments, accepted.received()?, call.emitted),
+                )?;
+                if admitted.received()? >= call.emitted {
+                    return Err(
+                        "publication began before repository received its admitted request".into(),
+                    );
+                }
                 let source = input(&calls, call, "implement_feature", "source_receipt")?;
                 let review = input(&calls, call, "code_review", "review_receipt")?;
                 let checked = review.result()?.1;
@@ -482,11 +505,26 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                 {
                     return Err("CI differs from the actual publication".into());
                 }
+                let previous_stage = calls
+                    .values()
+                    .filter(|entry| {
+                        entry.tool().ok() == Some("validate_staging")
+                            && feature(entry).ok() == Some(f)
+                            && entry.ended().is_ok_and(|(end, _)| end < merge.emitted)
+                    })
+                    .max_by_key(|entry| entry.emitted);
+                let publication_label = if previous_stage.is_some_and(|entry| {
+                    entry
+                        .result()
+                        .is_ok_and(|(_, value)| value["success"] == false)
+                }) {
+                    label(&format!("RepairPublication{suffix}"))?
+                } else {
+                    label(&format!("Publication{suffix}"))?
+                };
                 let context = one(frames.values().filter(|frame| {
-                    frame.direction(repo, build)
-                        && u64::from(frame.logical_label)
-                            == label(&format!("Publication{suffix}"))
-                                .expect("known publication label")
+                    frame.direction(repo, ci_owner)
+                        && u64::from(frame.logical_label) == publication_label
                         && frame.sent < call.emitted
                         && !used.contains(&frame.sent)
                         && frame
@@ -581,6 +619,15 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                     (result, at, next),
                 )?
                 .received()?;
+                consume(
+                    (&frames, &mut used),
+                    (
+                        repo,
+                        owner,
+                        &[label(&format!("Publication{outcome}{suffix}"))?],
+                    ),
+                    (result, committed, next),
+                )?;
                 for peer in [
                     role("A_FILE")?,
                     role("B_FILE")?,
@@ -632,24 +679,74 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                         );
                     }
                 }
-                let inputs = json!({"publication":published,"ci":tested});
-                for (from, to, message) in [
-                    (build, stage, format!("StagingReady{suffix}")),
+                let integrated = input(&calls, ci, "merge_code", "publication_event")?
+                    .result()?
+                    .1;
+                let inputs = json!({"publication":published,"integrated_publication":integrated,"ci":tested});
+                let deployment_start = call.started()?.0;
+                let own_ci = one(calls.values().filter(|own| {
+                    own.tool().ok() == Some("run_tests")
+                        && own.ended().is_ok_and(|(end, _)| end < deployment_start)
+                        && own.result().is_ok_and(|(_, result)| {
+                            result["success"] == true
+                                && result["data"]["publication_event"]
+                                    == published["data"]["publication_event"]
+                        })
+                }))?;
+                let readiness = json!({"publication":published,"integrated_publication":published,"ci":own_ci.result()?.1});
+                let stage_owner = role(["STAGE_OWNER", "STAGE_OWNER_B", "STAGE_OWNER_C"][f])?;
+                let announced = consume(
+                    (&frames, &mut used),
+                    (
+                        build,
+                        stage_owner,
+                        &[label(&format!("StagingReady{suffix}"))?],
+                    ),
+                    (&readiness, own_ci.result()?.0, call.emitted),
+                )?
+                .received()?;
+                consume(
+                    (&frames, &mut used),
                     (
                         stage,
                         role("RELEASE_FILE")?,
-                        format!("FileStagingReady{suffix}"),
+                        &[label(&format!("FileStagingReady{suffix}"))?],
                     ),
-                ] {
-                    let ready = consume(
-                        (&frames, &mut used),
-                        (from, to, &[label(&message)?]),
-                        (&inputs, ci.result()?.0, call.emitted),
-                    )?;
-                    if ready.received()? >= call.emitted {
-                        return Err("deploy before actual staging inputs".into());
-                    }
+                    (&readiness, announced, accepted.sent),
+                )?;
+                let checked = consume(
+                    (&frames, &mut used),
+                    (stage, requests, &[label(&format!("CheckStage{suffix}"))?]),
+                    (arguments, accepted.received()?, call.emitted),
+                )?
+                .received()?;
+                let latest = consume(
+                    (&frames, &mut used),
+                    (owner, repo, &[label(&format!("LatestChecked{suffix}"))?]),
+                    (arguments, checked, call.emitted),
+                )?
+                .received()?;
+                let before_effect = consume(
+                    (&frames, &mut used),
+                    (repo, stage, &[label(&format!("StageInputs{suffix}"))?]),
+                    (&inputs, latest.max(ci.result()?.0), call.emitted),
+                )?
+                .received()?;
+                if before_effect >= call.emitted {
+                    return Err("deploy before receiving the checked repository head".into());
                 }
+                let installed = label(&format!("Installed{suffix}"))?;
+                let installation = consume(
+                    (&frames, &mut used),
+                    (stage, repo, &[installed]),
+                    (result, at, next),
+                )?
+                .received()?;
+                consume(
+                    (&frames, &mut used),
+                    (repo, owner, &[installed]),
+                    (result, installation, next),
+                )?;
             }
             "validate_staging" => {
                 let deployed = input(&calls, call, "deploy_service", "deployment_event")?;
@@ -700,7 +797,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                     review_file,
                     role("TEST_FILE")?,
                     role("CI_FILE")?,
-                    build,
+                    ci_owner,
                 ] {
                     consume(
                         (&frames, &mut used),
@@ -809,8 +906,14 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let journal = crate::journal::read(&rows, &headers, actors)?;
     let roles = [
         "REPO",
+        "REPO_OWNER",
+        "MERGE_REQUESTS",
+        "STAGE_OWNER",
+        "STAGE_OWNER_B",
+        "STAGE_OWNER_C",
         "TEST_ENV",
         "BUILD_SERVER",
+        "CI_OWNER",
         "STAGING_ENV",
         "REVIEW_A",
         "REVIEW_B",

@@ -58,9 +58,6 @@ class PhilosophersSim(SimContext):
         self._think_steps = {s.agent_id: s for s in _think}
         self._eat_steps = {s.agent_id: s for s in _eat}
 
-        self._think_done: dict[str, bool] = {k: False for k in self._think_steps}
-        self._eat_done: dict[str, bool] = {k: False for k in self._eat_steps}
-
         # Initialize all unique forks as resources
         all_forks: set[str] = set()
         for left, right in forks.values():
@@ -97,9 +94,6 @@ class PhilosophersSim(SimContext):
 
     def think(self, agent_id: str, **kwargs: Any) -> ToolResult:
         """Think. No resource required."""
-        if agent_id in self._think_done:
-            self._think_done[agent_id] = True
-
         result = {"philosopher": agent_id, "status": "thinking"}
         self.log_event(agent_id, "think", {},
                        success=True, result=result)
@@ -118,13 +112,20 @@ class PhilosophersSim(SimContext):
 
         left_fork, right_fork = fork_pair
 
-        if agent_id in self._eat_done:
-            self._eat_done[agent_id] = True
+        violations = []
+        if agent_id in self._think_steps and not any(
+            event.agent == agent_id and event.tool == "think" and event.success
+            and event.completed_at is not None for event in self._events
+        ):
+            violations.append(self.log_violation(
+                agent_id, "eat", "eat_before_think",
+                "Meal started before the diner's thinking completed",
+            ))
 
         result = {"philosopher": agent_id, "status": "eating",
                   "left_fork": left_fork, "right_fork": right_fork}
         self.log_event(agent_id, "eat", {"left_fork": left_fork, "right_fork": right_fork},
-                       success=True, result=result)
+                       success=True, result=result, violations=violations)
         return ToolResult(tool_name="eat", success=True,
                           data=result, message=f"{agent_id} is eating")
 
@@ -137,13 +138,13 @@ class PhilosophersSim(SimContext):
         }
 
     def is_complete(self) -> bool:
-        return (all(self._think_done.values()) and
-                all(self._eat_done.values()))
+        return self.progress["all_complete"]
 
     @property
     def progress(self) -> dict[str, Any]:
-        return {
-            "thinking": dict(self._think_done),
-            "eating": dict(self._eat_done),
-            "all_complete": self.is_complete(),
-        }
+        finished = {(event.agent, event.tool) for event in self._events
+                    if event.success and event.completed_at is not None and not event.violations}
+        thinking = {agent: (agent, "think") in finished for agent in self._think_steps}
+        eating = {agent: (agent, "eat") in finished for agent in self._eat_steps}
+        return {"thinking": thinking, "eating": eating,
+                "all_complete": all(thinking.values()) and all(eating.values())}

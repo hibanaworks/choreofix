@@ -389,11 +389,14 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 observations += 1;
             }
         }
-        if observations < 2 || check(&changed, &artifact, &dynamic).is_ok() {
-            return Err("coherently altered manufacturing wire header accepted".into());
+        if observations != 1 {
+            return Err("manufacturing header mutation must change one actual acceptance".into());
         }
+        let error = check(&changed, &artifact, &dynamic)
+            .err()
+            .ok_or("coherently altered manufacturing wire header accepted")?;
         checked.push(
-            json!({"kind":format!("coherent_wrong_{field}"),"frame_id":first,"status":"rejected"}),
+            json!({"kind":format!("coherent_wrong_{field}"),"frame_id":first,"status":"rejected","error":error.to_string()}),
         );
     }
     fs::create_dir(output)?;

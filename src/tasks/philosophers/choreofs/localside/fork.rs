@@ -8,7 +8,12 @@ pub async fn run<'run, const ROLE: u8, const RESOURCE: u8>(
     mut resource: Endpoint<'run, RESOURCE>,
 ) -> ShellResult<()> {
     for _ in 0..2 {
-        let admitted = endpoint.recv::<Eat<RESOURCE>>().await?;
+        let request = endpoint.offer().await?;
+        let admitted = match request.label() {
+            label if label == ROLE => request.recv::<Eat<ROLE>>().await?,
+            label if label == RESOURCE => request.recv::<Eat<RESOURCE>>().await?,
+            _ => return Err(ShellError::message("unexpected fork request")),
+        };
         resource.send::<Eat<RESOURCE>>(&admitted).await?;
         endpoint.send::<Loan<RESOURCE>>(resource).await?;
         let result = endpoint.recv::<Meal<RESOURCE>>().await?;

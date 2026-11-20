@@ -22,7 +22,7 @@ pub fn material(feature: usize) -> (Value, Value, Value, Value) {
             "artifact_id":format!("development:{}",8+index as u64*10), "source_receipt":5+index as u64*10,
             "test_source":{"target":target,"expected_candidate":hash},"test_sha256":format!("test:{index}")}));
     }
-    let inputs = json!({
+    let mut inputs = json!({
         "publication":{"tool_name":"merge_code","success":true,"data":{
             "agent":(["DEVELOPER_A","DEVELOPER_B","DEVELOPER_C"][feature]),"feature":name,"branch":name,
             "candidate_sha256":format!("candidate:{feature}"),"repository_sha256":format!("repository:{feature}"),
@@ -33,6 +33,7 @@ pub fn material(feature: usize) -> (Value, Value, Value, Value) {
             "published_candidates":candidates,"repository_sha256":format!("repository:{feature}"),
             "publication_event":id,"publication_events":publications,"test_receipts":tests,
             "test_inputs":test_inputs,"artifact_id":format!("development:{}",id+2)}}});
+    inputs["integrated_publication"] = inputs["publication"].clone();
     let mut dependencies = serde_json::Map::new();
     if feature > 0 {
         dependencies.insert(FEATURES[feature - 1].into(), json!(id - 10 + 4));

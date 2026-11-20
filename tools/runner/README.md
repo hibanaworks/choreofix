@@ -24,8 +24,9 @@ Luna/xhigh participants completed the same source in 76.462663417 seconds,
 request/material/reply and common-world audits passed with zero violations.
 
 The new 4M direct-file port uses five actual Wasm guests and twelve original
-effects. Its declared eight-case domain is `refactor_boundary::`; all eight
-cases and one five-person Luna/xhigh trial passed complete EPF, effect/reply and
+effects. Its current `refactor_boundary::` gate covers eight interleaved schedules and
+eight schedules in which one module publishes before the other starts. In the
+earlier qualification, eight cases and one five-person Luna/xhigh trial passed complete EPF, effect/reply and
 common-world audits. The live run took 79.728423 seconds and 687,694 inclusive
 tokens; it was the 25th source-bound task. Common-environment-v24 exposes current
 code identities in refactor responses for every method without changing scoring
@@ -85,7 +86,7 @@ undo their effects. The runner and its tests have no Tokio dependency.
 Runs and boundary tests require a selected runtime and its build receipt.
 Set `CHOREOFIX_<FAMILY>_WASI_BINARY` and
 `CHOREOFIX_<FAMILY>_BUILD_RECEIPT`, where `FAMILY` is `CODEBASE`, `WRITING`, `API`,
-`CICD`, `REVIEW`, `FEATURE_DELIVERY`, `REPORT`, `DOCUMENT`, `COORDINATION`, `REFACTOR`,
+`CICD`, `REVIEW`, `FEATURE_DELIVERY`, `REPORT`, `DOCUMENT`, `LARGE_DOCUMENT`, `COORDINATION`, `REFACTOR`,
 `DISCOVERY`, `REGULATORY_DISCOVERY`, `MULTI_ROUND_DISCOVERY`, `LAB`, `LAB_QUALITY`,
 `MEDICAL`, `MULTI_SPECIALTY`, `CRITICAL_CARE`,
 `BUILD`, `CASCADING_BUILD`, `MANUFACTURING`, `KITCHEN` or `PHILOSOPHERS`, as applicable to
@@ -107,16 +108,19 @@ overwritten. These records identify the measured build; they do not establish
 that its implementation or task outcome is correct.
 
 The normal command and live subscription tests use the same execution path.
-It supports `1E`, `1M`, `1H`, `2E`, `2M`, `2H`, `3E`, `4E`, `4M`, `5E`, `5M`,
-`5H`, `6E`, `6M`, `6H`, `7E`, `8E`, `9E`, `9M`, `9H`, `10E`, `10M`, `11E`, `12E`,
-`13E`, `13M` and `16E`, with the original failure conditions `0`, `1` and `2`.
-Each qualification retains its exact source and simulator version. Twenty-seven
-source-bound tasks have completed direct-projection mechanism and live-model
-checks; the other 21 remain unqualified. The older 4M, 13E/13M and 14E/14M/14H
-adapters and their execution/audit commands have been removed. Their original
-worlds, descriptions and historical source-bound results remain. These tasks
-other than 4M/13E/13M still require direct qualification. The new qualification is separate from those
-retired adapters.
+The [task inventory](../../analysis/README.md) records the qualified tasks and
+failure depths. Each qualification retains its exact source and simulator
+version. The 14M evidence covers seven real Wasm
+conditions and a five-participant depth-two run on the same executable.
+Use `--qualify-wasi NEW_OUTPUT regulatory_discovery_boundary::` for its
+mechanism cases or `--audit-regulatory-discovery EVENTS` to inspect a saved run.
+For 3M, `--qualify-wasi NEW_OUTPUT research_paper_boundary::` runs the ordinary
+and two-rejection conditions. `--audit-research-paper EVENTS` checks a saved
+trace, and the live run uses the `RESEARCH_PAPER` build variables.
+For 14H, `--qualify-wasi NEW_OUTPUT multi_round_discovery_boundary::` runs the
+three mechanism conditions. `--audit-multi-round-discovery EVENTS` checks the
+actual scientific requests, effects and replies against the EPF witness.
+The older adapter results retain their original software and experiment scope.
 The rewritten 7E passes
 twelve real-wash mechanism cases, EPF/effect audits and 1,503 record mutations.
 Three Luna/xhigh participants also completed depth 2 on the same runtime binary;
@@ -175,13 +179,21 @@ scoring. Ordinary CI explicitly runs the isolated process regression:
 PYTHONHASHSEED=0 cargo +stable test --locked --manifest-path tools/runner/Cargo.toml process::tests::runtime_shutdown_completes_pending_and_queued_shared_channel_replies -- --exact --ignored --test-threads=1
 ```
 
-This uses real child stdio and the shared simulator connection, without Wasm or
-model calls. It checks failed verdict and EOF; cancellation of the entire owner
-is a separate boundary.
+This checks the failed-verdict and EOF paths through child stdio and the common
+simulator. The companion test `trial_failure_preserves_both_reports_and_admitted_effects`
+checks that either participant group can fail while the other has outstanding
+work. The runner saves both reports and scores effects already accepted before
+returning the infrastructure error. The whole-run deadline still bounds cleanup.
+The 7H Wasm regression `early_fact_checker_exit_preserves_the_actual_document_score`
+uses the real wash guest and simulator to check a completed chapter followed by
+an early fact-checker exit. These three tests use zero model calls.
 
 For the feature-delivery family, `--qualify-wasi NEW_OUTPUT feature_delivery_boundary::`
-assigns all four initial orders and both recovery conditions to six separate
-test processes. It uses the same finite input constants as the boundary tests,
+assigns eight initial conditions and three recovery conditions to eleven test
+processes. Review order, test-writing order and first merge are independent
+two-way choices. The crossed cases let both reviews finish, then leave the
+earlier-approved developer idle while the other tries to merge. The current
+protocol fails this witness when it grants merge priority by approval order. It uses the same finite input constants as the boundary tests,
 records each command and selector, and requires exactly one test per assignment.
 This bounds cumulative fixture memory without changing the domain or skipping
 cases. An external `CHOREOFIX_FEATURE_DELIVERY_CASE` is rejected by qualification;
@@ -368,9 +380,16 @@ cargo +stable test --locked --manifest-path tools/runner/Cargo.toml \
 ```
 
 For the complete source-bound qualification use `--qualify-wasi NEW_DIRECTORY
-philosophers_boundary::`. It runs each of the six conditions in its own process
-and requires all six reports against one runtime binary. This releases each
-condition's audit search workspace before starting the next condition.
+philosophers_boundary::`. Six tests cover normal and adversarial shells at the three table sizes.
+Three more drive seven three-seat schedules (all six meal orders and one
+interleaved reconsideration), six five-seat schedules and eight seven-seat
+schedules. Every diner can eat before any neighbor starts thinking. All three
+table sizes exercise the reverse order. Qualification matches each scripted
+think and eat to the journal and checks the executable hash, EPF verdict,
+fork returns and common simulator score for each schedule.
+Each process releases its audit workspace on exit. The separate [upstream
+action replay](../../analysis/arbitration.md#scoring-and-recorded-orders)
+checks all 90 original visible sequences for the paper experiment.
 
 The codebase and writing effect checks also require EPF source conformance and
 bind requests to its committed receives. Their duplicate holder/transfer tables
@@ -452,6 +471,13 @@ ChatGPT subscription limits still apply. Raw model events, tool calls and
 inclusive token usage are recorded for each participant. Reasoning tokens are
 part of output tokens and are not counted twice. Missing usage remains unknown.
 
+A participant sends `shell({"command":"..."})` to its own wash guest. If the
+model connection cancels that tool call while wash is running, `shell({})`
+collects the oldest interrupted command for the same participant. The reply
+includes the original call ID and command alongside the terminal output.
+Collection does not execute the command again. The audit checks the output
+acknowledged by the model connection against the result from the original guest.
+
 ChoreoFix experiments use the available subscription connection and record its
 model, settings and execution conditions. Comparison connection development is
 deferred. An unavailable comparator is recorded as unexecuted and does not block
@@ -473,8 +499,10 @@ See [Codex authentication](https://developers.openai.com/codex/auth) and
 participant connection.
 
 `--qualify-wasi NEW_OUTPUT` builds and checks every declared WASI family.
+The 16M assignment runs all twelve build, QA and deployment cases. To select
+this family alone, use `--qualify-wasi NEW_OUTPUT cicd_pipeline_boundary::`.
 
-The feature-delivery reconsideration test normally executes both declared
+The feature-delivery reconsideration test normally executes all three declared
 conditions. To execute only its remaining input during diagnosis, use
 `CHOREOFIX_FEATURE_DELIVERY_CASE=1` with the explicit diagnostic filter
 `feature_delivery_boundary::actual_wasi_review_rejection_and_ci_repair`.

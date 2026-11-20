@@ -140,7 +140,7 @@ pub fn merged(value: &Value, feature: usize) -> ShellResult<()> {
 pub fn merge_result(
     value: &Value,
     (feature, source, tests, review): (usize, &Value, &Value, &Value),
-    prior_ci: &Value,
+    ci_by_feature: &[Value; 3],
 ) -> ShellResult<()> {
     merge_inputs(
         &json!({"branch":FEATURES[feature]}),
@@ -159,6 +159,16 @@ pub fn merge_result(
             "publication substituted its reviewed material",
         ));
     }
+    // The actual CI receipts identify the integrated base across merge orders.
+    // Deployment and rollback retain the receipt for their individual feature.
+    let mut latest = None;
+    for ci in ci_by_feature.iter().filter(|ci| !ci.is_null()) {
+        let occurrence = receipt(ci)?;
+        if latest.is_none_or(|(previous, _)| occurrence > previous) {
+            latest = Some((occurrence, ci));
+        }
+    }
+    let prior_ci = latest.map_or(&Value::Null, |(_, ci)| ci);
     if prior_ci.is_null() {
         if !data["base_repository_sha256"].is_null()
             || !data["base_test_receipt"].is_null()
@@ -318,14 +328,11 @@ pub fn stage_notice(value: &Value, feature: usize) -> ShellResult<()> {
     }
     Ok(())
 }
-pub fn publication_stage(
-    value: &Value,
-    publication: &Value,
-    ci: &Value,
-    feature: usize,
-) -> ShellResult<()> {
+pub fn publication_stage(value: &Value, inputs: &Value, feature: usize) -> ShellResult<()> {
+    let publication = &inputs["publication"];
+    let ci = &inputs["ci"];
     stage_notice(value, feature)?;
-    staging_inputs(&json!({"publication":publication,"ci":ci}), feature)?;
+    staging_inputs(inputs, feature)?;
     let deployment = value["data"]["deployment_event"]
         .as_u64()
         .ok_or_else(|| ShellError::message("staging deployment occurrence"))?;
@@ -342,11 +349,12 @@ pub fn publication_stage(
 pub fn rollback_notice(
     value: &Value,
     validation: &Value,
-    publication: &Value,
-    ci: &Value,
+    inputs: &Value,
     feature: usize,
 ) -> ShellResult<()> {
-    publication_stage(validation, publication, ci, feature)?;
+    let publication = &inputs["publication"];
+    let ci = &inputs["ci"];
+    publication_stage(validation, inputs, feature)?;
     result(value, "rollback_service", "RELEASE_MANAGER")?;
     let removed = &value["data"]["removed_deployment"];
     if validation["success"] != false
@@ -368,39 +376,36 @@ pub fn rollback_notice(
 pub fn staging_inputs(value: &Value, feature: usize) -> ShellResult<()> {
     let publication = &value["publication"];
     let ci = &value["ci"];
-    let author = ["DEVELOPER_A", "DEVELOPER_B", "DEVELOPER_C"][feature];
-    result(publication, "merge_code", author)?;
-    result(ci, "run_tests", "CI_RUNNER")?;
+    let head = &value["integrated_publication"];
+    let integrated = FEATURES
+        .iter()
+        .position(|name| head["data"]["feature"] == *name)
+        .ok_or_else(|| ShellError::message("unknown integrated publication"))?;
+    merged(publication, feature)?;
+    merged(head, integrated)?;
+    ci_notice(ci, integrated)?;
     let material = &publication["data"];
+    let repository = &head["data"];
     let checked = &ci["data"];
-    if publication["success"] != true
-        || ci["success"] != true
-        || material["feature"] != FEATURES[feature]
-        || material["branch"] != FEATURES[feature]
-        || material["candidate_sha256"]
-            .as_str()
-            .is_none_or(str::is_empty)
-        || material["repository_sha256"]
-            .as_str()
-            .is_none_or(str::is_empty)
-        || material["publication_event"].as_u64() != Some(receipt(publication)?)
-        || material["published_candidates"][FEATURES[feature]] != material["candidate_sha256"]
-        || checked["feature"] != FEATURES[feature]
-        || checked["suite"] != SUITES[feature]
-        || checked["publication_event"] != material["publication_event"]
-        || checked["publication_events"] != publication_events(publication, feature)?
+    if ci["success"] != true
+        || repository["published_candidates"][FEATURES[feature]] != material["candidate_sha256"]
+        || checked["publication_event"] != repository["publication_event"]
+        || checked["publication_events"] != publication_events(head, integrated)?
         || checked["publication_events"][FEATURES[feature]] != material["publication_event"]
-        || checked["repository_sha256"] != material["repository_sha256"]
-        || checked["published_candidates"] != material["published_candidates"]
-        || receipt(ci)? <= receipt(publication)?
+        || checked["repository_sha256"] != repository["repository_sha256"]
+        || checked["published_candidates"] != repository["published_candidates"]
+        || material["published_candidates"][FEATURES[feature]] != material["candidate_sha256"]
+        || (receipt(publication)? == receipt(head)? && publication != head)
+        || receipt(publication)? > receipt(head)?
+        || receipt(ci)? <= receipt(head)?
     {
         return Err(ShellError::message(
-            "staging requires completed CI for the exact publication",
+            "staging requires the exact feature publication in the tested repository",
         ));
     }
-    let candidates = material["published_candidates"]
+    let candidates = repository["published_candidates"]
         .as_object()
-        .ok_or_else(|| ShellError::message("published input map"))?;
+        .ok_or_else(|| ShellError::message("integrated candidate map"))?;
     let ci_receipt = receipt(ci)?;
     for field in ["publication_events", "test_receipts", "test_inputs"] {
         if checked[field].as_object().is_none_or(|map| {
@@ -465,7 +470,7 @@ pub fn deploy_input(
         )?;
         if previous["validation"]["success"] != true
             || previous["deployment"]["data"]["candidate_sha256"]
-                != inputs["publication"]["data"]["published_candidates"][FEATURES[feature - 1]]
+                != inputs["ci"]["data"]["published_candidates"][FEATURES[feature - 1]]
         {
             return Err(ShellError::message(
                 "deployment lacks its actual validated predecessor",
@@ -498,7 +503,7 @@ pub fn deployed(
         )?;
         if previous["validation"]["success"] != true
             || previous["deployment"]["data"]["candidate_sha256"]
-                != publication["published_candidates"][name]
+                != inputs["ci"]["data"]["published_candidates"][name]
         {
             return Err(ShellError::message(
                 "staged predecessor differs from current published material",
@@ -510,7 +515,7 @@ pub fn deployed(
         || data["service"] != FEATURES[feature]
         || data["environment"] != "staging"
         || data["candidate_sha256"] != publication["candidate_sha256"]
-        || data["repository_sha256"] != publication["repository_sha256"]
+        || data["repository_sha256"] != inputs["ci"]["data"]["repository_sha256"]
         || data["publication_event"] != publication["publication_event"]
         || data["ci_receipt"].as_u64() != Some(receipt(&inputs["ci"])?)
         || data["dependency_receipts"] != Value::Object(dependencies)

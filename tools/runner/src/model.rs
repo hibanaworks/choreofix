@@ -5,7 +5,7 @@ use crate::{
     wire::Wire,
 };
 use hibana_runtime::{
-    host::{Process, deadline},
+    host::{Io, Process, deadline},
     race,
 };
 use serde_json::{Value, json};
@@ -23,6 +23,80 @@ mod tests;
 pub const MODEL: &str = "gpt-6-luna";
 pub const EFFORT: &str = "xhigh";
 pub const CLI: &str = "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex";
+
+pub(crate) fn same_tool_call(request: &Value, completed: &Value) -> bool {
+    let item = &completed["item"];
+    request["callId"].as_str().is_some_and(|id| !id.is_empty())
+        && request["threadId"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+        && request["turnId"].as_str().is_some_and(|id| !id.is_empty())
+        && item["id"] == request["callId"]
+        && completed["threadId"] == request["threadId"]
+        && completed["turnId"] == request["turnId"]
+        && item["tool"] == request["tool"]
+        && item["namespace"] == request["namespace"]
+        && item["arguments"] == request["arguments"]
+}
+
+pub(crate) fn cancelled_tool(completed: &Value) -> bool {
+    let item = &completed["item"];
+    item["status"] == "failed"
+        && item["success"] == false
+        && item["contentItems"].as_array().is_some_and(Vec::is_empty)
+}
+
+/// The server reports the contents it delivered to this particular tool call.
+pub(crate) fn check_tool_completion(
+    request: &Value,
+    sent: &Value,
+    completed: &Value,
+) -> Result<()> {
+    let item = &completed["item"];
+    let success = sent["success"]
+        .as_bool()
+        .ok_or("shell reply lacks a success value")?;
+    if !same_tool_call(request, completed)
+        || item["status"] != if success { "completed" } else { "failed" }
+        || item["success"] != success
+        || !sent["contentItems"].is_array()
+        || item["contentItems"] != sent["contentItems"]
+    {
+        return Err(format!(
+            "model did not acknowledge the shell reply for {}",
+            request["callId"]
+        )
+        .into());
+    }
+    Ok(())
+}
+
+pub(crate) fn check_model_item(message: &Value) -> Result<()> {
+    let item = &message["params"]["item"];
+    match item["type"].as_str() {
+        None | Some("dynamicToolCall" | "reasoning" | "userMessage" | "agentMessage") => Ok(()),
+        Some("sleep")
+            if message.get("id").is_none()
+                && item.as_object().is_some_and(|fields| {
+                    fields.len() == 5 && fields.contains_key("completedAtMs")
+                })
+                && item["id"].is_string()
+                && item["durationMs"].as_u64().is_some_and(|ms| ms > 0)
+                && item["startedAtMs"]
+                    .as_u64()
+                    .is_some_and(|started| match message["method"].as_str() {
+                        Some("item/started") => item["completedAtMs"].is_null(),
+                        Some("item/completed") => item["completedAtMs"]
+                            .as_u64()
+                            .is_some_and(|completed| completed >= started),
+                        _ => false,
+                    }) =>
+        {
+            Ok(())
+        }
+        Some(kind) => Err(format!("unexpected native model item: {kind}").into()),
+    }
+}
 
 pub fn identity() -> Result<Value> {
     let version = std::process::Command::new(CLI).arg("--version").output()?;
@@ -83,7 +157,12 @@ impl Conversation {
     }
 }
 
-pub async fn run(people: Vec<Participant>, limits: Limits, guest: &Guest) -> Result<Vec<Value>> {
+pub async fn run(
+    people: Vec<Participant>,
+    limits: Limits,
+    guest: &Guest,
+    guest_failure: &mut Io,
+) -> Result<Vec<Value>> {
     let parent = people
         .first()
         .ok_or("empty model group")?
@@ -144,7 +223,10 @@ pub async fn run(people: Vec<Participant>, limits: Limits, guest: &Guest) -> Res
             )
             .await)
         },
-        deadline(limits.timeout),
+        race(deadline(limits.timeout), async {
+            guest_failure.read(&mut [0]).await?;
+            Ok(Err("guest runtime failed; see guest-outcome.json".into()))
+        }),
     )
     .await;
     let outcome = match child.terminate() {
@@ -162,7 +244,10 @@ fn finish_reports(
     let error = match outcome {
         Ok(Ok(())) => None,
         Ok(Err(error)) => Some(("harness_error", error.to_string())),
-        Err(_) => Some(("timeout", "participant group timeout".to_owned())),
+        Err(error) if error.kind() == io::ErrorKind::TimedOut => {
+            Some(("timeout", "participant group timeout".to_owned()))
+        }
+        Err(error) => Some(("harness_error", error.to_string())),
     };
     if let Some((status, error)) = error {
         if conversations.iter().all(|conversation| {

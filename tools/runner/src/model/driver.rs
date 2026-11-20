@@ -1,5 +1,8 @@
 //! JSON-RPC correlation and concurrent tool replies, without task authority.
-use super::{Conversation, EFFORT, MODEL};
+use super::{
+    Conversation, EFFORT, MODEL, cancelled_tool, check_model_item, check_tool_completion,
+    same_tool_call,
+};
 use crate::{
     evidence::Result,
     process::Guest,
@@ -12,6 +15,29 @@ use std::{collections::BTreeMap, sync::mpsc};
 enum Incoming {
     Frame(Value),
     Reply(Value, Result<Value>),
+}
+
+struct ToolCall {
+    participant: usize,
+    original: Value,
+    reader: Option<Value>,
+    response: Option<Value>,
+}
+
+impl ToolCall {
+    fn reply(&self) -> Option<Value> {
+        let reader = self.reader.as_ref()?;
+        let mut result = self.response.clone()?;
+        if reader["params"]["callId"] != self.original["params"]["callId"] {
+            let origin = &self.original["params"];
+            let receipt =
+                json!({"original_call":origin["callId"],"command":origin["arguments"]["command"]});
+            result["contentItems"]
+                .as_array_mut()?
+                .push(json!({"type":"inputText","text":receipt.to_string()}));
+        }
+        Some(json!({"id":reader["id"],"result":result}))
+    }
 }
 
 pub(super) async fn run(
@@ -34,7 +60,7 @@ pub(super) async fn run(
             "environments":[],"sandbox":"read-only","approvalPolicy":"never",
             "baseInstructions":format!("{}\nUse only the supplied experiment tools. Do not use native tools or start other agents. Finish with a brief final response.",person.participant.instructions),
             "config":{"model_reasoning_effort":EFFORT,"features.shell_tool":false,"features.multi_agent":false,"project_doc_max_bytes":0},
-            "dynamicTools":[{"type":"function","name":"shell","description":"Run your script in the WASI wash guest over ChoreoFS.","inputSchema":{"type":"object","properties":{"command":{"type":"string"}},"required":["command"],"additionalProperties":false}}]
+            "dynamicTools":[{"type":"function","name":"shell","description":"Run a command in your WASI wash guest over ChoreoFS. If a tool call is interrupted, call shell with {} to collect the original terminal output. This waits for your oldest interrupted command without running it again.","inputSchema":{"type":"object","properties":{"command":{"type":"string"}},"additionalProperties":false}}]
         }});
         person.trace.record("send", &request)?;
         let reply = wire
@@ -75,7 +101,7 @@ pub(super) async fn run(
     }
     let (replies, receive) = mpsc::channel::<(Value, Result<Value>)>();
     let (notify, mut ready) = notification()?;
-    let mut pending = BTreeMap::<String, usize>::new();
+    let mut pending = Vec::<ToolCall>::new();
     while !threads.is_empty() {
         let incoming = race(async { wire.next().await.map(Incoming::Frame) }, async {
             let (id, result) = wire::receive(&receive, &mut ready)
@@ -87,13 +113,21 @@ pub(super) async fn run(
         let message = match incoming {
             Incoming::Frame(message) => message,
             Incoming::Reply(id, outcome) => {
-                let index = pending
-                    .remove(&id.to_string())
+                let call = pending
+                    .iter_mut()
+                    .find(|call| call.original["id"] == id)
                     .ok_or("tool reply has no matching request")?;
+                if call.response.is_some() {
+                    return Err("duplicate guest tool reply".into());
+                }
                 let outcome = outcome?;
-                let reply = json!({"id":id,"result":{"success":true,"contentItems":[{"type":"inputText","text":outcome.to_string()}]}});
-                people[index].trace.record("send", &reply)?;
-                wire.send(&reply).await?;
+                call.response = Some(
+                    json!({"success":true,"contentItems":[{"type":"inputText","text":outcome.to_string()}]}),
+                );
+                if let Some(reply) = call.reply() {
+                    people[call.participant].trace.record("send", &reply)?;
+                    wire.send(&reply).await?;
+                }
                 continue;
             }
         };
@@ -121,17 +155,7 @@ pub(super) async fn run(
         };
         let person = &mut people[index];
         person.trace.record("receive", &message)?;
-        if let Some(kind) = message["params"]["item"]["type"].as_str()
-            && ![
-                "dynamicToolCall",
-                "reasoning",
-                "userMessage",
-                "agentMessage",
-            ]
-            .contains(&kind)
-        {
-            return Err(format!("unexpected native model item: {kind}").into());
-        }
+        check_model_item(&message)?;
         match message["method"].as_str() {
             Some("item/tool/call") => {
                 person.observed.tool_calls += 1;
@@ -142,34 +166,112 @@ pub(super) async fn run(
                     .get("id")
                     .cloned()
                     .ok_or("tool request id missing")?;
-                if pending.insert(id.to_string(), index).is_some() {
-                    return Err("duplicate pending tool id".into());
+                let params = &message["params"];
+                let item_id = params["callId"]
+                    .as_str()
+                    .filter(|id| !id.is_empty())
+                    .ok_or("missing tool callId")?;
+                if pending.iter().any(|call| {
+                    call.original["id"] == id
+                        || call.reader.as_ref().is_some_and(|reader| {
+                            reader["id"] == id
+                                || (call.participant == index
+                                    && reader["params"]["callId"] == item_id)
+                        })
+                        || (call.participant == index
+                            && call.original["params"]["callId"] == item_id)
+                }) {
+                    return Err("duplicate pending model tool call".into());
                 }
-                let arguments = &message["params"]["arguments"];
-                if message["params"]["tool"] != "shell"
-                    || arguments.as_object().is_none_or(|o| o.len() != 1)
+                let arguments = &params["arguments"];
+                let collect = params["tool"] == "shell"
+                    && arguments.as_object().is_some_and(|a| a.is_empty());
+                if collect
+                    && let Some(call) = pending
+                        .iter_mut()
+                        .find(|c| c.participant == index && c.reader.is_none())
+                {
+                    call.reader = Some(message);
+                    if let Some(reply) = call.reply() {
+                        person.trace.record("send", &reply)?;
+                        wire.send(&reply).await?;
+                    }
+                    continue;
+                }
+                let response = if collect {
+                    Some(
+                        json!({"success":true,"contentItems":[{"type":"inputText","text":r#"{"status":"no_interrupted_command"}"#}]}),
+                    )
+                } else if params["tool"] != "shell"
+                    || arguments.as_object().is_none_or(|a| a.len() != 1)
                     || !arguments["command"].is_string()
                 {
-                    pending.remove(&id.to_string());
-                    let reply = json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"expected shell with one command string"}]}});
-                    person.trace.record("send", &reply)?;
-                    wire.send(&reply).await?;
+                    Some(
+                        json!({"success":false,"contentItems":[{"type":"inputText","text":"expected a shell command or an empty object to collect interrupted output"}]}),
+                    )
                 } else {
-                    let command = arguments["command"].as_str().unwrap().to_owned();
-                    let reply = (replies.clone(), notify.try_clone()?);
+                    let command = arguments["command"].as_str().unwrap();
                     if command.len() > 4096 {
-                        wire::respond(
-                            &reply,
-                            id,
-                            Ok(json!({"status":"script_too_long","limit_utf8_bytes":4096})),
-                        )?;
+                        Some(
+                            json!({"success":true,"contentItems":[{"type":"inputText","text":r#"{"limit_utf8_bytes":4096,"status":"script_too_long"}"#}]}),
+                        )
                     } else {
                         guest.send(
                             json!({"id":id,"agent":person.participant.agent,"command":command}),
-                            reply,
+                            (replies.clone(), notify.try_clone()?),
                         )?;
+                        None
                     }
+                };
+                let call = ToolCall {
+                    participant: index,
+                    original: message.clone(),
+                    reader: Some(message),
+                    response,
+                };
+                if let Some(reply) = call.reply() {
+                    person.trace.record("send", &reply)?;
+                    wire.send(&reply).await?;
                 }
+                pending.push(call);
+            }
+            Some("item/completed") if message["params"]["item"]["type"] == "dynamicToolCall" => {
+                let completed = &message["params"];
+                let slot = pending
+                    .iter()
+                    .position(|call| {
+                        call.participant == index
+                            && call
+                                .reader
+                                .as_ref()
+                                .is_some_and(|reader| same_tool_call(&reader["params"], completed))
+                    })
+                    .ok_or("model completed an unknown shell call")?;
+                let call = &mut pending[slot];
+                if cancelled_tool(completed) {
+                    if call.original["params"]["tool"] == "shell"
+                        && call.original["params"]["arguments"]
+                            .as_object()
+                            .is_some_and(|arguments| arguments.len() == 1)
+                        && call.original["params"]["arguments"]["command"]
+                            .as_str()
+                            .is_some_and(|s| s.len() <= 4096)
+                    {
+                        call.reader.take();
+                    } else {
+                        pending.remove(slot);
+                    }
+                    continue;
+                }
+                let sent = call
+                    .reply()
+                    .ok_or("model completed shell call before its reply")?;
+                check_tool_completion(
+                    &call.reader.as_ref().unwrap()["params"],
+                    &sent["result"],
+                    completed,
+                )?;
+                pending.remove(slot);
             }
             Some("thread/tokenUsage/updated") => {
                 person.observed.usage = message["params"]["tokenUsage"]["total"].clone()
@@ -178,7 +280,7 @@ pub(super) async fn run(
                 return Err("participant model was rerouted".into());
             }
             Some("turn/completed") => {
-                if pending.values().any(|&owner| owner == index) {
+                if pending.iter().any(|call| call.participant == index) {
                     return Err("turn completed with a pending tool request".into());
                 }
                 threads.remove(

@@ -7,67 +7,13 @@ use serde_json::{Value, json};
 #[hibana_runtime::scope]
 pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> ShellResult<()> {
     let mut repo = owner.recv::<RepoLoan>().await?;
-    let mut current = Value::Null;
-    // Four finite edits, in whichever order the actual file requests arrive.
-    for _ in 0..4 {
-        let branch = repo.offer().await?;
-        match branch.label() {
-            RefactorA::LOGICAL_LABEL => {
-                let args = branch.recv::<RefactorA>().await?.into_value();
-                let value = domain
-                    .execute("DEVELOPER_A", "refactor_code", args)
-                    .await
-                    .map_err(ShellError::message)?;
-                imp::changed(&value, "module_a")?;
-                current = value["data"]["working_candidates"].clone();
-                let bytes = imp::encode(&value)?;
-                repo.send::<RefactoredA>(&bytes.as_slice()).await?;
-            }
-            RefactorSharedA::LOGICAL_LABEL => {
-                let args = branch.recv::<RefactorSharedA>().await?.into_value();
-                let value = domain
-                    .execute("DEVELOPER_A", "refactor_code", args)
-                    .await
-                    .map_err(ShellError::message)?;
-                imp::changed(&value, "SHARED_LIBRARY")?;
-                current = value["data"]["working_candidates"].clone();
-                let bytes = imp::encode(&value)?;
-                repo.send::<SharedChangedA>(&bytes.as_slice()).await?;
-            }
-            RefactorB::LOGICAL_LABEL => {
-                let args = branch.recv::<RefactorB>().await?.into_value();
-                let value = domain
-                    .execute("DEVELOPER_B", "refactor_code", args)
-                    .await
-                    .map_err(ShellError::message)?;
-                imp::changed(&value, "module_b")?;
-                current = value["data"]["working_candidates"].clone();
-                let bytes = imp::encode(&value)?;
-                repo.send::<RefactoredB>(&bytes.as_slice()).await?;
-            }
-            RefactorSharedB::LOGICAL_LABEL => {
-                let args = branch.recv::<RefactorSharedB>().await?.into_value();
-                let value = domain
-                    .execute("DEVELOPER_B", "refactor_code", args)
-                    .await
-                    .map_err(ShellError::message)?;
-                imp::changed(&value, "SHARED_LIBRARY")?;
-                current = value["data"]["working_candidates"].clone();
-                let bytes = imp::encode(&value)?;
-                repo.send::<SharedChangedB>(&bytes.as_slice()).await?;
-            }
-            label => {
-                return Err(ShellError::message(format!(
-                    "unexpected repository edit {label}"
-                )));
-            }
-        }
-    }
     async {
         async {
             async {
                 let [mut a, mut b] = owner.par()?;
                 async {
+                    a.send::<ReadCandidateA>(&()).await?;
+                    let current = imp::decode(a.recv::<CandidateA>().await?)?;
                     let (review, test) = async {
                         let [mut review, mut test] = a.par()?;
                         async {
@@ -110,6 +56,8 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                     a.send::<MergedA>(&bytes.as_slice()).await?;
                 };
                 async {
+                    b.send::<ReadCandidateB>(&()).await?;
+                    let current = imp::decode(b.recv::<CandidateB>().await?)?;
                     let (review, test) = async {
                         let [mut review, mut test] = b.par()?;
                         async {
@@ -156,12 +104,72 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
             .await?;
             owner.send::<ReviewExit>(&0).await?;
             owner.send::<TestExit>(&0).await?;
+            owner.send::<RepoExit>(&()).await?;
         };
         async {
             // This Endpoint's single I/O owner retains the physical repository.
-            for _ in 0..2 {
+            let mut current = Value::Null;
+            loop {
                 let branch = repo.offer().await?;
                 match branch.label() {
+                    RefactorA::LOGICAL_LABEL => {
+                        let args = branch.recv::<RefactorA>().await?.into_value();
+                        let value = domain
+                            .execute("DEVELOPER_A", "refactor_code", args)
+                            .await
+                            .map_err(ShellError::message)?;
+                        imp::changed(&value, "module_a")?;
+                        current = value["data"]["working_candidates"].clone();
+                        let bytes = imp::encode(&value)?;
+                        repo.send::<RefactoredA>(&bytes.as_slice()).await?;
+                    }
+                    RefactorSharedA::LOGICAL_LABEL => {
+                        let args = branch.recv::<RefactorSharedA>().await?.into_value();
+                        let value = domain
+                            .execute("DEVELOPER_A", "refactor_code", args)
+                            .await
+                            .map_err(ShellError::message)?;
+                        imp::changed(&value, "SHARED_LIBRARY")?;
+                        current = value["data"]["working_candidates"].clone();
+                        let bytes = imp::encode(&value)?;
+                        repo.send::<SharedChangedA>(&bytes.as_slice()).await?;
+                    }
+                    RefactorB::LOGICAL_LABEL => {
+                        let args = branch.recv::<RefactorB>().await?.into_value();
+                        let value = domain
+                            .execute("DEVELOPER_B", "refactor_code", args)
+                            .await
+                            .map_err(ShellError::message)?;
+                        imp::changed(&value, "module_b")?;
+                        current = value["data"]["working_candidates"].clone();
+                        let bytes = imp::encode(&value)?;
+                        repo.send::<RefactoredB>(&bytes.as_slice()).await?;
+                    }
+                    RefactorSharedB::LOGICAL_LABEL => {
+                        let args = branch.recv::<RefactorSharedB>().await?.into_value();
+                        let value = domain
+                            .execute("DEVELOPER_B", "refactor_code", args)
+                            .await
+                            .map_err(ShellError::message)?;
+                        imp::changed(&value, "SHARED_LIBRARY")?;
+                        current = value["data"]["working_candidates"].clone();
+                        let bytes = imp::encode(&value)?;
+                        repo.send::<SharedChangedB>(&bytes.as_slice()).await?;
+                    }
+                    ReadCandidateA::LOGICAL_LABEL => {
+                        branch.recv::<ReadCandidateA>().await?;
+                        let bytes = imp::encode(&current)?;
+                        repo.send::<CandidateA>(&bytes.as_slice()).await?;
+                    }
+                    ReadCandidateB::LOGICAL_LABEL => {
+                        branch.recv::<ReadCandidateB>().await?;
+                        let bytes = imp::encode(&current)?;
+                        repo.send::<CandidateB>(&bytes.as_slice()).await?;
+                    }
+                    RepoExit::LOGICAL_LABEL => {
+                        branch.recv::<RepoExit>().await?;
+                        break;
+                    }
                     PublicationA::LOGICAL_LABEL => {
                         let admitted = imp::decode(branch.recv::<PublicationA>().await?)?;
                         let arguments = &admitted["arguments"];
@@ -196,7 +204,7 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                     }
                     label => {
                         return Err(ShellError::message(format!(
-                            "unexpected publication {label}"
+                            "unexpected repository operation {label}"
                         )));
                     }
                 }

@@ -129,6 +129,8 @@ async fn actual_wasi_partial_panels_and_independent_ct_orders() -> Result<()> {
         let ((),(),(),result) = hibana_runtime::race(async {
             async {
                 if invalid {
+                    let reply = guest.command("ER_DOCTOR","cat /service/summary".into()).await?;
+                    assert!(reply["stdout"].as_str().ok_or("early summary output")?.contains("Permission denied"),"{reply}");
                     let reply = guest.command("ER_DOCTOR","echo '{\"patient_id\":\"patient_other\"}' > /service/assess_patient".into()).await?;
                     assert!(reply["stdout"].as_str().ok_or("invalid-request output")?.contains("wash:"),"{reply}");
                 }

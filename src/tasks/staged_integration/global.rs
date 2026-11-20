@@ -14,6 +14,26 @@ use hibana_wasip1_runtime::{
     protocol,
 };
 
+pub const MERGE_REQUESTS: u8 = 14;
+pub type RepairPublicationA<'r> = g::Msg<244, &'r [u8]>;
+pub type AdmitA = g::Msg<229, Arguments<3>>;
+pub type CheckStageA = g::Msg<232, Arguments<5>>;
+pub type LatestCheckedA = g::Msg<235, Arguments<5>>;
+pub type StageInputsA<'r> = g::Msg<238, &'r [u8]>;
+pub type InstalledA<'r> = g::Msg<241, &'r [u8]>;
+pub type RepairPublicationB<'r> = g::Msg<245, &'r [u8]>;
+pub type AdmitB = g::Msg<230, Arguments<11>>;
+pub type CheckStageB = g::Msg<233, Arguments<13>>;
+pub type LatestCheckedB = g::Msg<236, Arguments<13>>;
+pub type StageInputsB<'r> = g::Msg<239, &'r [u8]>;
+pub type InstalledB<'r> = g::Msg<242, &'r [u8]>;
+pub type RepairPublicationC<'r> = g::Msg<246, &'r [u8]>;
+pub type AdmitC = g::Msg<231, Arguments<19>>;
+pub type CheckStageC = g::Msg<234, Arguments<21>>;
+pub type LatestCheckedC = g::Msg<237, Arguments<21>>;
+pub type StageInputsC<'r> = g::Msg<240, &'r [u8]>;
+pub type InstalledC<'r> = g::Msg<243, &'r [u8]>;
+
 pub const SESSION: u32 = 63;
 pub const REPO_OWNER: u8 = 0;
 pub const TEST_OWNER: u8 = 1;
@@ -112,7 +132,9 @@ pub type MergedA<'a> = g::Msg<120, &'a [u8]>;
 pub type PublicationA<'a> = g::Msg<121, &'a [u8]>;
 pub type FilePublicationA<'a> = g::Msg<122, &'a [u8]>;
 pub type CiRequestA = g::Msg<123, Arguments<4>>;
+pub type PublicationPassedA<'a> = g::Msg<247, ReviewReply<'a, true>>;
 pub type CiPassedA<'a> = g::Msg<124, ReviewReply<'a, true>>;
+pub type PublicationFailedA<'a> = g::Msg<248, ReviewReply<'a, false>>;
 pub type CiFailedA<'a> = g::Msg<125, ReviewReply<'a, false>>;
 pub type CiUpdateA<'a> = g::Msg<126, &'a [u8]>;
 pub type FileCiResultA<'a> = g::Msg<127, &'a [u8]>;
@@ -155,7 +177,9 @@ pub type MergedB<'a> = g::Msg<161, &'a [u8]>;
 pub type PublicationB<'a> = g::Msg<162, &'a [u8]>;
 pub type FilePublicationB<'a> = g::Msg<163, &'a [u8]>;
 pub type CiRequestB = g::Msg<164, Arguments<12>>;
+pub type PublicationPassedB<'a> = g::Msg<249, ReviewReply<'a, true>>;
 pub type CiPassedB<'a> = g::Msg<165, ReviewReply<'a, true>>;
+pub type PublicationFailedB<'a> = g::Msg<250, ReviewReply<'a, false>>;
 pub type CiFailedB<'a> = g::Msg<166, ReviewReply<'a, false>>;
 pub type CiUpdateB<'a> = g::Msg<167, &'a [u8]>;
 pub type FileCiResultB<'a> = g::Msg<168, &'a [u8]>;
@@ -198,7 +222,9 @@ pub type MergedC<'a> = g::Msg<202, &'a [u8]>;
 pub type PublicationC<'a> = g::Msg<203, &'a [u8]>;
 pub type FilePublicationC<'a> = g::Msg<204, &'a [u8]>;
 pub type CiRequestC = g::Msg<205, Arguments<20>>;
+pub type PublicationPassedC<'a> = g::Msg<251, ReviewReply<'a, true>>;
 pub type CiPassedC<'a> = g::Msg<206, ReviewReply<'a, true>>;
+pub type PublicationFailedC<'a> = g::Msg<252, ReviewReply<'a, false>>;
 pub type CiFailedC<'a> = g::Msg<207, ReviewReply<'a, false>>;
 pub type CiUpdateC<'a> = g::Msg<208, &'a [u8]>;
 pub type FileCiResultC<'a> = g::Msg<209, &'a [u8]>;
@@ -413,13 +439,13 @@ fn prepare_a<Approved: g::Message, Rejected: g::Message>() -> impl Projectable {
         .resolve::<REVIEW_DECISION_A>(),
     )
 }
-fn merge_ci_a() -> impl Projectable {
+fn merge_ci_a<Publication: g::Message>() -> impl Projectable {
     g::seq(
-        g::send::<A_FILE, REPO, MergeRequestA>(),
+        g::send::<A_FILE, MERGE_REQUESTS, MergeRequestA>(),
         g::seq(
             g::send::<REPO, A_FILE, MergedA>(),
             g::seq(
-                g::send::<REPO, BUILD_SERVER, PublicationA>(),
+                g::send::<REPO, CI_OWNER, Publication>(),
                 g::seq(
                     g::send::<BUILD_SERVER, CI_FILE, FilePublicationA>(),
                     g::send::<CI_FILE, BUILD_SERVER, CiRequestA>(),
@@ -457,34 +483,43 @@ fn ci_outcome_a<M: g::Message>() -> impl Projectable {
 }
 fn integrate_a() -> impl Projectable {
     g::seq(
-        merge_ci_a(),
-        g::route(
-            ci_outcome_a::<CiPassedA>(),
-            g::seq(
-                g::seq(
-                    ci_outcome_a::<CiFailedA>(),
-                    g::seq(
-                        prepare_a::<RepairApprovedA, RepairRejectedA>(),
-                        merge_ci_a(),
-                    ),
-                )
-                .roll(),
+        g::seq(
+            merge_ci_a::<PublicationA>(),
+            g::route(
                 ci_outcome_a::<CiPassedA>(),
-            ),
-        )
-        .resolve::<CI_DECISION_A>(),
+                g::seq(
+                    g::seq(
+                        ci_outcome_a::<CiFailedA>(),
+                        g::seq(
+                            prepare_a::<RepairApprovedA, RepairRejectedA>(),
+                            merge_ci_a::<PublicationA>(),
+                        ),
+                    )
+                    .roll(),
+                    ci_outcome_a::<CiPassedA>(),
+                ),
+            )
+            .resolve::<CI_DECISION_A>(),
+        ),
+        g::send::<BUILD_SERVER, STAGE_OWNER, StagingReadyA>(),
     )
 }
 pub fn staging_a() -> impl Projectable {
     g::seq(
-        g::send::<BUILD_SERVER, STAGING_ENV, StagingReadyA>(),
+        g::send::<STAGING_ENV, RELEASE_FILE, FileStagingReadyA>(),
         g::seq(
-            g::send::<STAGING_ENV, RELEASE_FILE, FileStagingReadyA>(),
+            g::send::<RELEASE_FILE, STAGING_ENV, DeployRequestA>(),
             g::seq(
-                g::send::<RELEASE_FILE, STAGING_ENV, DeployRequestA>(),
+                g::send::<STAGING_ENV, MERGE_REQUESTS, CheckStageA>(),
                 g::seq(
-                    g::send::<STAGING_ENV, RELEASE_FILE, DeployedA>(),
-                    g::send::<RELEASE_FILE, STAGING_ENV, ValidateRequestA>(),
+                    g::send::<REPO, STAGING_ENV, StageInputsA>(),
+                    g::seq(
+                        g::send::<STAGING_ENV, REPO, InstalledA>(),
+                        g::seq(
+                            g::send::<STAGING_ENV, RELEASE_FILE, DeployedA>(),
+                            g::send::<RELEASE_FILE, STAGING_ENV, ValidateRequestA>(),
+                        ),
+                    ),
                 ),
             ),
         ),
@@ -511,7 +546,7 @@ fn stage_passed_a() -> impl Projectable {
                                         g::send::<REPO, TEST_FILE, StageUpdateA>(),
                                         g::seq(
                                             g::send::<REPO, CI_FILE, StageUpdateA>(),
-                                            g::send::<REPO, BUILD_SERVER, StageUpdateA>(),
+                                            g::send::<REPO, CI_OWNER, StageUpdateA>(),
                                         ),
                                     ),
                                 ),
@@ -550,8 +585,7 @@ fn stage_failed_a() -> impl Projectable {
                                                     g::send::<REPO, TEST_FILE, StageUpdateA>(),
                                                     g::seq(
                                                         g::send::<REPO, CI_FILE, StageUpdateA>(),
-                                                        g::send::<REPO, BUILD_SERVER, StageUpdateA>(
-                                                        ),
+                                                        g::send::<REPO, CI_OWNER, StageUpdateA>(),
                                                     ),
                                                 ),
                                             ),
@@ -568,45 +602,45 @@ fn stage_failed_a() -> impl Projectable {
 }
 fn integrate_stage_a() -> impl Projectable {
     g::seq(
-        merge_ci_a(),
-        g::route(
-            ci_outcome_a::<StageCiPassedA>(),
-            g::seq(
-                g::seq(
-                    ci_outcome_a::<StageCiFailedA>(),
-                    g::seq(
-                        prepare_a::<StageCiApprovedA, StageCiRejectedA>(),
-                        merge_ci_a(),
-                    ),
-                )
-                .roll(),
+        g::seq(
+            merge_ci_a::<RepairPublicationA>(),
+            g::route(
                 ci_outcome_a::<StageCiPassedA>(),
-            ),
-        )
-        .resolve::<CI_DECISION_A>(),
+                g::seq(
+                    g::seq(
+                        ci_outcome_a::<StageCiFailedA>(),
+                        g::seq(
+                            prepare_a::<StageCiApprovedA, StageCiRejectedA>(),
+                            merge_ci_a::<RepairPublicationA>(),
+                        ),
+                    )
+                    .roll(),
+                    ci_outcome_a::<StageCiPassedA>(),
+                ),
+            )
+            .resolve::<CI_DECISION_A>(),
+        ),
+        g::send::<BUILD_SERVER, STAGE_OWNER, StagingReadyA>(),
     )
 }
 fn release_a() -> impl Projectable {
     g::seq(
-        integrate_a(),
-        g::seq(
-            staging_a(),
-            g::route(
-                stage_passed_a(),
+        staging_a(),
+        g::route(
+            stage_passed_a(),
+            g::seq(
                 g::seq(
+                    stage_failed_a(),
                     g::seq(
-                        stage_failed_a(),
-                        g::seq(
-                            prepare_a::<StageRepairApprovedA, StageRepairRejectedA>(),
-                            g::seq(integrate_stage_a(), staging_a()),
-                        ),
-                    )
-                    .roll(),
-                    stage_passed_a(),
-                ),
-            )
-            .resolve::<STAGE_DECISION_A>(),
-        ),
+                        prepare_a::<StageRepairApprovedA, StageRepairRejectedA>(),
+                        g::seq(integrate_stage_a(), staging_a()),
+                    ),
+                )
+                .roll(),
+                stage_passed_a(),
+            ),
+        )
+        .resolve::<STAGE_DECISION_A>(),
     )
 }
 
@@ -680,13 +714,13 @@ fn prepare_b<Approved: g::Message, Rejected: g::Message>() -> impl Projectable {
         .resolve::<REVIEW_DECISION_B>(),
     )
 }
-fn merge_ci_b() -> impl Projectable {
+fn merge_ci_b<Publication: g::Message>() -> impl Projectable {
     g::seq(
-        g::send::<B_FILE, REPO, MergeRequestB>(),
+        g::send::<B_FILE, MERGE_REQUESTS, MergeRequestB>(),
         g::seq(
             g::send::<REPO, B_FILE, MergedB>(),
             g::seq(
-                g::send::<REPO, BUILD_SERVER, PublicationB>(),
+                g::send::<REPO, CI_OWNER, Publication>(),
                 g::seq(
                     g::send::<BUILD_SERVER, CI_FILE, FilePublicationB>(),
                     g::send::<CI_FILE, BUILD_SERVER, CiRequestB>(),
@@ -724,34 +758,43 @@ fn ci_outcome_b<M: g::Message>() -> impl Projectable {
 }
 fn integrate_b() -> impl Projectable {
     g::seq(
-        merge_ci_b(),
-        g::route(
-            ci_outcome_b::<CiPassedB>(),
-            g::seq(
-                g::seq(
-                    ci_outcome_b::<CiFailedB>(),
-                    g::seq(
-                        prepare_b::<RepairApprovedB, RepairRejectedB>(),
-                        merge_ci_b(),
-                    ),
-                )
-                .roll(),
+        g::seq(
+            merge_ci_b::<PublicationB>(),
+            g::route(
                 ci_outcome_b::<CiPassedB>(),
-            ),
-        )
-        .resolve::<CI_DECISION_B>(),
+                g::seq(
+                    g::seq(
+                        ci_outcome_b::<CiFailedB>(),
+                        g::seq(
+                            prepare_b::<RepairApprovedB, RepairRejectedB>(),
+                            merge_ci_b::<PublicationB>(),
+                        ),
+                    )
+                    .roll(),
+                    ci_outcome_b::<CiPassedB>(),
+                ),
+            )
+            .resolve::<CI_DECISION_B>(),
+        ),
+        g::send::<BUILD_SERVER, STAGE_OWNER_B, StagingReadyB>(),
     )
 }
 pub fn staging_b() -> impl Projectable {
     g::seq(
-        g::send::<BUILD_SERVER, STAGING_ENV, StagingReadyB>(),
+        g::send::<STAGING_ENV, RELEASE_FILE, FileStagingReadyB>(),
         g::seq(
-            g::send::<STAGING_ENV, RELEASE_FILE, FileStagingReadyB>(),
+            g::send::<RELEASE_FILE, STAGING_ENV, DeployRequestB>(),
             g::seq(
-                g::send::<RELEASE_FILE, STAGING_ENV, DeployRequestB>(),
+                g::send::<STAGING_ENV, MERGE_REQUESTS, CheckStageB>(),
                 g::seq(
-                    g::send::<STAGING_ENV, RELEASE_FILE, DeployedB>(),
-                    g::send::<RELEASE_FILE, STAGING_ENV, ValidateRequestB>(),
+                    g::send::<REPO, STAGING_ENV, StageInputsB>(),
+                    g::seq(
+                        g::send::<STAGING_ENV, REPO, InstalledB>(),
+                        g::seq(
+                            g::send::<STAGING_ENV, RELEASE_FILE, DeployedB>(),
+                            g::send::<RELEASE_FILE, STAGING_ENV, ValidateRequestB>(),
+                        ),
+                    ),
                 ),
             ),
         ),
@@ -778,7 +821,7 @@ fn stage_passed_b() -> impl Projectable {
                                         g::send::<REPO, TEST_FILE, StageUpdateB>(),
                                         g::seq(
                                             g::send::<REPO, CI_FILE, StageUpdateB>(),
-                                            g::send::<REPO, BUILD_SERVER, StageUpdateB>(),
+                                            g::send::<REPO, CI_OWNER, StageUpdateB>(),
                                         ),
                                     ),
                                 ),
@@ -817,8 +860,7 @@ fn stage_failed_b() -> impl Projectable {
                                                     g::send::<REPO, TEST_FILE, StageUpdateB>(),
                                                     g::seq(
                                                         g::send::<REPO, CI_FILE, StageUpdateB>(),
-                                                        g::send::<REPO, BUILD_SERVER, StageUpdateB>(
-                                                        ),
+                                                        g::send::<REPO, CI_OWNER, StageUpdateB>(),
                                                     ),
                                                 ),
                                             ),
@@ -835,45 +877,45 @@ fn stage_failed_b() -> impl Projectable {
 }
 fn integrate_stage_b() -> impl Projectable {
     g::seq(
-        merge_ci_b(),
-        g::route(
-            ci_outcome_b::<StageCiPassedB>(),
-            g::seq(
-                g::seq(
-                    ci_outcome_b::<StageCiFailedB>(),
-                    g::seq(
-                        prepare_b::<StageCiApprovedB, StageCiRejectedB>(),
-                        merge_ci_b(),
-                    ),
-                )
-                .roll(),
+        g::seq(
+            merge_ci_b::<RepairPublicationB>(),
+            g::route(
                 ci_outcome_b::<StageCiPassedB>(),
-            ),
-        )
-        .resolve::<CI_DECISION_B>(),
+                g::seq(
+                    g::seq(
+                        ci_outcome_b::<StageCiFailedB>(),
+                        g::seq(
+                            prepare_b::<StageCiApprovedB, StageCiRejectedB>(),
+                            merge_ci_b::<RepairPublicationB>(),
+                        ),
+                    )
+                    .roll(),
+                    ci_outcome_b::<StageCiPassedB>(),
+                ),
+            )
+            .resolve::<CI_DECISION_B>(),
+        ),
+        g::send::<BUILD_SERVER, STAGE_OWNER_B, StagingReadyB>(),
     )
 }
 fn release_b() -> impl Projectable {
     g::seq(
-        integrate_b(),
-        g::seq(
-            staging_b(),
-            g::route(
-                stage_passed_b(),
+        staging_b(),
+        g::route(
+            stage_passed_b(),
+            g::seq(
                 g::seq(
+                    stage_failed_b(),
                     g::seq(
-                        stage_failed_b(),
-                        g::seq(
-                            prepare_b::<StageRepairApprovedB, StageRepairRejectedB>(),
-                            g::seq(integrate_stage_b(), staging_b()),
-                        ),
-                    )
-                    .roll(),
-                    stage_passed_b(),
-                ),
-            )
-            .resolve::<STAGE_DECISION_B>(),
-        ),
+                        prepare_b::<StageRepairApprovedB, StageRepairRejectedB>(),
+                        g::seq(integrate_stage_b(), staging_b()),
+                    ),
+                )
+                .roll(),
+                stage_passed_b(),
+            ),
+        )
+        .resolve::<STAGE_DECISION_B>(),
     )
 }
 
@@ -947,13 +989,13 @@ fn prepare_c<Approved: g::Message, Rejected: g::Message>() -> impl Projectable {
         .resolve::<REVIEW_DECISION_C>(),
     )
 }
-fn merge_ci_c() -> impl Projectable {
+fn merge_ci_c<Publication: g::Message>() -> impl Projectable {
     g::seq(
-        g::send::<C_FILE, REPO, MergeRequestC>(),
+        g::send::<C_FILE, MERGE_REQUESTS, MergeRequestC>(),
         g::seq(
             g::send::<REPO, C_FILE, MergedC>(),
             g::seq(
-                g::send::<REPO, BUILD_SERVER, PublicationC>(),
+                g::send::<REPO, CI_OWNER, Publication>(),
                 g::seq(
                     g::send::<BUILD_SERVER, CI_FILE, FilePublicationC>(),
                     g::send::<CI_FILE, BUILD_SERVER, CiRequestC>(),
@@ -991,34 +1033,43 @@ fn ci_outcome_c<M: g::Message>() -> impl Projectable {
 }
 fn integrate_c() -> impl Projectable {
     g::seq(
-        merge_ci_c(),
-        g::route(
-            ci_outcome_c::<CiPassedC>(),
-            g::seq(
-                g::seq(
-                    ci_outcome_c::<CiFailedC>(),
-                    g::seq(
-                        prepare_c::<RepairApprovedC, RepairRejectedC>(),
-                        merge_ci_c(),
-                    ),
-                )
-                .roll(),
+        g::seq(
+            merge_ci_c::<PublicationC>(),
+            g::route(
                 ci_outcome_c::<CiPassedC>(),
-            ),
-        )
-        .resolve::<CI_DECISION_C>(),
+                g::seq(
+                    g::seq(
+                        ci_outcome_c::<CiFailedC>(),
+                        g::seq(
+                            prepare_c::<RepairApprovedC, RepairRejectedC>(),
+                            merge_ci_c::<PublicationC>(),
+                        ),
+                    )
+                    .roll(),
+                    ci_outcome_c::<CiPassedC>(),
+                ),
+            )
+            .resolve::<CI_DECISION_C>(),
+        ),
+        g::send::<BUILD_SERVER, STAGE_OWNER_C, StagingReadyC>(),
     )
 }
 pub fn staging_c() -> impl Projectable {
     g::seq(
-        g::send::<BUILD_SERVER, STAGING_ENV, StagingReadyC>(),
+        g::send::<STAGING_ENV, RELEASE_FILE, FileStagingReadyC>(),
         g::seq(
-            g::send::<STAGING_ENV, RELEASE_FILE, FileStagingReadyC>(),
+            g::send::<RELEASE_FILE, STAGING_ENV, DeployRequestC>(),
             g::seq(
-                g::send::<RELEASE_FILE, STAGING_ENV, DeployRequestC>(),
+                g::send::<STAGING_ENV, MERGE_REQUESTS, CheckStageC>(),
                 g::seq(
-                    g::send::<STAGING_ENV, RELEASE_FILE, DeployedC>(),
-                    g::send::<RELEASE_FILE, STAGING_ENV, ValidateRequestC>(),
+                    g::send::<REPO, STAGING_ENV, StageInputsC>(),
+                    g::seq(
+                        g::send::<STAGING_ENV, REPO, InstalledC>(),
+                        g::seq(
+                            g::send::<STAGING_ENV, RELEASE_FILE, DeployedC>(),
+                            g::send::<RELEASE_FILE, STAGING_ENV, ValidateRequestC>(),
+                        ),
+                    ),
                 ),
             ),
         ),
@@ -1045,7 +1096,7 @@ fn stage_passed_c() -> impl Projectable {
                                         g::send::<REPO, TEST_FILE, StageUpdateC>(),
                                         g::seq(
                                             g::send::<REPO, CI_FILE, StageUpdateC>(),
-                                            g::send::<REPO, BUILD_SERVER, StageUpdateC>(),
+                                            g::send::<REPO, CI_OWNER, StageUpdateC>(),
                                         ),
                                     ),
                                 ),
@@ -1084,8 +1135,7 @@ fn stage_failed_c() -> impl Projectable {
                                                     g::send::<REPO, TEST_FILE, StageUpdateC>(),
                                                     g::seq(
                                                         g::send::<REPO, CI_FILE, StageUpdateC>(),
-                                                        g::send::<REPO, BUILD_SERVER, StageUpdateC>(
-                                                        ),
+                                                        g::send::<REPO, CI_OWNER, StageUpdateC>(),
                                                     ),
                                                 ),
                                             ),
@@ -1102,51 +1152,76 @@ fn stage_failed_c() -> impl Projectable {
 }
 fn integrate_stage_c() -> impl Projectable {
     g::seq(
-        merge_ci_c(),
-        g::route(
-            ci_outcome_c::<StageCiPassedC>(),
-            g::seq(
-                g::seq(
-                    ci_outcome_c::<StageCiFailedC>(),
-                    g::seq(
-                        prepare_c::<StageCiApprovedC, StageCiRejectedC>(),
-                        merge_ci_c(),
-                    ),
-                )
-                .roll(),
+        g::seq(
+            merge_ci_c::<RepairPublicationC>(),
+            g::route(
                 ci_outcome_c::<StageCiPassedC>(),
-            ),
-        )
-        .resolve::<CI_DECISION_C>(),
+                g::seq(
+                    g::seq(
+                        ci_outcome_c::<StageCiFailedC>(),
+                        g::seq(
+                            prepare_c::<StageCiApprovedC, StageCiRejectedC>(),
+                            merge_ci_c::<RepairPublicationC>(),
+                        ),
+                    )
+                    .roll(),
+                    ci_outcome_c::<StageCiPassedC>(),
+                ),
+            )
+            .resolve::<CI_DECISION_C>(),
+        ),
+        g::send::<BUILD_SERVER, STAGE_OWNER_C, StagingReadyC>(),
     )
 }
 fn release_c() -> impl Projectable {
     g::seq(
-        integrate_c(),
-        g::seq(
-            staging_c(),
-            g::route(
-                stage_passed_c(),
+        staging_c(),
+        g::route(
+            stage_passed_c(),
+            g::seq(
                 g::seq(
+                    stage_failed_c(),
                     g::seq(
-                        stage_failed_c(),
-                        g::seq(
-                            prepare_c::<StageRepairApprovedC, StageRepairRejectedC>(),
-                            g::seq(integrate_stage_c(), staging_c()),
-                        ),
-                    )
-                    .roll(),
-                    stage_passed_c(),
-                ),
-            )
-            .resolve::<STAGE_DECISION_C>(),
+                        prepare_c::<StageRepairApprovedC, StageRepairRejectedC>(),
+                        g::seq(integrate_stage_c(), staging_c()),
+                    ),
+                )
+                .roll(),
+                stage_passed_c(),
+            ),
+        )
+        .resolve::<STAGE_DECISION_C>(),
+    )
+}
+
+fn admit_merge<Request: g::Message, Passed: g::Message, Failed: g::Message>() -> impl Projectable {
+    let request = g::send::<REPO_OWNER, REPO, Request>();
+    let passed = g::send::<REPO, REPO_OWNER, Passed>();
+    g::seq(
+        request,
+        g::route(
+            passed,
+            g::seq(
+                g::seq(g::send::<REPO, REPO_OWNER, Failed>(), request).roll(),
+                passed,
+            ),
         ),
+    )
+}
+
+fn stage_read<Request: g::Message, Installed: g::Message>() -> impl Projectable {
+    g::seq(
+        g::send::<REPO_OWNER, REPO, Request>(),
+        g::send::<REPO, REPO_OWNER, Installed>(),
     )
 }
 
 pub fn source() -> impl Projectable {
     let resources = g::par(
-        g::send::<RESOURCE_INIT, REPO_OWNER, RepoLoan>(),
+        g::seq(
+            g::send::<RESOURCE_INIT, REPO_OWNER, RepoLoan>(),
+            g::send::<RESOURCE_INIT, REPO_OWNER, Loan<MERGE_REQUESTS>>(),
+        ),
         g::par(
             g::send::<RESOURCE_INIT, TEST_OWNER, TestLoan>(),
             g::par(
@@ -1180,38 +1255,43 @@ pub fn source() -> impl Projectable {
             ),
         ),
     );
-    let task = g::seq(
-        g::par(
+    let staged_a = g::seq(
+        g::seq(prepare_a::<ApprovedA, RejectedA>(), integrate_a()),
+        g::seq(
+            release_a(),
             g::seq(
-                prepare_a::<ApprovedA, RejectedA>(),
-                g::seq(
-                    release_a(),
-                    g::seq(
-                        g::send::<STAGE_OWNER, STAGE_OWNER_B, StageHistory>(),
-                        g::send::<STAGE_OWNER, STAGE_OWNER_B, StageLoan>(),
-                    ),
-                ),
-            ),
-            g::par(
-                prepare_b::<ApprovedB, RejectedB>(),
-                prepare_c::<ApprovedC, RejectedC>(),
+                g::send::<STAGE_OWNER, STAGE_OWNER_B, StageHistory>(),
+                g::send::<STAGE_OWNER, STAGE_OWNER_B, StageLoan>(),
             ),
         ),
+    );
+    let staged_b = g::seq(
+        g::par(
+            staged_a,
+            g::seq(prepare_b::<ApprovedB, RejectedB>(), integrate_b()),
+        ),
         g::seq(
+            release_b(),
             g::seq(
-                release_b(),
-                g::seq(
-                    g::send::<STAGE_OWNER_B, STAGE_OWNER_C, StageHistory>(),
-                    g::seq(
-                        g::send::<STAGE_OWNER_B, STAGE_OWNER_C, StageLoan>(),
-                        release_c(),
-                    ),
-                ),
+                g::send::<STAGE_OWNER_B, STAGE_OWNER_C, StageHistory>(),
+                g::send::<STAGE_OWNER_B, STAGE_OWNER_C, StageLoan>(),
             ),
+        ),
+    );
+    let task = g::seq(
+        g::par(
+            staged_b,
+            g::seq(prepare_c::<ApprovedC, RejectedC>(), integrate_c()),
+        ),
+        g::seq(
+            release_c(),
             g::seq(
-                g::send::<STAGING_ENV, TEST_ENV, TaskExit>(),
                 g::seq(
-                    g::send::<STAGING_ENV, BUILD_SERVER, TaskExit>(),
+                    g::send::<STAGING_ENV, MERGE_REQUESTS, TaskExit>(),
+                    g::send::<STAGING_ENV, TEST_ENV, TaskExit>(),
+                ),
+                g::seq(
+                    g::send::<STAGING_ENV, CI_OWNER, TaskExit>(),
                     g::seq(
                         g::send::<STAGING_ENV, REPO, TaskExit>(),
                         g::seq(
@@ -1267,10 +1347,39 @@ pub fn source() -> impl Projectable {
             ),
         ),
     );
-    g::seq(resources, g::seq(files, g::par(task, g::par(metadata, io))))
+    g::seq(
+        resources,
+        g::seq(
+            files,
+            g::par(
+                g::par(
+                    task,
+                    g::route(
+                        admit_merge::<AdmitA, PublicationPassedA, PublicationFailedA>(),
+                        g::route(
+                            stage_read::<LatestCheckedA, InstalledA>(),
+                            g::route(
+                                admit_merge::<AdmitB, PublicationPassedB, PublicationFailedB>(),
+                                g::route(
+                                    stage_read::<LatestCheckedB, InstalledB>(),
+                                    g::route(
+                                        admit_merge::<AdmitC, PublicationPassedC, PublicationFailedC>(),
+                                        stage_read::<LatestCheckedC, InstalledC>(),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    )
+                    .roll(),
+                ),
+                g::par(metadata, io),
+            ),
+        ),
+    )
 }
 
 pub struct Programs {
+    pub merge_requests: RoleProgram<MERGE_REQUESTS>,
     pub repo_owner: RoleProgram<REPO_OWNER>,
     pub test_owner: RoleProgram<TEST_OWNER>,
     pub ci_owner: RoleProgram<CI_OWNER>,
@@ -1323,6 +1432,24 @@ impl Programs {
         use crate::imp::projection::rows;
         use hibana::g::Message;
         let labels: serde_json::Map<String, serde_json::Value> = [
+            ("RepairPublicationA", RepairPublicationA::LOGICAL_LABEL),
+            ("AdmitA", AdmitA::LOGICAL_LABEL),
+            ("CheckStageA", CheckStageA::LOGICAL_LABEL),
+            ("LatestCheckedA", LatestCheckedA::LOGICAL_LABEL),
+            ("StageInputsA", StageInputsA::LOGICAL_LABEL),
+            ("InstalledA", InstalledA::LOGICAL_LABEL),
+            ("RepairPublicationB", RepairPublicationB::LOGICAL_LABEL),
+            ("AdmitB", AdmitB::LOGICAL_LABEL),
+            ("CheckStageB", CheckStageB::LOGICAL_LABEL),
+            ("LatestCheckedB", LatestCheckedB::LOGICAL_LABEL),
+            ("StageInputsB", StageInputsB::LOGICAL_LABEL),
+            ("InstalledB", InstalledB::LOGICAL_LABEL),
+            ("RepairPublicationC", RepairPublicationC::LOGICAL_LABEL),
+            ("AdmitC", AdmitC::LOGICAL_LABEL),
+            ("CheckStageC", CheckStageC::LOGICAL_LABEL),
+            ("LatestCheckedC", LatestCheckedC::LOGICAL_LABEL),
+            ("StageInputsC", StageInputsC::LOGICAL_LABEL),
+            ("InstalledC", InstalledC::LOGICAL_LABEL),
             ("RepoLoan", RepoLoan::LOGICAL_LABEL),
             ("TestLoan", TestLoan::LOGICAL_LABEL),
             ("BuildLoan", BuildLoan::LOGICAL_LABEL),
@@ -1370,7 +1497,9 @@ impl Programs {
             ("PublicationA", PublicationA::LOGICAL_LABEL),
             ("FilePublicationA", FilePublicationA::LOGICAL_LABEL),
             ("CiRequestA", CiRequestA::LOGICAL_LABEL),
+            ("PublicationPassedA", PublicationPassedA::LOGICAL_LABEL),
             ("CiPassedA", CiPassedA::LOGICAL_LABEL),
+            ("PublicationFailedA", PublicationFailedA::LOGICAL_LABEL),
             ("CiFailedA", CiFailedA::LOGICAL_LABEL),
             ("CiUpdateA", CiUpdateA::LOGICAL_LABEL),
             ("FileCiResultA", FileCiResultA::LOGICAL_LABEL),
@@ -1409,7 +1538,9 @@ impl Programs {
             ("PublicationB", PublicationB::LOGICAL_LABEL),
             ("FilePublicationB", FilePublicationB::LOGICAL_LABEL),
             ("CiRequestB", CiRequestB::LOGICAL_LABEL),
+            ("PublicationPassedB", PublicationPassedB::LOGICAL_LABEL),
             ("CiPassedB", CiPassedB::LOGICAL_LABEL),
+            ("PublicationFailedB", PublicationFailedB::LOGICAL_LABEL),
             ("CiFailedB", CiFailedB::LOGICAL_LABEL),
             ("CiUpdateB", CiUpdateB::LOGICAL_LABEL),
             ("FileCiResultB", FileCiResultB::LOGICAL_LABEL),
@@ -1448,7 +1579,9 @@ impl Programs {
             ("PublicationC", PublicationC::LOGICAL_LABEL),
             ("FilePublicationC", FilePublicationC::LOGICAL_LABEL),
             ("CiRequestC", CiRequestC::LOGICAL_LABEL),
+            ("PublicationPassedC", PublicationPassedC::LOGICAL_LABEL),
             ("CiPassedC", CiPassedC::LOGICAL_LABEL),
+            ("PublicationFailedC", PublicationFailedC::LOGICAL_LABEL),
             ("CiFailedC", CiFailedC::LOGICAL_LABEL),
             ("CiUpdateC", CiUpdateC::LOGICAL_LABEL),
             ("FileCiResultC", FileCiResultC::LOGICAL_LABEL),
@@ -1469,6 +1602,7 @@ impl Programs {
         .map(|(name, label)| (name.into(), label.into()))
         .collect();
         let roles: serde_json::Map<String, serde_json::Value> = [
+            ("MERGE_REQUESTS", MERGE_REQUESTS),
             ("REPO_OWNER", REPO_OWNER),
             ("TEST_OWNER", TEST_OWNER),
             ("CI_OWNER", CI_OWNER),
@@ -1520,6 +1654,7 @@ impl Programs {
         .map(|(name, role)| (name.into(), role.into()))
         .collect();
         let programs = [
+            rows(&self.merge_requests),
             rows(&self.repo_owner),
             rows(&self.test_owner),
             rows(&self.ci_owner),
@@ -1574,6 +1709,7 @@ impl Programs {
 pub fn programs() -> Programs {
     let p = source();
     Programs {
+        merge_requests: project(&p),
         repo_owner: project(&p),
         test_owner: project(&p),
         ci_owner: project(&p),

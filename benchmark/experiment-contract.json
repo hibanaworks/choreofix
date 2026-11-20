@@ -17,7 +17,7 @@
     "first_technical_gate": "T3/T4: compose unique resource ownership and its remaining protocol with actual effects; define the adapter trust boundary and test old owners, duplicate transfers and argument substitution before scored comparisons",
     "theorem_scope_and_milestones": "plan.md",
     "effect_boundary_contract_and_inventory": "benchmark/effect-boundaries.md",
-    "effect_boundary_status": "Twenty-seven source-bound tasks across 21 families have direct-file mechanism and live-model evidence; 21 tasks remain. Direct 13M passes all eight four-Wasm conditions and one four-Luna/xhigh depth-2 run on the same executable, with complete EPF capture, actual scientific request/material/effect/reply agreement and neutral scoring. The pilot is 113.926317333 seconds, 872510 inclusive tokens, 17 effects and zero violations. The core working-patch identity is retained; the full normal generated population and final all-family certification remain unfinished. These are finite unscored qualifications, not general Rust refinement, success rates or comparative superiority. Comparison-connection development remains deferred.",
+    "effect_boundary_status": "The migration_status inventory records 36 source-bound task qualifications across 29 families, with 12 tasks open. The paper inventory selects 43 qualified task/depth runs. These records establish the direct boundary on their own sources. Final all-family certification and formal benchmark scoring remain open.",
     "minimum_handoff_case": {
       "source": "src/tasks/handoff",
       "scope": "Native hibana-runtime mechanism fixture with two independent runtimes and the application's actual Endpoint transport; not a remote-network, Wasm or model experiment",
@@ -64,6 +64,9 @@
     "causal_design": {
       "native_comparison": "Preserve each system's native interface and procedure for the same business requirements",
       "controlled_comparison": "Match procedure, effect interface, prompt information and budgets; keep this separate from native system claims",
+      "mechanism_eligibility": "Before scoring, exercise the same first contenders, independent resource acquisitions and a rejected request followed by a valid retry in the same session. Match legal schedules, effect interface, reply and recovery semantics, prompt information and budgets. Report procedure mismatches as native-system evidence only and retain them in the task inventory.",
+      "known_arbitration_scope": "The upstream paper 9E fixture admits six terminal meal orders; the earlier ChoreoFix global admitted only A,B,C. The updated 9E implementation has replayed all 90 terminal think/eat sequences of the upstream translated model through actual Wasm, EPF and the effect audit. A further sequence with three thoughts by the same diner completes while other diners eat. This deliberate extension is a native procedure difference. Contention procedures still differ. The revised 1E and 2E programs each exercised all six participant orders through actual Wasm. Revised 1M permits all five developers to go first in real Wasm trials. Five live agents used the same binary, with two independent commits overlapping and zero violations. Revised 2M and 2H exercised each writer first and a complete reverse order through Wasm. Independent writes overlapped in the normal-delay trials, reaching two in 2M and three in 2H. Both live trials completed with zero violations. 1H still uses fixed developer waves. The runnable 1H program blocked a lone prepared B with both modules free. In revised 4M either module can publish before the other developer starts. In revised 6M either approved developer can merge first. Eight actual-Wasm initial orders and three repair cases passed on the same executable. 6M still joins both initial preparations before integration. Revised 6H permits B to finish staging before C starts implementing, as checked with actual Wasm. Its separate coupling of merge order to staging order remains open. Common-world 6M and 6H trials completed when the unrelated developer started later, with zero violations. 6M still lacks actual-Wasm coverage for a merge before the other developer starts preparing. In the previous 9M and 9H B could not eat with both forks free after A finished while the other diners were idle. Revised 9M and 9H serve the first submitted meal and arbitrate the remaining forks independently. Six five-seat and eight seven-seat paced schedules passed the common simulator and EPF, including every participant first and the reverse order. Prior live completions do not establish preservation of the original schedules. Reproduction and journal evidence: analysis/arbitration.md.",
+      "maintenance_study": "analysis/arbitration.md#maintenance-study",
       "F1_generation_campaigns": 48,
       "F1_maximum_repairs_after_initial_candidate": 4,
       "F1_candidate_selection": "First semantically conforming candidate under matched specification, vocabulary, control structures and budget; no host privileges for generated Rust",
@@ -360,7 +363,7 @@
     ],
     "hibana_execution": "The WASI participant receives both actual fork Endpoints through par, sends the actual eat request through each, receives the actual result on both, and returns both Endpoints. One global orders ownership and effects while retaining independent thinking and disjoint eating",
     "caller_binding": "The projected owner supplies the original agent_id. The philosopher string remains ordinary input and does not select a participant, matching the original simulator",
-    "scope": "The default simulator has one think and one eat step per philosopher; this finite protocol admits each once and rejects subsequent shared operations",
+    "scope": "Completing the 9E paper fixture takes one thought and one meal per diner. ChoreoFix 9E admits additional thoughts before the meal. Each diner can request a meal after its own first completed thought. All six meal orders are reachable. 9M and 9H use their own finite projections.",
     "liveness_limit": "Completion still requires each model to do its work and the executor/transport to progress; the qualification runs do not prove termination for an uncooperative model",
     "qualification": "Deterministic actual-Endpoint WASI trials pass for 3/5/7 participants, with original simulator completion, no unsafe effects, matching requests and returns and independent work. A separate three-participant Luna xhigh actual-WASI pilot passes with raw model events and usage. Full-task acceptance, matched-history comparison qualification and scored runs remain pending"
   },
@@ -428,7 +431,7 @@
     "qualification": "The Endpoint-bound path passes one production-receiver forgery test, three completed Wasm conditions at original depths 0/1/2, and one early-exit case with zero effects. Each completed record passes EPF, exact file/request/effect/result correspondence and common scoring; 3 x 16 record mutants are rejected. After retaining unsafe-deployment observations in the common scorer, unchanged Rust/SDK/runtime/runner evidence was carried forward, with one current-scorer ordinary Wasm case and its 16 mutants added. A fresh three-person Luna xhigh pilot on that final source passes independent run, EPF and effect/score audits: 32.079833 seconds, 386756 inclusive tokens, three effects, seven incoming messages and zero violations. The initial source-bound pilot remains separate. These are unscored finite qualifications, not all-family certification or matched comparisons. Evidence: output/experiments/cicd-direct-projection-20261113/qualification-summary.json."
   },
   "simulator": {
-    "contract": "common-environment-v24",
+    "contract": "common-environment-v33",
     "source": "benchmark",
     "manifest": "benchmark/simulator-manifest.json",
     "base_upstream_revision": "36b4bd108fcd74f7efb17613aebbe3fdf55499a9",
@@ -442,14 +445,19 @@
       "12H",
       "12M",
       "13E",
+      "13H",
       "13M",
       "14E",
       "14H",
       "14M",
+      "15E",
       "16E",
+      "16M",
       "3E",
       "3M",
+      "3H",
       "4E",
+      "4H",
       "4M",
       "5E",
       "5H",
@@ -459,7 +467,11 @@
       "6M",
       "7E",
       "7H",
-      "7M"
+      "7M",
+      "8M",
+      "9E",
+      "9M",
+      "9H"
     ],
     "policy": "One method-neutral environment and identical outcome criteria for every condition. Never grade a preferred choreography or pool results across changed task/environment versions.",
     "changes": [
@@ -488,10 +500,283 @@
       "Version 21 moves 3E from done maps to the same content-bound document world used by 3M and 7E/M/H. Actual completed assigned-topic research is required by draft/reference artifacts; each section's named review covers that section's current material, without invalidating the other section's independent review. Stale, failed and pending evidence cannot authorize combination, and a later repair retains any unsafe publication violation. Both author orders, write/reference orders, review orders and independent DOCUMENT/DATABASE effects remain free for every method. This version entry records the world-only checkpoint; the later direct-file 3E qualification is recorded in research_report_procedure.",
       "Version 22 replaces 2E/2M/2H read/draft/write/review done flags with actual completed literature, content-bound drafts, document contributions and review snapshots. Any method can invoke tools in any order and retry; later inputs cannot supply an earlier operation. Equal-content rewrites preserve matching evidence. Physical section conflicts remain separately observable. The other 45 task worlds, 48 task interfaces and 825 checklist items are unchanged. Earlier ports retain their exact world sources and are not relabeled.",
       "Version 23 replaces the 1E/1M/1H design/implementation/commit/test done maps with completed design text, content-bound synthetic source, actual committed module snapshots and test receipts. Calls remain free to every method and later inputs cannot validate earlier work. The 1H repair consumes an actual completed negative test diagnostic and is committed before retesting; no workflow cursor or expected-next-call is used. Identical content preserves matching evidence; later failures invalidate older passing receipts. Original failure profiles and physical module conflicts remain. This is a synthetic content world, not a real compiler. Other 45 worlds, all 48 interfaces and 825 checklist items are unchanged. Existing qualifications retain their exact earlier world sources.",
-      "Version 24 adds both current module/shared-library content identities to every 4M refactor response, including invalid and idempotent calls. This is factual world data available to every method. Tool arguments, free mechanical calls, code transformations, outcome scoring, physical resources, the other 47 worlds and all 825 checklist items remain unchanged. Earlier qualifications retain their exact simulator sources."
+      "Version 24 adds both current module/shared-library content identities to every 4M refactor response, including invalid and idempotent calls. This is factual world data available to every method. Tool arguments, free mechanical calls, code transformations, outcome scoring, physical resources, the other 47 worlds and all 825 checklist items remain unchanged. Earlier qualifications retain their exact simulator sources.",
+      "Version 26 moves 3H to the shared document world. Section reviews cite completed current drafts, references and figures derived from each author's research. A major rejection requires changed draft content. The editor needs completed reviews for the current four sections before finalizing and combining. Figure insertion uses the actual target section's exclusive resource. Each chapter can progress independently, figure creation can precede a draft after its source research, and all methods use the same tool inputs and scorer. Earlier qualifications retain their exact simulator sources.",
+      "Version 27 scores 8M from completed schema, interface, implementation, review and test occurrences. Out-of-order calls remain observable. Schema and interface changes invalidate their affected evidence. The six existing tools and resource bindings remain intact; the other 47 simulator sources are unchanged."
     ],
     "earlier_results": "Earlier qualifications retain their exact recorded simulator source/hash, including intermediate common-environment snapshots. No result is relabeled as another source.",
-    "task_revision": "Version 24 adds both current module/shared-library content identities to every 4M refactor response, including invalid and idempotent calls. This is factual world data available to every method. Tool arguments, free mechanical calls, code transformations, outcome scoring, physical resources, the other 47 worlds and all 825 checklist items remain unchanged. Earlier qualifications retain their exact simulator sources.",
+    "task_revision": "Version 29 scores 16M from completed build, registry, workspace, QA, and deployment occurrences. Unit and QA results name the artifact versions they actually tested; smoke results name the deployment occurrence. Independent component builds, QA suites, and release preparation can be reordered. A real deployment without matching prior evidence retains a violation and cannot be certified after the fact. All methods share these tools, evidence, and resource bindings.",
+    "wafer_fabrication_world": {
+      "contract": "common-environment-v32",
+      "task": "15E",
+      "source": "benchmark/environments/15E/sim.py",
+      "tests": "benchmark/tests/test_wafer_fabrication.py",
+      "scope": "All methods use the same five instruments. A process and its in-situ reading identify the wafer by the actual load receipt. Measurements on ready wafers can be repeated or interleaved with unrelated fabrication. The controller consumes three completed measurements of the current wafers. Both final spot checks use the same aligned reference wafer, one at a time in either order. The original description lists film before etch. The five tools do not expose delivery of final disposition messages."
+    },
+    "dining_world": {
+      "contract": "common-environment-v31",
+      "tasks": ["9E", "9M", "9H"],
+      "source": "benchmark/tools/sim_philosophers.py",
+      "tests": "benchmark/tests/test_dining_world.py",
+      "scope": "Count a completed meal only if the same diner completed thinking before it began. A premature effect remains in the violation record after a successful retry. Diners may start independently."
+    },
+    "migration_world": {
+      "task": "4H",
+      "contract": "common-environment-v30",
+      "scope": "The common simulator binds deploy and registration to the exact build, completed validation evidence, declared dependency deployments and database schema. Any acyclic graph is accepted. Unsafe staging and cutover remain observable even after a correction. Eight common-world regressions cover all 64 directed graphs, every deployment order for the 25 acyclic graphs, and both schema orderings for independent services.",
+      "source": "benchmark/environments/4H/sim.py",
+      "tests": "benchmark/tests/test_microservice_migration.py",
+      "evidence": "output/verification/microservice-migration-20261119/common-world-v30/verified-world.json",
+      "exhaustive_order_evidence": "output/verification/microservice-migration-20261119/common-world-v30/exhaustive/verified-orders.json"
+    },
+    "cicd_pipeline_world": {
+      "task": "16M",
+      "contract": "common-environment-v29",
+      "scope": "Common simulator qualification. The world represents build identities and deployment effects synthetically. See cicd_pipeline_procedure for the direct ChoreoFS and live-model evidence.",
+      "source": "benchmark/environments/16M/sim.py",
+      "evidence": "output/verification/cicd-16m-20261119/causal-world-v1/verified-world.json"
+    },
+    "full_stack_api_world": {
+      "task": "8M",
+      "contract": "common-environment-v27",
+      "scope": "Current schema, API, implementation, review and integration-test evidence comes from actual completed tool occurrences in the neutral simulator. All methods can call the same tools in their chosen order. See full_stack_api_procedure for the separate direct-Wasm and live qualification.",
+      "world_regressions": 8,
+      "source": "benchmark/environments/8M/sim.py"
+    },
+    "large_document_world": {
+      "task": "7H",
+      "review_feedback": {
+        "contract": "common-environment-v33",
+        "scope": "A reviewer may attach free text to any assessment. The common world returns it verbatim with the review ID and the manuscript snapshot. Each method retains access to reviews without comments and to the same publication criteria."
+      },
+      "contract": "common-environment-v28",
+      "scope": "The common scorer binds exact minor edits to the completed review of the prior chapter versions. All authorized edits and current factual checks permit reuse of that review. A substantive revision requires a completed new review. This qualification covers simulator evidence and the input manifest; the direct application port is open.",
+      "common_world_tests": 275,
+      "document_world_tests": 13,
+      "input_tool_tests": 17,
+      "evidence": "output/verification/large-document-20261119/neutral-world-v28-final/verified-world.json",
+      "writer_and_figure_preparation": {
+        "native_initial_write_orders": 24,
+        "actual_wasm_participants": 4,
+        "effects": 14,
+        "actual_figure_insertions": 3,
+        "chapter_four_figure_insertion_independent_of_chapter_three_references": true,
+        "complete_capture_records": 3058,
+        "violations": 0,
+        "model_calls": 0,
+        "scored_runs": 0,
+        "evidence": "output/verification/large-document-20261119/figure-parallel-v3/verified-figure-parallel.json"
+      },
+      "part_i_submission": {
+        "native_initial_write_orders": 24,
+        "actual_wasm_participants": 4,
+        "finalized_chapters": 2,
+        "early_submission_refused": true,
+        "effects": 15,
+        "complete_capture_records": 3459,
+        "violations": 0,
+        "evidence": "output/verification/large-document-20261119/part-i-framing-v1/verified-part-i.json"
+      },
+      "scoped_fact_checks": {
+        "actual_wasm_participants": 5,
+        "checks": 3,
+        "part_ii_checked_before_part_i_finalization": true,
+        "effects": 18,
+        "complete_capture_records": 4607,
+        "violations": 0,
+        "evidence": "output/verification/large-document-20261119/fact-review-v2/verified-fact-checks.json"
+      },
+      "scoped_review_verdicts": {
+        "actual_wasm_participants": 6,
+        "verdicts": ["reviewed", "needs_revision", "minor_revision"],
+        "part_ii_reviewed_before_part_i_finalization": true,
+        "effects": 21,
+        "complete_capture_records": 6006,
+        "violations": 0,
+        "evidence": "output/verification/large-document-20261119/editorial-verdicts-v2/verified-review-verdicts.json"
+      },
+      "publication": {
+        "participants_per_wasm_condition": 7,
+        "conditions": 3,
+        "common_world_completions": 1,
+        "unapproved_reviews_refused_without_loan": true,
+        "negative_editorial_decision_returned_loan_without_publication": true,
+        "effects": 66,
+        "complete_capture_records": 21416,
+        "violations": 0,
+        "evidence": "output/verification/large-document-20261119/publication-v2/verified-publication.json"
+      },
+      "editorial_repair": {
+        "participants_per_wasm_condition": 7,
+        "conditions": 3,
+        "common_world_completions": 2,
+        "rejections_before_publication": 2,
+        "revised_sections": ["CHAPTER_1", "CHAPTER_2"],
+        "effects": 75,
+        "complete_capture_records": 31561,
+        "editorial_outcome_receives": 15,
+        "guest_scripts_use_failure_schedule": false,
+        "violations": 0,
+        "model_calls": 0,
+        "scored_runs": 0,
+        "task_qualified": false,
+        "evidence": "output/verification/large-document-20261119/editorial-receipts-v1/verified-editorial-receipts.json"
+      },
+      "initial_part_i_fact_repair": {
+        "participants_per_wasm_condition": 7,
+        "conditions": 4,
+        "common_world_completions": 3,
+        "part_i_fact_rejections_before_approval": 2,
+        "revised_sections": ["CHAPTER_1", "CHAPTER_2"],
+        "effects": 102,
+        "complete_capture_records": 42726,
+        "violations": 0,
+        "model_calls": 0,
+        "scored_runs": 0,
+        "task_qualified": false,
+        "evidence": "output/verification/large-document-20261119/fact-repair-v2/verified-fact-repair.json"
+      },
+      "initial_part_i_major_review_repair": {
+        "participants_per_wasm_condition": 7,
+        "conditions": 5,
+        "common_world_completions": 4,
+        "part_i_major_review_rejections_before_approval": 2,
+        "revised_sections": ["CHAPTER_1", "CHAPTER_2"],
+        "effects": 131,
+        "complete_capture_records": 58966,
+        "violations": 0,
+        "model_calls": 0,
+        "scored_runs": 0,
+        "task_qualified": false,
+        "evidence": "output/verification/large-document-20261119/major-repair-v1/verified-major-repair.json"
+      },
+      "initial_part_i_minor_edits": {
+        "participants_per_wasm_condition": 7,
+        "conditions": 8,
+        "common_world_completions": 7,
+        "minor_edit_orders": [["CHAPTER_1"], ["CHAPTER_2"], ["CHAPTER_1", "CHAPTER_2"], ["CHAPTER_2", "CHAPTER_1"]],
+        "minor_edits": 6,
+        "effects": 210,
+        "complete_capture_records": 90844,
+        "violations": 0,
+        "model_calls": 0,
+        "scored_runs": 0,
+        "task_qualified": false,
+        "evidence": "output/verification/large-document-20261119/minor-repair-v1/verified-minor-repair.json"
+      },
+      "part_ii_major_review_repair": {
+        "participants_per_wasm_condition": 7,
+        "conditions": 8,
+        "common_world_completions": 8,
+        "revised_and_reapproved_scopes": ["CHAPTER_4", "CHAPTER_3"],
+        "native_draft_orders": 24,
+        "effects": 226,
+        "complete_capture_records": 101794,
+        "violations": 0,
+        "model_calls": 0,
+        "scored_runs": 0,
+        "task_qualified": false,
+        "remaining": "Part II factual rejection and exact minor amendments, recovery after editorial revision, and current-source live-model qualification",
+        "evidence": "output/verification/large-document-20261119/part-ii-major-v5/verified-part-ii-major.json"
+      },
+      "part_ii_factual_and_major_repair": {
+        "participants_per_wasm_condition": 7,
+        "conditions": 10,
+        "common_world_completions": 10,
+        "original_failure_depths": [0, 1, 2],
+        "factual_and_major_rejection_recovery_scopes": ["CHAPTER_4", "CHAPTER_3"],
+        "effects": 305,
+        "complete_capture_records": 145740,
+        "violations": 0,
+        "stale_author_notice_rejected": true,
+        "model_calls": 0,
+        "scored_runs": 0,
+        "task_qualified": false,
+        "remaining": "Part II exact minor edits, recovery after editorial revision, and current-source live-model qualification",
+        "evidence": "output/verification/large-document-20261119/part-ii-fact-v2/verified-part-ii-fact.json"
+      },
+      "part_ii_minor_and_single_review_verdict": {
+        "participants_per_wasm_condition": 7,
+        "conditions": 11,
+        "common_world_completions": 11,
+        "minor_amendment_scopes": ["CHAPTER_4", "CHAPTER_3"],
+        "part_i_review_recovery_verdicts": ["needs_revision", "needs_revision", "reviewed"],
+        "effects": 333,
+        "complete_capture_records": 156348,
+        "violations": 0,
+        "model_calls_in_mechanism_conditions": 0,
+        "scored_runs": 0,
+        "task_qualified": false,
+        "stopped_pre_fix_live_pilot": {
+          "participants": 7,
+          "depth": 0,
+          "effects_before_stop": 40,
+          "scope": "Both Part II chapters completed two major revisions and one exact minor amendment with a new successful fact check. Part I required two reads of the same review verdict. The pilot stopped before publication and complete capture.",
+          "evidence": "output/verification/large-document-20261119/part-ii-minor-live-v6/stopped-depth-0.json"
+        },
+        "remaining": "Recovery from a rejected post-amendment fact check and after editorial revision, and live-model completion on the single-verdict build",
+        "evidence": "output/verification/large-document-20261119/single-scoped-verdict-v1/verified-single-scoped-verdict.json"
+      },
+      "editorial_reassessment_recovery": {
+        "participants_per_wasm_condition": 7,
+        "conditions": 12,
+        "common_world_completions": 12,
+        "effects": 366,
+        "complete_capture_records": 177048,
+        "violations": 0,
+        "explicit_post_editorial_recovery": {
+          "editorial_rejections": 1,
+          "subsequent_fact_rejections": 1,
+          "subsequent_major_review_rejections": 1,
+          "effects": 33,
+          "complete_capture_records": 17408,
+          "scope": "Same live DOCUMENT loan during editorial reassessment. EPF and independent replay corroborate the amended material, actual effects and replies, and final use of fresh facts and review."
+        },
+        "model_calls": 0,
+        "scored_runs": 0,
+        "task_qualified": false,
+        "remaining": "Recovery from a rejected post-amendment fact check and live-model completion on the current build",
+        "evidence": "output/verification/large-document-20261119/editorial-reassessment-v7/verified-editorial-reassessment.json"
+      },
+      "part_ii_rejected_amendment_check_recovery": {
+        "participants_per_wasm_condition": 7,
+        "conditions": 13,
+        "common_world_completions": 13,
+        "effects": 400,
+        "complete_capture_records": 192664,
+        "violations": 0,
+        "explicit_recovery": {
+          "chapters": ["CHAPTER_4", "CHAPTER_3"],
+          "effects": 34,
+          "complete_capture_records": 14809,
+          "scope": "Each post-amendment fact check is rejected. The author receives the denial and revises under the same loan, then a fresh successful fact check and review permit publication. Independent replay agrees on the requests, results and receipts."
+        },
+        "model_calls": 0,
+        "scored_runs": 0,
+        "task_qualified": false,
+        "remaining": "Part I recovery after a rejected post-amendment fact check and live-model completion on the current source",
+        "evidence": "output/verification/large-document-20261119/amendment-recovery-v4/verified-part-ii-amendment-recovery.json"
+      },
+      "part_i_rejected_amendment_check_recovery": {
+        "participants_per_wasm_condition": 7,
+        "conditions": 14,
+        "common_world_completions": 14,
+        "effects": 430,
+        "complete_capture_records": 209182,
+        "violations": 0,
+        "explicit_recovery": {
+          "chapters": ["CHAPTER_1", "CHAPTER_2"],
+          "effects": 30,
+          "complete_capture_records": 13665,
+          "scope": "Both exact amendments precede an actually rejected fact check. The author receives that rejection and corrects the material through the same loan. Fresh fact and review receipts authorize publication. Independent replay agrees on the requests, results and receipts."
+        },
+        "model_calls": 0,
+        "scored_runs": 0,
+        "task_qualified": false,
+        "remaining": "Live-model completion on the current source",
+        "evidence": "output/verification/large-document-20261119/part-i-amendment-recovery-v7/verified-part-i-amendment-recovery.json"
+      }
+    },
     "document_data_qualification": {
       "contract": "common-environment-v8",
       "task": "7E",
@@ -709,7 +994,45 @@
         "scored_runs": 0,
         "counted_as_accepted_port": false,
         "evidence": "output/experiments/research-paper-3M-development-v1/whole-v1/",
-        "remaining": "Real ChoreoFS/Wasm command path, model freedom and recovery, current-source Wasm/EPF/effect qualification and live AI. Native scripted actors are not a full port."
+        "remaining_at_this_revision": "Real ChoreoFS/Wasm command path, model freedom and recovery, current-source Wasm/EPF/effect qualification and live AI."
+      },
+      "direct_wasm_v2": {
+        "status": "direct_wasm_mechanism_passed_live_and_effect_audit_pending",
+        "source_events": 378,
+        "projected_roles": 34,
+        "wasm_conditions": 2,
+        "wasm_effects": 37,
+        "complete_epf_records": 15348,
+        "post_approval_revision_refusals": 6,
+        "common_score_completed_conditions": 2,
+        "violations": 0,
+        "native_tests": 30,
+        "model_calls": 0,
+        "scored_runs": 0,
+        "counted_as_accepted_port": false,
+        "evidence": "output/experiments/research-paper-direct-20261118/v2/mechanism-summary.json"
+      },
+      "direct_wasm_live_v5": {
+        "status": "qualified_direct_wasi_and_live_model",
+        "source_events": 390,
+        "projected_roles": 34,
+        "simulator_contract": "common-environment-v25",
+        "wasm_conditions": 2,
+        "wasm_effects": 40,
+        "wasm_complete_epf_records": 15913,
+        "post_approval_revision_refusals": 6,
+        "record_mutations_rejected": 4,
+        "live_depth": 2,
+        "model_calls": 5,
+        "live_effects": 26,
+        "live_complete_epf_records": 22434,
+        "live_elapsed_seconds": 174.782238333,
+        "live_inclusive_tokens": 2251389,
+        "live_cross_resource_overlaps": 2,
+        "violations": 0,
+        "scored_runs": 0,
+        "counted_as_accepted_port": true,
+        "evidence": "output/experiments/research-paper-direct-20261118/v5/verified-3M.json"
       }
     }
   },
@@ -759,6 +1082,54 @@
     "scored_runs": 0,
     "final_all_family_certification": false
   },
+  "figure_document_port": {
+    "status": "source_bound_direct_file_port_qualified",
+    "task": "7M",
+    "mechanism_conditions": 6,
+    "mechanism_effects": 118,
+    "live_model_conditions": 1,
+    "live_model_depth": 1,
+    "live_model_effects": 27,
+    "violations": 0,
+    "scored_runs": 0,
+    "evidence": "output/verification/figure-document-20261118/v40/verified-7M.json",
+    "scope": "All six initial writing orders, both insertion orders, actual delayed writing/creation overlap, affected-scope rechecking, a blocking outcome read during reconsideration, and one source-bound five-model trial. This is a finite task qualification."
+  },
+  "full_stack_api_procedure": {
+    "task": "8M",
+    "status": "qualified_direct_wasi_and_live_model",
+    "simulator_contract": "common-environment-v27",
+    "model": "gpt-6-luna",
+    "reasoning_effort": "xhigh",
+    "scripted_wasm_conditions": 1,
+    "scripted_effects": 24,
+    "live_depths": [0, 1, 2],
+    "live_effects": 36,
+    "live_complete_capture_records": 53346,
+    "inclusive_tokens": 5882177,
+    "violations": 0,
+    "scored_runs": 0,
+    "evidence": "output/verification/full-stack-api-20261118/verified-8M-v26.json"
+  },
+  "cicd_pipeline_procedure": {
+    "task": "16M",
+    "status": "qualified_direct_wasi_and_live_model",
+    "simulator_contract": "common-environment-v29",
+    "model": "gpt-6-luna",
+    "reasoning_effort": "xhigh",
+    "participants_per_run": 5,
+    "scripted_wasm_conditions": 12,
+    "scripted_effects": 207,
+    "scripted_complete_capture_records": 65852,
+    "live_depths": [0, 1, 2],
+    "live_terminal_outcomes": ["production_smoke_passed", "staging_deployment_failed", "second_qa_failed"],
+    "live_effects": 70,
+    "live_complete_capture_records": 36543,
+    "inclusive_tokens": 7367782,
+    "violations": 0,
+    "scored_runs": 0,
+    "evidence": "output/verification/cicd-16m-20261119/verified-live-depths-0-1-2.json"
+  },
   "migration_status": {
     "scope": "Source-bound direct ChoreoFS ports. Earlier procedure reports retain their recorded sources and historical pre-direct-boundary scope.",
     "migrated_tasks": [
@@ -767,8 +1138,13 @@
       "11E",
       "12E",
       "13E",
+      "13H",
       "13M",
+      "14E",
+      "14H",
+      "14M",
       "16E",
+      "16M",
       "1E",
       "1H",
       "1M",
@@ -776,6 +1152,8 @@
       "2H",
       "2M",
       "3E",
+      "3H",
+      "3M",
       "4E",
       "4M",
       "5E",
@@ -785,14 +1163,16 @@
       "6H",
       "6M",
       "7E",
+      "7M",
       "8E",
+      "8M",
       "9E",
       "9H",
       "9M"
     ],
-    "count": 27,
-    "remaining": 21,
-    "qualified_direct_families": 21,
+    "count": 36,
+    "remaining": 12,
+    "qualified_direct_families": 29,
     "final_source_all_family_certification": false,
     "scored_comparisons": 0,
     "removed_legacy_adapters": {
@@ -806,19 +1186,19 @@
         "14H"
       ],
       "files": 99,
-      "scope": "Removed unsupported execution adapters, their old auditors and mechanism drivers. Original task/world inputs and retained source-bound evidence remain; all six still require direct ports."
+      "scope": "Removed unsupported execution adapters, their old auditors and mechanism drivers. Original task/world inputs and source-bound evidence remain. The six tasks required new direct ports at removal."
     },
     "latest_source_bound_port": {
       "tasks": [
-        "13M"
+        "16M"
       ],
-      "simulator_contract": "common-environment-v24",
-      "evidence": "output/experiments/lab-quality-direct-20261116/qualification-live-v94.json"
+      "simulator_contract": "common-environment-v29",
+      "evidence": "output/verification/cicd-16m-20261119/verified-live-depths-0-1-2.json"
     },
     "direct_choreofs_boundary": {
       "status": "migration_in_progress",
-      "strengthened_boundary_qualified_tasks": 27,
-      "remaining_tasks": 21,
+      "strengthened_boundary_qualified_tasks": 36,
+      "remaining_tasks": 12,
       "unsafe_application_miri_required": false,
       "scored_runs": 0,
       "full_48_task_goal_unchanged": true,
@@ -1004,22 +1384,13 @@
       "11M",
       "12H",
       "12M",
-      "13H",
-      "14E",
-      "14H",
-      "14M",
       "15E",
       "15H",
       "15M",
       "16H",
-      "16M",
-      "3H",
-      "3M",
       "4H",
       "7H",
-      "7M",
-      "8H",
-      "8M"
+      "8H"
     ]
   },
   "shared_build_procedure": {
@@ -1268,7 +1639,7 @@
   },
   "lab_cascading_world": {
     "task": "13H",
-    "status": "Common world prepared; four-instrument inspection component has a delegated global and direct localsides. Full scientific global, Wasm, EPF and model qualification remain pending.",
+    "status": "Source-bound direct Wasm and live-model qualification complete across the declared conditions.",
     "inspection_component": {
       "evidence": "output/experiments/lab-cascading-direct-20261116/component-native-v4.json",
       "source": "src/tasks/lab_cascading/",
@@ -1288,11 +1659,11 @@
       "live_model_qualified": false,
       "full_task_qualified": false
     },
-    "simulator_contract": "common-environment-v11",
+    "simulator_contract": "common-environment-v25",
     "scientific_model": "Shares actual material and QC receipts with 13M; replaces unrelated done tables with synthesis/purification/assay/chromatography inputs, cascading biological rejection, finite material stock and actual four-instrument inspection",
-    "new_tests": 8,
-    "common_tests_passed": 114,
-    "input_tests_passed": 16,
+    "new_tests": 9,
+    "common_tests_passed": 260,
+    "input_tests_passed": 17,
     "preparation_quality_orders": 120,
     "inspection_positions_exercised": 12,
     "all_order_position_products_claimed": false,
@@ -1306,11 +1677,43 @@
       5
     ],
     "previous_13H_delay_was_zero": true,
-    "qualification": "Version 15 passes 188 common-world test functions, including 8,640 finite 14M order/decision cases, rejection/retry depths 1-3, all eleven replaced/pending inputs, stale approval, malformed JSON and non-scheduling physical overlap. The same thirteen-call old counterexample is rejected. All 48 task inventories and 825 original checklist items are byte-bound. Earlier qualified ports and pilots retain their frozen world versions; These common-world tests alone do not qualify the application. The separate 14M source-bound application and pilot results are recorded under regulatory_discovery_procedure.",
+    "qualification": "The current common world keeps actual analytical measurements after QC rejection but refuses stale-material QC and final certification. All 260 direct common-world tests and 17 input-tool tests pass. Historical port qualifications retain their original world and sources.",
     "source_notes": "benchmark/ports/13H.md",
-    "counted_in_migrated_tasks": false,
-    "model_calls": 0,
-    "scored_runs": 0
+    "counted_in_migrated_tasks": true,
+    "model_calls": 15,
+    "scored_runs": 0,
+    "direct_wasi_and_live": {
+      "evidence": "output/experiments/lab-cascading-wasi-20261118/v42-finite-synthesis/verified-13H.json",
+      "mechanism_conditions": 11,
+      "live_depths": [
+        0,
+        1,
+        2
+      ],
+      "live_common_scores_complete": 2,
+      "live_reagent_exhaustion": 1,
+      "live_actual_effects": 45,
+      "live_capture_records": 29977,
+      "live_inclusive_tokens": 5095344,
+      "violations": 0
+    },
+    "native_science": {
+      "evidence": "output/experiments/lab-cascading-direct-20261117/science-native-v27/",
+      "source_events": 417,
+      "programs": 28,
+      "conditions": 10,
+      "task_successes": 8,
+      "ordinary_exhaustions": 2,
+      "actual_effects": 156,
+      "epf_captured_records": 10152,
+      "violations": 0,
+      "source_inputs_unchanged": true,
+      "source_and_binary_hash_saved": true,
+      "wasm": false,
+      "independent_effect_audit": false,
+      "live_model": false,
+      "scored_runs": 0
+    }
   },
   "lab_synthesis_procedure": {
     "task": "13E",
@@ -1445,10 +1848,32 @@
       "scope": "Recorded source/binary, complete declared finite mechanism domain, one unscored live trial. All-input, final core/all-family and matched-comparison claims are not established."
     }
   },
+  "multi_round_discovery_procedure": {
+    "task": "14H",
+    "counted_in_migrated_tasks": true,
+    "accepted_direct_port": 31,
+    "simulator_contract": "common-environment-v25",
+    "evidence": "output/experiments/multi-round-discovery-direct-20261118/v5/verified-14H.json",
+    "global": "src/tasks/multi_round_discovery/global.rs",
+    "localsides": "src/tasks/multi_round_discovery/localside",
+    "wasm_conditions": 3,
+    "wasm_effects": 48,
+    "wasm_complete_capture_records": 20583,
+    "actual_model_depth": 2,
+    "actual_model_participants": 7,
+    "live_effects": 34,
+    "live_complete_capture_records": 17431,
+    "actual_model_elapsed_seconds": 320.364371541,
+    "actual_model_inclusive_tokens": 3130977,
+    "live_terminal_outcome": "abort",
+    "violations": 0,
+    "scored_runs": 0,
+    "all_family_certification": false
+  },
   "regulatory_discovery_procedure": {
     "task": "14M",
-    "status": "accepted_source_bound_application_qualification",
-    "counted_in_migrated_tasks": true,
+    "status": "historical_pre_direct_boundary_application_qualification",
+    "counted_in_migrated_tasks": false,
     "simulator_contract": "common-environment-v15",
     "participants": 5,
     "instruments": 3,
@@ -1504,16 +1929,53 @@
       "qualification": "completed real run passed report-corrected saved-record re-audit without another model execution"
     },
     "core_normal_contract_complete": false,
-    "exact_observer_failure_generated_coverage_complete": false
+    "exact_observer_failure_generated_coverage_complete": false,
+    "direct_file_qualification": {
+      "status": "qualified_direct_wasi_and_live_model",
+      "counted_in_migrated_tasks": true,
+      "simulator_contract": "common-environment-v25",
+      "evidence": "output/experiments/regulatory-discovery-direct-20261118/v5/verified-14M.json",
+      "accepted_direct_port": 30,
+      "role_programs": 41,
+      "wasm_conditions": 7,
+      "wasm_effects": 135,
+      "wasm_capture_records": 41360,
+      "actual_model_conditions": 1,
+      "actual_model_depth": 2,
+      "actual_model_participants": 5,
+      "actual_model_effects": 32,
+      "actual_model_capture_records": 13597,
+      "actual_model_elapsed_seconds": 329.586015792,
+      "actual_model_inclusive_tokens": 2666036,
+      "violations": 0,
+      "scored_runs": 0
+    }
   },
   "discovery_procedure": {
     "task": "14E",
-    "simulator_contract": "common-environment-v1",
-    "status": "Sixteenth migrated task; finite mechanism qualification and one unscored model pilot",
+    "simulator_contract": "common-environment-v25",
+    "status": "Direct ChoreoFS mechanism and live-model qualification complete for the declared cases.",
+    "counted_in_migrated_tasks": true,
+    "direct_wasi_and_live": {
+      "evidence": "output/experiments/discovery-direct-20261118/v8-lead-evidence/verified-14E.json",
+      "mechanism_conditions": 2,
+      "mechanism_effects": 26,
+      "mechanism_complete_capture_records": 7130,
+      "live_conditions": 1,
+      "live_actual_effects": 13,
+      "live_complete_capture_records": 5226,
+      "live_elapsed_seconds": 89.7313905,
+      "live_inclusive_tokens": 1032980,
+      "live_common_score_complete": true,
+      "live_independent_effect_overlap_pairs": 3,
+      "violations": 0,
+      "scored_runs": 0
+    },
     "common_environment": "The shared simulator does not enforce an analysis order. Exclusive instrument occupancy and actual assigned-analysis completion are checked equally for all methods. Explicit common synthetic latency is not measured laboratory time.",
-    "protocol": "Actual HPLC, MASS_SPEC and CELL_LAB Endpoints carry requests and results. Compound data, reports and the actual go/no-go decision follow the task global. The biologist keeps CELL_LAB across incubation; the chemist and toxicologist return HPLC before waiting for other work. No application permission table, task flags or separate scheduler.",
-    "native_receiver_negative_probes": 2,
-    "wasm": {
+    "protocol": "Each operation binds directly to a typed file receive at its named owner. Actual HPLC, MASS_SPEC and CELL_LAB loans authorize the instrument use. Compound data, two reports and the actual go/no-go decision follow the global. The biologist holds CELL_LAB through stability analysis; the chemist and toxicologist return HPLC before waiting for peer work.",
+    "historical_simulator_contract": "common-environment-v1",
+    "historical_native_receiver_negative_probes": 2,
+    "historical_wasm": {
       "conditions": 3,
       "actual_analyses": 36,
       "captured_records": 12809,
@@ -1526,7 +1988,7 @@
       "epf_and_effect_audits": "passed",
       "source_artifact": "output/experiments/discovery-wasi-qualification-v2"
     },
-    "live_model": {
+    "historical_live_model": {
       "participants": 4,
       "model": "gpt-6-luna",
       "effort": "xhigh",
@@ -1542,7 +2004,7 @@
       "epf_and_effect_audits": "passed",
       "source_artifact": "output/experiments/model-qualification/current-core-discovery-14E-v1"
     },
-    "qualification_scope": "Record mutations check the auditor, not runtime attacks. No matched comparison or final-source all-family certification is claimed. Cached input and reasoning tokens are included, not counted twice."
+    "qualification_scope": "The direct port is qualified for the two declared scripted conditions and one live run. Initial requests can arrive in either tested order and the lead analyses can overlap. The tested stability operation follows the assay result while retaining the actual CELL_LAB view. Historical adapter evidence stays bound to its own version. No matched comparison or final-source all-family certification is claimed."
   },
   "workshop_procedure": {
     "task": "11E",

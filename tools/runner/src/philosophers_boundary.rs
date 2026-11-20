@@ -78,6 +78,23 @@ async fn participant(
                 assert_eq!(count(&simulator.observed_events().await?), before);
             }
         }
+        if adversarial && tool == "think" {
+            // Rejected thoughts must not enable a meal even after multiple attempts.
+            let early = guest
+                .command(
+                    agent,
+                    "echo '{\"philosopher\":\"ready\"}' > /service/eat".into(),
+                )
+                .await?;
+            assert!(
+                early["stdout"]
+                    .as_str()
+                    .ok_or("early meal output")?
+                    .contains("wash:"),
+                "{early}"
+            );
+            assert_eq!(count(&simulator.observed_events().await?), 0);
+        }
         // This original argument is a display value; it must not change the
         // participant or its actual fork pair. Padding crosses a guest chunk.
         let arguments = json!({"philosopher":"ANOTHER_DISPLAY_NAME"});
@@ -95,20 +112,32 @@ async fn participant(
         results.push(result);
         if adversarial {
             let before = count(&simulator.observed_events().await?);
-            let duplicate = guest
-                .command(agent, format!("echo '{arguments}' > /service/{tool}"))
-                .await?;
-            assert!(
-                duplicate["stdout"]
-                    .as_str()
-                    .ok_or("duplicate output")?
-                    .contains("wash:"),
-                "{duplicate}"
-            );
-            assert_eq!(count(&simulator.observed_events().await?), before);
+            let command = format!("echo '{arguments}' > /service/{tool}");
+            if tool == "think" {
+                let reply = guest
+                    .command(agent, format!("{command} && cat /service/think"))
+                    .await?;
+                let thought = response(&reply)?;
+                assert_eq!(thought["success"], true, "{reply}");
+                assert_eq!(thought["data"]["philosopher"], agent);
+                assert_eq!(count(&simulator.observed_events().await?), before + 1);
+            } else {
+                let duplicate = guest.command(agent, command).await?;
+                assert!(
+                    duplicate["stdout"]
+                        .as_str()
+                        .ok_or("duplicate output")?
+                        .contains("wash:"),
+                    "{duplicate}"
+                );
+                assert_eq!(count(&simulator.observed_events().await?), before);
+            }
         }
     }
-    assert_eq!(count(&simulator.observed_events().await?), 2);
+    assert_eq!(
+        count(&simulator.observed_events().await?),
+        2 + usize::from(adversarial)
+    );
     let private = guest.command(agent, "cat /work/note".into()).await?;
     assert!(
         private["stdout"]
@@ -301,4 +330,151 @@ async fn five_philosophers_adversarial() -> Result<()> {
 #[ignore = "requires the source-qualified dining runtime, wash and original environment"]
 async fn seven_philosophers_adversarial() -> Result<()> {
     actual_wasi_dining("9H", true).await
+}
+
+/// Each diner finishes before the next guest starts thinking. A fixed priority
+/// or an all-thoughts barrier would stall a legal schedule in this test.
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires the dining executable and wash Wasm"]
+async fn three_philosophers_all_meal_orders() -> Result<()> {
+    verify_action_words(
+        "9E",
+        "three-diner-orders",
+        crate::qualification::DINING_9E_ORDERS.iter().copied(),
+    )
+    .await
+}
+
+/// With every other guest idle, each seat must be able to finish first.
+/// Rotations cover both relative orders of every neighboring pair.
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires the dining executable and wash Wasm"]
+async fn five_philosophers_any_first_seat() -> Result<()> {
+    verify_action_words(
+        "9M",
+        "five-first-seats",
+        crate::qualification::DINING_9M_ORDERS.iter().copied(),
+    )
+    .await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires the dining executable and wash Wasm"]
+async fn seven_philosophers_any_first_seat() -> Result<()> {
+    verify_action_words(
+        "9H",
+        "seven-first-seats",
+        crate::qualification::DINING_9H_ORDERS.iter().copied(),
+    )
+    .await
+}
+
+// In the upstream observer, lower case denotes a thought and upper case a meal.
+#[hibana_runtime::scope]
+pub(super) async fn verify_action_words<'a>(
+    task: &str,
+    folder: &str,
+    schedules: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> Result<()> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()?;
+    std::env::set_current_dir(root)?;
+    let evidence =
+        PathBuf::from(std::env::var_os("CHOREOFIX_EVIDENCE_ROOT").ok_or("evidence directory")?);
+    fs::create_dir_all(&evidence)?;
+    let output = evidence.join(folder);
+    fs::create_dir(&output)?;
+    let executable = PathBuf::from(
+        std::env::var_os("CHOREOFIX_PHILOSOPHERS_WASI_BINARY").ok_or("dining executable")?,
+    )
+    .canonicalize()?;
+    let wash = Path::new("vendor/hibana-wash/target/wasm32-wasip1/release/hibana-wash.wasm");
+    let count = match task {
+        "9E" => 3,
+        "9M" => 5,
+        "9H" => 7,
+        _ => return Err(format!("unknown dining task {task}").into()),
+    };
+    let diners = &crate::philosopher_identity::AGENTS[..count];
+    crate::projection::archive(&executable, &output, task)?;
+    let program = digest(&executable)?;
+    let module = digest(wash)?;
+    let projection = digest(&output.join("projection.json"))?;
+    let harness = digest(&std::env::current_exe()?)?;
+    let world_hash = digest(Path::new("benchmark/simulator-manifest.json"))?;
+    for (name, word) in schedules {
+        let steps: Vec<_> = word
+            .chars()
+            .map(|action| match action {
+                'a'..='g' => Ok((action.to_ascii_uppercase(), "think")),
+                'A'..='G' => Ok((action, "eat")),
+                _ => Err("unknown dining action"),
+            })
+            .collect::<std::result::Result<_, _>>()?;
+        let order: String = word.chars().filter(char::is_ascii_uppercase).collect();
+        let case = output.join(name);
+        fs::create_dir(&case)?;
+        fs::hard_link(output.join("projection.json"), case.join("projection.json"))?;
+        save(
+            &case.join("case.json"),
+            &json!({"task":task,"depth":0,"meal_order":order,"actions":word,
+            "model_calls":0,"scored_benchmark":false,"runtime_binary_sha256":program,
+            "compiled_projection_sha256":projection,"guest_wasm_sha256":module,
+            "harness_binary_sha256":harness,"simulator_manifest_sha256":world_hash,
+            "domain_delay_multiplier":0.01}),
+        )?;
+        let events = case.join("events.jsonl");
+        let trace = Trace::create(&events)?;
+        let (world, _) = oracle::Simulator::new(task, 0, 0.01, trace.clone(), &[])?;
+        let (guest, trial) = process::guest(&executable, wash, &[task], &case, trace, world)?;
+        let ((), result) = hibana_runtime::race(async {
+            async {
+                for &(seat, tool) in &steps {
+                    let diner = format!("PHILOSOPHER_{seat}");
+                    let reply = guest.command(&diner, format!(
+                            "echo '{{\"philosopher\":\"{diner}\"}}' > /service/{tool}; cat /service/{tool}"
+                        )).await?;
+                    let effect = response(&reply)?;
+                    assert_eq!(effect["success"], true, "{diner}/{tool}: {reply}");
+                    assert_eq!(effect["data"]["philosopher"], diner);
+                }
+                for &diner in diners {
+                    assert_eq!(guest.command(diner, "exit 0".into()).await?["exit_status"], 0);
+                }
+                Ok(())
+            };
+            async { trial.await };
+        }, hibana_runtime::host::deadline(Duration::from_secs(60))).await?;
+        save(&case.join("result.json"), &result)?;
+        assert_eq!(result["runtime_exit_code"], 0);
+        assert_eq!(result["protocol"]["status"], "complete");
+        assert_eq!(result["backend_errors"], json!([]));
+        let expected: Vec<_> = steps
+            .iter()
+            .map(|(seat, tool)| (format!("PHILOSOPHER_{seat}"), *tool))
+            .collect();
+        let scored = result["score"]["events"]
+            .as_array()
+            .ok_or("simulator events")?;
+        assert!(
+            scored
+                .iter()
+                .map(|e| (e["agent"].as_str(), e["tool"].as_str()))
+                .eq(expected
+                    .iter()
+                    .map(|(agent, tool)| (Some(agent.as_str()), Some(*tool)))),
+            "{name}: {scored:?}"
+        );
+        let audit = philosophers_audit::audit(&events)?;
+        assert_eq!(result["score"]["complete"], true);
+        assert_eq!(result["score"]["violations"], json!([]));
+        assert_eq!(audit["actual_resource_endpoint_returns"], 2 * count);
+        assert_eq!(audit["violations"], 0);
+        save(&case.join("audit.json"), &audit)?;
+    }
+    Ok(())
 }

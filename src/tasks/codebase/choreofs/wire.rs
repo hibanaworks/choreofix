@@ -158,7 +158,7 @@ mod tests {
 
         let early = Arguments::<A, 2>(br#"{"modules":"AUTH_MODULE,DATABASE_MODULE"}"#.to_vec());
         let denied = hibana_runtime::race(
-            async { Ok::<_, ShellError>(file.send::<CommitRequest<A>>(&early).await) },
+            async { Ok::<_, ShellError>(file.send::<Submitted<A>>(&early).await) },
             hibana_runtime::host::deadline(Duration::from_secs(2)),
         )
         .await?;

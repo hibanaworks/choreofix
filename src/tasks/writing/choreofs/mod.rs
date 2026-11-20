@@ -46,12 +46,11 @@ async fn run_2e_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> Sh
         let mut c_data = rv.enter(session, &programs.c_data)?;
         let file_c = rv.enter(session, &programs.c_file)?;
         let mut c_io = rv.enter(session, &programs.c_io)?;
-        let mut intro = rv.enter(session, &programs.intro)?;
-        let intro_resource = rv.enter(session, &programs.intro_resource)?;
-        let mut methods = rv.enter(session, &programs.methods)?;
-        let methods_resource = rv.enter(session, &programs.methods_resource)?;
-        let mut results = rv.enter(session, &programs.results)?;
-        let results_resource = rv.enter(session, &programs.results_resource)?;
+        let mut submissions = rv.enter(session, &programs.submissions)?;
+        let mut editor = rv.enter(session, &programs.editor)?;
+        let mut intro_resource = rv.enter(session, &programs.intro_resource)?;
+        let mut methods_resource = rv.enter(session, &programs.methods_resource)?;
+        let mut results_resource = rv.enter(session, &programs.results_resource)?;
         async {
             file_metadata::run(&mut a_data, file_a, FILES).await?;
         };
@@ -72,13 +71,84 @@ async fn run_2e_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> Sh
             localside::researcher::run::<C, INTRO_RESOURCE, RESULTS_RESOURCE>(&mut c, bus).await?;
         };
         async {
-            localside::section::run(&mut intro, intro_resource).await?;
-        };
-        async {
-            localside::section::run(&mut methods, methods_resource).await?;
-        };
-        async {
-            localside::section::run(&mut results, results_resource).await?;
+            for _ in [A, B, C] {
+                let request = submissions.offer().await?;
+                match request.label() {
+                    A => {
+                        let args = request.recv::<Submitted<A>>().await?;
+                        editor.send::<WriteRequest<A>>(&args).await?;
+                        async {
+                            let [mut first, mut second] = editor.par()?;
+                            async {
+                                first.send::<Loan<INTRO_RESOURCE>>(intro_resource).await?;
+                            };
+                            async {
+                                second
+                                    .send::<Loan<METHODS_RESOURCE>>(methods_resource)
+                                    .await?;
+                            };
+                            Ok(())
+                        }
+                        .await?;
+                        let [mut first, mut second] = editor.par()?;
+                        (intro_resource, methods_resource) = async {
+                            async { first.recv::<Loan<INTRO_RESOURCE>>().await };
+                            async { second.recv::<Loan<METHODS_RESOURCE>>().await };
+                        }
+                        .await?;
+                    }
+                    B => {
+                        let args = request.recv::<Submitted<B>>().await?;
+                        editor.send::<WriteRequest<B>>(&args).await?;
+                        async {
+                            let [mut first, mut second] = editor.par()?;
+                            async {
+                                first
+                                    .send::<Loan<METHODS_RESOURCE>>(methods_resource)
+                                    .await?;
+                            };
+                            async {
+                                second
+                                    .send::<Loan<RESULTS_RESOURCE>>(results_resource)
+                                    .await?;
+                            };
+                            Ok(())
+                        }
+                        .await?;
+                        let [mut first, mut second] = editor.par()?;
+                        (methods_resource, results_resource) = async {
+                            async { first.recv::<Loan<METHODS_RESOURCE>>().await };
+                            async { second.recv::<Loan<RESULTS_RESOURCE>>().await };
+                        }
+                        .await?;
+                    }
+                    C => {
+                        let args = request.recv::<Submitted<C>>().await?;
+                        editor.send::<WriteRequest<C>>(&args).await?;
+                        async {
+                            let [mut first, mut second] = editor.par()?;
+                            async {
+                                first.send::<Loan<INTRO_RESOURCE>>(intro_resource).await?;
+                            };
+                            async {
+                                second
+                                    .send::<Loan<RESULTS_RESOURCE>>(results_resource)
+                                    .await?;
+                            };
+                            Ok(())
+                        }
+                        .await?;
+                        let [mut first, mut second] = editor.par()?;
+                        (intro_resource, results_resource) = async {
+                            async { first.recv::<Loan<INTRO_RESOURCE>>().await };
+                            async { second.recv::<Loan<RESULTS_RESOURCE>>().await };
+                        }
+                        .await?;
+                    }
+                    _ => return Err(ShellError::message("unknown writing submission")),
+                }
+            }
+            Ok(())
         };
         async {
             let file = a_vm.recv::<Loan<A_FILE>>().await?;
@@ -102,7 +172,7 @@ async fn run_2e_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> Sh
                     .write_as::<DraftRequest<A>>(&mut draft)
                     .read_as::<DraftResult>(&mut draft_result)
                     .file(FILES[2])?
-                    .write_as::<WriteRequest<A>>(&mut write)
+                    .write_as::<Submitted<A>>(&mut write)
                     .read_as::<WriteResult>(&mut write_result)
                     .file(FILES[3])?
                     .write_as::<ReviewRequest<A>>(&mut review)
@@ -143,7 +213,7 @@ async fn run_2e_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> Sh
                     .write_as::<DraftRequest<B>>(&mut draft)
                     .read_as::<DraftResult>(&mut draft_result)
                     .file(FILES[2])?
-                    .write_as::<WriteRequest<B>>(&mut write)
+                    .write_as::<Submitted<B>>(&mut write)
                     .read_as::<WriteResult>(&mut write_result)
                     .file(FILES[3])?
                     .write_as::<ReviewRequest<B>>(&mut review)
@@ -184,7 +254,7 @@ async fn run_2e_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> Sh
                     .write_as::<DraftRequest<C>>(&mut draft)
                     .read_as::<DraftResult>(&mut draft_result)
                     .file(FILES[2])?
-                    .write_as::<WriteRequest<C>>(&mut write)
+                    .write_as::<Submitted<C>>(&mut write)
                     .read_as::<WriteResult>(&mut write_result)
                     .file(FILES[3])?
                     .write_as::<ReviewRequest<C>>(&mut review)
@@ -226,6 +296,8 @@ async fn run_2m_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 5]) -> Sh
     let session = SessionId::new(SESSION);
     let [a_terminal, b_terminal, c_terminal, d_terminal, e_terminal] = terminals;
     let result = async {
+        let mut submissions = rv.enter(session, &programs.submissions)?;
+        let mut editor = rv.enter(session, &programs.editor)?;
         let mut a = rv.enter(session, &programs.a)?;
         let mut a_vm = rv.enter(session, &programs.a_vm)?;
         let mut a_data = rv.enter(session, &programs.a_data)?;
@@ -252,15 +324,15 @@ async fn run_2m_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 5]) -> Sh
         let file_e = rv.enter(session, &programs.e_file)?;
         let mut e_io = rv.enter(session, &programs.e_io)?;
         let mut background = rv.enter(session, &programs.background)?;
-        let background_resource = rv.enter(session, &programs.background_resource)?;
+        let mut background_resource = rv.enter(session, &programs.background_resource)?;
         let mut intro = rv.enter(session, &programs.intro)?;
-        let intro_resource = rv.enter(session, &programs.intro_resource)?;
+        let mut intro_resource = rv.enter(session, &programs.intro_resource)?;
         let mut methods = rv.enter(session, &programs.methods)?;
-        let methods_resource = rv.enter(session, &programs.methods_resource)?;
+        let mut methods_resource = rv.enter(session, &programs.methods_resource)?;
         let mut experiments = rv.enter(session, &programs.experiments)?;
-        let experiments_resource = rv.enter(session, &programs.experiments_resource)?;
+        let mut experiments_resource = rv.enter(session, &programs.experiments_resource)?;
         let mut results = rv.enter(session, &programs.results)?;
-        let results_resource = rv.enter(session, &programs.results_resource)?;
+        let mut results_resource = rv.enter(session, &programs.results_resource)?;
         async {
             file_metadata::run(&mut a_data, file_a, FILES).await?;
         };
@@ -277,38 +349,182 @@ async fn run_2m_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 5]) -> Sh
             file_metadata::run(&mut e_data, file_e, FILES).await?;
         };
         async {
-            localside::researcher::run::<A, BACKGROUND_RESOURCE, INTRO_RESOURCE>(&mut a, bus)
+            localside::section_writer::run::<A, BACKGROUND_RESOURCE, INTRO_RESOURCE>(&mut a, bus)
                 .await?;
         };
         async {
-            localside::researcher::run::<B, BACKGROUND_RESOURCE, METHODS_RESOURCE>(&mut b, bus)
+            localside::section_writer::run::<B, BACKGROUND_RESOURCE, METHODS_RESOURCE>(&mut b, bus)
                 .await?;
         };
         async {
-            localside::researcher::run::<C, EXPERIMENTS_RESOURCE, METHODS_RESOURCE>(&mut c, bus)
+            localside::section_writer::run::<C, EXPERIMENTS_RESOURCE, METHODS_RESOURCE>(
+                &mut c, bus,
+            )
+            .await?;
+        };
+        async {
+            localside::section_writer::run::<D, EXPERIMENTS_RESOURCE, RESULTS_RESOURCE>(
+                &mut d, bus,
+            )
+            .await?;
+        };
+        async {
+            localside::section_writer::run::<E, INTRO_RESOURCE, RESULTS_RESOURCE>(&mut e, bus)
                 .await?;
         };
         async {
-            localside::researcher::run::<D, EXPERIMENTS_RESOURCE, RESULTS_RESOURCE>(&mut d, bus)
-                .await?;
+            for _ in 0..10 {
+                let receipt = submissions.offer().await?;
+                match receipt.label() {
+                    A => {
+                        let arguments = receipt.recv::<Submitted<A>>().await?;
+                        editor.send::<Submitted<A>>(&arguments).await?;
+                    }
+                    A_FILE => {
+                        let arguments = receipt.recv::<SectionClaim<A_FILE, A>>().await?;
+                        editor.send::<SectionClaim<A_FILE, A>>(&arguments).await?;
+                    }
+                    B => {
+                        let arguments = receipt.recv::<Submitted<B>>().await?;
+                        editor.send::<Submitted<B>>(&arguments).await?;
+                    }
+                    B_FILE => {
+                        let arguments = receipt.recv::<SectionClaim<B_FILE, B>>().await?;
+                        editor.send::<SectionClaim<B_FILE, B>>(&arguments).await?;
+                    }
+                    C => {
+                        let arguments = receipt.recv::<Submitted<C>>().await?;
+                        editor.send::<Submitted<C>>(&arguments).await?;
+                    }
+                    C_FILE => {
+                        let arguments = receipt.recv::<SectionClaim<C_FILE, C>>().await?;
+                        editor.send::<SectionClaim<C_FILE, C>>(&arguments).await?;
+                    }
+                    D => {
+                        let arguments = receipt.recv::<Submitted<D>>().await?;
+                        editor.send::<Submitted<D>>(&arguments).await?;
+                    }
+                    D_FILE => {
+                        let arguments = receipt.recv::<SectionClaim<D_FILE, D>>().await?;
+                        editor.send::<SectionClaim<D_FILE, D>>(&arguments).await?;
+                    }
+                    E => {
+                        let arguments = receipt.recv::<Submitted<E>>().await?;
+                        editor.send::<Submitted<E>>(&arguments).await?;
+                    }
+                    E_FILE => {
+                        let arguments = receipt.recv::<SectionClaim<E_FILE, E>>().await?;
+                        editor.send::<SectionClaim<E_FILE, E>>(&arguments).await?;
+                    }
+                    _ => return Err(ShellError::message("unknown section request")),
+                }
+            }
         };
         async {
-            localside::researcher::run::<E, INTRO_RESOURCE, RESULTS_RESOURCE>(&mut e, bus).await?;
+            for _ in 0..2 {
+                let claim = background.offer().await?;
+                match claim.label() {
+                    A => {
+                        let arguments = claim.recv::<Submitted<A>>().await?;
+                        background
+                            .send::<SectionClaim<A_FILE, A>>(&arguments)
+                            .await?;
+                        background.send::<WriteRequest<A>>(&arguments).await?;
+                    }
+                    B => {
+                        let arguments = claim.recv::<Submitted<B>>().await?;
+                        background
+                            .send::<SectionClaim<B_FILE, B>>(&arguments)
+                            .await?;
+                        background.send::<WriteRequest<B>>(&arguments).await?;
+                    }
+                    _ => return Err(ShellError::message("unknown background section claim")),
+                }
+                background
+                    .send::<Loan<BACKGROUND_RESOURCE>>(background_resource)
+                    .await?;
+                background_resource = background.recv::<Loan<BACKGROUND_RESOURCE>>().await?;
+            }
         };
         async {
-            localside::section::run(&mut background, background_resource).await?;
+            for _ in 0..2 {
+                let claim = experiments.offer().await?;
+                match claim.label() {
+                    C => {
+                        let arguments = claim.recv::<Submitted<C>>().await?;
+                        experiments
+                            .send::<SectionClaim<C_FILE, C>>(&arguments)
+                            .await?;
+                        experiments.send::<WriteRequest<C>>(&arguments).await?;
+                    }
+                    D => {
+                        let arguments = claim.recv::<Submitted<D>>().await?;
+                        experiments
+                            .send::<SectionClaim<D_FILE, D>>(&arguments)
+                            .await?;
+                        experiments.send::<WriteRequest<D>>(&arguments).await?;
+                    }
+                    _ => return Err(ShellError::message("unknown experiments section claim")),
+                }
+                experiments
+                    .send::<Loan<EXPERIMENTS_RESOURCE>>(experiments_resource)
+                    .await?;
+                experiments_resource = experiments.recv::<Loan<EXPERIMENTS_RESOURCE>>().await?;
+            }
         };
         async {
-            localside::section::run(&mut intro, intro_resource).await?;
+            for _ in 0..2 {
+                let claim = intro.offer().await?;
+                match claim.label() {
+                    E => {
+                        let arguments = claim.recv::<Submitted<E>>().await?;
+                        intro.send::<SectionClaim<E_FILE, E>>(&arguments).await?;
+                        intro.send::<WriteRequest<E>>(&arguments).await?;
+                    }
+                    A_FILE => {
+                        claim.recv::<SectionClaim<A_FILE, A>>().await?;
+                    }
+                    _ => return Err(ShellError::message("unknown intro section claim")),
+                }
+                intro.send::<Loan<INTRO_RESOURCE>>(intro_resource).await?;
+                intro_resource = intro.recv::<Loan<INTRO_RESOURCE>>().await?;
+            }
         };
         async {
-            localside::section::run(&mut methods, methods_resource).await?;
+            for _ in 0..2 {
+                let claim = methods.offer().await?;
+                match claim.label() {
+                    B_FILE => {
+                        claim.recv::<SectionClaim<B_FILE, B>>().await?;
+                    }
+                    C_FILE => {
+                        claim.recv::<SectionClaim<C_FILE, C>>().await?;
+                    }
+                    _ => return Err(ShellError::message("unknown methods section claim")),
+                }
+                methods
+                    .send::<Loan<METHODS_RESOURCE>>(methods_resource)
+                    .await?;
+                methods_resource = methods.recv::<Loan<METHODS_RESOURCE>>().await?;
+            }
         };
         async {
-            localside::section::run(&mut experiments, experiments_resource).await?;
-        };
-        async {
-            localside::section::run(&mut results, results_resource).await?;
+            for _ in 0..2 {
+                let claim = results.offer().await?;
+                match claim.label() {
+                    D_FILE => {
+                        claim.recv::<SectionClaim<D_FILE, D>>().await?;
+                    }
+                    E_FILE => {
+                        claim.recv::<SectionClaim<E_FILE, E>>().await?;
+                    }
+                    _ => return Err(ShellError::message("unknown results section claim")),
+                }
+                results
+                    .send::<Loan<RESULTS_RESOURCE>>(results_resource)
+                    .await?;
+                results_resource = results.recv::<Loan<RESULTS_RESOURCE>>().await?;
+            }
         };
         async {
             let file = a_vm.recv::<Loan<A_FILE>>().await?;
@@ -332,7 +548,7 @@ async fn run_2m_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 5]) -> Sh
                     .write_as::<DraftRequest<A>>(&mut draft)
                     .read_as::<DraftResult>(&mut draft_result)
                     .file(FILES[2])?
-                    .write_as::<WriteRequest<A>>(&mut write)
+                    .write_as::<Submitted<A>>(&mut write)
                     .read_as::<WriteResult>(&mut write_result)
                     .file(FILES[3])?
                     .write_as::<ReviewRequest<A>>(&mut review)
@@ -373,7 +589,7 @@ async fn run_2m_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 5]) -> Sh
                     .write_as::<DraftRequest<B>>(&mut draft)
                     .read_as::<DraftResult>(&mut draft_result)
                     .file(FILES[2])?
-                    .write_as::<WriteRequest<B>>(&mut write)
+                    .write_as::<Submitted<B>>(&mut write)
                     .read_as::<WriteResult>(&mut write_result)
                     .file(FILES[3])?
                     .write_as::<ReviewRequest<B>>(&mut review)
@@ -414,7 +630,7 @@ async fn run_2m_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 5]) -> Sh
                     .write_as::<DraftRequest<C>>(&mut draft)
                     .read_as::<DraftResult>(&mut draft_result)
                     .file(FILES[2])?
-                    .write_as::<WriteRequest<C>>(&mut write)
+                    .write_as::<Submitted<C>>(&mut write)
                     .read_as::<WriteResult>(&mut write_result)
                     .file(FILES[3])?
                     .write_as::<ReviewRequest<C>>(&mut review)
@@ -455,7 +671,7 @@ async fn run_2m_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 5]) -> Sh
                     .write_as::<DraftRequest<D>>(&mut draft)
                     .read_as::<DraftResult>(&mut draft_result)
                     .file(FILES[2])?
-                    .write_as::<WriteRequest<D>>(&mut write)
+                    .write_as::<Submitted<D>>(&mut write)
                     .read_as::<WriteResult>(&mut write_result)
                     .file(FILES[3])?
                     .write_as::<ReviewRequest<D>>(&mut review)
@@ -496,7 +712,7 @@ async fn run_2m_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 5]) -> Sh
                     .write_as::<DraftRequest<E>>(&mut draft)
                     .read_as::<DraftResult>(&mut draft_result)
                     .file(FILES[2])?
-                    .write_as::<WriteRequest<E>>(&mut write)
+                    .write_as::<Submitted<E>>(&mut write)
                     .read_as::<WriteResult>(&mut write_result)
                     .file(FILES[3])?
                     .write_as::<ReviewRequest<E>>(&mut review)
@@ -546,6 +762,8 @@ async fn run_2h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
         g_terminal,
     ] = terminals;
     let result = async {
+        let mut submissions = rv.enter(session, &programs.submissions)?;
+        let mut editor = rv.enter(session, &programs.editor)?;
         let mut a = rv.enter(session, &programs.a)?;
         let mut a_vm = rv.enter(session, &programs.a_vm)?;
         let mut a_data = rv.enter(session, &programs.a_data)?;
@@ -582,19 +800,19 @@ async fn run_2h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
         let file_g = rv.enter(session, &programs.g_file)?;
         let mut g_io = rv.enter(session, &programs.g_io)?;
         let mut background = rv.enter(session, &programs.background)?;
-        let background_resource = rv.enter(session, &programs.background_resource)?;
+        let mut background_resource = rv.enter(session, &programs.background_resource)?;
         let mut intro = rv.enter(session, &programs.intro)?;
-        let intro_resource = rv.enter(session, &programs.intro_resource)?;
+        let mut intro_resource = rv.enter(session, &programs.intro_resource)?;
         let mut related = rv.enter(session, &programs.related)?;
-        let related_resource = rv.enter(session, &programs.related_resource)?;
+        let mut related_resource = rv.enter(session, &programs.related_resource)?;
         let mut methods = rv.enter(session, &programs.methods)?;
-        let methods_resource = rv.enter(session, &programs.methods_resource)?;
+        let mut methods_resource = rv.enter(session, &programs.methods_resource)?;
         let mut experiments = rv.enter(session, &programs.experiments)?;
-        let experiments_resource = rv.enter(session, &programs.experiments_resource)?;
+        let mut experiments_resource = rv.enter(session, &programs.experiments_resource)?;
         let mut results = rv.enter(session, &programs.results)?;
-        let results_resource = rv.enter(session, &programs.results_resource)?;
+        let mut results_resource = rv.enter(session, &programs.results_resource)?;
         let mut discussion = rv.enter(session, &programs.discussion)?;
-        let discussion_resource = rv.enter(session, &programs.discussion_resource)?;
+        let mut discussion_resource = rv.enter(session, &programs.discussion_resource)?;
         async {
             file_metadata::run(&mut a_data, file_a, FILES).await?;
         };
@@ -617,53 +835,242 @@ async fn run_2h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
             file_metadata::run(&mut g_data, file_g, FILES).await?;
         };
         async {
-            localside::researcher::run::<A, BACKGROUND_RESOURCE, INTRO_RESOURCE>(&mut a, bus)
+            localside::section_writer::run::<A, BACKGROUND_RESOURCE, INTRO_RESOURCE>(&mut a, bus)
                 .await?;
         };
         async {
-            localside::researcher::run::<B, BACKGROUND_RESOURCE, RELATED_RESOURCE>(&mut b, bus)
+            localside::section_writer::run::<B, BACKGROUND_RESOURCE, RELATED_RESOURCE>(&mut b, bus)
                 .await?;
         };
         async {
-            localside::researcher::run::<C, METHODS_RESOURCE, RELATED_RESOURCE>(&mut c, bus)
+            localside::section_writer::run::<C, METHODS_RESOURCE, RELATED_RESOURCE>(&mut c, bus)
                 .await?;
         };
         async {
-            localside::researcher::run::<D, EXPERIMENTS_RESOURCE, METHODS_RESOURCE>(&mut d, bus)
+            localside::section_writer::run::<D, EXPERIMENTS_RESOURCE, METHODS_RESOURCE>(
+                &mut d, bus,
+            )
+            .await?;
+        };
+        async {
+            localside::section_writer::run::<E, EXPERIMENTS_RESOURCE, RESULTS_RESOURCE>(
+                &mut e, bus,
+            )
+            .await?;
+        };
+        async {
+            localside::section_writer::run::<F, DISCUSSION_RESOURCE, RESULTS_RESOURCE>(&mut f, bus)
                 .await?;
         };
         async {
-            localside::researcher::run::<E, EXPERIMENTS_RESOURCE, RESULTS_RESOURCE>(&mut e, bus)
+            localside::section_writer::run::<G, DISCUSSION_RESOURCE, INTRO_RESOURCE>(&mut g, bus)
                 .await?;
         };
         async {
-            localside::researcher::run::<F, DISCUSSION_RESOURCE, RESULTS_RESOURCE>(&mut f, bus)
-                .await?;
+            for _ in 0..14 {
+                let receipt = submissions.offer().await?;
+                match receipt.label() {
+                    A => {
+                        let arguments = receipt.recv::<Submitted<A>>().await?;
+                        editor.send::<Submitted<A>>(&arguments).await?;
+                    }
+                    A_FILE => {
+                        let arguments = receipt.recv::<SectionClaim<A_FILE, A>>().await?;
+                        editor.send::<SectionClaim<A_FILE, A>>(&arguments).await?;
+                    }
+                    B => {
+                        let arguments = receipt.recv::<Submitted<B>>().await?;
+                        editor.send::<Submitted<B>>(&arguments).await?;
+                    }
+                    B_FILE => {
+                        let arguments = receipt.recv::<SectionClaim<B_FILE, B>>().await?;
+                        editor.send::<SectionClaim<B_FILE, B>>(&arguments).await?;
+                    }
+                    C => {
+                        let arguments = receipt.recv::<Submitted<C>>().await?;
+                        editor.send::<Submitted<C>>(&arguments).await?;
+                    }
+                    C_FILE => {
+                        let arguments = receipt.recv::<SectionClaim<C_FILE, C>>().await?;
+                        editor.send::<SectionClaim<C_FILE, C>>(&arguments).await?;
+                    }
+                    D => {
+                        let arguments = receipt.recv::<Submitted<D>>().await?;
+                        editor.send::<Submitted<D>>(&arguments).await?;
+                    }
+                    D_FILE => {
+                        let arguments = receipt.recv::<SectionClaim<D_FILE, D>>().await?;
+                        editor.send::<SectionClaim<D_FILE, D>>(&arguments).await?;
+                    }
+                    E => {
+                        let arguments = receipt.recv::<Submitted<E>>().await?;
+                        editor.send::<Submitted<E>>(&arguments).await?;
+                    }
+                    E_FILE => {
+                        let arguments = receipt.recv::<SectionClaim<E_FILE, E>>().await?;
+                        editor.send::<SectionClaim<E_FILE, E>>(&arguments).await?;
+                    }
+                    F => {
+                        let arguments = receipt.recv::<Submitted<F>>().await?;
+                        editor.send::<Submitted<F>>(&arguments).await?;
+                    }
+                    F_FILE => {
+                        let arguments = receipt.recv::<SectionClaim<F_FILE, F>>().await?;
+                        editor.send::<SectionClaim<F_FILE, F>>(&arguments).await?;
+                    }
+                    G => {
+                        let arguments = receipt.recv::<Submitted<G>>().await?;
+                        editor.send::<Submitted<G>>(&arguments).await?;
+                    }
+                    G_FILE => {
+                        let arguments = receipt.recv::<SectionClaim<G_FILE, G>>().await?;
+                        editor.send::<SectionClaim<G_FILE, G>>(&arguments).await?;
+                    }
+                    _ => return Err(ShellError::message("unknown section request")),
+                }
+            }
         };
         async {
-            localside::researcher::run::<G, DISCUSSION_RESOURCE, INTRO_RESOURCE>(&mut g, bus)
-                .await?;
+            for _ in 0..2 {
+                let claim = background.offer().await?;
+                match claim.label() {
+                    A => {
+                        let arguments = claim.recv::<Submitted<A>>().await?;
+                        background
+                            .send::<SectionClaim<A_FILE, A>>(&arguments)
+                            .await?;
+                        background.send::<WriteRequest<A>>(&arguments).await?;
+                    }
+                    B => {
+                        let arguments = claim.recv::<Submitted<B>>().await?;
+                        background
+                            .send::<SectionClaim<B_FILE, B>>(&arguments)
+                            .await?;
+                        background.send::<WriteRequest<B>>(&arguments).await?;
+                    }
+                    _ => return Err(ShellError::message("unknown background section claim")),
+                }
+                background
+                    .send::<Loan<BACKGROUND_RESOURCE>>(background_resource)
+                    .await?;
+                background_resource = background.recv::<Loan<BACKGROUND_RESOURCE>>().await?;
+            }
         };
         async {
-            localside::section::run(&mut background, background_resource).await?;
+            for _ in 0..2 {
+                let claim = discussion.offer().await?;
+                match claim.label() {
+                    F_FILE => {
+                        claim.recv::<SectionClaim<F_FILE, F>>().await?;
+                    }
+                    G_FILE => {
+                        claim.recv::<SectionClaim<G_FILE, G>>().await?;
+                    }
+                    _ => return Err(ShellError::message("unknown discussion section claim")),
+                }
+                discussion
+                    .send::<Loan<DISCUSSION_RESOURCE>>(discussion_resource)
+                    .await?;
+                discussion_resource = discussion.recv::<Loan<DISCUSSION_RESOURCE>>().await?;
+            }
         };
         async {
-            localside::section::run(&mut intro, intro_resource).await?;
+            for _ in 0..2 {
+                let claim = experiments.offer().await?;
+                match claim.label() {
+                    D_FILE => {
+                        claim.recv::<SectionClaim<D_FILE, D>>().await?;
+                    }
+                    E_FILE => {
+                        claim.recv::<SectionClaim<E_FILE, E>>().await?;
+                    }
+                    _ => return Err(ShellError::message("unknown experiments section claim")),
+                }
+                experiments
+                    .send::<Loan<EXPERIMENTS_RESOURCE>>(experiments_resource)
+                    .await?;
+                experiments_resource = experiments.recv::<Loan<EXPERIMENTS_RESOURCE>>().await?;
+            }
         };
         async {
-            localside::section::run(&mut related, related_resource).await?;
+            for _ in 0..2 {
+                let claim = intro.offer().await?;
+                match claim.label() {
+                    G => {
+                        let arguments = claim.recv::<Submitted<G>>().await?;
+                        intro.send::<SectionClaim<G_FILE, G>>(&arguments).await?;
+                        intro.send::<WriteRequest<G>>(&arguments).await?;
+                    }
+                    A_FILE => {
+                        claim.recv::<SectionClaim<A_FILE, A>>().await?;
+                    }
+                    _ => return Err(ShellError::message("unknown intro section claim")),
+                }
+                intro.send::<Loan<INTRO_RESOURCE>>(intro_resource).await?;
+                intro_resource = intro.recv::<Loan<INTRO_RESOURCE>>().await?;
+            }
         };
         async {
-            localside::section::run(&mut methods, methods_resource).await?;
+            for _ in 0..2 {
+                let claim = methods.offer().await?;
+                match claim.label() {
+                    C => {
+                        let arguments = claim.recv::<Submitted<C>>().await?;
+                        methods.send::<SectionClaim<C_FILE, C>>(&arguments).await?;
+                        methods.send::<WriteRequest<C>>(&arguments).await?;
+                    }
+                    D => {
+                        let arguments = claim.recv::<Submitted<D>>().await?;
+                        methods.send::<SectionClaim<D_FILE, D>>(&arguments).await?;
+                        methods.send::<WriteRequest<D>>(&arguments).await?;
+                    }
+                    _ => return Err(ShellError::message("unknown methods section claim")),
+                }
+                methods
+                    .send::<Loan<METHODS_RESOURCE>>(methods_resource)
+                    .await?;
+                methods_resource = methods.recv::<Loan<METHODS_RESOURCE>>().await?;
+            }
         };
         async {
-            localside::section::run(&mut experiments, experiments_resource).await?;
+            for _ in 0..2 {
+                let claim = related.offer().await?;
+                match claim.label() {
+                    B_FILE => {
+                        claim.recv::<SectionClaim<B_FILE, B>>().await?;
+                    }
+                    C_FILE => {
+                        claim.recv::<SectionClaim<C_FILE, C>>().await?;
+                    }
+                    _ => return Err(ShellError::message("unknown related section claim")),
+                }
+                related
+                    .send::<Loan<RELATED_RESOURCE>>(related_resource)
+                    .await?;
+                related_resource = related.recv::<Loan<RELATED_RESOURCE>>().await?;
+            }
         };
         async {
-            localside::section::run(&mut results, results_resource).await?;
-        };
-        async {
-            localside::section::run(&mut discussion, discussion_resource).await?;
+            for _ in 0..2 {
+                let claim = results.offer().await?;
+                match claim.label() {
+                    E => {
+                        let arguments = claim.recv::<Submitted<E>>().await?;
+                        results.send::<SectionClaim<E_FILE, E>>(&arguments).await?;
+                        results.send::<WriteRequest<E>>(&arguments).await?;
+                    }
+                    F => {
+                        let arguments = claim.recv::<Submitted<F>>().await?;
+                        results.send::<SectionClaim<F_FILE, F>>(&arguments).await?;
+                        results.send::<WriteRequest<F>>(&arguments).await?;
+                    }
+                    _ => return Err(ShellError::message("unknown results section claim")),
+                }
+                results
+                    .send::<Loan<RESULTS_RESOURCE>>(results_resource)
+                    .await?;
+                results_resource = results.recv::<Loan<RESULTS_RESOURCE>>().await?;
+            }
         };
         async {
             let file = a_vm.recv::<Loan<A_FILE>>().await?;
@@ -687,7 +1094,7 @@ async fn run_2h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
                     .write_as::<DraftRequest<A>>(&mut draft)
                     .read_as::<DraftResult>(&mut draft_result)
                     .file(FILES[2])?
-                    .write_as::<WriteRequest<A>>(&mut write)
+                    .write_as::<Submitted<A>>(&mut write)
                     .read_as::<WriteResult>(&mut write_result)
                     .file(FILES[3])?
                     .write_as::<ReviewRequest<A>>(&mut review)
@@ -728,7 +1135,7 @@ async fn run_2h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
                     .write_as::<DraftRequest<B>>(&mut draft)
                     .read_as::<DraftResult>(&mut draft_result)
                     .file(FILES[2])?
-                    .write_as::<WriteRequest<B>>(&mut write)
+                    .write_as::<Submitted<B>>(&mut write)
                     .read_as::<WriteResult>(&mut write_result)
                     .file(FILES[3])?
                     .write_as::<ReviewRequest<B>>(&mut review)
@@ -769,7 +1176,7 @@ async fn run_2h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
                     .write_as::<DraftRequest<C>>(&mut draft)
                     .read_as::<DraftResult>(&mut draft_result)
                     .file(FILES[2])?
-                    .write_as::<WriteRequest<C>>(&mut write)
+                    .write_as::<Submitted<C>>(&mut write)
                     .read_as::<WriteResult>(&mut write_result)
                     .file(FILES[3])?
                     .write_as::<ReviewRequest<C>>(&mut review)
@@ -810,7 +1217,7 @@ async fn run_2h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
                     .write_as::<DraftRequest<D>>(&mut draft)
                     .read_as::<DraftResult>(&mut draft_result)
                     .file(FILES[2])?
-                    .write_as::<WriteRequest<D>>(&mut write)
+                    .write_as::<Submitted<D>>(&mut write)
                     .read_as::<WriteResult>(&mut write_result)
                     .file(FILES[3])?
                     .write_as::<ReviewRequest<D>>(&mut review)
@@ -851,7 +1258,7 @@ async fn run_2h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
                     .write_as::<DraftRequest<E>>(&mut draft)
                     .read_as::<DraftResult>(&mut draft_result)
                     .file(FILES[2])?
-                    .write_as::<WriteRequest<E>>(&mut write)
+                    .write_as::<Submitted<E>>(&mut write)
                     .read_as::<WriteResult>(&mut write_result)
                     .file(FILES[3])?
                     .write_as::<ReviewRequest<E>>(&mut review)
@@ -892,7 +1299,7 @@ async fn run_2h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
                     .write_as::<DraftRequest<F>>(&mut draft)
                     .read_as::<DraftResult>(&mut draft_result)
                     .file(FILES[2])?
-                    .write_as::<WriteRequest<F>>(&mut write)
+                    .write_as::<Submitted<F>>(&mut write)
                     .read_as::<WriteResult>(&mut write_result)
                     .file(FILES[3])?
                     .write_as::<ReviewRequest<F>>(&mut review)
@@ -933,7 +1340,7 @@ async fn run_2h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
                     .write_as::<DraftRequest<G>>(&mut draft)
                     .read_as::<DraftResult>(&mut draft_result)
                     .file(FILES[2])?
-                    .write_as::<WriteRequest<G>>(&mut write)
+                    .write_as::<Submitted<G>>(&mut write)
                     .read_as::<WriteResult>(&mut write_result)
                     .file(FILES[3])?
                     .write_as::<ReviewRequest<G>>(&mut review)

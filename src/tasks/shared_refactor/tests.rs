@@ -5,10 +5,7 @@ use crate::shell::{
     imp::{bus::Bus, service::Domain},
 };
 use core::cell::Cell;
-use hibana::{
-    g,
-    runtime::{SessionKitStorage, ids::SessionId, program::project},
-};
+use hibana::runtime::{SessionKitStorage, ids::SessionId};
 use serde_json::{Value, json};
 
 struct Effects(Cell<Vec<Value>>);
@@ -37,87 +34,62 @@ impl Domain for Effects {
 async fn production_receiver_rejects_stale_negative_or_wrong_kind_before_publication()
 -> ShellResult<()> {
     for bad in 0..12 {
-        let edits = g::par(
-            g::seq(
-                g::send::<A_FILE, REPO, RefactorA>(),
-                g::send::<REPO, A_FILE, RefactoredA>(),
-            ),
-            g::par(
-                g::seq(
-                    g::send::<A_FILE, REPO, RefactorSharedA>(),
-                    g::send::<REPO, A_FILE, SharedChangedA>(),
-                ),
-                g::par(
-                    g::seq(
-                        g::send::<B_FILE, REPO, RefactorB>(),
-                        g::send::<REPO, B_FILE, RefactoredB>(),
-                    ),
-                    g::seq(
-                        g::send::<B_FILE, REPO, RefactorSharedB>(),
-                        g::send::<REPO, B_FILE, SharedChangedB>(),
-                    ),
-                ),
-            ),
-        );
-        let validations = g::par(
-            g::seq(
-                g::par(
-                    g::seq(
-                        g::send::<REPO_OWNER, REVIEWER, ReadyReviewA>(),
-                        g::send::<REVIEWER, REPO_OWNER, ReviewedA>(),
-                    ),
-                    g::seq(
-                        g::send::<REPO_OWNER, TEST_ENV, ReadyTestA>(),
-                        g::send::<TEST_ENV, REPO_OWNER, TestedA>(),
-                    ),
-                ),
-                g::par(
-                    g::send::<REPO_OWNER, A_FILE, ReviewFeedbackA>(),
-                    g::send::<REPO_OWNER, A_FILE, TestFeedbackA>(),
-                ),
-            ),
-            g::seq(
-                g::par(
-                    g::seq(
-                        g::send::<REPO_OWNER, REVIEWER, ReadyReviewB>(),
-                        g::send::<REVIEWER, REPO_OWNER, ReviewedB>(),
-                    ),
-                    g::seq(
-                        g::send::<REPO_OWNER, TEST_ENV, ReadyTestB>(),
-                        g::send::<TEST_ENV, REPO_OWNER, TestedB>(),
-                    ),
-                ),
-                g::par(
-                    g::send::<REPO_OWNER, B_FILE, ReviewFeedbackB>(),
-                    g::send::<REPO_OWNER, B_FILE, TestFeedbackB>(),
-                ),
-            ),
-        );
-        let source = g::seq(
-            g::send::<RESOURCE_INIT, REPO_OWNER, RepoLoan>(),
-            g::seq(edits, validations),
-        );
-        let (p_owner, p_init, p_repo, p_a, p_b, p_review, p_test) = (
-            project::<REPO_OWNER>(&source),
-            project::<RESOURCE_INIT>(&source),
-            project::<REPO>(&source),
-            project::<A_FILE>(&source),
-            project::<B_FILE>(&source),
-            project::<REVIEWER>(&source),
-            project::<TEST_ENV>(&source),
-        );
+        let p = programs();
         let session = SessionId::new(SESSION);
-        let (bus, _, []) = Bus::open([], [(session, REPO)]);
+        let (bus, _, []) = Bus::open(
+            [],
+            [
+                REPO,
+                TEST_ENV,
+                ARCH_FILE,
+                A_FILE,
+                B_FILE,
+                REVIEW_FILE,
+                TEST_FILE,
+            ]
+            .map(|role| (session, role)),
+        );
         let mut slab = vec![0; 256 * 1024];
         let mut storage = SessionKitStorage::uninit();
         let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
-        let mut owner = rv.enter(session, &p_owner)?;
-        let mut init = rv.enter(session, &p_init)?;
-        let repo = rv.enter(session, &p_repo)?;
-        let mut a = rv.enter(session, &p_a)?;
-        let mut b = rv.enter(session, &p_b)?;
-        let mut reviewer = rv.enter(session, &p_review)?;
-        let mut tester = rv.enter(session, &p_test)?;
+        let mut owner = rv.enter(session, &p.repo_owner)?;
+        let mut init = rv.enter(session, &p.resource_init)?;
+        let mut test_owner = rv.enter(session, &p.test_owner)?;
+        let mut reviewer = rv.enter(session, &p.reviewer)?;
+        init.send::<RepoLoan>(rv.enter(session, &p.repo)?).await?;
+        init.send::<TestLoan>(rv.enter(session, &p.environment)?)
+            .await?;
+        let mut tester = test_owner.recv::<TestLoan>().await?;
+        let mut arch_data = rv.enter(session, &p.arch_data)?;
+        let mut arch_vm = rv.enter(session, &p.arch_vm)?;
+        arch_data
+            .send::<Loan<ARCH_FILE>>(rv.enter(session, &p.arch_file)?)
+            .await?;
+        let _arch = arch_vm.recv::<Loan<ARCH_FILE>>().await?;
+        let mut a_data = rv.enter(session, &p.a_data)?;
+        let mut a_vm = rv.enter(session, &p.a_vm)?;
+        a_data
+            .send::<Loan<A_FILE>>(rv.enter(session, &p.a_file)?)
+            .await?;
+        let mut a = a_vm.recv::<Loan<A_FILE>>().await?;
+        let mut b_data = rv.enter(session, &p.b_data)?;
+        let mut b_vm = rv.enter(session, &p.b_vm)?;
+        b_data
+            .send::<Loan<B_FILE>>(rv.enter(session, &p.b_file)?)
+            .await?;
+        let mut b = b_vm.recv::<Loan<B_FILE>>().await?;
+        let mut review_data = rv.enter(session, &p.review_data)?;
+        let mut review_vm = rv.enter(session, &p.review_vm)?;
+        review_data
+            .send::<Loan<REVIEW_FILE>>(rv.enter(session, &p.review_file)?)
+            .await?;
+        let mut review_file = review_vm.recv::<Loan<REVIEW_FILE>>().await?;
+        let mut test_data = rv.enter(session, &p.test_data)?;
+        let mut test_vm = rv.enter(session, &p.test_vm)?;
+        test_data
+            .send::<Loan<TEST_FILE>>(rv.enter(session, &p.test_file)?)
+            .await?;
+        let mut test_file = test_vm.recv::<Loan<TEST_FILE>>().await?;
         let effects = Effects(Cell::new(Vec::new()));
         let review = json!({"tool_name":"code_review","success":true,"data":{
             "target":"module_a","candidate_sha256":"1".repeat(64),
@@ -142,38 +114,45 @@ async fn production_receiver_rejects_stale_negative_or_wrong_kind_before_publica
             _ => wrong["data"]["outputs"] = json!([]),
         }
         let error = hibana_runtime::race(localside::repository::run(&mut owner, &effects), async {
+            a.send::<RefactorA>(&Arguments::<2>::try_from(
+                br#"{"target":"module_a"}"#.as_slice(),
+            )?)
+            .await?;
+            a.recv::<RefactoredA>().await?;
+            b.send::<RefactorB>(&Arguments::<4>::try_from(
+                br#"{"target":"module_b"}"#.as_slice(),
+            )?)
+            .await?;
+            b.recv::<RefactoredB>().await?;
+            a.send::<RefactorSharedA>(&Arguments::<3>::try_from(
+                br#"{"target":"SHARED_LIBRARY"}"#.as_slice(),
+            )?)
+            .await?;
+            a.recv::<SharedChangedA>().await?;
+            b.send::<RefactorSharedB>(&Arguments::<5>::try_from(
+                br#"{"target":"SHARED_LIBRARY"}"#.as_slice(),
+            )?)
+            .await?;
+            b.recv::<SharedChangedB>().await?;
             async {
-                init.send::<RepoLoan>(repo).await?;
-            };
-            async {
-                a.send::<RefactorA>(&Arguments::<2>::try_from(
-                    br#"{"target":"module_a"}"#.as_slice(),
-                )?)
-                .await?;
-                a.recv::<RefactoredA>().await?;
-                b.send::<RefactorB>(&Arguments::<4>::try_from(
-                    br#"{"target":"module_b"}"#.as_slice(),
-                )?)
-                .await?;
-                b.recv::<RefactoredB>().await?;
-                a.send::<RefactorSharedA>(&Arguments::<3>::try_from(
-                    br#"{"target":"SHARED_LIBRARY"}"#.as_slice(),
-                )?)
-                .await?;
-                a.recv::<SharedChangedA>().await?;
-                b.send::<RefactorSharedB>(&Arguments::<5>::try_from(
-                    br#"{"target":"SHARED_LIBRARY"}"#.as_slice(),
-                )?)
-                .await?;
-                b.recv::<SharedChangedB>().await?;
-            };
-            async {
+                review_file
+                    .send::<ReviewRequestA>(&Arguments::<6>::try_from(
+                        br#"{"pr_id":"module_a"}"#.as_slice(),
+                    )?)
+                    .await?;
                 reviewer.recv::<ReadyReviewA>().await?;
+                reviewer.recv::<ReviewRequestA>().await?;
                 let bytes = serde_json::to_vec(if bad < 6 { &wrong } else { &review }).unwrap();
                 reviewer.send::<ReviewedA>(&bytes.as_slice()).await?;
             };
             async {
+                test_file
+                    .send::<TestRequestA>(&Arguments::<8>::try_from(
+                        br#"{"suite":"module_a_tests"}"#.as_slice(),
+                    )?)
+                    .await?;
                 tester.recv::<ReadyTestA>().await?;
+                tester.recv::<TestRequestA>().await?;
                 let bytes = serde_json::to_vec(if bad >= 6 { &wrong } else { &test }).unwrap();
                 tester.send::<TestedA>(&bytes.as_slice()).await?;
             };

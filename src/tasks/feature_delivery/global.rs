@@ -17,6 +17,9 @@ pub const FEATURE_B: &str = "payment_processing";
 pub const SUITE_A: &str = "full_test_suite_after_auth";
 pub const SUITE_B: &str = "full_test_suite_after_payment";
 pub const REPO_OWNER: u8 = 0;
+pub const REVIEW_INITIAL: u8 = 1;
+pub const REVIEW_REPAIR_A: u8 = 2;
+pub const REVIEW_REPAIR_B: u8 = 3;
 pub const REVIEW_A: u8 = 6;
 pub const REVIEW_B: u8 = 7;
 pub const TEST_OWNER: u8 = 8;
@@ -47,9 +50,15 @@ pub const B_IO: u8 = 17;
 pub const REVIEW_IO: u8 = 18;
 pub const TEST_IO: u8 = 19;
 pub const CI_IO: u8 = 20;
-pub const MERGE_ORDER: u16 = 862;
+pub const A_MERGE_FILE: u8 = 38;
+pub const B_MERGE_FILE: u8 = 39;
+pub const A_MERGE_DATA: u8 = 102;
+pub const B_MERGE_DATA: u8 = 103;
+pub const MERGE_REQUESTS: u8 = 4;
 pub const REVIEW_DECISION_A: u16 = 865;
 pub const REVIEW_DECISION_B: u16 = 866;
+pub const REPAIR_DECISION_A: u16 = 867;
+pub const REPAIR_DECISION_B: u16 = 868;
 pub const CI_DECISION_A: u16 = 863;
 pub const CI_DECISION_B: u16 = 864;
 
@@ -58,7 +67,9 @@ pub type TestLoan<'r> = g::Msg<11, Endpoint<'r, TEST_ENV>>;
 pub type BuildLoan<'r> = g::Msg<12, Endpoint<'r, BUILD_SERVER>>;
 pub type ImplementA = g::Msg<200, Arguments<0>>;
 pub type ImplementB = g::Msg<201, Arguments<1>>;
+pub type InitialMergeA = g::Msg<178, Arguments<2>>;
 pub type MergeA = g::Msg<202, Arguments<2>>;
+pub type InitialMergeB = g::Msg<179, Arguments<3>>;
 pub type MergeB = g::Msg<203, Arguments<3>>;
 pub type ReviewRequestA = g::Msg<204, Arguments<4>>;
 pub type ReviewRequestB = g::Msg<205, Arguments<5>>;
@@ -102,8 +113,6 @@ pub type FileCiResultB<'a> = g::Msg<243, &'a [u8]>;
 pub type InterfaceA<'a> = g::Msg<244, &'a [u8]>;
 pub type InterfaceB<'a> = g::Msg<245, &'a [u8]>;
 pub type TaskExit = g::Msg<246, i32>;
-pub type LastCiPassedA<'a> = g::Msg<247, ReviewReply<'a, true>>;
-pub type LastCiPassedB<'a> = g::Msg<252, ReviewReply<'a, true>>;
 pub type FileReviewCandidateA<'a> = g::Msg<248, &'a [u8]>;
 pub type FileReviewCandidateB<'a> = g::Msg<249, &'a [u8]>;
 pub type FileTestCandidateA<'a> = g::Msg<250, &'a [u8]>;
@@ -112,6 +121,10 @@ pub type RepairApprovedA<'a> = g::Msg<180, ReviewReply<'a, true>>;
 pub type RepairRejectedA<'a> = g::Msg<181, ReviewReply<'a, false>>;
 pub type RepairApprovedB<'a> = g::Msg<182, ReviewReply<'a, true>>;
 pub type RepairRejectedB<'a> = g::Msg<183, ReviewReply<'a, false>>;
+pub type CiResultA<'a> = g::Msg<186, &'a [u8]>;
+pub type CiResultB<'a> = g::Msg<187, &'a [u8]>;
+pub type RetiredReviewA<'r> = g::Msg<184, Endpoint<'r, REVIEW_A>>;
+pub type RetiredReviewB<'r> = g::Msg<185, Endpoint<'r, REVIEW_B>>;
 
 const fn writable(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
     ChoreoFsObject::read_write(
@@ -139,15 +152,22 @@ const fn readable(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
         },
     )
 }
-pub const DEVELOPER_FILES: [ChoreoFsObject<'static>; 7] = [
+pub const FEATURE_FILES: [ChoreoFsObject<'static>; 4] = [
     writable(b"service/implement_feature", 4),
     writable(b"service/merge_code", 5),
     readable(b"service/review", 6),
     readable(b"service/merge_ready", 7),
+];
+pub const UPDATE_FILES: [ChoreoFsObject<'static>; 3] = [
     readable(b"service/integration", 8),
     readable(b"service/interface_change", 9),
     readable(b"service/peer_review", 10),
 ];
+pub const DEVELOPER_FILES: [ChoreoFsObject<'static>; 7] = {
+    let [implement, merge, review, ready] = FEATURE_FILES;
+    let [ci, interface, peer_review] = UPDATE_FILES;
+    [implement, merge, review, ready, ci, interface, peer_review]
+};
 pub const REVIEW_FILES: [ChoreoFsObject<'static>; 6] = [
     writable(b"service/code_review/user_authentication", 4),
     writable(b"service/code_review/payment_processing", 5),
@@ -174,18 +194,19 @@ pub const CI_FILES: [ChoreoFsObject<'static>; 4] = [
 
 fn attempt_a() -> impl Projectable + Copy {
     g::seq(
-        g::send::<A_FILE, REPO, ImplementA>(),
+        g::send::<A_MERGE_FILE, REPO, ImplementA>(),
         g::seq(
-            g::send::<REPO, A_FILE, ImplementationA>(),
-            g::par(
-                g::seq(
-                    g::send::<REPO, REVIEW_A, ReadyReviewA>(),
-                    g::seq(
-                        g::send::<REPO, A_REVIEW_FILE, FileReviewCandidateA>(),
-                        g::send::<A_REVIEW_FILE, REVIEW_A, ReviewRequestA>(),
-                    ),
-                ),
+            g::send::<REPO, A_MERGE_FILE, ImplementationA>(),
+            g::seq(
+                g::send::<REPO, B_FILE, InterfaceA>(),
                 g::par(
+                    g::seq(
+                        g::send::<REPO, REVIEW_A, ReadyReviewA>(),
+                        g::seq(
+                            g::send::<REPO, A_REVIEW_FILE, FileReviewCandidateA>(),
+                            g::send::<A_REVIEW_FILE, REVIEW_A, ReviewRequestA>(),
+                        ),
+                    ),
                     g::seq(
                         g::send::<REPO, TEST_ENV, ReadyTestA>(),
                         g::seq(
@@ -199,78 +220,198 @@ fn attempt_a() -> impl Projectable + Copy {
                             ),
                         ),
                     ),
-                    g::send::<REPO, B_FILE, InterfaceA>(),
                 ),
             ),
         ),
     )
 }
-fn review_outcome_a<M: g::Message>() -> impl Projectable {
+fn review_outcome_a<const CONTROLLER: u8, M: g::Message>() -> impl Projectable {
     g::seq(
-        g::send::<REVIEW_A, REPO, M>(),
+        g::send::<CONTROLLER, REPO, M>(),
         g::seq(
-            g::send::<REPO, A_FILE, ReviewFeedbackA>(),
-            g::seq(
-                g::send::<REPO, B_FILE, ReviewFeedbackA>(),
+            g::send::<REPO, B_FILE, ReviewFeedbackA>(),
+            g::par(
+                g::send::<REVIEW_A, A_REVIEW_FILE, FileReviewResultA>(),
                 g::seq(
-                    g::send::<REPO, TEST_FILE, ReviewFeedbackA>(),
+                    g::send::<REPO, A_MERGE_FILE, ReviewFeedbackA>(),
                     g::seq(
+                        g::send::<REPO, TEST_FILE, ReviewFeedbackA>(),
                         g::send::<REPO, TEST_ENV, ReviewFeedbackA>(),
-                        g::send::<REVIEW_A, A_REVIEW_FILE, FileReviewResultA>(),
                     ),
                 ),
             ),
         ),
     )
 }
-fn prepare_a<Approved: g::Message, Rejected: g::Message>() -> impl Projectable {
+fn prepare_a() -> impl Projectable {
+    let approved = || {
+        g::seq(
+            g::send::<REVIEW_A, REVIEW_REPAIR_A, ApprovedA>(),
+            g::seq(
+                g::send::<REVIEW_INITIAL, REVIEW_REPAIR_A, Loan<REVIEW_A>>(),
+                review_outcome_a::<REVIEW_A, ApprovedA>(),
+            ),
+        )
+    };
     g::seq(
         attempt_a(),
         g::route(
-            review_outcome_a::<Approved>(),
+            approved(),
             g::seq(
-                g::seq(review_outcome_a::<Rejected>(), attempt_a()).roll(),
-                review_outcome_a::<Approved>(),
+                g::seq(review_outcome_a::<REVIEW_A, RejectedA>(), attempt_a()).roll(),
+                approved(),
             ),
         )
         .resolve::<REVIEW_DECISION_A>(),
     )
 }
-fn merge_ci_a() -> impl Projectable {
+fn repair_a() -> impl Projectable {
     g::seq(
-        g::send::<REPO, A_FILE, MergeReadyA>(),
-        g::seq(
-            g::send::<A_FILE, REPO, MergeA>(),
+        attempt_a(),
+        g::route(
+            review_outcome_a::<REVIEW_A, RepairApprovedA>(),
             g::seq(
-                g::send::<REPO, A_FILE, MergedA>(),
+                g::seq(review_outcome_a::<REVIEW_A, RepairRejectedA>(), attempt_a()).roll(),
+                review_outcome_a::<REVIEW_A, RepairApprovedA>(),
+            ),
+        )
+        .resolve::<REPAIR_DECISION_A>(),
+    )
+}
+fn delivery_a() -> impl Projectable {
+    g::seq(
+        prepare_a(),
+        g::seq(
+            g::seq(
+                g::send::<REVIEW_A, A_MERGE_FILE, MergeReadyA>(),
+                g::send::<A_MERGE_FILE, MERGE_REQUESTS, MergeA>(),
+            ),
+            g::route(
                 g::seq(
-                    g::send::<REPO, BUILD_SERVER, PublicationA>(),
+                    g::send::<REVIEW_A, REPO, CiPassedA>(),
                     g::seq(
-                        g::send::<BUILD_SERVER, CI_FILE, FilePublicationA>(),
-                        g::send::<CI_FILE, BUILD_SERVER, CiRequestA>(),
+                        g::send::<REVIEW_REPAIR_A, REPO, RetiredReviewA>(),
+                        g::seq(
+                            g::send::<REVIEW_REPAIR_A, A_FILE, CiUpdate>(),
+                            g::seq(
+                                g::send::<REVIEW_REPAIR_A, B_FILE, CiUpdate>(),
+                                g::seq(
+                                    g::send::<REVIEW_REPAIR_A, A_REVIEW_FILE, CiUpdate>(),
+                                    g::seq(
+                                        g::send::<REVIEW_REPAIR_A, TEST_FILE, CiUpdate>(),
+                                        g::send::<REVIEW_REPAIR_A, TEST_ENV, CiUpdate>(),
+                                    ),
+                                ),
+                            ),
+                        ),
                     ),
                 ),
+                g::seq(
+                    (g::seq(
+                        g::seq(
+                            g::send::<REVIEW_A, REPO, CiFailedA>(),
+                            g::seq(
+                                g::send::<REVIEW_REPAIR_A, A_FILE, CiUpdate>(),
+                                g::seq(
+                                    g::send::<REVIEW_REPAIR_A, B_FILE, CiUpdate>(),
+                                    g::seq(
+                                        g::send::<REVIEW_REPAIR_A, A_REVIEW_FILE, CiUpdate>(),
+                                        g::seq(
+                                            g::send::<REVIEW_REPAIR_A, TEST_FILE, CiUpdate>(),
+                                            g::send::<REVIEW_REPAIR_A, TEST_ENV, CiUpdate>(),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                        g::seq(
+                            repair_a(),
+                            g::seq(
+                                g::send::<REVIEW_A, A_MERGE_FILE, MergeReadyA>(),
+                                g::send::<A_MERGE_FILE, MERGE_REQUESTS, MergeA>(),
+                            ),
+                        ),
+                    ))
+                    .roll(),
+                    g::seq(
+                        g::send::<REVIEW_A, REPO, CiPassedA>(),
+                        g::seq(
+                            g::send::<REVIEW_REPAIR_A, REPO, RetiredReviewA>(),
+                            g::seq(
+                                g::send::<REVIEW_REPAIR_A, A_FILE, CiUpdate>(),
+                                g::seq(
+                                    g::send::<REVIEW_REPAIR_A, B_FILE, CiUpdate>(),
+                                    g::seq(
+                                        g::send::<REVIEW_REPAIR_A, A_REVIEW_FILE, CiUpdate>(),
+                                        g::seq(
+                                            g::send::<REVIEW_REPAIR_A, TEST_FILE, CiUpdate>(),
+                                            g::send::<REVIEW_REPAIR_A, TEST_ENV, CiUpdate>(),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            )
+            .resolve::<CI_DECISION_A>(),
+        ),
+    )
+}
+fn publication_a() -> impl Projectable {
+    g::seq(
+        g::send::<REPO, A_MERGE_FILE, MergedA>(),
+        g::seq(
+            g::send::<REPO, BUILD_SERVER, PublicationA>(),
+            g::seq(
+                g::send::<BUILD_SERVER, CI_FILE, FilePublicationA>(),
+                g::send::<CI_FILE, BUILD_SERVER, CiRequestA>(),
             ),
         ),
     )
 }
-fn ci_outcome_a<M: g::Message>() -> impl Projectable {
+fn integration_a() -> impl Projectable {
     g::seq(
-        g::send::<BUILD_SERVER, REPO, M>(),
+        g::send::<REPO_OWNER, REPO, InitialMergeA>(),
         g::seq(
-            g::send::<REPO, A_FILE, CiUpdate>(),
-            g::seq(
-                g::send::<REPO, B_FILE, CiUpdate>(),
+            publication_a(),
+            g::route(
                 g::seq(
-                    g::send::<REPO, A_REVIEW_FILE, CiUpdate>(),
                     g::seq(
-                        g::send::<REPO, TEST_FILE, CiUpdate>(),
+                        g::send::<BUILD_SERVER, REPO_OWNER, CiPassedA>(),
+                        g::send::<BUILD_SERVER, REVIEW_REPAIR_A, CiResultA>(),
+                    ),
+                    g::seq(
+                        g::send::<REPO, BUILD_SERVER, CiPassedA>(),
+                        g::send::<BUILD_SERVER, CI_FILE, FileCiResultA>(),
+                    ),
+                ),
+                g::seq(
+                    (g::seq(
                         g::seq(
-                            g::send::<REPO, REVIEW_A, CiUpdate>(),
                             g::seq(
-                                g::send::<REPO, TEST_ENV, CiUpdate>(),
+                                g::send::<BUILD_SERVER, REPO_OWNER, CiFailedA>(),
+                                g::send::<BUILD_SERVER, REVIEW_REPAIR_A, CiResultA>(),
+                            ),
+                            g::seq(
+                                g::send::<REPO, BUILD_SERVER, CiFailedA>(),
                                 g::send::<BUILD_SERVER, CI_FILE, FileCiResultA>(),
                             ),
+                        ),
+                        g::seq(
+                            g::send::<REPO_OWNER, REPO, InitialMergeA>(),
+                            publication_a(),
+                        ),
+                    ))
+                    .roll(),
+                    g::seq(
+                        g::seq(
+                            g::send::<BUILD_SERVER, REPO_OWNER, CiPassedA>(),
+                            g::send::<BUILD_SERVER, REVIEW_REPAIR_A, CiResultA>(),
+                        ),
+                        g::seq(
+                            g::send::<REPO, BUILD_SERVER, CiPassedA>(),
+                            g::send::<BUILD_SERVER, CI_FILE, FileCiResultA>(),
                         ),
                     ),
                 ),
@@ -278,41 +419,21 @@ fn ci_outcome_a<M: g::Message>() -> impl Projectable {
         ),
     )
 }
-fn integrate_a<Passed: g::Message>() -> impl Projectable {
-    g::seq(
-        merge_ci_a(),
-        g::route(
-            ci_outcome_a::<Passed>(),
-            g::seq(
-                g::seq(
-                    ci_outcome_a::<CiFailedA>(),
-                    g::seq(
-                        prepare_a::<RepairApprovedA, RepairRejectedA>(),
-                        merge_ci_a(),
-                    ),
-                )
-                .roll(),
-                ci_outcome_a::<Passed>(),
-            ),
-        )
-        .resolve::<CI_DECISION_A>(),
-    )
-}
-
 fn attempt_b() -> impl Projectable + Copy {
     g::seq(
-        g::send::<B_FILE, REPO, ImplementB>(),
+        g::send::<B_MERGE_FILE, REPO, ImplementB>(),
         g::seq(
-            g::send::<REPO, B_FILE, ImplementationB>(),
-            g::par(
-                g::seq(
-                    g::send::<REPO, REVIEW_B, ReadyReviewB>(),
-                    g::seq(
-                        g::send::<REPO, B_REVIEW_FILE, FileReviewCandidateB>(),
-                        g::send::<B_REVIEW_FILE, REVIEW_B, ReviewRequestB>(),
-                    ),
-                ),
+            g::send::<REPO, B_MERGE_FILE, ImplementationB>(),
+            g::seq(
+                g::send::<REPO, A_FILE, InterfaceB>(),
                 g::par(
+                    g::seq(
+                        g::send::<REPO, REVIEW_B, ReadyReviewB>(),
+                        g::seq(
+                            g::send::<REPO, B_REVIEW_FILE, FileReviewCandidateB>(),
+                            g::send::<B_REVIEW_FILE, REVIEW_B, ReviewRequestB>(),
+                        ),
+                    ),
                     g::seq(
                         g::send::<REPO, TEST_ENV, ReadyTestB>(),
                         g::seq(
@@ -326,78 +447,198 @@ fn attempt_b() -> impl Projectable + Copy {
                             ),
                         ),
                     ),
-                    g::send::<REPO, A_FILE, InterfaceB>(),
                 ),
             ),
         ),
     )
 }
-fn review_outcome_b<M: g::Message>() -> impl Projectable {
+fn review_outcome_b<const CONTROLLER: u8, M: g::Message>() -> impl Projectable {
     g::seq(
-        g::send::<REVIEW_B, REPO, M>(),
+        g::send::<CONTROLLER, REPO, M>(),
         g::seq(
             g::send::<REPO, A_FILE, ReviewFeedbackB>(),
-            g::seq(
-                g::send::<REPO, B_FILE, ReviewFeedbackB>(),
+            g::par(
+                g::send::<REVIEW_B, B_REVIEW_FILE, FileReviewResultB>(),
                 g::seq(
-                    g::send::<REPO, TEST_FILE, ReviewFeedbackB>(),
+                    g::send::<REPO, B_MERGE_FILE, ReviewFeedbackB>(),
                     g::seq(
+                        g::send::<REPO, TEST_FILE, ReviewFeedbackB>(),
                         g::send::<REPO, TEST_ENV, ReviewFeedbackB>(),
-                        g::send::<REVIEW_B, B_REVIEW_FILE, FileReviewResultB>(),
                     ),
                 ),
             ),
         ),
     )
 }
-fn prepare_b<Approved: g::Message, Rejected: g::Message>() -> impl Projectable {
+fn prepare_b() -> impl Projectable {
+    let approved = || {
+        g::seq(
+            g::send::<REVIEW_B, REVIEW_REPAIR_B, ApprovedB>(),
+            g::seq(
+                g::send::<REVIEW_INITIAL, REVIEW_REPAIR_B, Loan<REVIEW_B>>(),
+                review_outcome_b::<REVIEW_B, ApprovedB>(),
+            ),
+        )
+    };
     g::seq(
         attempt_b(),
         g::route(
-            review_outcome_b::<Approved>(),
+            approved(),
             g::seq(
-                g::seq(review_outcome_b::<Rejected>(), attempt_b()).roll(),
-                review_outcome_b::<Approved>(),
+                g::seq(review_outcome_b::<REVIEW_B, RejectedB>(), attempt_b()).roll(),
+                approved(),
             ),
         )
         .resolve::<REVIEW_DECISION_B>(),
     )
 }
-fn merge_ci_b() -> impl Projectable {
+fn repair_b() -> impl Projectable {
     g::seq(
-        g::send::<REPO, B_FILE, MergeReadyB>(),
-        g::seq(
-            g::send::<B_FILE, REPO, MergeB>(),
+        attempt_b(),
+        g::route(
+            review_outcome_b::<REVIEW_B, RepairApprovedB>(),
             g::seq(
-                g::send::<REPO, B_FILE, MergedB>(),
+                g::seq(review_outcome_b::<REVIEW_B, RepairRejectedB>(), attempt_b()).roll(),
+                review_outcome_b::<REVIEW_B, RepairApprovedB>(),
+            ),
+        )
+        .resolve::<REPAIR_DECISION_B>(),
+    )
+}
+fn delivery_b() -> impl Projectable {
+    g::seq(
+        prepare_b(),
+        g::seq(
+            g::seq(
+                g::send::<REVIEW_B, B_MERGE_FILE, MergeReadyB>(),
+                g::send::<B_MERGE_FILE, MERGE_REQUESTS, MergeB>(),
+            ),
+            g::route(
                 g::seq(
-                    g::send::<REPO, BUILD_SERVER, PublicationB>(),
+                    g::send::<REVIEW_B, REPO, CiPassedB>(),
                     g::seq(
-                        g::send::<BUILD_SERVER, CI_FILE, FilePublicationB>(),
-                        g::send::<CI_FILE, BUILD_SERVER, CiRequestB>(),
+                        g::send::<REVIEW_REPAIR_B, REPO, RetiredReviewB>(),
+                        g::seq(
+                            g::send::<REVIEW_REPAIR_B, A_FILE, CiUpdate>(),
+                            g::seq(
+                                g::send::<REVIEW_REPAIR_B, B_FILE, CiUpdate>(),
+                                g::seq(
+                                    g::send::<REVIEW_REPAIR_B, B_REVIEW_FILE, CiUpdate>(),
+                                    g::seq(
+                                        g::send::<REVIEW_REPAIR_B, TEST_FILE, CiUpdate>(),
+                                        g::send::<REVIEW_REPAIR_B, TEST_ENV, CiUpdate>(),
+                                    ),
+                                ),
+                            ),
+                        ),
                     ),
                 ),
+                g::seq(
+                    (g::seq(
+                        g::seq(
+                            g::send::<REVIEW_B, REPO, CiFailedB>(),
+                            g::seq(
+                                g::send::<REVIEW_REPAIR_B, A_FILE, CiUpdate>(),
+                                g::seq(
+                                    g::send::<REVIEW_REPAIR_B, B_FILE, CiUpdate>(),
+                                    g::seq(
+                                        g::send::<REVIEW_REPAIR_B, B_REVIEW_FILE, CiUpdate>(),
+                                        g::seq(
+                                            g::send::<REVIEW_REPAIR_B, TEST_FILE, CiUpdate>(),
+                                            g::send::<REVIEW_REPAIR_B, TEST_ENV, CiUpdate>(),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                        g::seq(
+                            repair_b(),
+                            g::seq(
+                                g::send::<REVIEW_B, B_MERGE_FILE, MergeReadyB>(),
+                                g::send::<B_MERGE_FILE, MERGE_REQUESTS, MergeB>(),
+                            ),
+                        ),
+                    ))
+                    .roll(),
+                    g::seq(
+                        g::send::<REVIEW_B, REPO, CiPassedB>(),
+                        g::seq(
+                            g::send::<REVIEW_REPAIR_B, REPO, RetiredReviewB>(),
+                            g::seq(
+                                g::send::<REVIEW_REPAIR_B, A_FILE, CiUpdate>(),
+                                g::seq(
+                                    g::send::<REVIEW_REPAIR_B, B_FILE, CiUpdate>(),
+                                    g::seq(
+                                        g::send::<REVIEW_REPAIR_B, B_REVIEW_FILE, CiUpdate>(),
+                                        g::seq(
+                                            g::send::<REVIEW_REPAIR_B, TEST_FILE, CiUpdate>(),
+                                            g::send::<REVIEW_REPAIR_B, TEST_ENV, CiUpdate>(),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            )
+            .resolve::<CI_DECISION_B>(),
+        ),
+    )
+}
+fn publication_b() -> impl Projectable {
+    g::seq(
+        g::send::<REPO, B_MERGE_FILE, MergedB>(),
+        g::seq(
+            g::send::<REPO, BUILD_SERVER, PublicationB>(),
+            g::seq(
+                g::send::<BUILD_SERVER, CI_FILE, FilePublicationB>(),
+                g::send::<CI_FILE, BUILD_SERVER, CiRequestB>(),
             ),
         ),
     )
 }
-fn ci_outcome_b<M: g::Message>() -> impl Projectable {
+fn integration_b() -> impl Projectable {
     g::seq(
-        g::send::<BUILD_SERVER, REPO, M>(),
+        g::send::<REPO_OWNER, REPO, InitialMergeB>(),
         g::seq(
-            g::send::<REPO, A_FILE, CiUpdate>(),
-            g::seq(
-                g::send::<REPO, B_FILE, CiUpdate>(),
+            publication_b(),
+            g::route(
                 g::seq(
-                    g::send::<REPO, B_REVIEW_FILE, CiUpdate>(),
                     g::seq(
-                        g::send::<REPO, TEST_FILE, CiUpdate>(),
+                        g::send::<BUILD_SERVER, REPO_OWNER, CiPassedB>(),
+                        g::send::<BUILD_SERVER, REVIEW_REPAIR_B, CiResultB>(),
+                    ),
+                    g::seq(
+                        g::send::<REPO, BUILD_SERVER, CiPassedB>(),
+                        g::send::<BUILD_SERVER, CI_FILE, FileCiResultB>(),
+                    ),
+                ),
+                g::seq(
+                    (g::seq(
                         g::seq(
-                            g::send::<REPO, REVIEW_B, CiUpdate>(),
                             g::seq(
-                                g::send::<REPO, TEST_ENV, CiUpdate>(),
+                                g::send::<BUILD_SERVER, REPO_OWNER, CiFailedB>(),
+                                g::send::<BUILD_SERVER, REVIEW_REPAIR_B, CiResultB>(),
+                            ),
+                            g::seq(
+                                g::send::<REPO, BUILD_SERVER, CiFailedB>(),
                                 g::send::<BUILD_SERVER, CI_FILE, FileCiResultB>(),
                             ),
+                        ),
+                        g::seq(
+                            g::send::<REPO_OWNER, REPO, InitialMergeB>(),
+                            publication_b(),
+                        ),
+                    ))
+                    .roll(),
+                    g::seq(
+                        g::seq(
+                            g::send::<BUILD_SERVER, REPO_OWNER, CiPassedB>(),
+                            g::send::<BUILD_SERVER, REVIEW_REPAIR_B, CiResultB>(),
+                        ),
+                        g::seq(
+                            g::send::<REPO, BUILD_SERVER, CiPassedB>(),
+                            g::send::<BUILD_SERVER, CI_FILE, FileCiResultB>(),
                         ),
                     ),
                 ),
@@ -405,34 +646,26 @@ fn ci_outcome_b<M: g::Message>() -> impl Projectable {
         ),
     )
 }
-fn integrate_b<Passed: g::Message>() -> impl Projectable {
-    g::seq(
-        merge_ci_b(),
-        g::route(
-            ci_outcome_b::<Passed>(),
-            g::seq(
-                g::seq(
-                    ci_outcome_b::<CiFailedB>(),
-                    g::seq(
-                        prepare_b::<RepairApprovedB, RepairRejectedB>(),
-                        merge_ci_b(),
-                    ),
-                )
-                .roll(),
-                ci_outcome_b::<Passed>(),
-            ),
-        )
-        .resolve::<CI_DECISION_B>(),
-    )
-}
-
 pub fn source() -> impl Projectable {
     let resources = g::par(
-        g::send::<RESOURCE_INIT, REPO_OWNER, RepoLoan>(),
+        g::seq(
+            g::send::<RESOURCE_INIT, REPO_OWNER, RepoLoan>(),
+            g::send::<RESOURCE_INIT, REPO_OWNER, Loan<MERGE_REQUESTS>>(),
+        ),
         g::par(
             g::send::<RESOURCE_INIT, TEST_OWNER, TestLoan>(),
-            g::send::<RESOURCE_INIT, CI_OWNER, BuildLoan>(),
+            g::par(
+                g::send::<RESOURCE_INIT, CI_OWNER, BuildLoan>(),
+                g::seq(
+                    g::send::<RESOURCE_INIT, REVIEW_INITIAL, Loan<REVIEW_A>>(),
+                    g::send::<RESOURCE_INIT, REVIEW_INITIAL, Loan<REVIEW_B>>(),
+                ),
+            ),
         ),
+    );
+    let merge_files = g::par(
+        g::send::<A_MERGE_DATA, REVIEW_REPAIR_A, Loan<A_MERGE_FILE>>(),
+        g::send::<B_MERGE_DATA, REVIEW_REPAIR_B, Loan<B_MERGE_FILE>>(),
     );
     let files = g::par(
         g::send::<A_DATA, A_VM, Loan<A_FILE>>(),
@@ -452,23 +685,19 @@ pub fn source() -> impl Projectable {
     );
     let task = g::seq(
         g::par(
-            prepare_a::<ApprovedA, RejectedA>(),
-            prepare_b::<ApprovedB, RejectedB>(),
+            g::par(delivery_a(), delivery_b()),
+            g::route(
+                g::seq(integration_a(), integration_b()),
+                g::seq(integration_b(), integration_a()),
+            ),
         ),
         g::seq(
-            g::route(
-                g::seq(integrate_a::<CiPassedA>(), integrate_b::<LastCiPassedB>()),
-                g::seq(integrate_b::<CiPassedB>(), integrate_a::<LastCiPassedA>()),
-            )
-            .resolve::<MERGE_ORDER>(),
+            g::send::<REPO, TEST_ENV, TaskExit>(),
             g::seq(
-                g::send::<REPO, TEST_ENV, TaskExit>(),
+                g::send::<REPO, REVIEW_A, TaskExit>(),
                 g::seq(
-                    g::send::<REPO, REVIEW_A, TaskExit>(),
-                    g::seq(
-                        g::send::<REPO, REVIEW_B, TaskExit>(),
-                        g::send::<REPO, BUILD_SERVER, TaskExit>(),
-                    ),
+                    g::send::<REPO, REVIEW_B, TaskExit>(),
+                    g::send::<REPO, BUILD_SERVER, TaskExit>(),
                 ),
             ),
         ),
@@ -508,6 +737,16 @@ pub fn source() -> impl Projectable {
             ),
         ),
     );
+    let merge_metadata = g::par(
+        g::seq(
+            crate::shell::global::file_metadata::<A_MERGE_FILE, A_MERGE_DATA>().roll(),
+            g::send::<A_MERGE_FILE, A_MERGE_DATA, FileExit>(),
+        ),
+        g::seq(
+            crate::shell::global::file_metadata::<B_MERGE_FILE, B_MERGE_DATA>().roll(),
+            g::send::<B_MERGE_FILE, B_MERGE_DATA, FileExit>(),
+        ),
+    );
     let io = g::par(
         g::seq(
             crate::shell::global::private_io::<A_VM, A_IO>(),
@@ -536,10 +775,24 @@ pub fn source() -> impl Projectable {
             ),
         ),
     );
-    g::seq(resources, g::seq(files, g::par(task, g::par(metadata, io))))
+    g::seq(
+        resources,
+        g::seq(
+            g::seq(merge_files, files),
+            g::par(task, g::par(g::par(metadata, merge_metadata), io)),
+        ),
+    )
 }
 pub struct Programs {
+    pub b_merge_data: RoleProgram<B_MERGE_DATA>,
+    pub a_merge_data: RoleProgram<A_MERGE_DATA>,
+    pub b_merge_file: RoleProgram<B_MERGE_FILE>,
+    pub a_merge_file: RoleProgram<A_MERGE_FILE>,
+    pub merge_requests: RoleProgram<MERGE_REQUESTS>,
     pub repo_owner: RoleProgram<REPO_OWNER>,
+    pub review_initial: RoleProgram<REVIEW_INITIAL>,
+    pub review_repair_a: RoleProgram<REVIEW_REPAIR_A>,
+    pub review_repair_b: RoleProgram<REVIEW_REPAIR_B>,
     pub review_a: RoleProgram<REVIEW_A>,
     pub review_b: RoleProgram<REVIEW_B>,
     pub test_owner: RoleProgram<TEST_OWNER>,
@@ -581,7 +834,9 @@ impl Programs {
             ("BuildLoan", BuildLoan::LOGICAL_LABEL),
             ("ImplementA", ImplementA::LOGICAL_LABEL),
             ("ImplementB", ImplementB::LOGICAL_LABEL),
+            ("InitialMergeA", InitialMergeA::LOGICAL_LABEL),
             ("MergeA", MergeA::LOGICAL_LABEL),
+            ("InitialMergeB", InitialMergeB::LOGICAL_LABEL),
             ("MergeB", MergeB::LOGICAL_LABEL),
             ("ReviewRequestA", ReviewRequestA::LOGICAL_LABEL),
             ("ReviewRequestB", ReviewRequestB::LOGICAL_LABEL),
@@ -625,8 +880,6 @@ impl Programs {
             ("InterfaceA", InterfaceA::LOGICAL_LABEL),
             ("InterfaceB", InterfaceB::LOGICAL_LABEL),
             ("TaskExit", TaskExit::LOGICAL_LABEL),
-            ("LastCiPassedA", LastCiPassedA::LOGICAL_LABEL),
-            ("LastCiPassedB", LastCiPassedB::LOGICAL_LABEL),
             ("FileReviewCandidateA", FileReviewCandidateA::LOGICAL_LABEL),
             ("FileReviewCandidateB", FileReviewCandidateB::LOGICAL_LABEL),
             ("FileTestCandidateA", FileTestCandidateA::LOGICAL_LABEL),
@@ -635,17 +888,111 @@ impl Programs {
             ("RepairRejectedA", RepairRejectedA::LOGICAL_LABEL),
             ("RepairApprovedB", RepairApprovedB::LOGICAL_LABEL),
             ("RepairRejectedB", RepairRejectedB::LOGICAL_LABEL),
+            ("RetiredReviewA", RetiredReviewA::LOGICAL_LABEL),
+            ("CiResultA", CiResultA::LOGICAL_LABEL),
+            ("CiResultB", CiResultB::LOGICAL_LABEL),
+            ("RetiredReviewB", RetiredReviewB::LOGICAL_LABEL),
         ]
         .into_iter()
         .map(|(name, label)| (name.into(), label.into()))
         .collect();
-        serde_json::json!({"type":"compiled_projection","format_version":1,"task":"6M","session":SESSION,"labels":labels,"roles":{"REPO_OWNER":REPO_OWNER,"REVIEW_A":REVIEW_A,"REVIEW_B":REVIEW_B,"TEST_OWNER":TEST_OWNER,"CI_OWNER":CI_OWNER,"REPO":REPO,"TEST_ENV":TEST_ENV,"BUILD_SERVER":BUILD_SERVER,"RESOURCE_INIT":RESOURCE_INIT,"A_FILE":A_FILE,"B_FILE":B_FILE,"A_REVIEW_FILE":A_REVIEW_FILE,"B_REVIEW_FILE":B_REVIEW_FILE,"TEST_FILE":TEST_FILE,"CI_FILE":CI_FILE,"A_VM":A_VM,"B_VM":B_VM,"REVIEW_VM":REVIEW_VM,"TEST_VM":TEST_VM,"CI_VM":CI_VM,"A_DATA":A_DATA,"B_DATA":B_DATA,"A_REVIEW_DATA":A_REVIEW_DATA,"B_REVIEW_DATA":B_REVIEW_DATA,"TEST_DATA":TEST_DATA,"CI_DATA":CI_DATA,"A_IO":A_IO,"B_IO":B_IO,"REVIEW_IO":REVIEW_IO,"TEST_IO":TEST_IO,"CI_IO":CI_IO},"programs":[rows(&self.repo_owner),rows(&self.review_a),rows(&self.review_b),rows(&self.test_owner),rows(&self.ci_owner),rows(&self.repo),rows(&self.environment),rows(&self.build),rows(&self.resource_init),rows(&self.a_file),rows(&self.b_file),rows(&self.a_review_file),rows(&self.b_review_file),rows(&self.test_file),rows(&self.ci_file),rows(&self.a_vm),rows(&self.b_vm),rows(&self.review_vm),rows(&self.test_vm),rows(&self.ci_vm),rows(&self.a_data),rows(&self.b_data),rows(&self.a_review_data),rows(&self.b_review_data),rows(&self.test_data),rows(&self.ci_data),rows(&self.a_io),rows(&self.b_io),rows(&self.review_io),rows(&self.test_io),rows(&self.ci_io)]})
+        let roles = std::collections::BTreeMap::from([
+            ("A_DATA", A_DATA),
+            ("A_FILE", A_FILE),
+            ("A_IO", A_IO),
+            ("A_MERGE_DATA", A_MERGE_DATA),
+            ("A_MERGE_FILE", A_MERGE_FILE),
+            ("A_REVIEW_DATA", A_REVIEW_DATA),
+            ("A_REVIEW_FILE", A_REVIEW_FILE),
+            ("A_VM", A_VM),
+            ("BUILD_SERVER", BUILD_SERVER),
+            ("B_DATA", B_DATA),
+            ("B_FILE", B_FILE),
+            ("B_IO", B_IO),
+            ("B_MERGE_DATA", B_MERGE_DATA),
+            ("B_MERGE_FILE", B_MERGE_FILE),
+            ("B_REVIEW_DATA", B_REVIEW_DATA),
+            ("B_REVIEW_FILE", B_REVIEW_FILE),
+            ("B_VM", B_VM),
+            ("CI_DATA", CI_DATA),
+            ("CI_FILE", CI_FILE),
+            ("CI_IO", CI_IO),
+            ("CI_OWNER", CI_OWNER),
+            ("CI_VM", CI_VM),
+            ("MERGE_REQUESTS", MERGE_REQUESTS),
+            ("REPO", REPO),
+            ("REPO_OWNER", REPO_OWNER),
+            ("RESOURCE_INIT", RESOURCE_INIT),
+            ("REVIEW_A", REVIEW_A),
+            ("REVIEW_B", REVIEW_B),
+            ("REVIEW_INITIAL", REVIEW_INITIAL),
+            ("REVIEW_IO", REVIEW_IO),
+            ("REVIEW_REPAIR_A", REVIEW_REPAIR_A),
+            ("REVIEW_REPAIR_B", REVIEW_REPAIR_B),
+            ("REVIEW_VM", REVIEW_VM),
+            ("TEST_DATA", TEST_DATA),
+            ("TEST_ENV", TEST_ENV),
+            ("TEST_FILE", TEST_FILE),
+            ("TEST_IO", TEST_IO),
+            ("TEST_OWNER", TEST_OWNER),
+            ("TEST_VM", TEST_VM),
+        ]);
+        let programs = [
+            rows(&self.b_merge_data),
+            rows(&self.a_merge_data),
+            rows(&self.b_merge_file),
+            rows(&self.a_merge_file),
+            rows(&self.merge_requests),
+            rows(&self.review_repair_a),
+            rows(&self.review_repair_b),
+            rows(&self.review_initial),
+            rows(&self.repo_owner),
+            rows(&self.review_a),
+            rows(&self.review_b),
+            rows(&self.test_owner),
+            rows(&self.ci_owner),
+            rows(&self.repo),
+            rows(&self.environment),
+            rows(&self.build),
+            rows(&self.resource_init),
+            rows(&self.a_file),
+            rows(&self.b_file),
+            rows(&self.a_review_file),
+            rows(&self.b_review_file),
+            rows(&self.test_file),
+            rows(&self.ci_file),
+            rows(&self.a_vm),
+            rows(&self.b_vm),
+            rows(&self.review_vm),
+            rows(&self.test_vm),
+            rows(&self.ci_vm),
+            rows(&self.a_data),
+            rows(&self.b_data),
+            rows(&self.a_review_data),
+            rows(&self.b_review_data),
+            rows(&self.test_data),
+            rows(&self.ci_data),
+            rows(&self.a_io),
+            rows(&self.b_io),
+            rows(&self.review_io),
+            rows(&self.test_io),
+            rows(&self.ci_io),
+        ];
+        serde_json::json!({"type":"compiled_projection","format_version":1,"task":"6M","session":SESSION,"labels":labels,"roles":roles,"programs":programs.as_slice()})
     }
 }
 pub fn programs() -> Programs {
     let p = source();
     Programs {
+        b_merge_data: project(&p),
+        a_merge_data: project(&p),
+        b_merge_file: project(&p),
+        a_merge_file: project(&p),
+        merge_requests: project(&p),
         repo_owner: project(&p),
+        review_initial: project(&p),
+        review_repair_a: project(&p),
+        review_repair_b: project(&p),
         review_a: project(&p),
         review_b: project(&p),
         test_owner: project(&p),

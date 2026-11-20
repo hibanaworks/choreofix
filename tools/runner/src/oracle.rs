@@ -208,7 +208,7 @@ impl Simulator {
                     inputs.insert(key, json_value(&value)?);
                 }
             }
-            if task == "13M" {
+            if matches!(task, "13M" | "13H") {
                 // Public scientific target sets are input data, not a workflow.
                 // The current common world has no former dataclass step tables.
                 let scientific = PyModule::import(py, "benchmark.tools.sim_lab_qc")?;
@@ -252,28 +252,32 @@ impl Simulator {
             Ok((sim.unbind(), registry.unbind(), inputs))
         })?;
         let mut inputs = json!(inputs);
-        if task == "14H" {
+        if matches!(task, "4H" | "7H" | "8M" | "14H" | "15E" | "16M") {
             inputs["tool_schemas"] = serde_json::from_slice(&fs::read(
-                source.join("benchmark/descriptions/14H/tools.json"),
+                source.join(format!("benchmark/descriptions/{task}/tools.json")),
             )?)?;
         }
         let mut fixture = fixture(task, &metadata, &inputs)?;
-        if task == "14H" {
-            fixture["tool_schemas"] = inputs["tool_schemas"].clone();
+        if let Some(schemas) = inputs.get("tool_schemas") {
+            fixture["tool_schemas"] = schemas.clone();
         } else if matches!(
             task,
             "3E" | "4E"
+                | "3M"
+                | "3H"
                 | "4M"
                 | "5E"
                 | "5M"
                 | "5H"
                 | "6M"
                 | "7E"
+                | "7M"
                 | "10E"
                 | "10M"
                 | "11E"
                 | "13E"
                 | "13M"
+                | "13H"
                 | "14E"
                 | "14M"
         ) {
@@ -315,6 +319,79 @@ impl Simulator {
                 }
             })?;
         Ok((Self(send), fixture))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn recorded_effects(events: &Path, trace: Trace) -> Result<Self> {
+        use std::{
+            collections::BTreeMap,
+            io::{BufRead, BufReader},
+        };
+
+        let mut requests = BTreeMap::new();
+        let mut completed = Vec::new();
+        for line in BufReader::new(fs::File::open(events)?).lines() {
+            let row: Value = serde_json::from_str(&line?)?;
+            let message = &row["message"];
+            match (row["direction"].as_str(), message["type"].as_str()) {
+                (Some("domain_start"), Some("execute")) => {
+                    let id = message["id"].as_u64().ok_or("recorded effect id")?;
+                    if requests.insert(id, message.clone()).is_some() {
+                        return Err("duplicate recorded effect request".into());
+                    }
+                }
+                (Some("simulator"), Some("simulator_result")) => {
+                    let id = message["id"].as_u64().ok_or("recorded effect result id")?;
+                    let request = requests
+                        .remove(&id)
+                        .ok_or("result without recorded request")?;
+                    completed.push((request, message.clone()));
+                }
+                _ => {}
+            }
+        }
+        if completed.is_empty() {
+            return Err("expected a prefix with real recorded effects".into());
+        }
+        completed.sort_by_key(|(request, _)| request["id"].as_u64());
+        let (send, receive) = mpsc::channel::<Request>();
+        std::thread::Builder::new()
+            .name("recorded-effect-replies".into())
+            .spawn(move || {
+                while let Ok((message, reply)) = receive.recv() {
+                    let id = message["id"].clone();
+                    let result =
+                        match message["type"].as_str() {
+                            Some("execute") => {
+                                match completed.iter().position(|(request, _)| {
+                                    ["agent", "tool", "arguments"]
+                                        .iter()
+                                        .all(|field| request[*field] == message[*field])
+                                }) {
+                                    Some(index) => {
+                                        let (request, mut response) = completed.remove(index);
+                                        response["id"] = id.clone();
+                                        trace.record("diagnostic_effect", &json!({
+                                    "original_id": request["id"], "request": message,
+                                    "response": response
+                                })).map(|()| response)
+                                    }
+                                    None => Err(format!(
+                                        "no recorded reply for {} by {}",
+                                        message["tool"], message["agent"]
+                                    )
+                                    .into()),
+                                }
+                            }
+                            Some("score") => Ok(Value::Null),
+                            _ => Err("unexpected recorded-effect request".into()),
+                        };
+                    if wire::respond(&reply, id, result).is_err() {
+                        break;
+                    }
+                }
+            })?;
+        Ok(Self(send))
     }
 
     pub async fn call(&self, message: Value) -> Result<Value> {
@@ -551,6 +628,57 @@ fn fixture(task: &str, metadata: &Value, inputs: &Value) -> Result<Value> {
     let family = task.trim_end_matches(['E', 'M', 'H']).parse::<u8>()?;
     let mut actors = Vec::new();
     for agent in metadata["agents"].as_array().ok_or("original agent list")? {
+        if matches!(task, "4H" | "7H" | "8M" | "15E") {
+            let name = agent.as_str().ok_or("participant name")?;
+            let operations = inputs["tool_schemas"]
+                .as_array()
+                .ok_or("declared operation schemas")?
+                .iter()
+                .map(|tool| &tool["function"])
+                .filter(|tool| {
+                    tool["agent_ids"]
+                        .as_array()
+                        .is_some_and(|ids| ids.contains(agent))
+                })
+                .collect::<Vec<_>>();
+            if operations.is_empty() {
+                return Err("participant lacks declared operations".into());
+            }
+            let mut resources = std::collections::BTreeSet::new();
+            for operation in &operations {
+                resources.extend(resources_for_call(
+                    metadata,
+                    name,
+                    &json!({"tool":operation["name"]}),
+                )?);
+            }
+            actors.push(json!({"agent":agent,"resources":resources,"operations":operations}));
+            continue;
+        }
+        if task == "16M" {
+            let name = agent.as_str().ok_or("pipeline participant name")?;
+            let resources = metadata["agent_resources"][name]
+                .as_array()
+                .ok_or("pipeline resources")?;
+            let operations = inputs["tool_schemas"]
+                .as_array()
+                .ok_or("pipeline domain schemas")?
+                .iter()
+                .map(|tool| &tool["function"])
+                .filter(|tool| {
+                    tool["agent_ids"]
+                        .as_array()
+                        .is_some_and(|ids| ids.contains(agent))
+                })
+                .collect::<Vec<_>>();
+            if (operations.is_empty() && name != "BUILD_MASTER")
+                || resources.iter().any(|resource| !resource.is_string())
+            {
+                return Err("pipeline participant lacks its declared inputs".into());
+            }
+            actors.push(json!({"agent":agent,"resources":resources,"operations":operations}));
+            continue;
+        }
         if task == "14H" {
             let name = agent.as_str().ok_or("scientist name")?;
             let resources = metadata["agent_resources"][name]
@@ -668,6 +796,39 @@ fn fixture(task: &str, metadata: &Value, inputs: &Value) -> Result<Value> {
                 {"tool":"draft_content","arguments":{"section_name":section}},
                 {"tool":"write_to_document","arguments":{"sections":sections}},
                 {"tool":"review_own_work","arguments":{"section_name":section}}])
+        } else if task == "7M" {
+            let mut calls = Vec::new();
+            for (table, tool, field) in [
+                ("_WRITE_STEPS", "write_section", "section"),
+                ("_REFERENCES_STEPS", "update_references", "scope"),
+                ("_FACT_CHECK_STEPS", "fact_check", "section"),
+                ("_REVIEW_STEPS", "review_sections", "scope"),
+                ("_INSERT_FIGURE_STEPS", "insert_figure", "section"),
+            ] {
+                for row in inputs[table].as_array().ok_or("7M assignment table")? {
+                    if row["agent_id"] == *agent {
+                        if tool == "insert_figure" {
+                            calls.push(json!({"tool":"create_figure","section":row[field]}));
+                        }
+                        calls.push(json!({"tool":tool,"arguments":{"section_name":row[field]}}));
+                    }
+                }
+            }
+            if agent == "EDITOR" {
+                let sections = step("_COMBINE_STEPS", "sections")?;
+                let sections = sections
+                    .as_array()
+                    .ok_or("assembly chapters")?
+                    .iter()
+                    .map(|value| value.as_str().ok_or("assembly chapter"))
+                    .collect::<std::result::Result<Vec<_>, _>>()?
+                    .join(",");
+                calls.push(json!({"tool":"combine_sections","arguments":{"sections":sections}}));
+            }
+            if calls.is_empty() {
+                return Err("7M actor lacks an original assignment".into());
+            }
+            json!(calls)
         } else if task == "7E" {
             if agent == "EDITOR" {
                 let mut calls = inputs["_REVIEW_STEPS"].as_array().ok_or("document reviews")?
@@ -690,7 +851,29 @@ fn fixture(task: &str, metadata: &Value, inputs: &Value) -> Result<Value> {
                     {"tool":"update_references","arguments":{"section_name":step("_REFERENCES_STEPS","scope")?}}
                 ])
             }
-        } else if task == "3E" {
+        } else if task == "3H" {
+            match agent.as_str() {
+                Some("EDITOR_IN_CHIEF") => json!([
+                    {"tool":"make_editorial_decision"},
+                    {"tool":"combine_sections","arguments":{"sections":step("_COMBINE_STEPS","sections")?.as_array().ok_or("survey sections")?
+                        .iter().map(|value|value.as_str().ok_or("survey section")).collect::<std::result::Result<Vec<_>,_>>()?.join(",")}}
+                ]),
+                Some("REVIEWER") => json!(inputs["_REVIEW_STEPS"].as_array().ok_or("survey review assignments")?
+                    .iter().map(|row|json!({"tool":"peer_review","arguments":{"manuscript":row["scope"]}})).collect::<Vec<_>>()),
+                Some("DATA_ANALYST") => json!(inputs["_INSERT_FIGURE_STEPS"].as_array().ok_or("survey figure assignments")?
+                    .iter().flat_map(|row|[
+                        json!({"tool":"create_figure","section":row["section"]}),
+                        json!({"tool":"insert_figure","arguments":{"section_name":row["section"]}}),
+                    ]).collect::<Vec<_>>()),
+                Some("RESEARCHER_A" | "RESEARCHER_B" | "RESEARCHER_C" | "RESEARCHER_D") => json!([
+                    {"tool":"research_topic","arguments":{"topic":step("_RESEARCH_STEPS","topic")?}},
+                    {"tool":"write_section","arguments":{"section_name":step("_WRITE_STEPS","section")?}},
+                    {"tool":"update_references","arguments":{"section_name":step("_REFERENCES_STEPS","scope")?}},
+                    {"tool":"revise_section","arguments":{"section_name":step("_WRITE_STEPS","section")?}}
+                ]),
+                _ => return Err("unknown survey participant".into()),
+            }
+        } else if matches!(task, "3E" | "3M") {
             if agent == "EDITOR" {
                 let mut calls = inputs["_REVIEW_STEPS"].as_array().ok_or("original report reviews")?.iter()
                     .filter(|row| row["agent_id"] == *agent)
@@ -706,6 +889,14 @@ fn fixture(task: &str, metadata: &Value, inputs: &Value) -> Result<Value> {
                     .join(",");
                 calls.push(json!({"tool":"combine_sections","arguments":{"sections":sections}}));
                 Value::Array(calls)
+            } else if agent == "FACT_CHECKER" {
+                json!(inputs["_FACT_CHECK_STEPS"]
+                    .as_array()
+                    .ok_or("original fact check targets")?
+                    .iter()
+                    .filter(|row|row["agent_id"]==*agent)
+                    .map(|row|json!({"tool":"fact_check","arguments":{"section_name":row["section"]}}))
+                    .collect::<Vec<_>>())
             } else {
                 json!([
                     {"tool":"research_topic","arguments":{"topic":step("_RESEARCH_STEPS","topic")?}},
@@ -792,7 +983,7 @@ fn fixture(task: &str, metadata: &Value, inputs: &Value) -> Result<Value> {
                 }
             }
             Value::Array(calls)
-        } else if matches!(task, "13E" | "13M") {
+        } else if matches!(task, "13E" | "13M" | "13H") {
             let mut calls = Vec::new();
             for (tool, table, key) in [
                 ("run_analysis", "_ANALYSES", "sample"),
@@ -819,21 +1010,29 @@ fn fixture(task: &str, metadata: &Value, inputs: &Value) -> Result<Value> {
                     .iter()
                     .find(|s| s["scientist_id"] == "BIOLOGIST")
                     .ok_or("prepared culture")?;
-                let specimen = if task == "13M" {
+                let specimen = if matches!(task, "13M" | "13H") {
                     json!("synthesized_compound")
                 } else {
                     compound["material"].clone()
                 };
                 calls.push(json!({"tool":"run_bioassay","arguments":{"compound":specimen,"cell_type":culture["material"]}}));
             }
-            if task == "13M" && agent == "CHEMIST" {
+            if matches!(task, "13M" | "13H") && agent == "CHEMIST" {
                 calls.push(
                     json!({"tool":"run_synthesis","arguments":{"compound":"synthesized_compound"}}),
                 );
             }
-            if task == "13M" && agent == "QC_CONTROLLER" {
-                calls.push(json!({"tool":"verify_result","arguments":{"scientist":"CHEMIST","data_type":"purification"}}));
+            if matches!(task, "13M" | "13H") && agent == "QC_CONTROLLER" {
+                if task == "13M" {
+                    calls.push(json!({"tool":"verify_result","arguments":{"scientist":"CHEMIST","data_type":"purification"}}));
+                }
                 calls.push(json!({"tool":"verify_result","arguments":{"scientist":"BIOLOGIST","data_type":"bioassay"}}));
+            }
+            if task == "13H" && agent == "ANALYST" {
+                calls.push(json!({"tool":"run_chromatography","arguments":{"sample":"synthesized_compound"}}));
+            }
+            if task == "13H" && agent == "SAFETY_OFFICER" {
+                calls.push(json!({"tool":"perform_inspection","arguments":{}}));
             }
             Value::Array(calls)
         } else if matches!(task, "14E" | "14M") {
@@ -853,7 +1052,7 @@ fn fixture(task: &str, metadata: &Value, inputs: &Value) -> Result<Value> {
                 }
             }
             if agent == "LEAD_SCIENTIST" {
-                calls.push(json!({"tool":"submit_decision","arguments":{"go":true}}));
+                calls.push(json!({"tool":"submit_decision","arguments":{}}));
             }
             if task == "14M" && agent == "REGULATORY_SPECIALIST" {
                 calls.push(json!({"tool":"verify_regulatory_compliance","arguments":{"decision":"go_no_go"}}));
@@ -986,16 +1185,20 @@ fn fixture(task: &str, metadata: &Value, inputs: &Value) -> Result<Value> {
             || matches!(
                 task,
                 "3E" | "4M"
+                    | "3M"
+                    | "3H"
                     | "5E"
                     | "5M"
                     | "5H"
                     | "6M"
                     | "6H"
                     | "7E"
+                    | "7M"
                     | "11E"
                     | "12E"
                     | "13E"
                     | "13M"
+                    | "13H"
                     | "14E"
                     | "14M"
             ) {

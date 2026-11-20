@@ -11,7 +11,8 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<TEST_OWNER>, domain: &D) -> She
         let branch = environment.offer().await?;
         match branch.label() {
             ReadyTestA::LOGICAL_LABEL => {
-                current = imp::decode(branch.recv::<ReadyTestA>().await?)?;
+                current["module_a"] =
+                    imp::decode(branch.recv::<ReadyTestA>().await?)?["module_a"].take();
             }
             TestRequestA::LOGICAL_LABEL => {
                 let args = branch.recv::<TestRequestA>().await?.into_value();
@@ -25,7 +26,8 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<TEST_OWNER>, domain: &D) -> She
                 environment.send::<FileTestedA>(&bytes.as_slice()).await?;
             }
             ReadyTestB::LOGICAL_LABEL => {
-                current = imp::decode(branch.recv::<ReadyTestB>().await?)?;
+                current["module_b"] =
+                    imp::decode(branch.recv::<ReadyTestB>().await?)?["module_b"].take();
             }
             TestRequestB::LOGICAL_LABEL => {
                 let args = branch.recv::<TestRequestB>().await?.into_value();

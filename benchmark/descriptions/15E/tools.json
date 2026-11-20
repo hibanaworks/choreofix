@@ -17,7 +17,7 @@
   {"type": "function", "function": {
     "name": "run_metrology_measurement", "description": "Perform a metrology measurement at the metrology station.",
     "agent_ids": ["LITHOGRAPHER", "DEPOSITOR", "METROLOGY_ENGINEER", "INTEGRATION_ENGINEER"], "can_fail": false,
-    "parameters": {"type": "object", "properties": {"measurement": {"type": "string", "description": "Measurement type (e.g., 'cd_measurement', 'thickness_measurement', 'profile_measurement', 'alignment_check', 'overlay_alignment')"}}, "required": ["measurement"]}
+    "parameters": {"type": "object", "properties": {"measurement": {"type": "string", "description": "Measurement type (e.g., 'cd_measurement', 'thickness_measurement', 'profile_measurement', 'alignment_check', 'thickness_verification', 'overlay_alignment')"}}, "required": ["measurement"]}
   }},
   {"type": "function", "function": {
     "name": "check_monitoring", "description": "Access the process monitoring system for real-time data.",

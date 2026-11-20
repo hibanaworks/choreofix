@@ -23,11 +23,7 @@ impl Domain for Replies {
     ) -> Result<Value, String> {
         let (mut replies, mut calls) = self.0.take();
         calls.push(json!({"agent":agent,"tool":tool,"arguments":arguments}));
-        let result = if tool == "research_topic" {
-            json!({"success":true,"data":{"topic":arguments["topic"]}})
-        } else {
-            replies.pop_front().ok_or("unexpected effect")?
-        };
+        let result = replies.pop_front().ok_or("unexpected effect")?;
         self.0.set((replies, calls));
         Ok(result)
     }
@@ -41,8 +37,14 @@ async fn section_a_uses_actual_results_and_retires_its_review_authority() -> She
             g::seq(
                 g::send::<REVIEW_A, A_WASI, ApprovedA>(),
                 g::seq(
-                    g::send::<REVIEW_A, B_WASI, ApprovedA>(),
-                    g::send::<REVIEW_A, REVIEW_WASI, ApprovedA>(),
+                    g::send::<A_WASI, REVIEW_A, ApprovedA>(),
+                    g::seq(
+                        g::send::<REVIEW_A, REVIEW_WASI, ApprovedA>(),
+                        g::seq(
+                            g::send::<REVIEW_A, B_WASI, ApprovedA>(),
+                            g::send::<B_WASI, REVIEW_A, ApprovedA>(),
+                        ),
+                    ),
                 ),
             ),
         );
@@ -51,41 +53,39 @@ async fn section_a_uses_actual_results_and_retires_its_review_authority() -> She
             g::seq(
                 g::send::<REVIEW_A, A_WASI, RejectedA>(),
                 g::seq(
-                    g::send::<REVIEW_A, B_WASI, RejectedA>(),
-                    g::send::<REVIEW_A, REVIEW_WASI, RejectedA>(),
-                ),
-            ),
-        );
-        let source = g::seq(
-            g::send::<A_FILE, RESEARCH_A, ResearchA>(),
-            g::seq(
-                g::send::<RESEARCH_A, A_FILE, ResearchResult>(),
-                g::seq(
-                    g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>(),
+                    g::send::<A_WASI, REVIEW_A, RejectedA>(),
                     g::seq(
-                        g::route(
-                            positive,
-                            g::seq(
-                                g::seq(negative, g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>())
-                                    .roll(),
-                                positive,
-                            ),
-                        ),
+                        g::send::<REVIEW_A, REVIEW_WASI, RejectedA>(),
                         g::seq(
-                            g::send::<EDITOR_FILE, REVIEW_WASI, Combine>(),
-                            g::seq(
-                                g::send::<REVIEW_WASI, RESEARCH_A, ConfirmApprovedA>(),
-                                g::seq(
-                                    g::send::<RESEARCH_A, DOCUMENT_SERVICE, ConfirmApprovedA>(),
-                                    g::send::<RESEARCH_A, REVIEW_WASI, Loan<REVIEW_A>>(),
-                                ),
-                            ),
+                            g::send::<REVIEW_A, B_WASI, RejectedA>(),
+                            g::send::<B_WASI, REVIEW_A, RejectedA>(),
                         ),
                     ),
                 ),
             ),
         );
-        let p_file = project::<A_FILE>(&source);
+        let source = g::seq(
+            g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>(),
+            g::seq(
+                g::route(
+                    positive,
+                    g::seq(
+                        g::seq(negative, g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>()).roll(),
+                        positive,
+                    ),
+                ),
+                g::seq(
+                    g::send::<EDITOR_FILE, REVIEW_WASI, Combine>(),
+                    g::seq(
+                        g::send::<REVIEW_WASI, RESEARCH_A, ConfirmApprovedA>(),
+                        g::seq(
+                            g::send::<RESEARCH_A, DOCUMENT_SERVICE, ConfirmApprovedA>(),
+                            g::send::<RESEARCH_A, REVIEW_WASI, Loan<REVIEW_A>>(),
+                        ),
+                    ),
+                ),
+            ),
+        );
         let p_research = project::<RESEARCH_A>(&source);
         let p_review = project::<REVIEW_A>(&source);
         let p_editor = project::<REVIEW_WASI>(&source);
@@ -108,7 +108,6 @@ async fn section_a_uses_actual_results_and_retires_its_review_authority() -> She
         let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
         rv.observe(&capture);
         let session = SessionId::new(3101);
-        let mut file = rv.enter(session, &p_file)?;
         let research = rv.enter(session, &p_research)?;
         let review = rv.enter(session, &p_review)?;
         let mut editor = rv.enter(session, &p_editor)?;
@@ -118,7 +117,6 @@ async fn section_a_uses_actual_results_and_retires_its_review_authority() -> She
         let mut editor_file = rv.enter(session, &p_editor_file)?;
         let outcomes:Vec<_>=(0..=rejections).map(|attempt|json!({"success":attempt==rejections,"data":{"review_id":format!("a:{attempt}")}})).collect();
         let domain = Replies(Cell::new((outcomes.clone().into(), Vec::new())));
-        let research_arguments = ReportArguments::<19>::from_bytes(br#"{"topic":"subtopic_a"}"#)?;
         let review_arguments =
             ReportArguments::<27>::from_bytes(br#"{"section_name":"section_a"}"#)?;
         let combine_arguments =
@@ -127,11 +125,6 @@ async fn section_a_uses_actual_results_and_retires_its_review_authority() -> She
             async {
                 async {
                     localside::reviewer_a::run(review, research, &domain).await?;
-                };
-                async {
-                    file.send::<ResearchA>(&research_arguments).await?;
-                    file.recv::<ResearchResult>().await?;
-                    Ok::<(), ShellError>(())
                 };
                 async {
                     for outcome in &outcomes {
@@ -156,23 +149,41 @@ async fn section_a_uses_actual_results_and_retires_its_review_authority() -> She
                 };
                 async {
                     for outcome in &outcomes {
-                        let bytes = if outcome["success"] == true {
-                            a.recv::<ApprovedA>().await?
+                        if outcome["success"] == true {
+                            let bytes = a.recv::<ApprovedA>().await?.to_vec();
+                            assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), *outcome);
+                            a.send::<ApprovedA>(&crate::shell::imp::review_reply::ReviewReply::<
+                                true,
+                            >::from_bytes(&bytes)?)
+                                .await?;
                         } else {
-                            a.recv::<RejectedA>().await?
-                        };
-                        assert_eq!(serde_json::from_slice::<Value>(bytes).unwrap(), *outcome);
+                            let bytes = a.recv::<RejectedA>().await?.to_vec();
+                            assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), *outcome);
+                            a.send::<RejectedA>(&crate::shell::imp::review_reply::ReviewReply::<
+                                false,
+                            >::from_bytes(&bytes)?)
+                                .await?;
+                        }
                     }
                     Ok::<(), ShellError>(())
                 };
                 async {
                     for outcome in &outcomes {
-                        let bytes = if outcome["success"] == true {
-                            b.recv::<ApprovedA>().await?
+                        if outcome["success"] == true {
+                            let bytes = b.recv::<ApprovedA>().await?.to_vec();
+                            assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), *outcome);
+                            b.send::<ApprovedA>(&crate::shell::imp::review_reply::ReviewReply::<
+                                true,
+                            >::from_bytes(&bytes)?)
+                                .await?;
                         } else {
-                            b.recv::<RejectedA>().await?
-                        };
-                        assert_eq!(serde_json::from_slice::<Value>(bytes).unwrap(), *outcome);
+                            let bytes = b.recv::<RejectedA>().await?.to_vec();
+                            assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), *outcome);
+                            b.send::<RejectedA>(&crate::shell::imp::review_reply::ReviewReply::<
+                                false,
+                            >::from_bytes(&bytes)?)
+                                .await?;
+                        }
                     }
                     Ok::<(), ShellError>(())
                 };
@@ -207,14 +218,9 @@ async fn section_a_uses_actual_results_and_retires_its_review_authority() -> She
         result?;
         let (remaining, calls) = domain.0.take();
         assert!(remaining.is_empty());
-        assert_eq!(calls.len(), outcomes.len() + 1);
-        assert_eq!(calls[0]["arguments"]["topic"], "subtopic_a");
-        assert!(
-            calls[1..]
-                .iter()
-                .all(|call| call["tool"] == "review_sections"
-                    && call["arguments"]["section_name"] == SECTION_A)
-        );
+        assert_eq!(calls.len(), outcomes.len());
+        assert!(calls.iter().all(|call| call["tool"] == "review_sections"
+            && call["arguments"]["section_name"] == SECTION_A));
     }
     Ok(())
 }
@@ -227,8 +233,14 @@ async fn section_b_uses_actual_results_and_retires_its_review_authority() -> She
             g::seq(
                 g::send::<REVIEW_B, B_WASI, ApprovedB>(),
                 g::seq(
-                    g::send::<REVIEW_B, A_WASI, ApprovedB>(),
-                    g::send::<REVIEW_B, REVIEW_WASI, ApprovedB>(),
+                    g::send::<B_WASI, REVIEW_B, ApprovedB>(),
+                    g::seq(
+                        g::send::<REVIEW_B, REVIEW_WASI, ApprovedB>(),
+                        g::seq(
+                            g::send::<REVIEW_B, A_WASI, ApprovedB>(),
+                            g::send::<A_WASI, REVIEW_B, ApprovedB>(),
+                        ),
+                    ),
                 ),
             ),
         );
@@ -237,41 +249,39 @@ async fn section_b_uses_actual_results_and_retires_its_review_authority() -> She
             g::seq(
                 g::send::<REVIEW_B, B_WASI, RejectedB>(),
                 g::seq(
-                    g::send::<REVIEW_B, A_WASI, RejectedB>(),
-                    g::send::<REVIEW_B, REVIEW_WASI, RejectedB>(),
-                ),
-            ),
-        );
-        let source = g::seq(
-            g::send::<B_FILE, RESEARCH_B, ResearchB>(),
-            g::seq(
-                g::send::<RESEARCH_B, B_FILE, ResearchResult>(),
-                g::seq(
-                    g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>(),
+                    g::send::<B_WASI, REVIEW_B, RejectedB>(),
                     g::seq(
-                        g::route(
-                            positive,
-                            g::seq(
-                                g::seq(negative, g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>())
-                                    .roll(),
-                                positive,
-                            ),
-                        ),
+                        g::send::<REVIEW_B, REVIEW_WASI, RejectedB>(),
                         g::seq(
-                            g::send::<EDITOR_FILE, REVIEW_WASI, Combine>(),
-                            g::seq(
-                                g::send::<REVIEW_WASI, RESEARCH_B, ConfirmApprovedB>(),
-                                g::seq(
-                                    g::send::<RESEARCH_B, DOCUMENT_SERVICE, ConfirmApprovedB>(),
-                                    g::send::<RESEARCH_B, REVIEW_WASI, Loan<REVIEW_B>>(),
-                                ),
-                            ),
+                            g::send::<REVIEW_B, A_WASI, RejectedB>(),
+                            g::send::<A_WASI, REVIEW_B, RejectedB>(),
                         ),
                     ),
                 ),
             ),
         );
-        let p_file = project::<B_FILE>(&source);
+        let source = g::seq(
+            g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>(),
+            g::seq(
+                g::route(
+                    positive,
+                    g::seq(
+                        g::seq(negative, g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>()).roll(),
+                        positive,
+                    ),
+                ),
+                g::seq(
+                    g::send::<EDITOR_FILE, REVIEW_WASI, Combine>(),
+                    g::seq(
+                        g::send::<REVIEW_WASI, RESEARCH_B, ConfirmApprovedB>(),
+                        g::seq(
+                            g::send::<RESEARCH_B, DOCUMENT_SERVICE, ConfirmApprovedB>(),
+                            g::send::<RESEARCH_B, REVIEW_WASI, Loan<REVIEW_B>>(),
+                        ),
+                    ),
+                ),
+            ),
+        );
         let p_research = project::<RESEARCH_B>(&source);
         let p_review = project::<REVIEW_B>(&source);
         let p_editor = project::<REVIEW_WASI>(&source);
@@ -294,7 +304,6 @@ async fn section_b_uses_actual_results_and_retires_its_review_authority() -> She
         let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
         rv.observe(&capture);
         let session = SessionId::new(3102);
-        let mut file = rv.enter(session, &p_file)?;
         let research = rv.enter(session, &p_research)?;
         let review = rv.enter(session, &p_review)?;
         let mut editor = rv.enter(session, &p_editor)?;
@@ -304,7 +313,6 @@ async fn section_b_uses_actual_results_and_retires_its_review_authority() -> She
         let mut editor_file = rv.enter(session, &p_editor_file)?;
         let outcomes:Vec<_>=(0..=rejections).map(|attempt|json!({"success":attempt==rejections,"data":{"review_id":format!("b:{attempt}")}})).collect();
         let domain = Replies(Cell::new((outcomes.clone().into(), Vec::new())));
-        let research_arguments = ReportArguments::<20>::from_bytes(br#"{"topic":"subtopic_b"}"#)?;
         let review_arguments =
             ReportArguments::<28>::from_bytes(br#"{"section_name":"section_b"}"#)?;
         let combine_arguments =
@@ -313,11 +321,6 @@ async fn section_b_uses_actual_results_and_retires_its_review_authority() -> She
             async {
                 async {
                     localside::reviewer_b::run(review, research, &domain).await?;
-                };
-                async {
-                    file.send::<ResearchB>(&research_arguments).await?;
-                    file.recv::<ResearchResult>().await?;
-                    Ok::<(), ShellError>(())
                 };
                 async {
                     for outcome in &outcomes {
@@ -342,23 +345,41 @@ async fn section_b_uses_actual_results_and_retires_its_review_authority() -> She
                 };
                 async {
                     for outcome in &outcomes {
-                        let bytes = if outcome["success"] == true {
-                            a.recv::<ApprovedB>().await?
+                        if outcome["success"] == true {
+                            let bytes = a.recv::<ApprovedB>().await?.to_vec();
+                            assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), *outcome);
+                            a.send::<ApprovedB>(&crate::shell::imp::review_reply::ReviewReply::<
+                                true,
+                            >::from_bytes(&bytes)?)
+                                .await?;
                         } else {
-                            a.recv::<RejectedB>().await?
-                        };
-                        assert_eq!(serde_json::from_slice::<Value>(bytes).unwrap(), *outcome);
+                            let bytes = a.recv::<RejectedB>().await?.to_vec();
+                            assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), *outcome);
+                            a.send::<RejectedB>(&crate::shell::imp::review_reply::ReviewReply::<
+                                false,
+                            >::from_bytes(&bytes)?)
+                                .await?;
+                        }
                     }
                     Ok::<(), ShellError>(())
                 };
                 async {
                     for outcome in &outcomes {
-                        let bytes = if outcome["success"] == true {
-                            b.recv::<ApprovedB>().await?
+                        if outcome["success"] == true {
+                            let bytes = b.recv::<ApprovedB>().await?.to_vec();
+                            assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), *outcome);
+                            b.send::<ApprovedB>(&crate::shell::imp::review_reply::ReviewReply::<
+                                true,
+                            >::from_bytes(&bytes)?)
+                                .await?;
                         } else {
-                            b.recv::<RejectedB>().await?
-                        };
-                        assert_eq!(serde_json::from_slice::<Value>(bytes).unwrap(), *outcome);
+                            let bytes = b.recv::<RejectedB>().await?.to_vec();
+                            assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), *outcome);
+                            b.send::<RejectedB>(&crate::shell::imp::review_reply::ReviewReply::<
+                                false,
+                            >::from_bytes(&bytes)?)
+                                .await?;
+                        }
                     }
                     Ok::<(), ShellError>(())
                 };
@@ -393,14 +414,9 @@ async fn section_b_uses_actual_results_and_retires_its_review_authority() -> She
         result?;
         let (remaining, calls) = domain.0.take();
         assert!(remaining.is_empty());
-        assert_eq!(calls.len(), outcomes.len() + 1);
-        assert_eq!(calls[0]["arguments"]["topic"], "subtopic_b");
-        assert!(
-            calls[1..]
-                .iter()
-                .all(|call| call["tool"] == "review_sections"
-                    && call["arguments"]["section_name"] == SECTION_B)
-        );
+        assert_eq!(calls.len(), outcomes.len());
+        assert!(calls.iter().all(|call| call["tool"] == "review_sections"
+            && call["arguments"]["section_name"] == SECTION_B));
     }
     Ok(())
 }
@@ -413,34 +429,33 @@ async fn section_a_single_review_retires_without_a_repeatable_fragment() -> Shel
             g::seq(
                 g::send::<REVIEW_A, A_WASI, ApprovedA>(),
                 g::seq(
-                    g::send::<REVIEW_A, B_WASI, ApprovedA>(),
-                    g::send::<REVIEW_A, REVIEW_WASI, ApprovedA>(),
-                ),
-            ),
-        );
-        let source = g::seq(
-            g::send::<A_FILE, RESEARCH_A, ResearchA>(),
-            g::seq(
-                g::send::<RESEARCH_A, A_FILE, ResearchResult>(),
-                g::seq(
-                    g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>(),
+                    g::send::<A_WASI, REVIEW_A, ApprovedA>(),
                     g::seq(
-                        positive,
+                        g::send::<REVIEW_A, REVIEW_WASI, ApprovedA>(),
                         g::seq(
-                            g::send::<EDITOR_FILE, REVIEW_WASI, Combine>(),
-                            g::seq(
-                                g::send::<REVIEW_WASI, RESEARCH_A, ConfirmApprovedA>(),
-                                g::seq(
-                                    g::send::<RESEARCH_A, DOCUMENT_SERVICE, ConfirmApprovedA>(),
-                                    g::send::<RESEARCH_A, REVIEW_WASI, Loan<REVIEW_A>>(),
-                                ),
-                            ),
+                            g::send::<REVIEW_A, B_WASI, ApprovedA>(),
+                            g::send::<B_WASI, REVIEW_A, ApprovedA>(),
                         ),
                     ),
                 ),
             ),
         );
-        let p_file = project::<A_FILE>(&source);
+        let source = g::seq(
+            g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>(),
+            g::seq(
+                positive,
+                g::seq(
+                    g::send::<EDITOR_FILE, REVIEW_WASI, Combine>(),
+                    g::seq(
+                        g::send::<REVIEW_WASI, RESEARCH_A, ConfirmApprovedA>(),
+                        g::seq(
+                            g::send::<RESEARCH_A, DOCUMENT_SERVICE, ConfirmApprovedA>(),
+                            g::send::<RESEARCH_A, REVIEW_WASI, Loan<REVIEW_A>>(),
+                        ),
+                    ),
+                ),
+            ),
+        );
         let p_research = project::<RESEARCH_A>(&source);
         let p_review = project::<REVIEW_A>(&source);
         let p_editor = project::<REVIEW_WASI>(&source);
@@ -463,7 +478,6 @@ async fn section_a_single_review_retires_without_a_repeatable_fragment() -> Shel
         let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
         rv.observe(&capture);
         let session = SessionId::new(3101);
-        let mut file = rv.enter(session, &p_file)?;
         let research = rv.enter(session, &p_research)?;
         let review = rv.enter(session, &p_review)?;
         let mut editor = rv.enter(session, &p_editor)?;
@@ -473,7 +487,6 @@ async fn section_a_single_review_retires_without_a_repeatable_fragment() -> Shel
         let mut editor_file = rv.enter(session, &p_editor_file)?;
         let outcomes:Vec<_>=(0..=rejections).map(|attempt|json!({"success":attempt==rejections,"data":{"review_id":format!("a:{attempt}")}})).collect();
         let domain = Replies(Cell::new((outcomes.clone().into(), Vec::new())));
-        let research_arguments = ReportArguments::<19>::from_bytes(br#"{"topic":"subtopic_a"}"#)?;
         let review_arguments =
             ReportArguments::<27>::from_bytes(br#"{"section_name":"section_a"}"#)?;
         let combine_arguments =
@@ -482,11 +495,6 @@ async fn section_a_single_review_retires_without_a_repeatable_fragment() -> Shel
             async {
                 async {
                     localside::reviewer_a::run(review, research, &domain).await?;
-                };
-                async {
-                    file.send::<ResearchA>(&research_arguments).await?;
-                    file.recv::<ResearchResult>().await?;
-                    Ok::<(), ShellError>(())
                 };
                 async {
                     for outcome in &outcomes {
@@ -511,23 +519,41 @@ async fn section_a_single_review_retires_without_a_repeatable_fragment() -> Shel
                 };
                 async {
                     for outcome in &outcomes {
-                        let bytes = if outcome["success"] == true {
-                            a.recv::<ApprovedA>().await?
+                        if outcome["success"] == true {
+                            let bytes = a.recv::<ApprovedA>().await?.to_vec();
+                            assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), *outcome);
+                            a.send::<ApprovedA>(&crate::shell::imp::review_reply::ReviewReply::<
+                                true,
+                            >::from_bytes(&bytes)?)
+                                .await?;
                         } else {
-                            a.recv::<RejectedA>().await?
-                        };
-                        assert_eq!(serde_json::from_slice::<Value>(bytes).unwrap(), *outcome);
+                            let bytes = a.recv::<RejectedA>().await?.to_vec();
+                            assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), *outcome);
+                            a.send::<RejectedA>(&crate::shell::imp::review_reply::ReviewReply::<
+                                false,
+                            >::from_bytes(&bytes)?)
+                                .await?;
+                        }
                     }
                     Ok::<(), ShellError>(())
                 };
                 async {
                     for outcome in &outcomes {
-                        let bytes = if outcome["success"] == true {
-                            b.recv::<ApprovedA>().await?
+                        if outcome["success"] == true {
+                            let bytes = b.recv::<ApprovedA>().await?.to_vec();
+                            assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), *outcome);
+                            b.send::<ApprovedA>(&crate::shell::imp::review_reply::ReviewReply::<
+                                true,
+                            >::from_bytes(&bytes)?)
+                                .await?;
                         } else {
-                            b.recv::<RejectedA>().await?
-                        };
-                        assert_eq!(serde_json::from_slice::<Value>(bytes).unwrap(), *outcome);
+                            let bytes = b.recv::<RejectedA>().await?.to_vec();
+                            assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), *outcome);
+                            b.send::<RejectedA>(&crate::shell::imp::review_reply::ReviewReply::<
+                                false,
+                            >::from_bytes(&bytes)?)
+                                .await?;
+                        }
                     }
                     Ok::<(), ShellError>(())
                 };
@@ -562,14 +588,9 @@ async fn section_a_single_review_retires_without_a_repeatable_fragment() -> Shel
         result?;
         let (remaining, calls) = domain.0.take();
         assert!(remaining.is_empty());
-        assert_eq!(calls.len(), outcomes.len() + 1);
-        assert_eq!(calls[0]["arguments"]["topic"], "subtopic_a");
-        assert!(
-            calls[1..]
-                .iter()
-                .all(|call| call["tool"] == "review_sections"
-                    && call["arguments"]["section_name"] == SECTION_A)
-        );
+        assert_eq!(calls.len(), outcomes.len());
+        assert!(calls.iter().all(|call| call["tool"] == "review_sections"
+            && call["arguments"]["section_name"] == SECTION_A));
     }
     Ok(())
 }
@@ -583,25 +604,18 @@ async fn malformed_review_verdict_never_sends_an_approval() -> ShellResult<()> {
         json!({"success":null}),
     ] {
         let source = g::seq(
-            g::send::<A_FILE, RESEARCH_A, ResearchA>(),
+            g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>(),
             g::seq(
-                g::send::<RESEARCH_A, A_FILE, ResearchResult>(),
+                g::send::<REVIEW_A, DOCUMENT_SERVICE, ApprovedA>(),
                 g::seq(
-                    g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>(),
+                    g::send::<REVIEW_A, A_WASI, ApprovedA>(),
                     g::seq(
-                        g::send::<REVIEW_A, DOCUMENT_SERVICE, ApprovedA>(),
-                        g::seq(
-                            g::send::<REVIEW_A, A_WASI, ApprovedA>(),
-                            g::seq(
-                                g::send::<REVIEW_A, B_WASI, ApprovedA>(),
-                                g::send::<REVIEW_A, REVIEW_WASI, ApprovedA>(),
-                            ),
-                        ),
+                        g::send::<REVIEW_A, B_WASI, ApprovedA>(),
+                        g::send::<REVIEW_A, REVIEW_WASI, ApprovedA>(),
                     ),
                 ),
             ),
         );
-        let p_file = project::<A_FILE>(&source);
         let p_research = project::<RESEARCH_A>(&source);
         let p_review = project::<REVIEW_A>(&source);
         let p_editor = project::<REVIEW_WASI>(&source);
@@ -617,22 +631,15 @@ async fn malformed_review_verdict_never_sends_an_approval() -> ShellResult<()> {
         let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
         rv.observe(&capture);
         let session = SessionId::new(3111);
-        let mut file = rv.enter(session, &p_file)?;
         let research = rv.enter(session, &p_research)?;
         let review = rv.enter(session, &p_review)?;
         let mut editor = rv.enter(session, &p_editor)?;
         let domain = Replies(Cell::new(([invalid].into(), Vec::new())));
-        let research_args = ReportArguments::<19>::from_bytes(br#"{"topic":"subtopic_a"}"#)?;
         let review_args = ReportArguments::<27>::from_bytes(br#"{"section_name":"section_a"}"#)?;
         let result = hibana_runtime::race(
             async {
                 async {
                     localside::reviewer_a::run(review, research, &domain).await?;
-                };
-                async {
-                    file.send::<ResearchA>(&research_args).await?;
-                    file.recv::<ResearchResult>().await?;
-                    Ok::<(), ShellError>(())
                 };
                 async {
                     editor.send::<ReviewA>(&review_args).await?;
@@ -657,7 +664,7 @@ async fn malformed_review_verdict_never_sends_an_approval() -> ShellResult<()> {
         );
         let (remaining, calls) = domain.0.take();
         assert!(remaining.is_empty());
-        assert_eq!(calls.len(), 2);
+        assert_eq!(calls.len(), 1);
     }
     Ok(())
 }

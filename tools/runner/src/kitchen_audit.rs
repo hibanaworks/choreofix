@@ -370,11 +370,14 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 count += 1;
             }
         }
-        if count < 2 || check(&changed, &artifact, &dynamic).is_ok() {
-            return Err("accepted coherently changed kitchen header".into());
+        if count != 1 {
+            return Err("kitchen header mutation must change one actual acceptance".into());
         }
+        let error = check(&changed, &artifact, &dynamic)
+            .err()
+            .ok_or("accepted coherently changed kitchen header")?;
         checked.push(
-            json!({"kind":format!("coherent_wrong_{field}"),"frame_id":first,"rejected":true}),
+            json!({"kind":format!("coherent_wrong_{field}"),"frame_id":first,"rejected":true,"error":error.to_string()}),
         );
     }
     fs::create_dir(output)?;

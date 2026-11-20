@@ -318,23 +318,23 @@ pub fn source() -> impl Projectable {
     let bootstrap = g::par(
         g::par(
             g::par(
-                g::send::<ASSESS_DATA, GENERAL_SERVICE, Loan<ASSESS_FILE>>(),
-                g::send::<GENERAL_DATA, GENERAL_SERVICE, Loan<GENERAL_FILE>>(),
+                g::send::<ASSESS_DATA, ER_DOCTOR, Loan<ASSESS_FILE>>(),
+                g::send::<GENERAL_DATA, ER_DOCTOR, Loan<GENERAL_FILE>>(),
             ),
             g::par(
-                g::send::<IMAGING_DATA, IMAGING_SERVICE, Loan<IMAGING_FILE>>(),
-                g::send::<REFERRAL_DATA, CARDIAC_SERVICE, Loan<REFERRAL_FILE>>(),
+                g::send::<IMAGING_DATA, ER_DOCTOR, Loan<IMAGING_FILE>>(),
+                g::send::<REFERRAL_DATA, CARDIOLOGIST, Loan<REFERRAL_FILE>>(),
             ),
         ),
         g::par(
             g::par(
-                g::send::<CARDIAC_DATA, CARDIAC_SERVICE, Loan<CARDIAC_FILE>>(),
-                g::send::<FINDINGS_DATA, CARDIAC_SERVICE, Loan<FINDINGS_FILE>>(),
+                g::send::<CARDIAC_DATA, CARDIOLOGIST, Loan<CARDIAC_FILE>>(),
+                g::send::<FINDINGS_DATA, CARDIOLOGIST, Loan<FINDINGS_FILE>>(),
             ),
             g::par(
-                g::send::<DIAGNOSIS_DATA, CARDIAC_SERVICE, Loan<DIAGNOSIS_FILE>>(),
+                g::send::<DIAGNOSIS_DATA, CARDIOLOGIST, Loan<DIAGNOSIS_FILE>>(),
                 g::par(
-                    g::send::<REVIEW_DATA, PHARMACY_SERVICE, Loan<REVIEW_FILE>>(),
+                    g::send::<REVIEW_DATA, PHARMACIST, Loan<REVIEW_FILE>>(),
                     g::send::<SUMMARY_DATA, ER_DOCTOR, Loan<SUMMARY_FILE>>(),
                 ),
             ),

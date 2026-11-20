@@ -46,12 +46,11 @@ async fn run_1e_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> Sh
         let mut c_data = rv.enter(session, &programs.c_data)?;
         let file_c = rv.enter(session, &programs.c_file)?;
         let mut c_io = rv.enter(session, &programs.c_io)?;
-        let mut auth = rv.enter(session, &programs.auth)?;
-        let auth_resource = rv.enter(session, &programs.auth_resource)?;
-        let mut database = rv.enter(session, &programs.database)?;
-        let database_resource = rv.enter(session, &programs.database_resource)?;
-        let mut api = rv.enter(session, &programs.api)?;
-        let api_resource = rv.enter(session, &programs.api_resource)?;
+        let mut requests = rv.enter(session, &programs.requests)?;
+        let mut repository = rv.enter(session, &programs.repository)?;
+        let mut auth_resource = rv.enter(session, &programs.auth_resource)?;
+        let mut database_resource = rv.enter(session, &programs.database_resource)?;
+        let mut api_resource = rv.enter(session, &programs.api_resource)?;
         async {
             file_metadata::run(&mut a_data, file_a, FILES).await?;
         };
@@ -71,13 +70,80 @@ async fn run_1e_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> Sh
             localside::developer::run::<C, API_RESOURCE, AUTH_RESOURCE>(&mut c, bus).await?;
         };
         async {
-            localside::module::run(&mut auth, auth_resource).await?;
-        };
-        async {
-            localside::module::run(&mut database, database_resource).await?;
-        };
-        async {
-            localside::module::run(&mut api, api_resource).await?;
+            for _ in [A, B, C] {
+                let request = requests.offer().await?;
+                match request.label() {
+                    A => {
+                        let args = request.recv::<Submitted<A>>().await?;
+                        repository.send::<CommitRequest<A>>(&args).await?;
+                        async {
+                            let [mut first, mut second] = repository.par()?;
+                            async {
+                                first.send::<Loan<AUTH_RESOURCE>>(auth_resource).await?;
+                            };
+                            async {
+                                second
+                                    .send::<Loan<DATABASE_RESOURCE>>(database_resource)
+                                    .await?;
+                            };
+                            Ok(())
+                        }
+                        .await?;
+                        let [mut first, mut second] = repository.par()?;
+                        (auth_resource, database_resource) = async {
+                            async { first.recv::<Loan<AUTH_RESOURCE>>().await };
+                            async { second.recv::<Loan<DATABASE_RESOURCE>>().await };
+                        }
+                        .await?;
+                    }
+                    B => {
+                        let args = request.recv::<Submitted<B>>().await?;
+                        repository.send::<CommitRequest<B>>(&args).await?;
+                        async {
+                            let [mut first, mut second] = repository.par()?;
+                            async {
+                                first.send::<Loan<API_RESOURCE>>(api_resource).await?;
+                            };
+                            async {
+                                second
+                                    .send::<Loan<DATABASE_RESOURCE>>(database_resource)
+                                    .await?;
+                            };
+                            Ok(())
+                        }
+                        .await?;
+                        let [mut first, mut second] = repository.par()?;
+                        (api_resource, database_resource) = async {
+                            async { first.recv::<Loan<API_RESOURCE>>().await };
+                            async { second.recv::<Loan<DATABASE_RESOURCE>>().await };
+                        }
+                        .await?;
+                    }
+                    C => {
+                        let args = request.recv::<Submitted<C>>().await?;
+                        repository.send::<CommitRequest<C>>(&args).await?;
+                        async {
+                            let [mut first, mut second] = repository.par()?;
+                            async {
+                                first.send::<Loan<API_RESOURCE>>(api_resource).await?;
+                            };
+                            async {
+                                second.send::<Loan<AUTH_RESOURCE>>(auth_resource).await?;
+                            };
+                            Ok(())
+                        }
+                        .await?;
+                        let [mut first, mut second] = repository.par()?;
+                        (api_resource, auth_resource) = async {
+                            async { first.recv::<Loan<API_RESOURCE>>().await };
+                            async { second.recv::<Loan<AUTH_RESOURCE>>().await };
+                        }
+                        .await?;
+                    }
+                    _ => return Err(ShellError::message("unknown repository submission")),
+                }
+            }
+            Ok(())
         };
         async {
             let file = a_vm.recv::<Loan<A_FILE>>().await?;
@@ -101,7 +167,7 @@ async fn run_1e_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> Sh
                     .write_as::<ImplementRequest<A>>(&mut implementation)
                     .read_as::<ImplementCompleted>(&mut implemented)
                     .file(FILES[2])?
-                    .write_as::<CommitRequest<A>>(&mut commit)
+                    .write_as::<Submitted<A>>(&mut commit)
                     .read_as::<CommitCompleted>(&mut committed)
                     .file(FILES[3])?
                     .write_as::<TestRequest<A>>(&mut test)
@@ -142,7 +208,7 @@ async fn run_1e_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> Sh
                     .write_as::<ImplementRequest<B>>(&mut implementation)
                     .read_as::<ImplementCompleted>(&mut implemented)
                     .file(FILES[2])?
-                    .write_as::<CommitRequest<B>>(&mut commit)
+                    .write_as::<Submitted<B>>(&mut commit)
                     .read_as::<CommitCompleted>(&mut committed)
                     .file(FILES[3])?
                     .write_as::<TestRequest<B>>(&mut test)
@@ -183,7 +249,7 @@ async fn run_1e_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> Sh
                     .write_as::<ImplementRequest<C>>(&mut implementation)
                     .read_as::<ImplementCompleted>(&mut implemented)
                     .file(FILES[2])?
-                    .write_as::<CommitRequest<C>>(&mut commit)
+                    .write_as::<Submitted<C>>(&mut commit)
                     .read_as::<CommitCompleted>(&mut committed)
                     .file(FILES[3])?
                     .write_as::<TestRequest<C>>(&mut test)
@@ -250,16 +316,18 @@ async fn run_1m_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 5]) -> Sh
         let mut e_data = rv.enter(session, &programs.e_data)?;
         let file_e = rv.enter(session, &programs.e_file)?;
         let mut e_io = rv.enter(session, &programs.e_io)?;
+        let mut requests = rv.enter(session, &programs.requests)?;
+        let mut repository = rv.enter(session, &programs.repository)?;
         let mut auth = rv.enter(session, &programs.auth)?;
-        let auth_resource = rv.enter(session, &programs.auth_resource)?;
+        let mut auth_resource = rv.enter(session, &programs.auth_resource)?;
         let mut database = rv.enter(session, &programs.database)?;
-        let database_resource = rv.enter(session, &programs.database_resource)?;
+        let mut database_resource = rv.enter(session, &programs.database_resource)?;
         let mut api = rv.enter(session, &programs.api)?;
-        let api_resource = rv.enter(session, &programs.api_resource)?;
+        let mut api_resource = rv.enter(session, &programs.api_resource)?;
         let mut payment = rv.enter(session, &programs.payment)?;
-        let payment_resource = rv.enter(session, &programs.payment_resource)?;
+        let mut payment_resource = rv.enter(session, &programs.payment_resource)?;
         let mut notify = rv.enter(session, &programs.notify)?;
-        let notify_resource = rv.enter(session, &programs.notify_resource)?;
+        let mut notify_resource = rv.enter(session, &programs.notify_resource)?;
         async {
             file_metadata::run(&mut a_data, file_a, FILES).await?;
         };
@@ -276,34 +344,165 @@ async fn run_1m_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 5]) -> Sh
             file_metadata::run(&mut e_data, file_e, FILES).await?;
         };
         async {
-            localside::developer::run::<A, AUTH_RESOURCE, DATABASE_RESOURCE>(&mut a, bus).await?;
+            localside::developer_1m::run::<A, AUTH_RESOURCE, DATABASE_RESOURCE>(&mut a, bus)
+                .await?;
         };
         async {
-            localside::developer::run::<B, API_RESOURCE, DATABASE_RESOURCE>(&mut b, bus).await?;
+            localside::developer_1m::run::<B, API_RESOURCE, DATABASE_RESOURCE>(&mut b, bus).await?;
         };
         async {
-            localside::developer::run::<C, API_RESOURCE, PAYMENT_RESOURCE>(&mut c, bus).await?;
+            localside::developer_1m::run::<C, API_RESOURCE, PAYMENT_RESOURCE>(&mut c, bus).await?;
         };
         async {
-            localside::developer::run::<D, NOTIFY_RESOURCE, PAYMENT_RESOURCE>(&mut d, bus).await?;
+            localside::developer_1m::run::<D, NOTIFY_RESOURCE, PAYMENT_RESOURCE>(&mut d, bus)
+                .await?;
         };
         async {
-            localside::developer::run::<E, AUTH_RESOURCE, NOTIFY_RESOURCE>(&mut e, bus).await?;
+            localside::developer_1m::run::<E, AUTH_RESOURCE, NOTIFY_RESOURCE>(&mut e, bus).await?;
         };
         async {
-            localside::module::run(&mut auth, auth_resource).await?;
+            for _ in 0..10 {
+                let request = requests.offer().await?;
+                match request.label() {
+                    A => {
+                        let args = request.recv::<Submitted<A>>().await?;
+                        repository.send::<Submitted<A>>(&args).await?;
+                    }
+                    A_FILE => {
+                        let args = request.recv::<ModuleClaim<A_FILE, A>>().await?;
+                        repository.send::<ModuleClaim<A_FILE, A>>(&args).await?;
+                    }
+                    B => {
+                        let args = request.recv::<Submitted<B>>().await?;
+                        repository.send::<Submitted<B>>(&args).await?;
+                    }
+                    B_FILE => {
+                        let args = request.recv::<ModuleClaim<B_FILE, B>>().await?;
+                        repository.send::<ModuleClaim<B_FILE, B>>(&args).await?;
+                    }
+                    C => {
+                        let args = request.recv::<Submitted<C>>().await?;
+                        repository.send::<Submitted<C>>(&args).await?;
+                    }
+                    C_FILE => {
+                        let args = request.recv::<ModuleClaim<C_FILE, C>>().await?;
+                        repository.send::<ModuleClaim<C_FILE, C>>(&args).await?;
+                    }
+                    D => {
+                        let args = request.recv::<Submitted<D>>().await?;
+                        repository.send::<Submitted<D>>(&args).await?;
+                    }
+                    D_FILE => {
+                        let args = request.recv::<ModuleClaim<D_FILE, D>>().await?;
+                        repository.send::<ModuleClaim<D_FILE, D>>(&args).await?;
+                    }
+                    E => {
+                        let args = request.recv::<Submitted<E>>().await?;
+                        repository.send::<Submitted<E>>(&args).await?;
+                    }
+                    E_FILE => {
+                        let args = request.recv::<ModuleClaim<E_FILE, E>>().await?;
+                        repository.send::<ModuleClaim<E_FILE, E>>(&args).await?;
+                    }
+                    _ => return Err(ShellError::message("unknown module request")),
+                }
+            }
         };
         async {
-            localside::module::run(&mut database, database_resource).await?;
+            for _ in 0..2 {
+                let claim = api.offer().await?;
+                match claim.label() {
+                    B_FILE => {
+                        claim.recv::<ModuleClaim<B_FILE, B>>().await?;
+                    }
+                    C_FILE => {
+                        claim.recv::<ModuleClaim<C_FILE, C>>().await?;
+                    }
+                    _ => return Err(ShellError::message("unknown api claim")),
+                }
+                api.send::<Loan<API_RESOURCE>>(api_resource).await?;
+                api_resource = api.recv::<Loan<API_RESOURCE>>().await?;
+            }
         };
         async {
-            localside::module::run(&mut api, api_resource).await?;
+            for _ in 0..2 {
+                let claim = auth.offer().await?;
+                match claim.label() {
+                    A_FILE => {
+                        claim.recv::<ModuleClaim<A_FILE, A>>().await?;
+                    }
+                    E => {
+                        let args = claim.recv::<Submitted<E>>().await?;
+                        auth.send::<ModuleClaim<E_FILE, E>>(&args).await?;
+                        auth.send::<CommitRequest<E>>(&args).await?;
+                    }
+                    _ => return Err(ShellError::message("unknown auth claim")),
+                }
+                auth.send::<Loan<AUTH_RESOURCE>>(auth_resource).await?;
+                auth_resource = auth.recv::<Loan<AUTH_RESOURCE>>().await?;
+            }
         };
         async {
-            localside::module::run(&mut payment, payment_resource).await?;
+            for _ in 0..2 {
+                let claim = database.offer().await?;
+                match claim.label() {
+                    A => {
+                        let args = claim.recv::<Submitted<A>>().await?;
+                        database.send::<ModuleClaim<A_FILE, A>>(&args).await?;
+                        database.send::<CommitRequest<A>>(&args).await?;
+                    }
+                    B => {
+                        let args = claim.recv::<Submitted<B>>().await?;
+                        database.send::<ModuleClaim<B_FILE, B>>(&args).await?;
+                        database.send::<CommitRequest<B>>(&args).await?;
+                    }
+                    _ => return Err(ShellError::message("unknown database claim")),
+                }
+                database
+                    .send::<Loan<DATABASE_RESOURCE>>(database_resource)
+                    .await?;
+                database_resource = database.recv::<Loan<DATABASE_RESOURCE>>().await?;
+            }
         };
         async {
-            localside::module::run(&mut notify, notify_resource).await?;
+            for _ in 0..2 {
+                let claim = notify.offer().await?;
+                match claim.label() {
+                    D_FILE => {
+                        claim.recv::<ModuleClaim<D_FILE, D>>().await?;
+                    }
+                    E_FILE => {
+                        claim.recv::<ModuleClaim<E_FILE, E>>().await?;
+                    }
+                    _ => return Err(ShellError::message("unknown notify claim")),
+                }
+                notify
+                    .send::<Loan<NOTIFY_RESOURCE>>(notify_resource)
+                    .await?;
+                notify_resource = notify.recv::<Loan<NOTIFY_RESOURCE>>().await?;
+            }
+        };
+        async {
+            for _ in 0..2 {
+                let claim = payment.offer().await?;
+                match claim.label() {
+                    C => {
+                        let args = claim.recv::<Submitted<C>>().await?;
+                        payment.send::<ModuleClaim<C_FILE, C>>(&args).await?;
+                        payment.send::<CommitRequest<C>>(&args).await?;
+                    }
+                    D => {
+                        let args = claim.recv::<Submitted<D>>().await?;
+                        payment.send::<ModuleClaim<D_FILE, D>>(&args).await?;
+                        payment.send::<CommitRequest<D>>(&args).await?;
+                    }
+                    _ => return Err(ShellError::message("unknown payment claim")),
+                }
+                payment
+                    .send::<Loan<PAYMENT_RESOURCE>>(payment_resource)
+                    .await?;
+                payment_resource = payment.recv::<Loan<PAYMENT_RESOURCE>>().await?;
+            }
         };
         async {
             let file = a_vm.recv::<Loan<A_FILE>>().await?;
@@ -327,7 +526,7 @@ async fn run_1m_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 5]) -> Sh
                     .write_as::<ImplementRequest<A>>(&mut implementation)
                     .read_as::<ImplementCompleted>(&mut implemented)
                     .file(FILES[2])?
-                    .write_as::<CommitRequest<A>>(&mut commit)
+                    .write_as::<Submitted<A>>(&mut commit)
                     .read_as::<CommitCompleted>(&mut committed)
                     .file(FILES[3])?
                     .write_as::<TestRequest<A>>(&mut test)
@@ -368,7 +567,7 @@ async fn run_1m_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 5]) -> Sh
                     .write_as::<ImplementRequest<B>>(&mut implementation)
                     .read_as::<ImplementCompleted>(&mut implemented)
                     .file(FILES[2])?
-                    .write_as::<CommitRequest<B>>(&mut commit)
+                    .write_as::<Submitted<B>>(&mut commit)
                     .read_as::<CommitCompleted>(&mut committed)
                     .file(FILES[3])?
                     .write_as::<TestRequest<B>>(&mut test)
@@ -409,7 +608,7 @@ async fn run_1m_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 5]) -> Sh
                     .write_as::<ImplementRequest<C>>(&mut implementation)
                     .read_as::<ImplementCompleted>(&mut implemented)
                     .file(FILES[2])?
-                    .write_as::<CommitRequest<C>>(&mut commit)
+                    .write_as::<Submitted<C>>(&mut commit)
                     .read_as::<CommitCompleted>(&mut committed)
                     .file(FILES[3])?
                     .write_as::<TestRequest<C>>(&mut test)
@@ -450,7 +649,7 @@ async fn run_1m_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 5]) -> Sh
                     .write_as::<ImplementRequest<D>>(&mut implementation)
                     .read_as::<ImplementCompleted>(&mut implemented)
                     .file(FILES[2])?
-                    .write_as::<CommitRequest<D>>(&mut commit)
+                    .write_as::<Submitted<D>>(&mut commit)
                     .read_as::<CommitCompleted>(&mut committed)
                     .file(FILES[3])?
                     .write_as::<TestRequest<D>>(&mut test)
@@ -491,7 +690,7 @@ async fn run_1m_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 5]) -> Sh
                     .write_as::<ImplementRequest<E>>(&mut implementation)
                     .read_as::<ImplementCompleted>(&mut implemented)
                     .file(FILES[2])?
-                    .write_as::<CommitRequest<E>>(&mut commit)
+                    .write_as::<Submitted<E>>(&mut commit)
                     .read_as::<CommitCompleted>(&mut committed)
                     .file(FILES[3])?
                     .write_as::<TestRequest<E>>(&mut test)
@@ -639,20 +838,27 @@ async fn run_1h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
         let mut g_data = rv.enter(session, &programs.g_data)?;
         let file_g = rv.enter(session, &programs.g_file)?;
         let mut g_io = rv.enter(session, &programs.g_io)?;
+        let mut auth_requests = rv.enter(session, &programs.auth_requests)?;
         let mut auth = rv.enter(session, &programs.auth)?;
-        let auth_resource = rv.enter(session, &programs.auth_resource)?;
+        let mut auth_resource = rv.enter(session, &programs.auth_resource)?;
+        let mut database_requests = rv.enter(session, &programs.database_requests)?;
         let mut database = rv.enter(session, &programs.database)?;
-        let database_resource = rv.enter(session, &programs.database_resource)?;
+        let mut database_resource = rv.enter(session, &programs.database_resource)?;
+        let mut api_requests = rv.enter(session, &programs.api_requests)?;
         let mut api = rv.enter(session, &programs.api)?;
-        let api_resource = rv.enter(session, &programs.api_resource)?;
+        let mut api_resource = rv.enter(session, &programs.api_resource)?;
+        let mut payment_requests = rv.enter(session, &programs.payment_requests)?;
         let mut payment = rv.enter(session, &programs.payment)?;
-        let payment_resource = rv.enter(session, &programs.payment_resource)?;
+        let mut payment_resource = rv.enter(session, &programs.payment_resource)?;
+        let mut notify_requests = rv.enter(session, &programs.notify_requests)?;
         let mut notify = rv.enter(session, &programs.notify)?;
-        let notify_resource = rv.enter(session, &programs.notify_resource)?;
+        let mut notify_resource = rv.enter(session, &programs.notify_resource)?;
+        let mut analytics_requests = rv.enter(session, &programs.analytics_requests)?;
         let mut analytics = rv.enter(session, &programs.analytics)?;
-        let analytics_resource = rv.enter(session, &programs.analytics_resource)?;
+        let mut analytics_resource = rv.enter(session, &programs.analytics_resource)?;
+        let mut search_requests = rv.enter(session, &programs.search_requests)?;
         let mut search = rv.enter(session, &programs.search)?;
-        let search_resource = rv.enter(session, &programs.search_resource)?;
+        let mut search_resource = rv.enter(session, &programs.search_resource)?;
         async {
             file_metadata::run(&mut a_data, file_a, FILES).await?;
         };
@@ -675,25 +881,25 @@ async fn run_1h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
             file_metadata::run(&mut g_data, file_g, FILES).await?;
         };
         async {
-            localside::developer_reconsider::run::<A, AUTH_RESOURCE, DATABASE_RESOURCE>(
+            localside::developer_reconsider::run::<A, DATABASE_RESOURCE, AUTH_RESOURCE>(
                 &mut a, bus, &report_a,
             )
             .await?;
         };
         async {
-            localside::developer_reconsider::run::<B, API_RESOURCE, DATABASE_RESOURCE>(
+            localside::developer_reconsider::run::<B, DATABASE_RESOURCE, API_RESOURCE>(
                 &mut b, bus, &report_b,
             )
             .await?;
         };
         async {
-            localside::developer_reconsider::run::<C, API_RESOURCE, PAYMENT_RESOURCE>(
+            localside::developer_reconsider::run::<C, PAYMENT_RESOURCE, API_RESOURCE>(
                 &mut c, bus, &report_c,
             )
             .await?;
         };
         async {
-            localside::developer_reconsider::run::<D, NOTIFY_RESOURCE, PAYMENT_RESOURCE>(
+            localside::developer_reconsider::run::<D, PAYMENT_RESOURCE, NOTIFY_RESOURCE>(
                 &mut d, bus, &report_d,
             )
             .await?;
@@ -717,25 +923,254 @@ async fn run_1h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
             .await?;
         };
         async {
-            localside::module_reconsider::auth(&mut auth, auth_resource).await?;
+            for _ in 0..2 {
+                loop {
+                    let request = analytics_requests.offer().await?;
+                    match request.label() {
+                        E => {
+                            let arguments = request.recv::<Submitted<E>>().await?;
+                            analytics.send::<ModuleClaim<E_FILE, E>>(&arguments).await?;
+                            analytics.send::<CommitRequest<E>>(&arguments).await?;
+                            analytics
+                                .send::<ModuleLoan<E, ANALYTICS_RESOURCE>>(analytics_resource)
+                                .await?;
+                            analytics_resource =
+                                analytics.recv::<Loan<ANALYTICS_RESOURCE>>().await?;
+                        }
+                        ANALYTICS => {
+                            let status = request.recv::<ModuleFileClosed<ANALYTICS>>().await?;
+                            if status != 0 {
+                                return Err(ShellError::message(format!(
+                                    "module requester exited with {status}"
+                                )));
+                            }
+                            break;
+                        }
+                        F => {
+                            let arguments = request.recv::<Submitted<F>>().await?;
+                            analytics.send::<ModuleClaim<F_FILE, F>>(&arguments).await?;
+                            analytics.send::<CommitRequest<F>>(&arguments).await?;
+                            analytics
+                                .send::<ModuleLoan<F, ANALYTICS_RESOURCE>>(analytics_resource)
+                                .await?;
+                            analytics_resource =
+                                analytics.recv::<Loan<ANALYTICS_RESOURCE>>().await?;
+                        }
+
+                        _ => return Err(ShellError::message("unknown module request")),
+                    }
+                }
+            }
         };
         async {
-            localside::module_reconsider::database(&mut database, database_resource).await?;
+            for _ in 0..2 {
+                loop {
+                    let request = api_requests.offer().await?;
+                    match request.label() {
+                        B_FILE => {
+                            request.recv::<ModuleClaim<B_FILE, B>>().await?;
+                            api.send::<ModuleLoan<B, API_RESOURCE>>(api_resource)
+                                .await?;
+                            api_resource = api.recv::<Loan<API_RESOURCE>>().await?;
+                        }
+                        API => {
+                            let status = request.recv::<ModuleFileClosed<API>>().await?;
+                            if status != 0 {
+                                return Err(ShellError::message(format!(
+                                    "module requester exited with {status}"
+                                )));
+                            }
+                            break;
+                        }
+                        C_FILE => {
+                            request.recv::<ModuleClaim<C_FILE, C>>().await?;
+                            api.send::<ModuleLoan<C, API_RESOURCE>>(api_resource)
+                                .await?;
+                            api_resource = api.recv::<Loan<API_RESOURCE>>().await?;
+                        }
+
+                        _ => return Err(ShellError::message("unknown module request")),
+                    }
+                }
+            }
         };
         async {
-            localside::module_reconsider::api(&mut api, api_resource).await?;
+            for _ in 0..2 {
+                loop {
+                    let request = auth_requests.offer().await?;
+                    match request.label() {
+                        G => {
+                            let arguments = request.recv::<Submitted<G>>().await?;
+                            auth.send::<ModuleClaim<G_FILE, G>>(&arguments).await?;
+                            auth.send::<CommitRequest<G>>(&arguments).await?;
+                            auth.send::<ModuleLoan<G, AUTH_RESOURCE>>(auth_resource)
+                                .await?;
+                            auth_resource = auth.recv::<Loan<AUTH_RESOURCE>>().await?;
+                        }
+                        AUTH => {
+                            let status = request.recv::<ModuleFileClosed<AUTH>>().await?;
+                            if status != 0 {
+                                return Err(ShellError::message(format!(
+                                    "module requester exited with {status}"
+                                )));
+                            }
+                            break;
+                        }
+                        A_FILE => {
+                            request.recv::<ModuleClaim<A_FILE, A>>().await?;
+                            auth.send::<ModuleLoan<A, AUTH_RESOURCE>>(auth_resource)
+                                .await?;
+                            auth_resource = auth.recv::<Loan<AUTH_RESOURCE>>().await?;
+                        }
+
+                        _ => return Err(ShellError::message("unknown module request")),
+                    }
+                }
+            }
         };
         async {
-            localside::module_reconsider::payment(&mut payment, payment_resource).await?;
+            for _ in 0..2 {
+                loop {
+                    let request = database_requests.offer().await?;
+                    match request.label() {
+                        A => {
+                            let arguments = request.recv::<Submitted<A>>().await?;
+                            database.send::<ModuleClaim<A_FILE, A>>(&arguments).await?;
+                            database.send::<CommitRequest<A>>(&arguments).await?;
+                            database
+                                .send::<ModuleLoan<A, DATABASE_RESOURCE>>(database_resource)
+                                .await?;
+                            database_resource = database.recv::<Loan<DATABASE_RESOURCE>>().await?;
+                        }
+                        DATABASE => {
+                            let status = request.recv::<ModuleFileClosed<DATABASE>>().await?;
+                            if status != 0 {
+                                return Err(ShellError::message(format!(
+                                    "module requester exited with {status}"
+                                )));
+                            }
+                            break;
+                        }
+                        B => {
+                            let arguments = request.recv::<Submitted<B>>().await?;
+                            database.send::<ModuleClaim<B_FILE, B>>(&arguments).await?;
+                            database.send::<CommitRequest<B>>(&arguments).await?;
+                            database
+                                .send::<ModuleLoan<B, DATABASE_RESOURCE>>(database_resource)
+                                .await?;
+                            database_resource = database.recv::<Loan<DATABASE_RESOURCE>>().await?;
+                        }
+
+                        _ => return Err(ShellError::message("unknown module request")),
+                    }
+                }
+            }
         };
         async {
-            localside::module_reconsider::notify(&mut notify, notify_resource).await?;
+            for _ in 0..2 {
+                loop {
+                    let request = notify_requests.offer().await?;
+                    match request.label() {
+                        D_FILE => {
+                            request.recv::<ModuleClaim<D_FILE, D>>().await?;
+                            notify
+                                .send::<ModuleLoan<D, NOTIFY_RESOURCE>>(notify_resource)
+                                .await?;
+                            notify_resource = notify.recv::<Loan<NOTIFY_RESOURCE>>().await?;
+                        }
+                        NOTIFY => {
+                            let status = request.recv::<ModuleFileClosed<NOTIFY>>().await?;
+                            if status != 0 {
+                                return Err(ShellError::message(format!(
+                                    "module requester exited with {status}"
+                                )));
+                            }
+                            break;
+                        }
+                        E_FILE => {
+                            request.recv::<ModuleClaim<E_FILE, E>>().await?;
+                            notify
+                                .send::<ModuleLoan<E, NOTIFY_RESOURCE>>(notify_resource)
+                                .await?;
+                            notify_resource = notify.recv::<Loan<NOTIFY_RESOURCE>>().await?;
+                        }
+
+                        _ => return Err(ShellError::message("unknown module request")),
+                    }
+                }
+            }
         };
         async {
-            localside::module_reconsider::analytics(&mut analytics, analytics_resource).await?;
+            for _ in 0..2 {
+                loop {
+                    let request = payment_requests.offer().await?;
+                    match request.label() {
+                        C => {
+                            let arguments = request.recv::<Submitted<C>>().await?;
+                            payment.send::<ModuleClaim<C_FILE, C>>(&arguments).await?;
+                            payment.send::<CommitRequest<C>>(&arguments).await?;
+                            payment
+                                .send::<ModuleLoan<C, PAYMENT_RESOURCE>>(payment_resource)
+                                .await?;
+                            payment_resource = payment.recv::<Loan<PAYMENT_RESOURCE>>().await?;
+                        }
+                        PAYMENT => {
+                            let status = request.recv::<ModuleFileClosed<PAYMENT>>().await?;
+                            if status != 0 {
+                                return Err(ShellError::message(format!(
+                                    "module requester exited with {status}"
+                                )));
+                            }
+                            break;
+                        }
+                        D => {
+                            let arguments = request.recv::<Submitted<D>>().await?;
+                            payment.send::<ModuleClaim<D_FILE, D>>(&arguments).await?;
+                            payment.send::<CommitRequest<D>>(&arguments).await?;
+                            payment
+                                .send::<ModuleLoan<D, PAYMENT_RESOURCE>>(payment_resource)
+                                .await?;
+                            payment_resource = payment.recv::<Loan<PAYMENT_RESOURCE>>().await?;
+                        }
+
+                        _ => return Err(ShellError::message("unknown module request")),
+                    }
+                }
+            }
         };
         async {
-            localside::module_reconsider::search(&mut search, search_resource).await?;
+            for _ in 0..2 {
+                loop {
+                    let request = search_requests.offer().await?;
+                    match request.label() {
+                        F_FILE => {
+                            request.recv::<ModuleClaim<F_FILE, F>>().await?;
+                            search
+                                .send::<ModuleLoan<F, SEARCH_RESOURCE>>(search_resource)
+                                .await?;
+                            search_resource = search.recv::<Loan<SEARCH_RESOURCE>>().await?;
+                        }
+                        SEARCH => {
+                            let status = request.recv::<ModuleFileClosed<SEARCH>>().await?;
+                            if status != 0 {
+                                return Err(ShellError::message(format!(
+                                    "module requester exited with {status}"
+                                )));
+                            }
+                            break;
+                        }
+                        G_FILE => {
+                            request.recv::<ModuleClaim<G_FILE, G>>().await?;
+                            search
+                                .send::<ModuleLoan<G, SEARCH_RESOURCE>>(search_resource)
+                                .await?;
+                            search_resource = search.recv::<Loan<SEARCH_RESOURCE>>().await?;
+                        }
+
+                        _ => return Err(ShellError::message("unknown module request")),
+                    }
+                }
+            }
         };
         async {
             let file = a_vm.recv::<Loan<A_FILE>>().await?;
@@ -759,7 +1194,7 @@ async fn run_1h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
                     .write_as::<ImplementRequest<A>>(&mut implementation)
                     .read_as::<ImplementCompleted>(&mut implemented)
                     .file(FILES[2])?
-                    .write_as::<CommitRequest<A>>(&mut commit)
+                    .write_as::<Submitted<A>>(&mut commit)
                     .read_as::<CommitCompleted>(&mut committed)
                     .file(FILES[3])?
                     .write_as::<TestRequest<A>>(&mut test)
@@ -773,6 +1208,17 @@ async fn run_1h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
             let (mut root, (file, ())) = files.into_parts();
             let mut file = file.into_endpoint();
             file.send::<crate::shell::global::FileExit>(&status).await?;
+            async {
+                let [mut commit, mut metadata] = file.par()?;
+                async {
+                    commit.send::<ModuleFileClosed<DATABASE>>(&status).await?;
+                };
+                async {
+                    metadata.send::<ModuleFileClosed<AUTH>>(&status).await?;
+                };
+                Ok(())
+            }
+            .await?;
             root.send::<crate::shell::global::Exit>(&status).await?;
         };
         async {
@@ -800,7 +1246,7 @@ async fn run_1h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
                     .write_as::<ImplementRequest<B>>(&mut implementation)
                     .read_as::<ImplementCompleted>(&mut implemented)
                     .file(FILES[2])?
-                    .write_as::<CommitRequest<B>>(&mut commit)
+                    .write_as::<Submitted<B>>(&mut commit)
                     .read_as::<CommitCompleted>(&mut committed)
                     .file(FILES[3])?
                     .write_as::<TestRequest<B>>(&mut test)
@@ -814,6 +1260,17 @@ async fn run_1h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
             let (mut root, (file, ())) = files.into_parts();
             let mut file = file.into_endpoint();
             file.send::<crate::shell::global::FileExit>(&status).await?;
+            async {
+                let [mut commit, mut metadata] = file.par()?;
+                async {
+                    commit.send::<ModuleFileClosed<DATABASE>>(&status).await?;
+                };
+                async {
+                    metadata.send::<ModuleFileClosed<API>>(&status).await?;
+                };
+                Ok(())
+            }
+            .await?;
             root.send::<crate::shell::global::Exit>(&status).await?;
         };
         async {
@@ -841,7 +1298,7 @@ async fn run_1h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
                     .write_as::<ImplementRequest<C>>(&mut implementation)
                     .read_as::<ImplementCompleted>(&mut implemented)
                     .file(FILES[2])?
-                    .write_as::<CommitRequest<C>>(&mut commit)
+                    .write_as::<Submitted<C>>(&mut commit)
                     .read_as::<CommitCompleted>(&mut committed)
                     .file(FILES[3])?
                     .write_as::<TestRequest<C>>(&mut test)
@@ -855,6 +1312,17 @@ async fn run_1h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
             let (mut root, (file, ())) = files.into_parts();
             let mut file = file.into_endpoint();
             file.send::<crate::shell::global::FileExit>(&status).await?;
+            async {
+                let [mut commit, mut metadata] = file.par()?;
+                async {
+                    commit.send::<ModuleFileClosed<PAYMENT>>(&status).await?;
+                };
+                async {
+                    metadata.send::<ModuleFileClosed<API>>(&status).await?;
+                };
+                Ok(())
+            }
+            .await?;
             root.send::<crate::shell::global::Exit>(&status).await?;
         };
         async {
@@ -882,7 +1350,7 @@ async fn run_1h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
                     .write_as::<ImplementRequest<D>>(&mut implementation)
                     .read_as::<ImplementCompleted>(&mut implemented)
                     .file(FILES[2])?
-                    .write_as::<CommitRequest<D>>(&mut commit)
+                    .write_as::<Submitted<D>>(&mut commit)
                     .read_as::<CommitCompleted>(&mut committed)
                     .file(FILES[3])?
                     .write_as::<TestRequest<D>>(&mut test)
@@ -896,6 +1364,17 @@ async fn run_1h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
             let (mut root, (file, ())) = files.into_parts();
             let mut file = file.into_endpoint();
             file.send::<crate::shell::global::FileExit>(&status).await?;
+            async {
+                let [mut commit, mut metadata] = file.par()?;
+                async {
+                    commit.send::<ModuleFileClosed<PAYMENT>>(&status).await?;
+                };
+                async {
+                    metadata.send::<ModuleFileClosed<NOTIFY>>(&status).await?;
+                };
+                Ok(())
+            }
+            .await?;
             root.send::<crate::shell::global::Exit>(&status).await?;
         };
         async {
@@ -923,7 +1402,7 @@ async fn run_1h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
                     .write_as::<ImplementRequest<E>>(&mut implementation)
                     .read_as::<ImplementCompleted>(&mut implemented)
                     .file(FILES[2])?
-                    .write_as::<CommitRequest<E>>(&mut commit)
+                    .write_as::<Submitted<E>>(&mut commit)
                     .read_as::<CommitCompleted>(&mut committed)
                     .file(FILES[3])?
                     .write_as::<TestRequest<E>>(&mut test)
@@ -937,6 +1416,17 @@ async fn run_1h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
             let (mut root, (file, ())) = files.into_parts();
             let mut file = file.into_endpoint();
             file.send::<crate::shell::global::FileExit>(&status).await?;
+            async {
+                let [mut commit, mut metadata] = file.par()?;
+                async {
+                    commit.send::<ModuleFileClosed<ANALYTICS>>(&status).await?;
+                };
+                async {
+                    metadata.send::<ModuleFileClosed<NOTIFY>>(&status).await?;
+                };
+                Ok(())
+            }
+            .await?;
             root.send::<crate::shell::global::Exit>(&status).await?;
         };
         async {
@@ -964,7 +1454,7 @@ async fn run_1h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
                     .write_as::<ImplementRequest<F>>(&mut implementation)
                     .read_as::<ImplementCompleted>(&mut implemented)
                     .file(FILES[2])?
-                    .write_as::<CommitRequest<F>>(&mut commit)
+                    .write_as::<Submitted<F>>(&mut commit)
                     .read_as::<CommitCompleted>(&mut committed)
                     .file(FILES[3])?
                     .write_as::<TestRequest<F>>(&mut test)
@@ -978,6 +1468,17 @@ async fn run_1h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
             let (mut root, (file, ())) = files.into_parts();
             let mut file = file.into_endpoint();
             file.send::<crate::shell::global::FileExit>(&status).await?;
+            async {
+                let [mut commit, mut metadata] = file.par()?;
+                async {
+                    commit.send::<ModuleFileClosed<ANALYTICS>>(&status).await?;
+                };
+                async {
+                    metadata.send::<ModuleFileClosed<SEARCH>>(&status).await?;
+                };
+                Ok(())
+            }
+            .await?;
             root.send::<crate::shell::global::Exit>(&status).await?;
         };
         async {
@@ -1005,7 +1506,7 @@ async fn run_1h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
                     .write_as::<ImplementRequest<G>>(&mut implementation)
                     .read_as::<ImplementCompleted>(&mut implemented)
                     .file(FILES[2])?
-                    .write_as::<CommitRequest<G>>(&mut commit)
+                    .write_as::<Submitted<G>>(&mut commit)
                     .read_as::<CommitCompleted>(&mut committed)
                     .file(FILES[3])?
                     .write_as::<TestRequest<G>>(&mut test)
@@ -1019,6 +1520,17 @@ async fn run_1h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
             let (mut root, (file, ())) = files.into_parts();
             let mut file = file.into_endpoint();
             file.send::<crate::shell::global::FileExit>(&status).await?;
+            async {
+                let [mut commit, mut metadata] = file.par()?;
+                async {
+                    commit.send::<ModuleFileClosed<AUTH>>(&status).await?;
+                };
+                async {
+                    metadata.send::<ModuleFileClosed<SEARCH>>(&status).await?;
+                };
+                Ok(())
+            }
+            .await?;
             root.send::<crate::shell::global::Exit>(&status).await?;
         };
         async {

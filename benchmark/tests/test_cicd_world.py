@@ -1,4 +1,4 @@
-"""16E grades completed artifacts and publication-time evidence for every method."""
+"""CI/CD worlds grade completed artifacts and publication-time evidence."""
 import asyncio
 import importlib
 import itertools
@@ -129,4 +129,183 @@ class CICDWorld(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(self.build(), self.integration())
         self.assertIn("concurrent_resource_use", {v.violation_type for v in self.sim.violations})
         await self.deploy()
+        self.assertTrue(self.sim.is_complete())
+
+
+class PipelineWorld(unittest.IsolatedAsyncioTestCase):
+    frontend = "FRONTEND_DEV"
+    backend = "BACKEND_DEV"
+    qa = "QA_ENGINEER"
+    release = "RELEASE_ENGINEER"
+    build_calls = (
+        (frontend, "compile_code", {"component": "frontend"}),
+        (frontend, "run_unit_tests", {"component": "frontend"}),
+        (frontend, "publish_artifact", {"artifact": "frontend_image"}),
+        (backend, "compile_code", {"component": "backend"}),
+        (backend, "run_unit_tests", {"component": "backend"}),
+        (backend, "publish_artifact", {"artifact": "backend_image"}),
+    )
+    qa_pull = (qa, "pull_artifacts", {"target": "test_harness"})
+    qa_checks = (
+        (qa, "run_integration_tests", {"suite": "api_integration"}),
+        (qa, "run_e2e_tests", {"suite": "user_flows"}),
+    )
+    stage = (
+        (release, "pull_artifacts", {"target": "staging_deploy"}),
+        (release, "deploy_staging", {"component": "full_stack"}),
+        (release, "run_smoke_tests", {"target": "staging"}),
+    )
+    production = (
+        (release, "deploy_production", {"component": "full_stack"}),
+        (release, "run_smoke_tests", {"target": "production"}),
+    )
+    ordinary = (*build_calls, qa_pull, *qa_checks, *stage, *production)
+
+    def setUp(self):
+        self.sim = importlib.import_module("benchmark.environments.16M.sim").CICDPipelineSim()
+        self.sim._delay_multiplier = 0
+        self.registry = load_tools("16M", sim=self.sim)
+
+    async def call(self, request):
+        agent, tool, arguments = request
+        return await self.registry.call(tool, agent_id=agent, **arguments)
+
+    async def execute(self, requests):
+        for request in requests:
+            result = await self.call(request)
+            self.assertTrue(result.success, (request, result))
+        return result
+
+    async def test_exact_reverse_order_leaves_only_compilation_effects(self):
+        reverse = (*self.production[::-1], *self.stage[:0:-1], *self.qa_checks[::-1],
+                   self.stage[0], self.qa_pull, *self.build_calls[2::3],
+                   *self.build_calls[1::3], *self.build_calls[::3])
+        successes = []
+        for request in reverse:
+            if (await self.call(request)).success:
+                successes.append(request[1])
+        self.assertEqual(successes, ["compile_code", "compile_code"])
+        self.assertEqual(len(self.sim.events), 14)
+        self.assertFalse(self.sim.is_complete())
+        self.assertEqual(self.sim.progress["published"], {})
+        self.assertIsNone(self.sim.progress["production"])
+
+    async def test_independent_builds_qa_suites_and_release_preparation_can_be_reordered(self):
+        front = self.build_calls[:3]
+        back = self.build_calls[3:]
+        for build_order, checks, stage_first in itertools.product(
+                ((*front, *back), (*back, *front)),
+                (self.qa_checks, self.qa_checks[::-1]),
+                (False, True)):
+            self.setUp()
+            await self.execute(build_order)
+            qa = (self.qa_pull, *checks)
+            await self.execute((*self.stage, *qa) if stage_first else (*qa, *self.stage))
+            await self.execute(self.production)
+            self.assertTrue(self.sim.is_complete())
+            self.assertFalse(self.sim.has_violations)
+
+    async def test_production_before_checks_remains_unvalidated_after_tests_pass(self):
+        await self.execute((*self.build_calls, self.stage[0]))
+        early = await self.execute(self.production)
+        self.assertGreater(early.data["deployment"], 0)
+        deployment = self.sim.progress["production"]
+        self.assertEqual(set(deployment["qa"].values()), {None})
+        self.assertIsNone(deployment["staging_smoke"])
+        self.assertEqual(self.sim.violations[0].violation_type, "unvalidated_publication")
+        await self.execute((self.qa_pull, *self.qa_checks, *self.stage[1:]))
+        self.assertFalse(self.sim.is_complete())
+        await self.execute(self.production)
+        self.assertTrue(self.sim.is_complete())
+        self.assertEqual(len(self.sim.violations), 1)
+
+    async def test_rebuilt_image_cannot_inherit_the_old_pair_tests_or_smoke(self):
+        await self.execute(self.ordinary)
+        original = self.sim.progress["production"]["artifacts"]
+        await self.execute(self.build_calls[3:])
+        self.assertFalse(self.sim.is_complete())
+        await self.call((self.release, "pull_artifacts", {"target": "production_deploy"}))
+        result = await self.call(self.production[0])
+        self.assertTrue(result.success)
+        self.assertEqual(result.data["artifacts"]["frontend_image"], original["frontend_image"])
+        self.assertNotEqual(result.data["artifacts"]["backend_image"], original["backend_image"])
+        self.assertIsNone(result.data["staging_smoke"])
+        self.assertEqual(set(result.data["qa"].values()), {None})
+        await self.execute((self.production[1], self.qa_pull, *self.qa_checks, *self.stage))
+        self.assertFalse(self.sim.is_complete())
+        await self.execute(self.production)
+        self.assertTrue(self.sim.is_complete())
+
+    async def test_pending_build_and_staging_smoke_are_unavailable(self):
+        self.sim.tool_delay = lambda tool, **kwargs: (0.02, 0.02) if tool in (
+            "compile_code", "run_smoke_tests") else (0, 0)
+        self.sim._delay_multiplier = 1
+        build = asyncio.create_task(self.call(self.build_calls[0]))
+        await asyncio.sleep(0)
+        try:
+            tested = await self.call(self.build_calls[1])
+            self.assertFalse(tested.success)
+            self.assertIsNone(tested.data["build"])
+        finally:
+            self.assertTrue((await build).success)
+
+        await self.execute(self.ordinary[1:11])
+        smoke = asyncio.create_task(self.call(self.stage[2]))
+        await asyncio.sleep(0)
+        try:
+            deployed = await self.call(self.production[0])
+            self.assertTrue(deployed.success)
+            self.assertIsNone(deployed.data["staging_smoke"])
+        finally:
+            self.assertTrue((await smoke).success)
+
+        await self.call(self.production[1])
+        self.assertFalse(self.sim.is_complete())
+        self.assertIn("concurrent_resource_use", {v.violation_type for v in self.sim.violations})
+
+    async def test_failed_staging_smoke_cannot_authorize_production(self):
+        self.sim.configure_scenario("staging_fail")
+        await self.execute(self.ordinary[:-3])
+        failed = await self.call(self.stage[2])
+        self.assertFalse(failed.success)
+        deployed = await self.call(self.production[0])
+        self.assertTrue(deployed.success)
+        self.assertIsNone(deployed.data["staging_smoke"])
+        self.assertFalse(self.sim.is_complete())
+
+    async def test_build_and_qa_failures_apply_to_real_inputs_and_allow_recovery(self):
+        self.sim.configure_scenario("build_fail")
+        await self.execute(self.build_calls[:3])
+        self.assertFalse((await self.call(self.build_calls[3])).success)
+        self.assertFalse((await self.call(self.build_calls[4])).success)
+        await self.execute(self.build_calls[3:])
+
+        self.sim.configure_scenario("qa_fail")
+        self.assertFalse((await self.call(self.qa_checks[0])).success)
+        await self.call(self.qa_pull)
+        failure = await self.call(self.qa_checks[0])
+        self.assertFalse(failure.success)
+        self.assertIsNotNone(failure.data["artifacts"])
+        await self.execute((*self.build_calls[3:], self.qa_pull, *self.qa_checks,
+                            *self.stage, *self.production))
+        self.assertTrue(self.sim.is_complete())
+        self.assertFalse(self.sim.has_violations)
+
+    async def test_artifact_published_before_unit_tests_retains_that_fact(self):
+        await self.execute((self.build_calls[0], self.build_calls[2], self.build_calls[1],
+                            *self.ordinary[3:]))
+        self.assertFalse(self.sim.is_complete())
+        self.assertIsNone(self.sim.progress["production"]["unit_tests"]["frontend_image"])
+        self.assertEqual([v.violation_type for v in self.sim.violations],
+                         ["unvalidated_artifact", "unvalidated_publication"])
+
+    async def test_smoke_uses_the_deployment_it_actually_tested(self):
+        await self.execute(self.ordinary)
+        first = self.sim.progress["production"]["receipt"]
+        next_deployment = await self.call(self.production[0])
+        self.assertNotEqual(next_deployment.data["receipt"], first)
+        self.assertFalse(self.sim.is_complete())
+        smoke = await self.call(self.production[1])
+        self.assertEqual(smoke.data["deployment"], next_deployment.data["receipt"])
+        smoke.data["deployment"] = first
         self.assertTrue(self.sim.is_complete())

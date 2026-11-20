@@ -16,13 +16,16 @@ pub async fn run_a<D: Domain>(
     let mut environment = owner.recv::<StageLoan>().await?;
     let mut validations = [Value::Null, Value::Null, Value::Null];
     loop {
-        let inputs = imp::decode(environment.recv::<StagingReadyA>().await?)?;
+        let inputs = imp::decode(owner.recv::<StagingReadyA>().await?)?;
         imp::staging_inputs(&inputs, 0)?;
         let bytes = imp::encode(&inputs)?;
         environment
             .send::<FileStagingReadyA>(&bytes.as_slice())
             .await?;
-        let arguments = environment.recv::<DeployRequestA>().await?.into_value();
+        let request = environment.recv::<DeployRequestA>().await?;
+        environment.send::<CheckStageA>(&request).await?;
+        let arguments = request.into_value();
+        let inputs = imp::decode(environment.recv::<StageInputsA>().await?)?;
         imp::deploy_input(&arguments, &inputs, (0, &validations))?;
         let deployment = domain
             .execute("RELEASE_MANAGER", "deploy_service", arguments)
@@ -30,6 +33,7 @@ pub async fn run_a<D: Domain>(
             .map_err(ShellError::message)?;
         imp::deployed(&deployment, &inputs, (0, &validations))?;
         let bytes = imp::encode(&deployment)?;
+        environment.send::<InstalledA>(&bytes.as_slice()).await?;
         environment.send::<DeployedA>(&bytes.as_slice()).await?;
         let arguments = environment.recv::<ValidateRequestA>().await?.into_value();
         imp::assigned(&arguments, "service", FEATURES[0])?;
@@ -91,13 +95,16 @@ pub async fn run_b<D: Domain>(
         serde_json::from_value(history).map_err(|error| ShellError::message(error.to_string()))?;
     let mut environment = owner.recv::<StageLoan>().await?;
     loop {
-        let inputs = imp::decode(environment.recv::<StagingReadyB>().await?)?;
+        let inputs = imp::decode(owner.recv::<StagingReadyB>().await?)?;
         imp::staging_inputs(&inputs, 1)?;
         let bytes = imp::encode(&inputs)?;
         environment
             .send::<FileStagingReadyB>(&bytes.as_slice())
             .await?;
-        let arguments = environment.recv::<DeployRequestB>().await?.into_value();
+        let request = environment.recv::<DeployRequestB>().await?;
+        environment.send::<CheckStageB>(&request).await?;
+        let arguments = request.into_value();
+        let inputs = imp::decode(environment.recv::<StageInputsB>().await?)?;
         imp::deploy_input(&arguments, &inputs, (1, &validations))?;
         let deployment = domain
             .execute("RELEASE_MANAGER", "deploy_service", arguments)
@@ -105,6 +112,7 @@ pub async fn run_b<D: Domain>(
             .map_err(ShellError::message)?;
         imp::deployed(&deployment, &inputs, (1, &validations))?;
         let bytes = imp::encode(&deployment)?;
+        environment.send::<InstalledB>(&bytes.as_slice()).await?;
         environment.send::<DeployedB>(&bytes.as_slice()).await?;
         let arguments = environment.recv::<ValidateRequestB>().await?.into_value();
         imp::assigned(&arguments, "service", FEATURES[1])?;
@@ -166,13 +174,16 @@ pub async fn run_c<D: Domain>(
         serde_json::from_value(history).map_err(|error| ShellError::message(error.to_string()))?;
     let mut environment = owner.recv::<StageLoan>().await?;
     loop {
-        let inputs = imp::decode(environment.recv::<StagingReadyC>().await?)?;
+        let inputs = imp::decode(owner.recv::<StagingReadyC>().await?)?;
         imp::staging_inputs(&inputs, 2)?;
         let bytes = imp::encode(&inputs)?;
         environment
             .send::<FileStagingReadyC>(&bytes.as_slice())
             .await?;
-        let arguments = environment.recv::<DeployRequestC>().await?.into_value();
+        let request = environment.recv::<DeployRequestC>().await?;
+        environment.send::<CheckStageC>(&request).await?;
+        let arguments = request.into_value();
+        let inputs = imp::decode(environment.recv::<StageInputsC>().await?)?;
         imp::deploy_input(&arguments, &inputs, (2, &validations))?;
         let deployment = domain
             .execute("RELEASE_MANAGER", "deploy_service", arguments)
@@ -180,6 +191,7 @@ pub async fn run_c<D: Domain>(
             .map_err(ShellError::message)?;
         imp::deployed(&deployment, &inputs, (2, &validations))?;
         let bytes = imp::encode(&deployment)?;
+        environment.send::<InstalledC>(&bytes.as_slice()).await?;
         environment.send::<DeployedC>(&bytes.as_slice()).await?;
         let arguments = environment.recv::<ValidateRequestC>().await?.into_value();
         imp::assigned(&arguments, "service", FEATURES[2])?;
@@ -198,6 +210,7 @@ pub async fn run_c<D: Domain>(
                 environment
                     .send::<FileStageResultC>(&bytes.as_slice())
                     .await?;
+                environment.send::<TaskExit>(&0).await?;
                 environment.send::<TaskExit>(&0).await?;
                 environment.send::<TaskExit>(&0).await?;
                 environment.send::<TaskExit>(&0).await?;

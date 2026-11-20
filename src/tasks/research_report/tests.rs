@@ -34,16 +34,20 @@ async fn substituted_document_requests_are_rejected_before_the_effect() -> Shell
         json!({"section_name":SECTION_B,"content_notes":"accepted notes"}),
     ] {
         let source = g::seq(
-            g::send::<DOCUMENT_SERVICE, A_WASI, DocumentLoan>(),
-            g::seq(
-                g::send::<A_FILE, DOCUMENT_SERVICE, WriteA>(),
+            g::send::<A_FILE, WRITE_REQUESTS, WriteA>(),
+            g::par(
                 g::seq(
-                    g::send::<DOCUMENT_SERVICE, A_WASI, WriteArgumentsA>(),
-                    g::send::<DOCUMENT, DOCUMENT_SERVICE, WriteOnDocument>(),
+                    g::send::<INITIAL_DOCUMENT, A_WASI, WriteArgumentsA>(),
+                    g::seq(
+                        g::send::<INITIAL_DOCUMENT, A_WASI, DocumentLoan>(),
+                        g::send::<DOCUMENT, INITIAL_DOCUMENT, WriteOnDocument>(),
+                    ),
                 ),
+                g::send::<DATABASE_SERVICE, INITIAL_DOCUMENT, ReferenceMaterialA>(),
             ),
         );
-        let p_service = project::<DOCUMENT_SERVICE>(&source);
+        let p_requests = project::<WRITE_REQUESTS>(&source);
+        let p_service = project::<INITIAL_DOCUMENT>(&source);
         let p_document = project::<DOCUMENT>(&source);
         let p_author = project::<A_WASI>(&source);
         let p_file = project::<A_FILE>(&source);
@@ -55,6 +59,7 @@ async fn substituted_document_requests_are_rejected_before_the_effect() -> Shell
         let mut slab = vec![0; 1024 * 1024];
         let mut storage = SessionKitStorage::uninit();
         let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
+        let mut requests = rv.enter(session, &p_requests)?;
         let mut service = rv.enter(session, &p_service)?;
         let document = rv.enter(session, &p_document)?;
         let mut author = rv.enter(session, &p_author)?;
@@ -67,14 +72,19 @@ async fn substituted_document_requests_are_rejected_before_the_effect() -> Shell
         let result = hibana_runtime::race(
             async {
                 async {
-                    localside::resources::document(&mut service, document, &domain).await?;
+                    localside::resources::initial_document(
+                        &mut service,
+                        (document, &mut requests),
+                        &domain,
+                    )
+                    .await?;
                 };
                 async {
                     file.send::<WriteA>(&admitted).await?;
                 };
                 async {
-                    let mut document = author.recv::<DocumentLoan>().await?;
                     let request = author.recv::<WriteArgumentsA>().await?;
+                    let mut document = author.recv::<DocumentLoan>().await?;
                     assert_eq!(request.as_bytes(), admitted.as_bytes());
                     document.send::<WriteOnDocument>(&supplied).await?;
                     Ok::<(), ShellError>(())
@@ -100,6 +110,10 @@ fn section_receipts_bind_current_material_without_serializing_the_other_section(
     let artifact = |id: &str| json!({"id":id,"content":format!("actual {id}")});
     let mut snapshot = json!({"sections":{SECTION_A:artifact("a"),SECTION_B:artifact("b")},"references":{SECTION_A:artifact("ra"),SECTION_B:artifact("rb")}});
     let a = json!({"tool_name":"review_sections","success":true,"data":{"agent":"EDITOR","scope":SECTION_A,"review_id":"review:a","status":"reviewed","input_snapshot":{"sections":{SECTION_A:snapshot["sections"][SECTION_A]},"references":{SECTION_A:snapshot["references"][SECTION_A]}}}});
+    let mut single = json!({"sections":{SECTION_A:snapshot["sections"][SECTION_A]},"references":{SECTION_A:snapshot["references"][SECTION_A]}});
+    imp::reviewed(&a, &single, SECTION_A).unwrap();
+    single["references"][SECTION_A] = Value::Null;
+    assert!(imp::reviewed(&a, &single, SECTION_A).is_err());
     imp::reviewed(&a, &snapshot, SECTION_A).unwrap();
     snapshot["sections"][SECTION_B] = artifact("revised-b");
     imp::reviewed(&a, &snapshot, SECTION_A).unwrap();

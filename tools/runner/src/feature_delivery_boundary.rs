@@ -24,6 +24,133 @@ fn response(reply: &Value) -> Result<Value> {
         .map_err(Into::into)
 }
 
+// Drive one operation at a time so an idle peer's attempted read cannot
+// mask what the chosen developer's merge file actually admitted.
+async fn drive_requested_order(
+    guest: &process::Guest,
+    (review_b_first, tests_b_first, merge_b_first): (bool, bool, bool),
+    separate_preparations: bool,
+) -> Result<()> {
+    let agents = ["DEVELOPER_A", "DEVELOPER_B"];
+    let features = ["user_authentication", "payment_processing"];
+    let suites = [
+        "full_test_suite_after_auth",
+        "full_test_suite_after_payment",
+    ];
+    let order = |b_first: bool| if b_first { [1usize, 0] } else { [0, 1] };
+    let read = async |agent: &str, path: String| -> Result<()> {
+        let reply = guest.command(agent, format!("cat /service/{path}")).await?;
+        let value = response(&reply).map_err(|error| format!("{agent} reading {path}: {error}"))?;
+        assert_eq!(value["success"], true, "{agent} {path}: {value}");
+        Ok(())
+    };
+    let call = async |agent: &str, path: String, args: Value| -> Result<()> {
+        let reply = guest
+            .command(
+                agent,
+                format!("echo '{args}' > /service/{path}; cat /service/{path}"),
+            )
+            .await?;
+        let value =
+            response(&reply).map_err(|error| format!("{agent} submitting {path}: {error}"))?;
+        assert_eq!(value["success"], true, "{agent} {path}: {value}");
+        Ok(())
+    };
+    let batches = if separate_preparations {
+        order(merge_b_first).map(|i| vec![i]).to_vec()
+    } else {
+        vec![vec![0, 1]]
+    };
+    for batch in batches {
+        for &i in &batch {
+            call(
+                agents[i],
+                "implement_feature".into(),
+                json!({"feature_name":features[i]}),
+            )
+            .await?;
+        }
+        for &i in &batch {
+            read(agents[1 - i], "interface_change".into()).await?;
+        }
+        for i in order(tests_b_first)
+            .into_iter()
+            .filter(|i| batch.contains(i))
+        {
+            let f = features[i];
+            read("TEST_WRITER", format!("code_ready/{f}")).await?;
+            call(
+                "TEST_WRITER",
+                format!("write_tests/{f}"),
+                json!({"target":f}),
+            )
+            .await?;
+        }
+        for i in order(review_b_first)
+            .into_iter()
+            .filter(|i| batch.contains(i))
+        {
+            let f = features[i];
+            read("REVIEWER", format!("code_ready/{f}")).await?;
+            call("REVIEWER", format!("code_review/{f}"), json!({"pr_id":f})).await?;
+            read(agents[i], "review".into()).await?;
+            read(agents[1 - i], "peer_review".into()).await?;
+            read("TEST_WRITER", format!("review/{f}")).await?;
+        }
+        for i in order(merge_b_first)
+            .into_iter()
+            .filter(|i| batch.contains(i))
+        {
+            let f = features[i];
+            read(agents[i], "merge_ready".into()).await?;
+            call(agents[i], "merge_code".into(), json!({"branch":f})).await?;
+            if separate_preparations && batch.len() == 1 && i == order(merge_b_first)[0] {
+                let other = features[1 - i];
+                let unavailable = guest
+                    .command(
+                        "CI_RUNNER",
+                        format!("dd if=/service/publication/{other} iflag=nonblock"),
+                    )
+                    .await?;
+                let output = unavailable["stdout"].as_str().ok_or("CI probe output")?;
+                assert!(
+                    output.contains("Resource temporarily unavailable")
+                        || output.contains("Permission denied"),
+                    "{unavailable}"
+                );
+            }
+            let published = guest
+                .command("CI_RUNNER", format!("cat /service/publication/{f}"))
+                .await?;
+            assert_eq!(response(&published)?["data"]["feature"], f, "{published}");
+            call(
+                "CI_RUNNER",
+                format!("run_tests/{f}"),
+                json!({"suite":suites[i]}),
+            )
+            .await?;
+            for agent in agents {
+                read(agent, "integration".into()).await?;
+            }
+            read("TEST_WRITER", "integration".into()).await?;
+            read("REVIEWER", format!("integration/{f}")).await?;
+        }
+    }
+    for agent in [
+        "DEVELOPER_A",
+        "DEVELOPER_B",
+        "CI_RUNNER",
+        "TEST_WRITER",
+        "REVIEWER",
+    ] {
+        assert_eq!(
+            guest.command(agent, "exit 0".into()).await?["exit_status"],
+            0
+        );
+    }
+    Ok(())
+}
+
 #[hibana_runtime::main]
 #[test]
 #[ignore = "requires the current 6M runtime, source receipt, wash and common simulator"]
@@ -54,34 +181,42 @@ async fn actual_wasi_initial_orders_and_integrated_ci() -> Result<()> {
     let receipt = archive_build_receipt(&binary, &input_receipt, &directory)?;
     let module = Path::new("vendor/hibana-wash/target/wasm32-wasip1/release/hibana-wash.wasm");
     let mut outcomes = Vec::new();
-    let cases = crate::qualification::FEATURE_DELIVERY_INITIAL_ORDERS;
+    let ordinary = crate::qualification::FEATURE_DELIVERY_INITIAL_ORDERS;
+    let count = ordinary.len() + 2;
     let selected = match std::env::var("CHOREOFIX_FEATURE_DELIVERY_CASE") {
         Ok(value) => {
             let index = value.parse::<usize>()?;
-            if index >= cases.len() {
+            if index >= count {
                 return Err("feature-delivery condition is outside the declared matrix".into());
             }
             index..index + 1
         }
-        Err(std::env::VarError::NotPresent) => 0..cases.len(),
+        Err(std::env::VarError::NotPresent) => 0..count,
         Err(error) => return Err(error.into()),
     };
     let expected_conditions = selected.len();
-    let full_matrix = expected_conditions == cases.len();
+    let full_matrix = expected_conditions == count;
     save(
         &directory.join("input-domain.json"),
-        &json!({"declared_conditions":cases.len(),"selected_conditions":selected.clone().collect::<Vec<_>>(),
+        &json!({"declared_conditions":count,"selected_conditions":selected.clone().collect::<Vec<_>>(),
             "full_matrix":full_matrix,"model_calls":0}),
     )?;
     for index in selected {
-        let (review_b_first, tests_b_first) = cases[index];
+        let separate_preparations = index >= ordinary.len();
+        let (review_b_first, tests_b_first, merge_b_first) =
+            if let Some(&order) = ordinary.get(index) {
+                order
+            } else {
+                let b_first = index == ordinary.len() + 1;
+                (b_first, b_first, b_first)
+            };
         let output = directory.join(format!("case{index}"));
         fs::create_dir(&output)?;
         crate::projection::archive(&binary, &output, "6M")?;
         save(
             &output.join("case.json"),
             &json!({"task":"6M","depth":0,"review_b_first":review_b_first,
-            "tests_b_first":tests_b_first,"model_calls":0,"scored_benchmark":false,"build":receipt,
+            "separate_preparations":separate_preparations,"tests_b_first":tests_b_first,"merge_b_first":merge_b_first,"model_calls":0,"scored_benchmark":false,"build":receipt,
             "simulator_contract":choreofix_inputs::SIMULATOR_CONTRACT,"delay_multiplier":0.01,
             "runtime_binary_sha256":digest(&binary)?,"guest_wasm_sha256":digest(module)?,
             "compiled_projection_sha256":digest(&output.join("projection.json"))?,
@@ -92,7 +227,24 @@ async fn actual_wasi_initial_orders_and_integrated_ci() -> Result<()> {
         let trace = Trace::create(&output.join("events.jsonl"))?;
         let (simulator, _) = oracle::Simulator::new("6M", 0, 0.01, trace.clone(), &[])?;
         let (guest, runtime) = process::guest(&binary, module, &["6M"], &output, trace, simulator)?;
-        let (_,(),(),(),result) = hibana_runtime::race(async {
+        let result = if separate_preparations || review_b_first != merge_b_first {
+            hibana_runtime::race(
+                async {
+                    async {
+                        drive_requested_order(
+                            &guest,
+                            (review_b_first, tests_b_first, merge_b_first),
+                            separate_preparations,
+                        )
+                        .await?;
+                    };
+                    runtime.await
+                },
+                hibana_runtime::host::deadline(Duration::from_secs(45)),
+            )
+            .await?
+        } else {
+            let (_,(),(),(),result) = hibana_runtime::race(async {
             async {
                 let guest = &guest;
                 for (agent, feature) in [("DEVELOPER_A","user_authentication"),("DEVELOPER_B","payment_processing")] {
@@ -101,8 +253,9 @@ async fn actual_wasi_initial_orders_and_integrated_ci() -> Result<()> {
                         assert_eq!(response(&implemented)?["success"],true,"{implemented}");
                         let changed = guest.command(agent,"cat /service/interface_change".into()).await?;
                         assert_eq!(response(&changed)?["success"],true,"{changed}");
-                        let first = (feature == "payment_processing") == review_b_first;
-                        let feedbacks = if first {["review","peer_review"]} else {["peer_review","review"]};
+                        let first = (feature == "payment_processing") == merge_b_first;
+                        let reviewed_first = (feature == "payment_processing") == review_b_first;
+                        let feedbacks = if reviewed_first {["review","peer_review"]} else {["peer_review","review"]};
                         for file in feedbacks {
                             let feedback=guest.command(agent,format!("cat /service/{file}")).await?;
                             assert_eq!(response(&feedback)?["success"],true,"{feedback}");
@@ -153,7 +306,7 @@ async fn actual_wasi_initial_orders_and_integrated_ci() -> Result<()> {
                     let reply=guest.command("REVIEWER",format!("echo '{}' > /service/code_review/{target}; cat /service/code_review/{target}",json!({"pr_id":target}))).await?;
                     assert_eq!(response(&reply)?["success"],true,"{reply}");
                 }
-                for target in targets {
+                for target in if merge_b_first {["payment_processing","user_authentication"]} else {["user_authentication","payment_processing"]} {
                     let ci=guest.command("REVIEWER",format!("cat /service/integration/{target}")).await?;
                     assert_eq!(response(&ci)?["success"],true,"{ci}");
                 }
@@ -161,7 +314,7 @@ async fn actual_wasi_initial_orders_and_integrated_ci() -> Result<()> {
                 Result::Ok(())
             };
             async {
-                let suites=if review_b_first {[("payment_processing","full_test_suite_after_payment"),("user_authentication","full_test_suite_after_auth")]} else {[("user_authentication","full_test_suite_after_auth"),("payment_processing","full_test_suite_after_payment")]};
+                let suites=if merge_b_first {[("payment_processing","full_test_suite_after_payment"),("user_authentication","full_test_suite_after_auth")]} else {[("user_authentication","full_test_suite_after_auth"),("payment_processing","full_test_suite_after_payment")]};
                 for (target,suite) in suites {
                     let publication=guest.command("CI_RUNNER",format!("cat /service/publication/{target}")).await?;
                     assert_eq!(response(&publication)?["success"],true,"{publication}");
@@ -173,6 +326,8 @@ async fn actual_wasi_initial_orders_and_integrated_ci() -> Result<()> {
             };
             async {runtime.await};
         },hibana_runtime::host::deadline(Duration::from_secs(180))).await?;
+            result
+        };
         save(&output.join("result.json"), &result)?;
         assert_eq!(
             result["protocol"],
@@ -190,6 +345,44 @@ async fn actual_wasi_initial_orders_and_integrated_ci() -> Result<()> {
                 .len(),
             10
         );
+        let events = result["score"]["events"]
+            .as_array()
+            .ok_or("scored 6M events")?;
+        for (tool, key, b_first) in [
+            ("code_review", "target", review_b_first),
+            ("write_tests", "component", tests_b_first),
+            ("merge_code", "branch", merge_b_first),
+        ] {
+            let observed: Vec<_> = events
+                .iter()
+                .filter(|event| event["tool"] == tool)
+                .map(|event| event["args"][key].as_str().ok_or("scored target"))
+                .collect::<std::result::Result<_, _>>()?;
+            let expected = if b_first {
+                ["payment_processing", "user_authentication"]
+            } else {
+                ["user_authentication", "payment_processing"]
+            };
+            assert_eq!(observed, expected, "observed {tool} effect order");
+        }
+        if separate_preparations {
+            let tools = events
+                .iter()
+                .map(|e| e["tool"].as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                tools,
+                [
+                    "implement_feature",
+                    "write_tests",
+                    "code_review",
+                    "merge_code",
+                    "run_tests"
+                ]
+                .map(Some)
+                .repeat(2)
+            );
+        }
         let mutations = if index == 0 {
             crate::feature_delivery_audit::check_mutants(
                 &output.join("events.jsonl"),
@@ -208,13 +401,13 @@ async fn actual_wasi_initial_orders_and_integrated_ci() -> Result<()> {
         save(
             &directory.join("progress.json"),
             &json!({"completed_conditions":outcomes.len(),"expected_conditions":expected_conditions,
-                "declared_conditions":cases.len(),"full_matrix":full_matrix,"model_calls":0,"outcomes":outcomes}),
+                "declared_conditions":count,"full_matrix":full_matrix,"model_calls":0,"outcomes":outcomes}),
         )?;
     }
     save(
         &directory.join("outcomes.json"),
         &json!({"status":"passed","task":"6M","conditions":outcomes.len(),
-            "declared_conditions":cases.len(),"full_matrix":full_matrix,
+            "declared_conditions":count,"full_matrix":full_matrix,
             "model_calls":0,"scored_benchmark":false,"outcomes":outcomes}),
     )?;
     Ok(())
@@ -348,6 +541,20 @@ async fn actual_wasi_review_rejection_and_ci_repair() -> Result<()> {
                             if response(&integrated)?["success"].as_bool().ok_or("actual own CI")? {break;}
                             let revised=guest.command(agent,format!("echo '{}' > /service/implement_feature; cat /service/implement_feature",json!({"feature_name":feature}))).await?;
                             assert_eq!(response(&revised)?["success"],true,"{revised}");
+                            let early=guest.command(agent,"cat /service/merge_ready".into()).await?;
+                            assert!(early["stdout"].as_str().ok_or("early repair merge-ready output")?.contains("Permission denied"),"{early}");
+                            let command=if failures.is_empty() {
+                                "cat /service/peer_review; echo peer_status:$?; cat /service/interface_change; echo interface_status:$?"
+                            } else {
+                                "cat /service/peer_review; echo peer_status:$?"
+                            };
+                            let peer=guest.command(agent,command.into()).await?;
+                            let output=peer["stdout"].as_str().ok_or("retired initial-review output")?;
+                            assert!(output.contains("peer_status:2")
+                                && output.contains("Permission denied"),"{peer}");
+                            if failures.is_empty() {
+                                assert!(output.contains("interface_status:2"),"{peer}");
+                            }
                             loop {
                                 let review=guest.command(agent,"cat /service/review".into()).await?;
                                 if response(&review)?["success"].as_bool().ok_or("actual repair review")? {break;}
@@ -408,6 +615,14 @@ async fn actual_wasi_review_rejection_and_ci_repair() -> Result<()> {
                 let refused=guest.command("REVIEWER",r#"echo '{"pr_id":"payment_processing"}' > /service/code_review/user_authentication"#.into()).await?;
                 assert!(refused["stdout"].as_str().ok_or("wrong review target output")?.contains("wash:"),"{refused}");
                 let targets=if review_b_first {["payment_processing","user_authentication"]} else {["user_authentication","payment_processing"]};
+                if failures.is_empty() {
+                    for target in targets {
+                        let ready=guest.command("REVIEWER",format!("cat /service/code_ready/{target}")).await?;
+                        assert_eq!(response(&ready)?["success"],true,"{ready}");
+                        let reviewed=guest.command("REVIEWER",format!("echo '{}' > /service/code_review/{target}; cat /service/code_review/{target}",json!({"pr_id":target}))).await?;
+                        assert_eq!(response(&reviewed)?["success"],false,"{reviewed}");
+                    }
+                }
                 for target in targets {
                     loop {
                         let ready=guest.command("REVIEWER",format!("cat /service/code_ready/{target}")).await?;

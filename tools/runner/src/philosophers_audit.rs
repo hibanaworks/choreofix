@@ -33,7 +33,7 @@ pub fn audit(path: &Path) -> Result<Value> {
 }
 
 fn check(records: &[Value], projection: &Value) -> Result<Value> {
-    use crate::philosopher_identity::{AGENTS, roles};
+    use crate::philosopher_identity::{AGENTS, THINK_COMPLETED, THINK_REQUEST, roles};
     let labels = crate::projection::frames(projection, records)?;
     let dynamic = crate::projection::check_dynamic(projection, records)?;
     let fixture = &records.first().ok_or("empty evidence")?["message"];
@@ -63,7 +63,6 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 roles::A_THINK_FILE,
                 roles::THINK_A,
                 roles::A_EAT_FILE,
-                roles::A_THINK_CLOSE,
                 roles::A_EAT_CLOSE,
             ],
         ),
@@ -78,7 +77,6 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 roles::B_THINK_FILE,
                 roles::THINK_B,
                 roles::B_EAT_FILE,
-                roles::B_THINK_CLOSE,
                 roles::B_EAT_CLOSE,
             ],
         ),
@@ -93,7 +91,6 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 roles::C_THINK_FILE,
                 roles::THINK_C,
                 roles::C_EAT_FILE,
-                roles::C_THINK_CLOSE,
                 roles::C_EAT_CLOSE,
             ],
         ),
@@ -108,7 +105,6 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 roles::D_THINK_FILE,
                 roles::THINK_D,
                 roles::D_EAT_FILE,
-                roles::D_THINK_CLOSE,
                 roles::D_EAT_CLOSE,
             ],
         ),
@@ -123,7 +119,6 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 roles::E_THINK_FILE,
                 roles::THINK_E,
                 roles::E_EAT_FILE,
-                roles::E_THINK_CLOSE,
                 roles::E_EAT_CLOSE,
             ],
         ),
@@ -138,7 +133,6 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 roles::F_THINK_FILE,
                 roles::THINK_F,
                 roles::F_EAT_FILE,
-                roles::F_THINK_CLOSE,
                 roles::F_EAT_CLOSE,
             ],
         ),
@@ -153,7 +147,6 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 roles::G_THINK_FILE,
                 roles::THINK_G,
                 roles::G_EAT_FILE,
-                roles::G_THINK_CLOSE,
                 roles::G_EAT_CLOSE,
             ],
         ),
@@ -169,6 +162,15 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
     }
     let journal = journal::read(records, &labels, actors)?;
     let receipts = journal.receipts(&dynamic)?;
+    let table = u64::from(roles::TABLE);
+    let requests_role = u64::from(roles::MEAL_REQUESTS);
+    let programs = projection["compiled"]["programs"]
+        .as_array()
+        .ok_or("compiled dining programs")?;
+    let selects_meals = programs.iter().any(|program| program["role"] == table);
+    let grants_to_forks = crate::projection::contracts(&projection["compiled"])?
+        .values()
+        .any(|header| header[1] == roles::TABLE && header[2] == roles::FORK_A);
     if dynamic["sessions"]
         .as_array()
         .ok_or("EPF sessions")?
@@ -189,7 +191,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
         .iter()
         .map(|(name, ids)| (*name, (u64::from(ids[1]), u64::from(ids[4]))))
         .collect();
-    let mut effects = BTreeMap::<u64, (u64, u64)>::new();
+    let mut effects = BTreeMap::<u64, (u64, Option<u64>)>::new();
     let mut rejected_closes = 0;
     let mut read_results = 0;
     for (index, (_, ids)) in layout.iter().enumerate() {
@@ -202,12 +204,11 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
             think_view,
             think_owner,
             eat_view,
-            think_close,
             eat_close,
         ] = ids.map(u64::from);
         let agent = AGENTS[index];
         for (tool, view, owner, controller, fd) in [
-            ("think", think_view, think_owner, think_close, 4),
+            ("think", think_view, think_owner, think_owner, 4),
             ("eat", eat_view, eat_owner, eat_close, 5),
         ] {
             let initial = journal::one(journal.frames.values().filter(|frame| {
@@ -227,14 +228,20 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
             if exit.bytes != 0i32.to_be_bytes() {
                 return Err("file owner received a nonzero guest exit".into());
             }
-            let (&authority_id, _) = journal::one(journal.frames.iter().filter(|(_, frame)| {
-                frame.direction(owner, view)
-                    && frame.logical_label == 165
-                    && frame.bytes.first().copied().map(u64::from) == Some(controller)
-            }))?;
-            if receipts[&authority_id]["receive_commit"]["actor"] != vm {
-                return Err("close authority was not received by the actual guest".into());
-            }
+            let authority_id = if tool == "think" {
+                // This file sends every close directly to its permanent effect owner.
+                None
+            } else {
+                let (&id, _) = journal::one(journal.frames.iter().filter(|(_, frame)| {
+                    frame.direction(owner, view)
+                        && frame.logical_label == 165
+                        && frame.bytes.first().copied().map(u64::from) == Some(controller)
+                }))?;
+                if receipts[&id]["receive_commit"]["actor"] != vm {
+                    return Err("close authority was not received by the actual guest".into());
+                }
+                Some(id)
+            };
             let mut requests = journal
                 .frames
                 .iter()
@@ -248,7 +255,8 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                                 | protocol::LABEL_WASI_FD_CLOSE
                         ))
                         || (frame.direction(view, controller)
-                            && frame.logical_label == protocol::LABEL_WASI_FD_CLOSE_OBJECT)
+                            && (frame.logical_label == protocol::LABEL_WASI_FD_CLOSE_OBJECT
+                                || (tool == "think" && frame.logical_label == THINK_REQUEST)))
                 })
                 .map(|(&id, frame)| Ok((committed(id)?, id, frame)))
                 .collect::<Result<Vec<_>>>()?;
@@ -270,6 +278,9 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                                 protocol::LABEL_WASI_FD_CLOSE_OBJECT_RET
                                     | protocol::LABEL_WASI_FD_CLOSE_REJECTED
                             ))
+                        || (tool == "think"
+                            && frame.direction(controller, view)
+                            && frame.logical_label == THINK_COMPLETED)
                 })
                 .map(|(&id, frame)| Ok((committed(id)?, id, frame)))
                 .collect::<Result<Vec<_>>>()?;
@@ -363,6 +374,36 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                             return Err("ordinary close fd/result mismatch".into());
                         }
                     }
+                    (THINK_REQUEST, THINK_COMPLETED) => {
+                        let arguments = request.value()?;
+                        if request.bytes != bytes
+                            || !arguments.get("philosopher").is_some_and(Value::is_string)
+                            || !reply.bytes.is_empty()
+                            || authority_id.is_some()
+                        {
+                            return Err(
+                                "typed thought differs from the file contents or completion".into(),
+                            );
+                        }
+                        let (&call_id, call) =
+                            journal::one(journal.calls.iter().filter(|(_, call)| {
+                                call.request["agent"] == agent
+                                    && call.request["tool"] == tool
+                                    && at < call.emitted
+                                    && call.emitted < replied
+                            }))?;
+                        let (result_at, result) = call.result()?;
+                        if result_at >= reply.sent
+                            || call.request["arguments"] != arguments
+                            || effects.insert(call_id, (request_id, None)).is_some()
+                        {
+                            return Err(
+                                "thought request, effect and acknowledgement mismatch".into()
+                            );
+                        }
+                        bytes = serde_json::to_vec(result)?;
+                        offset = 0;
+                    }
                     (
                         protocol::LABEL_WASI_FD_CLOSE_OBJECT,
                         protocol::LABEL_WASI_FD_CLOSE_OBJECT_RET
@@ -372,17 +413,86 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                         if request.bytes != [fd] || reply.bytes.first() != Some(&fd) {
                             return Err("object close fd mismatch".into());
                         }
+                        // close_with completes the guest syscall only after its
+                        // returned Endpoint arrives. In an arbitrated meal the
+                        // initial fd acknowledgement precedes fork acquisition.
+                        let arguments = serde_json::from_slice::<Value>(&bytes).ok();
+                        let (effect_after, completion) = if selects_meals
+                            && tool == "eat"
+                            && reply.logical_label == protocol::LABEL_WASI_FD_CLOSE_OBJECT_RET
+                        {
+                            let (ready_id, ready) =
+                                journal::one(journal.frames.iter().filter(|(_, f)| {
+                                    f.direction(controller, requests_role)
+                                        && u64::from(f.logical_label) == controller
+                                }))?;
+                            let ready_at = committed(*ready_id)?;
+                            let args = ready.value()?;
+                            let granted_at = if grants_to_forks {
+                                let mut latest = ready_at;
+                                let pair = actors[index]["forks"]
+                                    .as_array()
+                                    .filter(|v| v.len() == 2)
+                                    .ok_or("two assigned physical forks")?;
+                                for (side, name) in pair.iter().enumerate() {
+                                    let &(fork, resource) = forks
+                                        .get(name.as_str().ok_or("fork name")?)
+                                        .ok_or("unknown physical fork")?;
+                                    let label = if side == 0 { fork } else { resource };
+                                    let (id, grant) =
+                                        journal::one(journal.frames.iter().filter(|(_, f)| {
+                                            f.direction(table, fork)
+                                                && u64::from(f.logical_label) == label
+                                        }))?;
+                                    if grant.value()? != args || grant.sent <= ready_at {
+                                        return Err(
+                                            "fork grant precedes or differs from its meal request"
+                                                .into(),
+                                        );
+                                    }
+                                    latest = latest.max(committed(*id)?);
+                                }
+                                latest
+                            } else {
+                                let (grant_id, grant) =
+                                    journal::one(journal.frames.iter().filter(|(_, f)| {
+                                        f.direction(table, controller)
+                                            && u64::from(f.logical_label) == controller
+                                    }))?;
+                                if grant.value()? != args || grant.sent <= ready_at {
+                                    return Err(
+                                        "diner grant precedes or differs from its meal request"
+                                            .into(),
+                                    );
+                                }
+                                committed(*grant_id)?
+                            };
+                            let returned_at =
+                                committed(authority_id.ok_or("missing meal Endpoint")?)?;
+                            if args != *arguments.as_ref().ok_or("malformed admitted meal")?
+                                || at >= ready_at
+                                || ready_at >= granted_at
+                                || replied >= returned_at
+                            {
+                                return Err(
+                                    "meal request and grant differ in occurrence or arguments"
+                                        .into(),
+                                );
+                            }
+                            (granted_at, returned_at)
+                        } else {
+                            (at, replied)
+                        };
                         let calls = journal
                             .calls
                             .iter()
                             .filter(|(_, call)| {
                                 call.request["agent"] == agent
                                     && call.request["tool"] == tool
-                                    && at < call.emitted
-                                    && call.emitted < replied
+                                    && effect_after < call.emitted
+                                    && call.emitted < completion
                             })
                             .collect::<Vec<_>>();
-                        let arguments = serde_json::from_slice::<Value>(&bytes).ok();
                         let valid = arguments.as_ref().is_some_and(|v| {
                             v.as_object()
                                 .is_some_and(|v| v.get("philosopher").is_some_and(Value::is_string))
@@ -403,7 +513,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                             }
                             let (&call_id, call) = calls[0];
                             let (result_at, result) = call.result()?;
-                            if result_at >= replied
+                            if result_at >= completion
                                 || call.request["arguments"]
                                     != arguments.ok_or("invalid arguments")?
                                 || effects
@@ -423,7 +533,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
             }
         }
     }
-    if effects.len() != journal.calls.len() || effects.len() != 2 * count {
+    if effects.len() != journal.calls.len() {
         return Err("unmatched or missing object effect occurrence".into());
     }
     let mut used = BTreeSet::new();
@@ -431,46 +541,70 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
     let mut effect_receipts = Vec::new();
     for (index, (_, ids)) in layout.iter().enumerate() {
         let owner = u64::from(ids[0]);
-        let controller = u64::from(ids[9]);
+        let controller = u64::from(ids[8]);
         let agent = AGENTS[index];
         let assignment = &actors[index];
         for tool in ["think", "eat"] {
-            let call =
-                journal::one(journal.calls.values().filter(|call| {
-                    call.request["agent"] == agent && call.request["tool"] == tool
-                }))?;
-            let id = call.request["id"].as_u64().ok_or("effect ID")?;
-            let &(close_id, authority_id) = effects.get(&id).ok_or("unbound effect")?;
-            let (result_at, result) = call.result()?;
-            let mut resources = Vec::new();
-            if result["success"] != true || result["data"]["philosopher"] != agent {
-                return Err("unexpected original dining result".into());
+            let mut calls: Vec<_> = journal
+                .calls
+                .values()
+                .filter(|call| call.request["agent"] == agent && call.request["tool"] == tool)
+                .collect();
+            calls.sort_by_key(|call| call.emitted);
+            let events: Vec<_> = journal.score["events"]
+                .as_array()
+                .ok_or("original events")?
+                .iter()
+                .filter(|event| event["agent"] == agent && event["tool"] == tool)
+                .collect();
+            if calls.is_empty()
+                || calls.len() != events.len()
+                || (tool == "eat" && calls.len() != 1)
+            {
+                return Err(
+                    "dining effect count differs from the required meals or recorded thoughts"
+                        .into(),
+                );
             }
-            if tool == "eat" {
-                let required = assignment["forks"]
-                    .as_array()
-                    .filter(|v| v.len() == 2)
-                    .ok_or("two physical forks")?;
-                let mut names = BTreeSet::new();
-                for name in required {
-                    let name = name.as_str().ok_or("fork name")?;
-                    if !names.insert(name) {
-                        return Err("same physical fork twice".into());
-                    }
-                    let &(fork_owner, resource) = forks.get(name).ok_or("unknown physical fork")?;
-                    let find = |source, target, label| -> Result<(u64, &journal::Frame)> {
-                        let sender = if source == controller {
+            for (call, event) in calls.into_iter().zip(events) {
+                let id = call.request["id"].as_u64().ok_or("effect ID")?;
+                let &(close_id, authority_id) = effects.get(&id).ok_or("unbound effect")?;
+                let (result_at, result) = call.result()?;
+                let mut resources = Vec::new();
+                if result["success"] != true || result["data"]["philosopher"] != agent {
+                    return Err("unexpected original dining result".into());
+                }
+                if tool == "eat" {
+                    let required = assignment["forks"]
+                        .as_array()
+                        .filter(|v| v.len() == 2)
+                        .ok_or("two physical forks")?;
+                    let mut names = BTreeSet::new();
+                    for (side, name) in required.iter().enumerate() {
+                        let name = name.as_str().ok_or("fork name")?;
+                        if !names.insert(name) {
+                            return Err("same physical fork twice".into());
+                        }
+                        let &(fork_owner, resource) =
+                            forks.get(name).ok_or("unknown physical fork")?;
+                        let receiver = if grants_to_forks && side == 1 {
                             owner
-                        } else if source == resource {
-                            if target == controller {
-                                fork_owner
-                            } else {
-                                owner
-                            }
                         } else {
-                            source
+                            controller
                         };
-                        let (&id, frame) = journal::one(journal.frames.iter().filter(
+                        let find = |source, target, label| -> Result<(u64, &journal::Frame)> {
+                            let sender = if source == controller {
+                                owner
+                            } else if source == resource {
+                                if target == receiver {
+                                    fork_owner
+                                } else {
+                                    owner
+                                }
+                            } else {
+                                source
+                            };
+                            let (&id, frame) = journal::one(journal.frames.iter().filter(
                             |(frame_id, frame)| {
                                 frame.direction(source, target)
                                     && u64::from(frame.logical_label) == label
@@ -482,61 +616,63 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                                 "{agent}/{tool} frame {source}->{target}, label {label}: {error}"
                             )
                         })?;
-                        Ok((id, frame))
-                    };
-                    let (intent_id, intent) = find(controller, fork_owner, resource)?;
-                    let (request_id, request) = find(resource, controller, resource)?;
-                    let (loan_id, _) = find(fork_owner, controller, 10)?;
-                    let (reply_id, reply) = find(resource, fork_owner, resource)?;
-                    let (return_id, _) = find(controller, fork_owner, 10)?;
-                    if intent.value()? != call.request["arguments"]
-                        || request.value()? != call.request["arguments"]
-                        || reply.value()? != *result
-                        || !(committed(request_id)? < call.emitted
-                            && committed(loan_id)? < call.emitted
-                            && result_at < committed(reply_id)?)
-                        || receipts[&request_id]["send_actor"] != fork_owner
-                        || receipts[&request_id]["receive_commit"]["actor"] != owner
-                        || receipts[&loan_id]["receive_commit"]["actor"] != owner
-                        || receipts[&reply_id]["send_actor"] != owner
-                        || receipts[&reply_id]["receive_commit"]["actor"] != fork_owner
-                    {
-                        return Err("effect lacks its two committed resource requests, Endpoints or actual replies".into());
-                    }
-                    for id in [intent_id, request_id, loan_id, reply_id, return_id] {
-                        if !used.insert(id) {
-                            return Err("resource occurrence reused by another effect".into());
+                            Ok((id, frame))
+                        };
+                        let (intent_id, intent) = if grants_to_forks {
+                            find(
+                                table,
+                                fork_owner,
+                                if side == 0 { fork_owner } else { resource },
+                            )?
+                        } else {
+                            find(controller, fork_owner, resource)?
+                        };
+                        let (request_id, request) = find(resource, receiver, resource)?;
+                        let (loan_id, _) = find(fork_owner, receiver, 10)?;
+                        let (reply_id, reply) = find(resource, fork_owner, resource)?;
+                        let (return_id, _) = find(receiver, fork_owner, 10)?;
+                        if intent.value()? != call.request["arguments"]
+                            || request.value()? != call.request["arguments"]
+                            || reply.value()? != *result
+                            || !(committed(request_id)? < call.emitted
+                                && committed(loan_id)? < call.emitted
+                                && result_at < committed(reply_id)?)
+                            || receipts[&request_id]["send_actor"] != fork_owner
+                            || receipts[&request_id]["receive_commit"]["actor"] != owner
+                            || receipts[&loan_id]["receive_commit"]["actor"] != owner
+                            || receipts[&reply_id]["send_actor"] != owner
+                            || receipts[&reply_id]["receive_commit"]["actor"] != fork_owner
+                        {
+                            return Err("effect lacks its two committed resource requests, Endpoints or actual replies".into());
                         }
-                    }
-                    resources.push(json!({"resource":resource,"intent_frame":intent_id,
+                        for id in [intent_id, request_id, loan_id, reply_id, return_id] {
+                            if !used.insert(id) {
+                                return Err("resource occurrence reused by another effect".into());
+                            }
+                        }
+                        resources.push(json!({"resource":resource,"intent_frame":intent_id,
                         "request_frame":request_id,"request_receive":receipts[&request_id]["receive_commit"],
                         "endpoint_frame":loan_id,"endpoint_receive":receipts[&loan_id]["receive_commit"],
                         "result_frame":reply_id,"return_frame":return_id}));
+                    }
+                    meals.push((call.started()?.1, call.ended()?.1, names));
                 }
-                meals.push((call.started()?.1, call.ended()?.1, names));
-            }
-            let events = journal.score["events"]
-                .as_array()
-                .ok_or("original events")?
-                .iter()
-                .filter(|event| event["agent"] == agent && event["tool"] == tool)
-                .collect::<Vec<_>>();
-            let expected_args = if tool == "think" {
-                json!({})
-            } else {
-                json!({"left_fork":assignment["forks"][0],"right_fork":assignment["forks"][1]})
-            };
-            if events.len() != 1
-                || events[0]["args"] != expected_args
-                || events[0]["result"] != result["data"]
-                || events[0]["success"] != result["success"]
-            {
-                return Err("original simulator score and actual effect differ".into());
-            }
-            effect_receipts.push(json!({"effect_id":id,"agent":agent,"tool":tool,
+                let expected_args = if tool == "think" {
+                    json!({})
+                } else {
+                    json!({"left_fork":assignment["forks"][0],"right_fork":assignment["forks"][1]})
+                };
+                if event["args"] != expected_args
+                    || event["result"] != result["data"]
+                    || event["success"] != result["success"]
+                {
+                    return Err("original simulator score and actual effect differ".into());
+                }
+                effect_receipts.push(json!({"effect_id":id,"agent":agent,"tool":tool,
                 "object_frame":close_id,"object_receive":receipts[&close_id]["receive_commit"],
-                "close_authority_frame":authority_id,"close_authority_receive":receipts[&authority_id]["receive_commit"],
+                "close_authority_frame":authority_id,"close_authority_receive":authority_id.map(|id| &receipts[&id]["receive_commit"]),
                 "arguments":call.request["arguments"],"resources":resources}));
+            }
         }
     }
     for (&id, frame) in &journal.frames {
@@ -573,7 +709,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
             .as_array()
             .ok_or("score events")?
             .len()
-            != 2 * count
+            != effects.len()
         || maximum_eaters == 0
         || maximum_eaters > count / 2
     {
@@ -895,7 +1031,10 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
                 .into());
             }
         }
-        checked.push(json!({"mutation":mutation,"rejected":true,"epf_execution_preserved":epf_still_valid.then_some(true),"error":error}));
+        checked.push(json!({"mutation":mutation,"rejected":true,
+            "sha256":crate::evidence::digest(&mutant_path)?,
+            "epf_execution_preserved":epf_still_valid.then_some(true),"error":error}));
+        fs::remove_file(&mutant_path)?;
     }
     let result = json!({"mutants":checked,"original_unchanged":true});
     fs::write(

@@ -1,18 +1,124 @@
 //! The physical repository owns candidates, tests, reviews and publications.
 use super::super::{global::*, imp};
 use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{global::Loan, imp::review_reply::ReviewReply};
 use hibana::{Endpoint, g::Message};
 use serde_json::{Value, json};
 
 #[hibana_runtime::scope]
 pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> ShellResult<()> {
     let mut repository = owner.recv::<RepoLoan>().await?;
+    let mut requests = owner.recv::<Loan<MERGE_REQUESTS>>().await?;
+    async {
+        loop {
+            let request = requests.offer().await?;
+            match request.label() {
+                MergeRequestA::LOGICAL_LABEL => {
+                    let value = request.recv::<MergeRequestA>().await?;
+                    owner.send::<AdmitA>(&value).await?;
+                    loop {
+                        let verdict = owner.offer().await?;
+                        match verdict.label() {
+                            PublicationPassedA::LOGICAL_LABEL => {
+                                verdict.recv::<PublicationPassedA>().await?;
+                                break;
+                            }
+                            PublicationFailedA::LOGICAL_LABEL => {
+                                verdict.recv::<PublicationFailedA>().await?;
+                                let repaired = requests.recv::<MergeRequestA>().await?;
+                                owner.send::<AdmitA>(&repaired).await?;
+                            }
+                            label => {
+                                return Err(ShellError::message(format!(
+                                    "unexpected publication outcome {label}"
+                                )));
+                            }
+                        }
+                    }
+                }
+                CheckStageA::LOGICAL_LABEL => {
+                    let arguments = request.recv::<CheckStageA>().await?;
+                    owner.send::<LatestCheckedA>(&arguments).await?;
+                    owner.recv::<InstalledA>().await?;
+                }
+                MergeRequestB::LOGICAL_LABEL => {
+                    let value = request.recv::<MergeRequestB>().await?;
+                    owner.send::<AdmitB>(&value).await?;
+                    loop {
+                        let verdict = owner.offer().await?;
+                        match verdict.label() {
+                            PublicationPassedB::LOGICAL_LABEL => {
+                                verdict.recv::<PublicationPassedB>().await?;
+                                break;
+                            }
+                            PublicationFailedB::LOGICAL_LABEL => {
+                                verdict.recv::<PublicationFailedB>().await?;
+                                let repaired = requests.recv::<MergeRequestB>().await?;
+                                owner.send::<AdmitB>(&repaired).await?;
+                            }
+                            label => {
+                                return Err(ShellError::message(format!(
+                                    "unexpected publication outcome {label}"
+                                )));
+                            }
+                        }
+                    }
+                }
+                CheckStageB::LOGICAL_LABEL => {
+                    let arguments = request.recv::<CheckStageB>().await?;
+                    owner.send::<LatestCheckedB>(&arguments).await?;
+                    owner.recv::<InstalledB>().await?;
+                }
+                MergeRequestC::LOGICAL_LABEL => {
+                    let value = request.recv::<MergeRequestC>().await?;
+                    owner.send::<AdmitC>(&value).await?;
+                    loop {
+                        let verdict = owner.offer().await?;
+                        match verdict.label() {
+                            PublicationPassedC::LOGICAL_LABEL => {
+                                verdict.recv::<PublicationPassedC>().await?;
+                                break;
+                            }
+                            PublicationFailedC::LOGICAL_LABEL => {
+                                verdict.recv::<PublicationFailedC>().await?;
+                                let repaired = requests.recv::<MergeRequestC>().await?;
+                                owner.send::<AdmitC>(&repaired).await?;
+                            }
+                            label => {
+                                return Err(ShellError::message(format!(
+                                    "unexpected publication outcome {label}"
+                                )));
+                            }
+                        }
+                    }
+                }
+                CheckStageC::LOGICAL_LABEL => {
+                    let arguments = request.recv::<CheckStageC>().await?;
+                    owner.send::<LatestCheckedC>(&arguments).await?;
+                    owner.recv::<InstalledC>().await?;
+                }
+                TaskExit::LOGICAL_LABEL => {
+                    if request.recv::<TaskExit>().await? != 0 {
+                        return Err(ShellError::message("staging failed"));
+                    }
+                    return Ok::<(), ShellError>(());
+                }
+                label => {
+                    return Err(ShellError::message(format!(
+                        "unexpected repository request {label}"
+                    )));
+                }
+            }
+        }
+    };
     let mut candidates = [Value::Null, Value::Null, Value::Null];
     let mut tests = [Value::Null, Value::Null, Value::Null];
     let mut reviews = [Value::Null, Value::Null, Value::Null];
     let mut stages = [Value::Null, Value::Null, Value::Null];
-    let mut publication = Value::Null;
-    let mut prior_ci = Value::Null;
+    let mut publications = [Value::Null, Value::Null, Value::Null];
+    let mut stage_inputs = [Value::Null, Value::Null, Value::Null];
+    let mut deployments = [Value::Null, Value::Null, Value::Null];
+    let mut ci_results = [Value::Null, Value::Null, Value::Null];
     loop {
         let branch = repository.offer().await?;
         match branch.label() {
@@ -105,8 +211,8 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                     .send::<ReviewFeedbackA>(&bytes.as_slice())
                     .await?;
             }
-            MergeRequestA::LOGICAL_LABEL => {
-                let arguments = branch.recv::<MergeRequestA>().await?.into_value();
+            AdmitA::LOGICAL_LABEL => {
+                let arguments = branch.recv::<AdmitA>().await?.into_value();
                 imp::merge_inputs(&arguments, (0, &candidates[0], &tests[0], &reviews[0]))?;
                 let value = domain
                     .execute("DEVELOPER_A", "merge_code", arguments)
@@ -115,14 +221,20 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                 imp::merge_result(
                     &value,
                     (0, &candidates[0], &tests[0], &reviews[0]),
-                    &prior_ci,
+                    &ci_results,
                 )?;
                 let bytes = imp::encode(&value)?;
-                publication = value;
+                publications[0] = value;
                 repository.send::<MergedA>(&bytes.as_slice()).await?;
-                imp::ci_inputs(&publication, &tests, 0)?;
-                let bytes = imp::encode(&json!({"publication":publication,"tests":tests}))?;
-                repository.send::<PublicationA>(&bytes.as_slice()).await?;
+                imp::ci_inputs(&publications[0], &tests, 0)?;
+                let bytes = imp::encode(&json!({"publication":publications[0],"tests":tests}))?;
+                if stages[0]["success"] == false {
+                    repository
+                        .send::<RepairPublicationA>(&bytes.as_slice())
+                        .await?;
+                } else {
+                    repository.send::<PublicationA>(&bytes.as_slice()).await?;
+                }
             }
             CiPassedA::LOGICAL_LABEL
             | CiFailedA::LOGICAL_LABEL
@@ -140,19 +252,54 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                     _ => unreachable!(),
                 };
                 let value = imp::decode(&bytes)?;
-                imp::ci_result(&value, &publication, &tests, 0)?;
-                prior_ci = value;
+                imp::ci_result(&value, &publications[0], &tests, 0)?;
+                imp::ci_notice(&value, 0)?;
+                repository.send::<CiUpdateA>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdateA>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdateA>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdateA>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdateA>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdateA>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdateA>(&bytes.as_slice()).await?;
+                if value["success"] == true {
+                    repository
+                        .send::<PublicationPassedA>(&ReviewReply::<true>::from_bytes(&bytes)?)
+                        .await?;
+                } else {
+                    repository
+                        .send::<PublicationFailedA>(&ReviewReply::<false>::from_bytes(&bytes)?)
+                        .await?;
+                }
+                ci_results[0] = value;
             }
-            CiUpdateA::LOGICAL_LABEL => {
-                imp::ci_notice(&prior_ci, 0)?;
-                let bytes = imp::encode(&prior_ci)?;
-                branch.send::<CiUpdateA>(&bytes.as_slice()).await?;
-                repository.send::<CiUpdateA>(&bytes.as_slice()).await?;
-                repository.send::<CiUpdateA>(&bytes.as_slice()).await?;
-                repository.send::<CiUpdateA>(&bytes.as_slice()).await?;
-                repository.send::<CiUpdateA>(&bytes.as_slice()).await?;
-                repository.send::<CiUpdateA>(&bytes.as_slice()).await?;
-                repository.send::<CiUpdateA>(&bytes.as_slice()).await?;
+            LatestCheckedA::LOGICAL_LABEL => {
+                let arguments = branch.recv::<LatestCheckedA>().await?.into_value();
+                let mut head = None;
+                for (index, ci) in ci_results
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, ci)| !ci.is_null())
+                {
+                    let occurrence = imp::receipt(ci)?;
+                    if head.is_none_or(|(previous, _)| occurrence > previous) {
+                        head = Some((occurrence, index));
+                    }
+                }
+                let (_, index) =
+                    head.ok_or_else(|| ShellError::message("deployment lacks tested repository"))?;
+                let inputs = json!({"publication":publications[0],"integrated_publication":publications[index],"ci":ci_results[index]});
+                let prior = core::array::from_fn(
+                    |j| json!({"deployment":deployments[j],"validation":stages[j]}),
+                );
+                imp::deploy_input(&arguments, &inputs, (0, &prior))?;
+                let bytes = imp::encode(&inputs)?;
+                repository.send::<StageInputsA>(&bytes.as_slice()).await?;
+                let bytes = repository.recv::<InstalledA>().await?.to_vec();
+                let installed = imp::decode(&bytes)?;
+                imp::deployed(&installed, &inputs, (0, &prior))?;
+                stage_inputs[0] = inputs;
+                deployments[0] = installed;
+                repository.send::<InstalledA>(&bytes.as_slice()).await?;
             }
             StagePassedA::LOGICAL_LABEL | StageFailedA::LOGICAL_LABEL => {
                 let bytes = match branch.label() {
@@ -161,12 +308,12 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                     _ => unreachable!(),
                 };
                 let value = imp::decode(&bytes)?;
-                imp::publication_stage(&value, &publication, &prior_ci, 0)?;
+                imp::publication_stage(&value, &stage_inputs[0], 0)?;
                 stages[0] = value;
             }
             RollbackReceiptA::LOGICAL_LABEL => {
                 let value = imp::decode(branch.recv::<RollbackReceiptA>().await?)?;
-                imp::rollback_notice(&value, &stages[0], &publication, &prior_ci, 0)?;
+                imp::rollback_notice(&value, &stages[0], &stage_inputs[0], 0)?;
             }
             StageUpdateA::LOGICAL_LABEL => {
                 imp::stage_notice(&stages[0], 0)?;
@@ -270,8 +417,8 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                     .send::<ReviewFeedbackB>(&bytes.as_slice())
                     .await?;
             }
-            MergeRequestB::LOGICAL_LABEL => {
-                let arguments = branch.recv::<MergeRequestB>().await?.into_value();
+            AdmitB::LOGICAL_LABEL => {
+                let arguments = branch.recv::<AdmitB>().await?.into_value();
                 imp::merge_inputs(&arguments, (1, &candidates[1], &tests[1], &reviews[1]))?;
                 let value = domain
                     .execute("DEVELOPER_B", "merge_code", arguments)
@@ -280,14 +427,20 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                 imp::merge_result(
                     &value,
                     (1, &candidates[1], &tests[1], &reviews[1]),
-                    &prior_ci,
+                    &ci_results,
                 )?;
                 let bytes = imp::encode(&value)?;
-                publication = value;
+                publications[1] = value;
                 repository.send::<MergedB>(&bytes.as_slice()).await?;
-                imp::ci_inputs(&publication, &tests, 1)?;
-                let bytes = imp::encode(&json!({"publication":publication,"tests":tests}))?;
-                repository.send::<PublicationB>(&bytes.as_slice()).await?;
+                imp::ci_inputs(&publications[1], &tests, 1)?;
+                let bytes = imp::encode(&json!({"publication":publications[1],"tests":tests}))?;
+                if stages[1]["success"] == false {
+                    repository
+                        .send::<RepairPublicationB>(&bytes.as_slice())
+                        .await?;
+                } else {
+                    repository.send::<PublicationB>(&bytes.as_slice()).await?;
+                }
             }
             CiPassedB::LOGICAL_LABEL
             | CiFailedB::LOGICAL_LABEL
@@ -305,19 +458,54 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                     _ => unreachable!(),
                 };
                 let value = imp::decode(&bytes)?;
-                imp::ci_result(&value, &publication, &tests, 1)?;
-                prior_ci = value;
+                imp::ci_result(&value, &publications[1], &tests, 1)?;
+                imp::ci_notice(&value, 1)?;
+                repository.send::<CiUpdateB>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdateB>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdateB>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdateB>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdateB>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdateB>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdateB>(&bytes.as_slice()).await?;
+                if value["success"] == true {
+                    repository
+                        .send::<PublicationPassedB>(&ReviewReply::<true>::from_bytes(&bytes)?)
+                        .await?;
+                } else {
+                    repository
+                        .send::<PublicationFailedB>(&ReviewReply::<false>::from_bytes(&bytes)?)
+                        .await?;
+                }
+                ci_results[1] = value;
             }
-            CiUpdateB::LOGICAL_LABEL => {
-                imp::ci_notice(&prior_ci, 1)?;
-                let bytes = imp::encode(&prior_ci)?;
-                branch.send::<CiUpdateB>(&bytes.as_slice()).await?;
-                repository.send::<CiUpdateB>(&bytes.as_slice()).await?;
-                repository.send::<CiUpdateB>(&bytes.as_slice()).await?;
-                repository.send::<CiUpdateB>(&bytes.as_slice()).await?;
-                repository.send::<CiUpdateB>(&bytes.as_slice()).await?;
-                repository.send::<CiUpdateB>(&bytes.as_slice()).await?;
-                repository.send::<CiUpdateB>(&bytes.as_slice()).await?;
+            LatestCheckedB::LOGICAL_LABEL => {
+                let arguments = branch.recv::<LatestCheckedB>().await?.into_value();
+                let mut head = None;
+                for (index, ci) in ci_results
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, ci)| !ci.is_null())
+                {
+                    let occurrence = imp::receipt(ci)?;
+                    if head.is_none_or(|(previous, _)| occurrence > previous) {
+                        head = Some((occurrence, index));
+                    }
+                }
+                let (_, index) =
+                    head.ok_or_else(|| ShellError::message("deployment lacks tested repository"))?;
+                let inputs = json!({"publication":publications[1],"integrated_publication":publications[index],"ci":ci_results[index]});
+                let prior = core::array::from_fn(
+                    |j| json!({"deployment":deployments[j],"validation":stages[j]}),
+                );
+                imp::deploy_input(&arguments, &inputs, (1, &prior))?;
+                let bytes = imp::encode(&inputs)?;
+                repository.send::<StageInputsB>(&bytes.as_slice()).await?;
+                let bytes = repository.recv::<InstalledB>().await?.to_vec();
+                let installed = imp::decode(&bytes)?;
+                imp::deployed(&installed, &inputs, (1, &prior))?;
+                stage_inputs[1] = inputs;
+                deployments[1] = installed;
+                repository.send::<InstalledB>(&bytes.as_slice()).await?;
             }
             StagePassedB::LOGICAL_LABEL | StageFailedB::LOGICAL_LABEL => {
                 let bytes = match branch.label() {
@@ -326,12 +514,12 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                     _ => unreachable!(),
                 };
                 let value = imp::decode(&bytes)?;
-                imp::publication_stage(&value, &publication, &prior_ci, 1)?;
+                imp::publication_stage(&value, &stage_inputs[1], 1)?;
                 stages[1] = value;
             }
             RollbackReceiptB::LOGICAL_LABEL => {
                 let value = imp::decode(branch.recv::<RollbackReceiptB>().await?)?;
-                imp::rollback_notice(&value, &stages[1], &publication, &prior_ci, 1)?;
+                imp::rollback_notice(&value, &stages[1], &stage_inputs[1], 1)?;
             }
             StageUpdateB::LOGICAL_LABEL => {
                 imp::stage_notice(&stages[1], 1)?;
@@ -435,8 +623,8 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                     .send::<ReviewFeedbackC>(&bytes.as_slice())
                     .await?;
             }
-            MergeRequestC::LOGICAL_LABEL => {
-                let arguments = branch.recv::<MergeRequestC>().await?.into_value();
+            AdmitC::LOGICAL_LABEL => {
+                let arguments = branch.recv::<AdmitC>().await?.into_value();
                 imp::merge_inputs(&arguments, (2, &candidates[2], &tests[2], &reviews[2]))?;
                 let value = domain
                     .execute("DEVELOPER_C", "merge_code", arguments)
@@ -445,14 +633,20 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                 imp::merge_result(
                     &value,
                     (2, &candidates[2], &tests[2], &reviews[2]),
-                    &prior_ci,
+                    &ci_results,
                 )?;
                 let bytes = imp::encode(&value)?;
-                publication = value;
+                publications[2] = value;
                 repository.send::<MergedC>(&bytes.as_slice()).await?;
-                imp::ci_inputs(&publication, &tests, 2)?;
-                let bytes = imp::encode(&json!({"publication":publication,"tests":tests}))?;
-                repository.send::<PublicationC>(&bytes.as_slice()).await?;
+                imp::ci_inputs(&publications[2], &tests, 2)?;
+                let bytes = imp::encode(&json!({"publication":publications[2],"tests":tests}))?;
+                if stages[2]["success"] == false {
+                    repository
+                        .send::<RepairPublicationC>(&bytes.as_slice())
+                        .await?;
+                } else {
+                    repository.send::<PublicationC>(&bytes.as_slice()).await?;
+                }
             }
             CiPassedC::LOGICAL_LABEL
             | CiFailedC::LOGICAL_LABEL
@@ -470,19 +664,54 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                     _ => unreachable!(),
                 };
                 let value = imp::decode(&bytes)?;
-                imp::ci_result(&value, &publication, &tests, 2)?;
-                prior_ci = value;
+                imp::ci_result(&value, &publications[2], &tests, 2)?;
+                imp::ci_notice(&value, 2)?;
+                repository.send::<CiUpdateC>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdateC>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdateC>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdateC>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdateC>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdateC>(&bytes.as_slice()).await?;
+                repository.send::<CiUpdateC>(&bytes.as_slice()).await?;
+                if value["success"] == true {
+                    repository
+                        .send::<PublicationPassedC>(&ReviewReply::<true>::from_bytes(&bytes)?)
+                        .await?;
+                } else {
+                    repository
+                        .send::<PublicationFailedC>(&ReviewReply::<false>::from_bytes(&bytes)?)
+                        .await?;
+                }
+                ci_results[2] = value;
             }
-            CiUpdateC::LOGICAL_LABEL => {
-                imp::ci_notice(&prior_ci, 2)?;
-                let bytes = imp::encode(&prior_ci)?;
-                branch.send::<CiUpdateC>(&bytes.as_slice()).await?;
-                repository.send::<CiUpdateC>(&bytes.as_slice()).await?;
-                repository.send::<CiUpdateC>(&bytes.as_slice()).await?;
-                repository.send::<CiUpdateC>(&bytes.as_slice()).await?;
-                repository.send::<CiUpdateC>(&bytes.as_slice()).await?;
-                repository.send::<CiUpdateC>(&bytes.as_slice()).await?;
-                repository.send::<CiUpdateC>(&bytes.as_slice()).await?;
+            LatestCheckedC::LOGICAL_LABEL => {
+                let arguments = branch.recv::<LatestCheckedC>().await?.into_value();
+                let mut head = None;
+                for (index, ci) in ci_results
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, ci)| !ci.is_null())
+                {
+                    let occurrence = imp::receipt(ci)?;
+                    if head.is_none_or(|(previous, _)| occurrence > previous) {
+                        head = Some((occurrence, index));
+                    }
+                }
+                let (_, index) =
+                    head.ok_or_else(|| ShellError::message("deployment lacks tested repository"))?;
+                let inputs = json!({"publication":publications[2],"integrated_publication":publications[index],"ci":ci_results[index]});
+                let prior = core::array::from_fn(
+                    |j| json!({"deployment":deployments[j],"validation":stages[j]}),
+                );
+                imp::deploy_input(&arguments, &inputs, (2, &prior))?;
+                let bytes = imp::encode(&inputs)?;
+                repository.send::<StageInputsC>(&bytes.as_slice()).await?;
+                let bytes = repository.recv::<InstalledC>().await?.to_vec();
+                let installed = imp::decode(&bytes)?;
+                imp::deployed(&installed, &inputs, (2, &prior))?;
+                stage_inputs[2] = inputs;
+                deployments[2] = installed;
+                repository.send::<InstalledC>(&bytes.as_slice()).await?;
             }
             StagePassedC::LOGICAL_LABEL | StageFailedC::LOGICAL_LABEL => {
                 let bytes = match branch.label() {
@@ -491,12 +720,12 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                     _ => unreachable!(),
                 };
                 let value = imp::decode(&bytes)?;
-                imp::publication_stage(&value, &publication, &prior_ci, 2)?;
+                imp::publication_stage(&value, &stage_inputs[2], 2)?;
                 stages[2] = value;
             }
             RollbackReceiptC::LOGICAL_LABEL => {
                 let value = imp::decode(branch.recv::<RollbackReceiptC>().await?)?;
-                imp::rollback_notice(&value, &stages[2], &publication, &prior_ci, 2)?;
+                imp::rollback_notice(&value, &stages[2], &stage_inputs[2], 2)?;
             }
             StageUpdateC::LOGICAL_LABEL => {
                 imp::stage_notice(&stages[2], 2)?;

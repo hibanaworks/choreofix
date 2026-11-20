@@ -64,6 +64,10 @@ class LabQualitySim(SimContext):
                             purification=compound)
         return latest if latest is not None and self.events[latest].success else None
 
+    def _qc_assay(self, compound):
+        """Scientific evidence eligible for this world's verification policy."""
+        return self._assay(compound)
+
     def _approval(self, scientist, **inputs):
         latest = self._find("QC_CONTROLLER", "verify_result", "scientist", scientist,
                             include_failure=True, **inputs)
@@ -153,7 +157,7 @@ class LabQualitySim(SimContext):
             current = self._analysis(synthesis)
             inputs["analysis"] = current
         elif scientist == "BIOLOGIST" and data_type == "bioassay":
-            current = self._assay(compound)
+            current = self._qc_assay(compound)
             inputs["bioassay"] = current
         else:
             current = None

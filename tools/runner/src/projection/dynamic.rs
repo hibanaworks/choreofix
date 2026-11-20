@@ -1,7 +1,9 @@
 //! Decode evidence and delegate source interpretation to hibana-epf.
 use crate::evidence::Result;
 use hibana::runtime::tap::{self, TapEvent};
-use hibana_epf::{Acceptance, AuditStorage, Capture, ExecutionStorage, Protocol, RecordId, Unfold};
+use hibana_epf::{
+    Acceptance, AuditError, AuditStorage, Capture, ExecutionStorage, Protocol, RecordId, Unfold,
+};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -235,13 +237,33 @@ pub fn check(artifact: &Value, rows: &[Value]) -> Result<Value> {
         }
     }
     let count: usize = captures.iter().map(|c| c.records().len()).sum();
-    let capacity = count
+    let proof_limit = count
         .checked_mul(2)
         .and_then(|n| n.checked_add(1))
         .ok_or("source proof capacity overflow")?;
     let mut reports = Vec::new();
+    // EPF's count-guided candidate indexes one entry per static source event.
+    // Reserve that index before searching smaller arbitrary unfoldings.
+    let source_events = snapshot
+        .iter()
+        .filter(|row| row.id() == tap::PROJECTED_SOURCE)
+        .count();
     for session in sessions {
-        let mut derivation = vec![Unfold::Source; capacity];
+        // Visits and branch selections inform the initial unfolding size.
+        // The full trace still reaches EPF, including polls and diagnostics.
+        let structural_observations = captures
+            .iter()
+            .flat_map(|capture| capture.records())
+            .filter(|record| {
+                record.arg0() == session
+                    && matches!(record.id(), tap::SCOPE_REENTRY | tap::ROUTE_ARM_SELECTION)
+            })
+            .count();
+        let mut capacity = structural_observations
+            .saturating_mul(2)
+            .saturating_add(1)
+            .max(source_events)
+            .min(proof_limit);
         let mut order = vec![
             RecordId {
                 producer: 0,
@@ -260,14 +282,15 @@ pub fn check(artifact: &Value, rows: &[Value]) -> Result<Value> {
             };
             count
         ];
-        let mut workspace = vec![
-            0;
-            protocol
-                .audit_workspace_len(&captures, capacity)
-                .map_err(|e| format!("EPF workspace: {e:?}"))?
-        ];
-        let audit = protocol
-            .audit(
+        loop {
+            let mut derivation = vec![Unfold::Source; capacity];
+            let mut workspace = vec![
+                0;
+                protocol
+                    .audit_workspace_len(&captures, capacity)
+                    .map_err(|e| format!("EPF workspace: {e:?}"))?
+            ];
+            let audit = match protocol.audit(
                 &captures,
                 AuditStorage {
                     unfolding: &mut derivation,
@@ -280,67 +303,75 @@ pub fn check(artifact: &Value, rows: &[Value]) -> Result<Value> {
                     },
                 },
                 &mut workspace,
-            )
-            .map_err(|e| format!("EPF dynamic eligibility: {e:?}"))?;
-        let source = audit.path().unfolding();
-        let correspondence: Vec<_> = audit.execution().order.iter().zip(audit.execution().occurrences).map(|(id, occurrence)|
+            ) {
+                Ok(audit) => audit,
+                Err(AuditError::Exhausted { .. }) if capacity < proof_limit => {
+                    capacity = capacity.saturating_mul(2).min(proof_limit);
+                    continue;
+                }
+                Err(error) => return Err(format!("EPF dynamic eligibility: {error:?}").into()),
+            };
+            let source = audit.path().unfolding();
+            let correspondence: Vec<_> = audit.execution().order.iter().zip(audit.execution().occurrences).map(|(id, occurrence)|
             json!({"producer":streams.keys().nth(id.producer),"ordinal":id.ordinal,"occurrence":occurrence,
                 "source_event":occurrence.and_then(|event| source.origin(event))})
         ).collect();
-        // These are provenance links from the checked EPF witness, not another
-        // execution model. A finite prefix may have an acceptance without a
-        // receive commit. An effect auditor must require its own requests'
-        // receive commits and the producer's ordered effect/capture contract.
-        let mut poll_occurrences = BTreeMap::new();
-        let mut receive_commits = BTreeMap::new();
-        for (id, occurrence) in audit
-            .execution()
-            .order
-            .iter()
-            .zip(audit.execution().occurrences)
-        {
-            let Some(occurrence) = occurrence else {
-                continue;
-            };
-            poll_occurrences.insert((id.producer, id.ordinal), *occurrence);
-            let event = captures[id.producer].records()[id.ordinal];
-            if event.id() == tap::ENDPOINT_RECV {
-                let producer = producer_ids[id.producer];
-                let journal_row = journal_positions
-                    .get(&producer)
-                    .and_then(|positions| positions.get(id.ordinal))
-                    .ok_or("receive commit has no original journal observation")?;
-                let receipt = json!({"producer":producer,"ordinal":id.ordinal,
+            // These are provenance links from the checked EPF witness, not another
+            // execution model. A finite prefix may have an acceptance without a
+            // receive commit. An effect auditor must require its own requests'
+            // receive commits and the producer's ordered effect/capture contract.
+            let mut poll_occurrences = BTreeMap::new();
+            let mut receive_commits = BTreeMap::new();
+            for (id, occurrence) in audit
+                .execution()
+                .order
+                .iter()
+                .zip(audit.execution().occurrences)
+            {
+                let Some(occurrence) = occurrence else {
+                    continue;
+                };
+                poll_occurrences.insert((id.producer, id.ordinal), *occurrence);
+                let event = captures[id.producer].records()[id.ordinal];
+                if event.id() == tap::ENDPOINT_RECV {
+                    let producer = producer_ids[id.producer];
+                    let journal_row = journal_positions
+                        .get(&producer)
+                        .and_then(|positions| positions.get(id.ordinal))
+                        .ok_or("receive commit has no original journal observation")?;
+                    let receipt = json!({"producer":producer,"ordinal":id.ordinal,
                     "journal_row":journal_row,"occurrence":occurrence,
                     "source_event":source.origin(*occurrence),"actor":event.causal_key()>>8,
                     "view":event.arg1()>>24});
-                if receive_commits.insert(*occurrence, receipt).is_some() {
-                    return Err("one source occurrence has multiple receive commits".into());
+                    if receive_commits.insert(*occurrence, receipt).is_some() {
+                        return Err("one source occurrence has multiple receive commits".into());
+                    }
                 }
             }
-        }
-        let mut intervals = Vec::new();
-        for acceptance in audit.execution().acceptances {
-            let call =
-                captures[acceptance.first_poll.producer].records()[acceptance.first_poll.ordinal];
-            let origin = call.arg1() as u16;
-            let frame = frames
-                .get_mut(&(session, origin))
-                .and_then(VecDeque::pop_front)
-                .ok_or("accepted call has no unique corresponding journal frame")?;
-            let occurrence = poll_occurrences
-                .get(&(
-                    acceptance.first_poll.producer,
-                    acceptance.first_poll.ordinal,
-                ))
-                .ok_or("acceptance lacks a checked source occurrence")?;
-            intervals.push(json!({"producer":streams.keys().nth(acceptance.first_poll.producer),
+            let mut intervals = Vec::new();
+            for acceptance in audit.execution().acceptances {
+                let call = captures[acceptance.first_poll.producer].records()
+                    [acceptance.first_poll.ordinal];
+                let origin = call.arg1() as u16;
+                let frame = frames
+                    .get_mut(&(session, origin))
+                    .and_then(VecDeque::pop_front)
+                    .ok_or("accepted call has no unique corresponding journal frame")?;
+                let occurrence = poll_occurrences
+                    .get(&(
+                        acceptance.first_poll.producer,
+                        acceptance.first_poll.ordinal,
+                    ))
+                    .ok_or("acceptance lacks a checked source occurrence")?;
+                intervals.push(json!({"producer":streams.keys().nth(acceptance.first_poll.producer),
                 "first_poll":acceptance.first_poll.ordinal,"before":acceptance.before,"frame_id":frame,
                 "occurrence":occurrence,"send_actor":call.causal_key()>>8,
                 "send_view":call.causal_key() as u8,
                 "receive_commit":receive_commits.get(occurrence)}));
+            }
+            reports.push(json!({"session":session,"expanded_events":source.event_count(),"order":correspondence,"acceptances":intervals}));
+            break;
         }
-        reports.push(json!({"session":session,"expanded_events":source.event_count(),"order":correspondence,"acceptances":intervals}));
     }
     if frames.values().any(|remaining| !remaining.is_empty()) {
         return Err("journal frame has no checked acceptance occurrence".into());

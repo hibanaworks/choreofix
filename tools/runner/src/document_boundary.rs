@@ -661,7 +661,7 @@ async fn run(cases: &[Case]) -> Result<()> {
             .arg("--check-document-mutants")
             .arg(output.join("events.jsonl"))
             .arg(output.join("mutants"))
-            .stdout(Stdio::from(fs::File::create(output.join("mutants.json"))?))
+            .stdout(Stdio::null())
             .stderr(Stdio::from(fs::File::create(
                 output.join("mutants-stderr.log"),
             )?))
@@ -673,7 +673,8 @@ async fn run(cases: &[Case]) -> Result<()> {
             )
             .into());
         }
-        let mutants: Value = serde_json::from_slice(&fs::read(output.join("mutants.json"))?)?;
+        let mutants: Value =
+            serde_json::from_slice(&fs::read(output.join("mutants/result.json"))?)?;
         outcomes.push(json!({"directory":output,"domain_calls":events.len(),"revisions":revisions,
             "record_mutants_rejected":mutants["rejected"],"model_calls":0,"scored_benchmark":false}));
         save(

@@ -12,10 +12,17 @@
     "write_section": "@agent_resources",
     "revise_section": "@agent_resources",
     "update_references": ["DATABASE"],
-    "review_sections": [],
     "peer_review": [],
     "create_figure": ["FIGURE_REPOSITORY"],
-    "insert_figure": [],
+    "insert_figure": {
+      "argument": "section_name",
+      "values": {
+        "section_a": ["SECTION_A"],
+        "section_b": ["SECTION_B"],
+        "section_c": ["SECTION_C"],
+        "section_d": ["SECTION_D"]
+      }
+    },
     "combine_sections": [],
     "make_editorial_decision": []
   }

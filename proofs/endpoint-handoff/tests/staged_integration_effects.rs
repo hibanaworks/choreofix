@@ -22,6 +22,7 @@ use hibana::{
 use serde_json::{Value, json};
 use shell::{
     ShellError, ShellResult,
+    global::Loan,
     imp::{bus::Bus, service::Domain},
 };
 use staged_integration::{arguments::Arguments, global::*, imp as data};
@@ -89,32 +90,40 @@ async fn component(inputs: &Value, effects: &StagingEffects) -> ShellResult<()> 
             ),
         ),
     );
-    let source = g::seq(
+    let staging = || {
+        g::seq(
+            g::send::<BUILD_SERVER, STAGE_OWNER, StagingReadyA>(),
+            staged_integration::global::staging_a(),
+        )
+    };
+    let stages = g::seq(
         g::send::<RESOURCE_INIT, STAGE_OWNER, StageLoan>(),
         g::seq(
             g::seq(
-                staged_integration::global::staging_a(),
-                g::route(
-                    ready,
-                    g::seq(
-                        g::seq(rejected, staged_integration::global::staging_a()).roll(),
-                        ready,
-                    ),
-                )
-                .resolve::<STAGE_DECISION_A>(),
+                staging(),
+                g::route(ready, g::seq(g::seq(rejected, staging()).roll(), ready))
+                    .resolve::<STAGE_DECISION_A>(),
             ),
             g::send::<STAGING_ENV, REPO, StagePassedB>(),
         ),
+    );
+    let source = g::seq(
+        g::send::<RESOURCE_INIT, REPO, Loan<MERGE_REQUESTS>>(),
+        stages,
     );
     let init_program = project::<RESOURCE_INIT>(&source);
     let owner_program = project::<STAGE_OWNER>(&source);
     let next_program = project::<STAGE_OWNER_B>(&source);
     let environment_program = project::<STAGING_ENV>(&source);
+    let requests_program = project::<MERGE_REQUESTS>(&source);
     let repo_program = project::<REPO>(&source);
     let build_program = project::<BUILD_SERVER>(&source);
     let file_program = project::<RELEASE_FILE>(&source);
     let session = SessionId::new(SESSION);
-    let (bus, _, _) = Bus::open(["RELEASE_MANAGER"], [(session, STAGING_ENV)]);
+    let (bus, _, _) = Bus::open(
+        ["RELEASE_MANAGER"],
+        [(session, STAGING_ENV), (session, MERGE_REQUESTS)],
+    );
     let actual = Cell::new(None);
     let mut slab = vec![0; 1024 * 1024];
     let mut storage = SessionKitStorage::uninit();
@@ -131,9 +140,12 @@ async fn component(inputs: &Value, effects: &StagingEffects) -> ShellResult<()> 
     let mut owner = rv.enter(session, &owner_program)?;
     let mut next = rv.enter(session, &next_program)?;
     let resource = rv.enter(session, &environment_program)?;
+    let requests = rv.enter(session, &requests_program)?;
     let mut repo = rv.enter(session, &repo_program)?;
     let mut build = rv.enter(session, &build_program)?;
     let mut file = rv.enter(session, &file_program)?;
+    init.send::<Loan<MERGE_REQUESTS>>(requests).await?;
+    let mut requests = repo.recv::<Loan<MERGE_REQUESTS>>().await?;
     init.send::<StageLoan>(resource).await?;
     hibana_runtime::race(
         async {
@@ -156,6 +168,13 @@ async fn component(inputs: &Value, effects: &StagingEffects) -> ShellResult<()> 
                     let bytes = data::encode(inputs)?;
                     loop {
                         build.send::<StagingReadyA>(&bytes.as_slice()).await?;
+                        let arguments = requests.recv::<CheckStageA>().await?.into_value();
+                        assert_eq!(arguments, json!({"service": "user_authentication"}));
+                        repo.send::<StageInputsA>(&bytes.as_slice()).await?;
+                        assert_eq!(
+                            data::decode(repo.recv::<InstalledA>().await?)?,
+                            effects.results[0]
+                        );
                         let outcome = repo.offer().await?;
                         use hibana::g::Message;
                         match outcome.label() {

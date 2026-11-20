@@ -81,6 +81,11 @@ pub type PublicationA<'a> = g::Msg<138, &'a [u8]>;
 pub type PublishedA<'a> = g::Msg<139, &'a [u8]>;
 pub type PublicationB<'a> = g::Msg<140, &'a [u8]>;
 pub type PublishedB<'a> = g::Msg<141, &'a [u8]>;
+pub type CandidateA<'a> = g::Msg<142, &'a [u8]>;
+pub type CandidateB<'a> = g::Msg<143, &'a [u8]>;
+pub type RepoExit = g::Msg<144, ()>;
+pub type ReadCandidateA = g::Msg<145, ()>;
+pub type ReadCandidateB = g::Msg<146, ()>;
 const fn object(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
     ChoreoFsObject::read_write(
         path,
@@ -157,26 +162,24 @@ pub fn source() -> impl Projectable {
             g::send::<ARCHITECT, ARCH_FILE, DesignedB>(),
         ),
     );
-    let edits = g::par(
+    let edits_a = g::par(
         g::seq(
             g::send::<A_FILE, REPO, RefactorA>(),
             g::send::<REPO, A_FILE, RefactoredA>(),
         ),
-        g::par(
-            g::seq(
-                g::send::<A_FILE, REPO, RefactorSharedA>(),
-                g::send::<REPO, A_FILE, SharedChangedA>(),
-            ),
-            g::par(
-                g::seq(
-                    g::send::<B_FILE, REPO, RefactorB>(),
-                    g::send::<REPO, B_FILE, RefactoredB>(),
-                ),
-                g::seq(
-                    g::send::<B_FILE, REPO, RefactorSharedB>(),
-                    g::send::<REPO, B_FILE, SharedChangedB>(),
-                ),
-            ),
+        g::seq(
+            g::send::<A_FILE, REPO, RefactorSharedA>(),
+            g::send::<REPO, A_FILE, SharedChangedA>(),
+        ),
+    );
+    let edits_b = g::par(
+        g::seq(
+            g::send::<B_FILE, REPO, RefactorB>(),
+            g::send::<REPO, B_FILE, RefactoredB>(),
+        ),
+        g::seq(
+            g::send::<B_FILE, REPO, RefactorSharedB>(),
+            g::send::<REPO, B_FILE, SharedChangedB>(),
         ),
     );
     let module_a = g::seq(
@@ -260,10 +263,37 @@ pub fn source() -> impl Projectable {
         ),
     );
     let task = g::seq(
-        g::par(designs, g::seq(edits, g::par(module_a, module_b))),
+        g::par(
+            designs,
+            g::par(
+                g::seq(
+                    edits_a,
+                    g::seq(
+                        g::seq(
+                            g::send::<REPO_OWNER, REPO, ReadCandidateA>(),
+                            g::send::<REPO, REPO_OWNER, CandidateA>(),
+                        ),
+                        module_a,
+                    ),
+                ),
+                g::seq(
+                    edits_b,
+                    g::seq(
+                        g::seq(
+                            g::send::<REPO_OWNER, REPO, ReadCandidateB>(),
+                            g::send::<REPO, REPO_OWNER, CandidateB>(),
+                        ),
+                        module_b,
+                    ),
+                ),
+            ),
+        ),
         g::seq(
             g::send::<REPO_OWNER, REVIEWER, ReviewExit>(),
-            g::send::<REPO_OWNER, TEST_ENV, TestExit>(),
+            g::par(
+                g::send::<REPO_OWNER, REPO, RepoExit>(),
+                g::send::<REPO_OWNER, TEST_ENV, TestExit>(),
+            ),
         ),
     );
     let metadata = g::par(
@@ -400,6 +430,11 @@ impl Programs {
             ("PublishedA", PublishedA::LOGICAL_LABEL),
             ("PublicationB", PublicationB::LOGICAL_LABEL),
             ("PublishedB", PublishedB::LOGICAL_LABEL),
+            ("CandidateA", CandidateA::LOGICAL_LABEL),
+            ("ReadCandidateA", ReadCandidateA::LOGICAL_LABEL),
+            ("CandidateB", CandidateB::LOGICAL_LABEL),
+            ("ReadCandidateB", ReadCandidateB::LOGICAL_LABEL),
+            ("RepoExit", RepoExit::LOGICAL_LABEL),
             ("ReviewExit", ReviewExit::LOGICAL_LABEL),
             ("TestExit", TestExit::LOGICAL_LABEL),
         ]

@@ -8,7 +8,7 @@
 \lstset{basicstyle=\ttfamily\footnotesize,breaklines=true,columns=fullflexible,keepspaces=true,frame=single}
 \title{ChoreoFix: Enforcing Multi-Agent Coordination from Global Protocols}
 \author{Hayato Ohhashi}
-\date{15 October 2026\\Research draft, comparative evaluation incomplete}
+\date{19 November 2026\\Research draft, comparative evaluation incomplete}
 \begin{document}
 \maketitle
 \begin{abstract}
@@ -20,16 +20,12 @@ roles drive their endpoints before carrying out domain effects. A bounded WASI
 shell lets agents use work files and scripts. Every file operation goes through
 ChoreoFS. The shell cannot grant a task step by choosing a pathname or writing
 an approval file.
-The current direct boundary has been tested on two TraceFix tasks.
-One three-participant CI/CD trial and three three-participant review trials
-used GPT-6 Luna with xhigh reasoning. The review trials covered zero, one,
-and two requested revisions. All four completed their protocols and original
-simulator work without recorded resource violations. Independent audits check
-saved requests, effects, replies, model identity, and inclusive token counts.
-These are unscored integration observations, not a matched baseline comparison.
-The planned comparison retains all 48 tasks and four original runtime
-conditions. No task has passed the complete benchmark acceptance gate and no
-scored episode has started.
+By 19 November, 36 of 48 tasks had qualified at the direct shell boundary.
+For these tasks, 43 audited live-agent runs link shell commands and Hibana
+operation occurrences to 732 shared effects and their replies. The common
+simulator recorded task completion in 39 of these runs. Each qualification
+applies to the software version that produced its trace. The sample includes
+replacement runs. Formal benchmark scoring has yet to begin.
 \end{abstract}
 
 \section{Problem and scope}
@@ -217,7 +213,7 @@ The selected matrix has 48 tasks, three failure depths, three repetitions,
 and five conditions, for 2,160 scored episodes. The conditions are the paper's
 Topology-monitored, Mediator-enforced, Prompt-only, Chat-only, and Hibana.
 All participants use \texttt{gpt-6-luna} with xhigh reasoning. The episode limit
-is 600 seconds and each participant has a 200-tool-call budget.
+in the current matrix is 1,800 seconds and each participant has a 200-tool-call budget.
 
 The four TraceFix runtimes remain at public revision
 \href{https://github.com/Sensing-And-Reasoning/TraceFix/tree/87b01a2c0ae53c5045c9ce3d43cd0235b1831275}{\texttt{87b01a2}}. Their coordination logic is
@@ -236,6 +232,89 @@ paths, and required independence. All 825 checklist items remain in the
 manifest. A passing compilation or generated TLC model is not by itself a
 fidelity verdict. Task prototypes exist, but none has passed the
 full independent benchmark acceptance gate. No scored episode has started.
+
+\subsection{Which contention orders survive projection?}
+An exclusive resource can be safe under several arbitration policies. In 9E the
+upstream paper fixture orders the acquisition of the two forks for each diner.
+We instrumented its unchanged TLA+ transition relation with the sequence of
+meal events. TLC explored 152 distinct states; every permutation of A, B and C
+reached a state in which all three had finished. The earlier ChoreoFix 9E global prescribed A, B, C. We changed the global to allow a table participant to select a ready meal request. Each diner still needs both fork endpoints before the effect. On one compiled projection, scripted Wasm guests exercised all six meal orders. Each run passed the EPF and effect audits, returned all six fork loans and completed in the shared simulator with zero violations. The first diner could finish before a second diner started to think. These runs used no model calls. They establish reachability of each meal order. The upstream fixture acquires the forks individually, so equality of all acquisition traces and fairness under sustained contention remain open.
+
+In a separate unscored depth-zero trial on the same executable, three live
+agents chose their own shell commands. The simulator recorded meals in B,A,C
+order and scored the task complete with zero violations. The independent audit
+checked all six fork returns and 1,578 EPF records from this execution.
+Two TLC builds gave the same terminal orders on the upstream translated source. Their exact hashes and revisions are recorded in the reproduction. Qualification with the historical compiler pin remains open.
+
+We then made the thinking operation repeatable in the 9E global and observed
+both thoughts and meals in the upstream fixture. TLC exhausted 1,142 states
+with this observer. We replayed all 90 distinct terminal action sequences via
+the Wasm shells. Each run passed EPF and the request/effect audit. In an
+additional run A thought three times, B and C ate between those thoughts, and
+A ate last. The upstream fixture visits each think instruction once. On the
+alphabet of participant-labelled thoughts and meals, the revised protocol
+therefore admits a strict superset of the upstream fixture's terminal traces.
+This statement concerns the three-participant task and hides fork-acquisition
+steps. The extra behavior is a declared procedural difference for comparisons.
+On the executable used for these replays, three live agents could choose
+whether to repeat a thought. Each chose one. A began eating before B started
+thinking, and meals ran in A,C,B order. All three finished, the simulator
+recorded zero violations, and the audit checked 1,574 EPF observations and all
+six fork returns. This unscored trial took 24.23 seconds.
+
+The first five- and seven-participant versions with repeatable thinking
+kept the earlier priority at contested forks. In scripted Wasm trials each diner recovered from an
+invalid request, thought twice and ate once. Disjoint meals overlapped up to
+two at a time in 9M and three in 9H. In separate live trials on that same
+executable, all twelve participants chose to think once. Both trials completed
+with zero violations and all ten and fourteen fork loans returned, respectively.
+In 9H, A began eating before C and E first thought. On the executable used for both
+live trials, all 90 upstream 9E action sequences and the additional sequence
+with three thoughts by A again passed the EPF and effect audits and the common
+task score.
+
+The previous priority was observable at the shell boundary. In one archived depth-zero 9E
+qualification, eat commands were dispatched in A,C,B order, while the simulator
+started meals in A,B,C order. In 1E the first commit command came from B and
+the first actual commit came from A. The archived 9M global allowed A and C,
+or B and D, to eat concurrently and fixed precedence at each contested fork. Shell
+dispatch time does not establish when every prerequisite for a meal or commit
+was ready. We do not infer a scheduling penalty from these runs.
+
+In the revised 9M and 9H globals, the first meal request received determines
+which diner has first use of its two adjacent forks. Each remaining fork can
+serve either neighbor first. We delayed the other guests until the first
+guest had finished eating, rotating the first seat through all five or seven
+positions. For each fixed first diner, the remaining diners ate in clockwise
+order in one trial and counterclockwise order in another. All ten five-seat
+and fourteen seven-seat Wasm trials passed EPF, the effect audit and the
+common task score. For each first diner, the audited Endpoint receipts showed
+both grant orders at every fork outside that diner's pair. Five live agents
+on the same executable started eating in B,A,C,E,D order, with two eating at
+once. Seven started in E,D,B,G,C,A,F order, with three eating at once. They
+returned all ten and fourteen fork loans, respectively, with zero simulator
+violations. These trials establish that any seat can go first. Fairness among
+simultaneous arrivals remains unmeasured.
+
+We removed the fixed priority in 1E. Each developer can submit its own
+implementation independently. The repository receives the typed submission
+and lends both required module endpoints to its sender. All three pairs of
+developers share a module. Six scripted Wasm trials exercised every order,
+with each developer finishing its local tests before the next began designing.
+Each trial passed the common score and EPF audit and returned all six loans.
+On the same executable, three live agents committed in C,B,A order. The
+audit matched twelve effects and 4,957 protocol observations, and the common
+simulator scored completion with zero violations. This unscored result shows
+that the port preserves the choice of winner in these runs. It does not
+measure fairness under simultaneous requests.
+
+For each proposed mechanism comparison, we will first exercise alternate first
+contenders, independent acquisitions, and an early request followed by a valid
+retry in the same session. Both arms must expose the same admissible orders,
+reply timing contract, and rejection and retry behavior. When they differ,
+the native-system result can still be reported with its procedure; it cannot
+isolate the effect of projection. The reproducible 9E observation and the
+three archived dispatch sequences are described in \path{analysis/arbitration.md}.
 
 \subsection{Outcomes and accounting}
 Primary outcomes are full and partial completion and unauthorized committed
@@ -263,8 +342,8 @@ The task endpoint still rejects the operation before the simulator receives
 an execute request.
 
 \section{Evidence to date}
-\subsection{Source and core qualification}
-The current consumer uses Hibana package version \texttt{0.9.9} with an exact Git
+\subsection{Historical source and core qualification}
+The earlier integration snapshot used Hibana version \texttt{0.9.9} with an exact Git
 patch to \texttt{c2001ec06944d7f3b299e16b5b3efb5b0ba0366a}. This is an unreleased
 repair, not a new registry version. Both direct and WASI-runtime dependency
 paths select that core. The WASI runtime is pinned to
@@ -289,7 +368,7 @@ Reference self-tests were omitted. The retained evidence discloses runner and
 capture-shutdown patches. This is integration evidence for the repair, not a
 whole-system proof or a performance comparison.
 
-\subsection{Direct WASI model trials}
+\subsection{Early direct WASI model trials}
 Table~\ref{tab:preflight} contains four unscored trials using the direct projected
 boundary. Earlier limited-command and cross-graph bridge trials remain in their
 separate ledgers. They are not evidence that the present architecture was
@@ -338,9 +417,11 @@ forge required requests and notifications, alter feedback, or overlap resource
 intervals. They must fail even after the event-file hash is recomputed.
 
 Later boundary tests found a caller-side limitation in that model checkpoint.
-After a duplicate request to a completed review service, its next branch could
-be observed by an offer intended for the other service. An offer is not scoped
-by the previous request. All six added cases failed in the old application.
+After a duplicate request to a completed review service, the shared caller
+could still offer a legal branch of the other service. The application intended
+a particular service; the public offer identifies an enabled endpoint branch.
+This observation alone does not demonstrate that projection accepted two
+indistinguishable public operations. All six added cases failed in the old application.
 The revised global gives each service a separate caller role, directly driven
 by the same original guest. All six repaired cases and simulator replays passed,
 including chunked writes and duplicate requests followed by work on the other
@@ -348,12 +429,177 @@ feature. No application progress state or core change was needed. The earlier
 model observations retain their original source and do not qualify this revised
 source by themselves.
 
-\subsection{What these trials do not establish}
+\subsection{Source-bound migration evidence}
+The first 18 November verification batch covered 27 of 48 tasks across 21
+families. Its mechanism suite contains 321 real Wasm conditions with
+scripted shell inputs, including four retained CI/CD conditions whose
+production-source continuity was checked. The separate live-agent suite
+contains 28 required task--depth conditions across those same 27 tasks. The
+accepted run for each condition has an independent audit. Across these runs,
+the audits cover 119 model participants, 419 actual effects, and 312,880 records
+from complete EPF captures. The recorded usage is 35,801,001 inclusive tokens.
+The common simulator reported task completion in 27 of the 28 conditions.
+
+The live ledger identifies the re-audited capture and the completed replacement
+runs. It retains the interrupted audit and early guest exits from the original
+attempts. The 28 condition results include replacements and do not estimate a
+first-attempt success rate. The artifact records are
+\path{output/verification/post-core-regression-20261117/v31/full-mechanism-regression.json},
+\path{output/verification/post-core-regression-20261117/v31/live/verified-results.json},
+and \path{output/verification/post-core-regression-20261117/v31/paper-inventory-recheck-v1.json}.
+The last file checks the assigned task--depth pairs and links each accepted live
+result to the hashes of its runtime, raw events, build receipt, and audit.
+
+The separately qualified 13H port adds eleven Wasm conditions and three
+live-agent conditions on one executable. The live runs involved five agents
+each. All three passed the EPF and request/effect/reply audits. Two completed
+the common-world task and one ran out of reagent stock. After final approval,
+an additional blocking read had stalled an earlier live run. The final global
+expresses the stock's finite retry paths. The same read returned a WASI error
+in both a regression and a subsequent live run, allowing the guest to exit.
+The completed conditions and their artifact hashes are recorded in
+\path{output/experiments/lab-cascading-wasi-20261118/v42-finite-synthesis/verified-13H.json}.
+
+Task 14E adds two real Wasm conditions and a four-agent live run. The
+mechanism cases exercise both decisions and independent instrument effects.
+In the live run, the lead read both actual reports, selected go, and the
+chemist completed documentation. The common-world score and the EPF and
+effect audits passed with 13 actual effects and zero violations.
+The artifact is
+\path{output/experiments/discovery-direct-20261118/v8-lead-evidence/verified-14E.json}.
+
+Task 14M adds seven real Wasm conditions, including all four selective
+reanalysis choices, two consecutive regulatory rejections, and retries after
+failed instrument or documentation effects. A scientist's study file receives
+reanalysis requested of that scientist or the actual approval. Unselected
+scientists keep their existing evidence without resubmitting their reports.
+Submitting a reanalysis choice requires no separate confirmation read.
+Across the seven conditions the audits bind 135 effects to accepted requests
+and replies, with 41,360 complete EPF observations, common-world completion,
+and zero violations. The mechanism artifact is
+\path{output/experiments/regulatory-discovery-direct-20261118/v5/verified-mechanism.json}.
+The depth-two live run on that executable completed with five agents after
+two regulatory rejections. The lead chose to reuse the current reports in both
+revisions, performed a new structural confirmation, and submitted a new
+decision for each review. Final approval and documentation passed common
+scoring. The audit links 32 effects and 13,597 complete EPF records to the
+same execution, with zero violations. The run took 329.59 seconds and used
+2,666,036 inclusive tokens. The combined evidence is
+\path{output/experiments/regulatory-discovery-direct-20261118/v5/verified-14M.json}.
+
+Task 14H covers an entire material study with seven separate wash guests and
+three consumable sample units. Three actual Wasm conditions completed direct
+continuation, continuation after a two-instrument review, and documentation of
+an evidence-backed abort after stock exhaustion. These executions produced
+48 actual effects and 20,583 complete EPF records. The depth-two live run used
+the same runtime binary and completed two rounds. Seven agents chose their
+own retries and concluded with a documented abort once the evidence could no
+longer support continuation. The common-world score and the EPF and effect
+audits passed for 34 effects and 17,431 records with zero violations. That run
+took 320.36 seconds and used 3,130,977 inclusive tokens. The same captured
+record supported re-audit after EPF learned to construct a candidate with
+unequal nested visit counts.
+\path{output/experiments/multi-round-discovery-direct-20261118/v5/verified-14H.json}.
+
+Task 3M uses five wash guests for three authors, a fact checker, and an
+editor. Chapter Endpoints transfer during review and revision. The document
+owner checks each verdict against the current draft before delivering it
+to the author. Supplemental research remains independent until guest exit.
+Two scripted Wasm conditions account for 40 effects and 15,913 complete
+EPF records. In the depth-two live run, the five agents published the paper
+after two factual and two editorial rejections. The same binary produced
+26 effects, 22,434 complete EPF records, and two overlapping effects on
+distinct physical resources. The common score and the audits passed with
+zero violations in 174.78 seconds and 2,251,389 inclusive tokens. The
+source-bound record is
+\path{output/experiments/research-paper-direct-20261118/v5/verified-3M.json}.
+
+\subsection{Live-agent evidence across 36 tasks}
+The 19 November inventory includes one audited execution for each of the
+43 qualified task--depth conditions across 29 families. We matched each raw
+event stream to its saved audit, executable, source manifest and participant
+reports. For each of the 2,466 shell calls, the model server acknowledged the
+same tool arguments and reply contents as the driver recorded for that call.
+The runs contain 197 participant sessions, 563,288 EPF observations,
+and 67,938,442 inclusive tokens. The four negative common-world scores were
+8E at depth two, 13H at depth two, and 16M at depths one and two. All four
+passed the protocol and effect audits. The selected executions, including
+replacements, are individually identified in
+\path{output/verification/paper-36-ports-20261119.CogEVn/verified-conditions.json}.
+The archived manifests contain two distinct sets of Hibana core sources.
+Both predate changes to receive admission and offer handling used in the
+subsequent 7H trial. The 43 runs establish results for their recorded
+builds. The per-run source comparison is archived in
+\path{output/verification/paper-36-ports-20261119.CogEVn/core-source-comparison.json}.
+
+Across these 43 runs, we measured all 732 simulator calls on the runner's
+monotonic clock. Calls from different participants overlapped in 27 runs
+covering 26 distinct tasks. There were 318 overlapping pairs. The peak number
+of participants with a call in progress was one in 16 runs, two in 17,
+three in six, and four to six in the remaining four. The seven-developer
+1H run at depth two reached six. Each interval extends from the start of
+a domain request through its simulator callback, including any simulated
+delay. Two intervals count as overlapping only if their intersection has
+positive duration. Per-run bounds and request IDs are archived in
+\path{output/verification/paper-36-ports-20261119.CogEVn/effect-overlap.json}.
+
+The five-agent CI/CD task (16M) illustrates what the two outcomes measure.
+With no injected failure, the pipeline passed the production smoke test in
+100.11 seconds (14 effects). At depth one, staging deployment failed after
+26 effects in 273.40 seconds. At depth two, the second QA check failed after
+30 effects in 314.97 seconds. Both failures produced a negative business
+score. The audit found zero protocol or effect violations in all three runs.
+\path{output/verification/cicd-16m-20261119/verified-live-depths-0-1-2.json}.
+
+None of the 70 simulator calls in those three runs overlapped a call from
+another participant.
+\path{output/verification/paper-36-ports-20261119.CogEVn/16m-effect-intervals.json}.
+
+\subsection{Limits of the integration evidence}
+Task 7H exposes a different outcome. In two seven-agent trials outside the
+qualified set, the reviewer issued \texttt{exit 0} while the manuscript
+still needed work. At depth one, its preceding read of the editorial file
+returned a permission error. At depth two, it had received an explicit
+request for another revision of Chapter 4. In both traces, the response
+delivered to the model matched the guest's terminal output. The simulator
+recorded 14 and 20 effects respectively, zero violations, and an unfinished
+document. A shell that rejects unavailable operations still lets an agent
+choose to leave early.
+\path{output/verification/7h-schema-guide-20261119.FTJvex/reviewer-exit-depths-1-2.json}.
+
+At depth zero, the editor read the material before the manuscript was ready.
+The model server cancelled the outstanding tool call after 471.984 seconds.
+The guest subsequently returned 112,435 bytes. The driver sent that output
+26.96 seconds after the server had closed the call with an empty result.
+The successful read in the guest trace therefore did not establish that the
+editor received the manuscript. Its last required review finished only
+1.82 seconds before wash returned the reviewed material. Four participants
+reached the 1,800-second group deadline with an outstanding shell exit. For
+each of the four, a shell call was outstanding during 86--92\% of its turn.
+The remaining interval includes model generation and server scheduling.
+The source record identifies the command and the server call separately and
+matches the guest bytes to the late reply.
+\path{output/verification/7h-schema-guide-20261119.FTJvex/material-delivery-depth-0.json}.
+
+In a subsequent depth-zero trial with seven agents, the authors and reviewers
+completed three rounds of substantive revision on Chapter~4. After acceptance,
+the fact checker checked Chapter~3. At 390 seconds the reviewer was already
+waiting on its editorial-outcome file. At 398 seconds the transport recorded
+the Chapter~3 evidence going to the reviewer's material file (frame 20408).
+The guest returned no Chapter~3 manuscript to the reviewer. The trial reached
+its 1,800-second deadline with 24 effects and two completed participants.
+The common simulator saved an incomplete score. The end-to-end audit rejected
+the trial. This run used the ordinary world and delays, with no injected
+business failure.
+\path{output/verification/7h-terminal-outcome-20261120/verified-results.json}.
+
 These are integration observations from development, not random samples or
 paired baseline trials. They cannot estimate a comparative completion rate,
 latency advantage, or maintenance saving. Earlier failed and interrupted
 attempts remain in the repository records. A successful replacement is not
 used to erase a failed attempt.
+
+The 43 selected ChoreoFix runs used 67,938,442 inclusive tokens in total (median 1,027,748 per run). The inventory selects qualified conditions; it does not estimate the token budget or success rate of another arm.
 
 The shell changes the domain-call interface. In 6E a developer's implementation
 reply waits for review and includes its actual result. Canonical object targets
@@ -369,13 +615,23 @@ proof of unrestricted agent freedom. No complete 48-task fidelity acceptance,
 scored comparison, or maintenance measurement is reported here.
 
 \section{Maintenance study and remaining work}
-A maintenance study should change required evidence, retry rules, or a
-participant relation while keeping a fixed task variant in both implementations.
-For each change we will record edited declarations, localside functions,
-handwritten authorization fields, tests, and failure of stale implementations.
-Generated files and generic engine code must be counted separately from manual
-edits. TraceFix may also derive execution data from one source. A claim of lower
-maintenance cost must be measured rather than inferred from filenames.
+We specify three paired changes before collecting maintenance results: add a
+second candidate-bound approval in 6E; add a replacement-and-retest path after
+a failed deployment check in 16E; and allow all first diners from a matched
+fixed-order starting procedure in 9E. The 9E upstream fixture already permits
+all six orders. An unmatched starting pair is recorded as such. We will freeze
+the starting revisions, editing budgets, editor assignment and the same
+observable acceptance cases for each pair before editing.
+
+The primary outcome per ticket is the number of independently maintained
+authorization decisions that must change. Two manual rules that can disagree
+about a request count separately even in the same file. Two reviewers will
+label edits independently and reconcile disagreements. Secondary outcomes are
+edited files, engine versus application changes, elapsed time, and remaining
+acceptance failures. Generated artifacts are accounted for separately.
+Unfinished tickets retain their time and failing observations. Ticket-level
+results and missing pairs will be reported individually. No maintenance
+advantage has yet been measured.
 
 The main blockers to a completed empirical paper are completion of all task
 ports and independent fidelity acceptance of all 48, a runnable and accepted

@@ -13,7 +13,16 @@
         "properties": {
           "title": {
             "type": "string",
-            "description": "Proposal title"
+            "description": "Use migration_plan for the shared plan"
+          },
+          "dependencies": {
+            "type": "object",
+            "description": "Optional map from each service to the services it depends on. Omitted services have no prerequisites.",
+            "additionalProperties": {
+              "type": "array",
+              "items": {"type": "string", "enum": ["microservice_a", "microservice_b", "microservice_c"]},
+              "uniqueItems": true
+            }
           }
         },
         "required": [
@@ -111,7 +120,8 @@
           },
           "environment": {
             "type": "string",
-            "description": "Target environment"
+            "description": "Use staging for the staged deployment",
+            "enum": ["staging"]
           }
         },
         "required": [

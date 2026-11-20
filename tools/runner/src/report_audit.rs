@@ -203,6 +203,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         role("DATABASE")?,
         role("DATABASE_SERVICE")?,
     );
+    let initial_doc = role("INITIAL_DOCUMENT")?;
     let mut ordered = calls.values().collect::<Vec<_>>();
     ordered.sort_by_key(|call| call.emitted);
     let mut used = BTreeSet::new();
@@ -220,10 +221,10 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         let args = &call.request["arguments"];
         let (result_at, result) = call.result()?;
         let actor = role(agent)?;
-        let (file, section, research) = match agent {
-            "RESEARCHER_A" => (role("A_FILE")?, "section_a", role("RESEARCH_A")?),
-            "RESEARCHER_B" => (role("B_FILE")?, "section_b", role("RESEARCH_B")?),
-            "EDITOR" => (role("EDITOR_FILE")?, "", 0),
+        let (file, section) = match agent {
+            "RESEARCHER_A" => (role("A_FILE")?, "section_a"),
+            "RESEARCHER_B" => (role("B_FILE")?, "section_b"),
+            "EDITOR" => (role("EDITOR_FILE")?, ""),
             _ => return Err("unassigned report actor".into()),
         };
         if tool != "review_sections" && result["success"] != true {
@@ -234,6 +235,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         }
         match tool {
             "research_topic" => {
+                let research = actor;
                 let request_label = label(if agent == "RESEARCHER_A" {
                     "ResearchA"
                 } else {
@@ -271,7 +273,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 ) = match (agent, tool) {
                     ("RESEARCHER_A", "write_section") => (
                         doc,
-                        doc_service,
+                        initial_doc,
                         "WriteOnDocument",
                         "WriteA",
                         Some("WriteArgumentsA"),
@@ -280,7 +282,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     ),
                     ("RESEARCHER_B", "write_section") => (
                         doc,
-                        doc_service,
+                        initial_doc,
                         "WriteOnDocument",
                         "WriteB",
                         Some("WriteArgumentsB"),
@@ -342,6 +344,11 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                         && f.value().is_ok_and(|v| v == *args)
                 })?;
                 let admission_label = label(admitted_name)?;
+                let admission_target = match tool {
+                    "write_section" => name(compiled, "roles", "WRITE_REQUESTS")?,
+                    "update_references" => name(compiled, "roles", "REFERENCE_REQUESTS")?,
+                    _ => service,
+                };
                 take(&frames, &mut used, |f| {
                     f.direction(
                         if tool == "combine_sections" {
@@ -349,7 +356,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                         } else {
                             file
                         },
-                        service,
+                        admission_target,
                     ) && f.logical_label == admission_label
                         && f.received.is_some_and(|at| at < call.emitted)
                         && f.value().is_ok_and(|v| v == *args)
@@ -392,7 +399,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                         "ReferenceMaterialB"
                     })?;
                     take(&frames, &mut used, |f| {
-                        f.direction(db_service, doc_service)
+                        f.direction(db_service, initial_doc)
                             && f.logical_label == forwarded_label
                             && f.received.is_some_and(|at| at > result_at)
                             && f.value().is_ok_and(|v| v == *result)
@@ -533,22 +540,20 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 } else {
                     "ReviewB"
                 })?;
-                take(&frames, &mut used, |f| {
-                    f.direction(editor, service)
-                        && f.logical_label == request_label
-                        && f.received.is_some_and(|at| at < call.emitted)
-                        && f.value().is_ok_and(|v| v == *args)
-                })?;
-                take(&frames, &mut used, |f| {
-                    f.direction(file, editor)
-                        && f.logical_label == request_label
-                        && f.received.is_some_and(|at| at < call.emitted)
-                        && f.value().is_ok_and(|v| v == *args)
-                })?;
+                for (from, to) in [(file, editor), (editor, own), (own, service)] {
+                    take(&frames, &mut used, |f| {
+                        f.direction(from, to)
+                            && f.logical_label == request_label
+                            && f.received.is_some_and(|at| at < call.emitted)
+                            && f.value().is_ok_and(|v| v == *args)
+                    })?;
+                }
+                // The author admits the review of its own prepared material.
                 take(&frames, &mut used, |f| {
                     f.direction(editor, doc_service)
                         && f.logical_label == request_label
-                        && f.received.is_some_and(|at| at < call.emitted)
+                        && f.sent < call.emitted
+                        && f.received.is_some()
                         && f.value().is_ok_and(|v| v == *args)
                 })?;
                 let verdict = result["success"]
@@ -569,6 +574,28 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     (_, false) => "RejectedB",
                 };
                 let reply_label = label(response_name)?;
+                if review_count == 1 {
+                    let forwarded = take(&frames, &mut used, |f| {
+                        f.direction(doc_service, initial_doc)
+                            && f.logical_label == reply_label
+                            && f.received.is_some_and(|at| at > result_at)
+                            && f.value().is_ok_and(|v| v == *result)
+                    })?;
+                    let handoff_label = label("ReportMaterial")?;
+                    let handoff = take(&frames, &mut used, |f| {
+                        f.direction(initial_doc, doc_service)
+                            && f.logical_label == handoff_label
+                            && f.sent > forwarded.received.expect("matched delivered review")
+                            && f.received.is_some()
+                    })?;
+                    let actual = material(&ordered, handoff.sent)?;
+                    if ["section_a", "section_b"].into_iter().any(|key|
+                        actual["sections"][key].is_null() || actual["references"][key].is_null())
+                        || handoff.value()? != actual
+                    {
+                        return Err("document transfer differs from the actual initial material".into());
+                    }
+                }
                 for recipient in [doc_service, own, other, editor] {
                     take(&frames, &mut used, |f| {
                         f.direction(outcome, recipient)
@@ -576,6 +603,14 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                             && f.received.is_some_and(|at| at > result_at)
                             && f.value().is_ok_and(|v| v == *result)
                     })?;
+                    if recipient == own || recipient == other {
+                        take(&frames, &mut used, |f| {
+                            f.direction(recipient, outcome)
+                                && f.logical_label == reply_label
+                                && f.received.is_some_and(|at| at > result_at)
+                                && f.value().is_ok_and(|v| v == *result)
+                        })?;
+                    }
                     if recipient == own {
                         let feedback = label(feedback)?;
                         take(&frames, &mut used, |f| {
@@ -620,6 +655,9 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         editor,
         doc,
         doc_service,
+        initial_doc,
+        role("WRITE_REQUESTS")?,
+        role("REFERENCE_REQUESTS")?,
         db,
         db_service,
         role("A_FILE")?,

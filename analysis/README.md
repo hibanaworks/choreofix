@@ -17,6 +17,29 @@ event streams with identical hashes are marked as duplicates. Missing source,
 binary, scorer or audit evidence remains explicit. A hash match does not prove
 task correctness or comparison superiority.
 
+The JSON and Markdown also list attempts without an aggregate model report. On a
+closed archive the reader recognizes an explicit runner error, a simulator
+fixture with a model-connection trace but no aggregate result, or a model
+run result with no participant reports. Each directory appears once. These
+entries retain the available trace hashes and reported errors. Individual
+participants may have finished. Trial-wide token counts and completion remain
+unknown until the corresponding evidence is available.
+A mechanism fixture alone does not identify a model attempt.
+If every recorded attempt lacks an aggregate model report, the tool writes the
+inventory and returns an error. The final inclusive token total requires a
+completed model turn and a valid usage report from every expected participant.
+If the group was interrupted and every participant reported usage, the sum of
+their last updates appears under `interrupted_reported_tokens`. Those updates
+can precede the interruption. When a participant's usage is missing, both
+token columns are empty. A completed model group retains its final token total
+even when the common simulator records an unsuccessful task outcome.
+
+When an interruption prevents the guest-runtime report from being saved, the
+common simulator can still have recorded its final score in the same trial.
+The reader accepts a single complete score message from the simulator in the
+hash-verified raw trace. The `world_score_source` column identifies its source.
+The guest-runtime report remains missing and the trial retains its failure.
+
 The reference JSON maps each model `result.json`, relative to `INPUT_ROOT`, to
 its exact result hash and selected saved audit. An audit reference names a file,
 its hash and a JSON pointer (empty for a complete audit, `/baseline` for an audit
@@ -136,3 +159,59 @@ The reader source/binary match v6 exactly; the guarded scan peaked at
 166,395,904 bytes. The current 10M mechanism matrix is separate and remains
 unfinished after 18 normal conditions and a private-descriptor collision in
 the following recovery condition. It is not counted as a new model pilot.
+
+The November 19 inventories for the archived 7M and 8M development trials are in
+`output/verification/paper-7m-8m-20261119.MZ3ZSr/`. For 7M, one five-participant
+trial reached publication with 27 effects and 2,600,761 inclusive tokens. In
+the other aggregate report, only one of the five participants finished. Their
+last usage reports sum to 2,185,945 tokens and the final total is unknown.
+Two further attempts have no aggregate report.
+
+For 8M, all four archived model results have matching saved audits, and three
+additional attempts have no aggregate report. The three v26 trials at depths
+0, 1 and 2 account for 36 effects and 5,882,177 inclusive tokens. The fourth
+model result uses v25. The reference maps, raw-result and audit hash checks,
+per-trial CSVs and reader source are archived together. These runs were unscored.
+
+For 16M, the November 19 recheck covers eight aggregate reports and one
+attempt without a report. The two interrupted depth-1 groups last reported
+93,703 and 1,029,054 tokens. Both final totals are unknown. The completed
+depth-1 and depth-2 groups used 3,034,750 and 3,190,652 tokens respectively.
+Both passed the saved protocol audit and received a negative task score.
+The individual results and original audit references are in
+`output/verification/7h-paper-inventory.viAUKS/16m-usage-recheck/`.
+
+The 19 November paper inventory joins the 36 source-bound task qualifications
+in `output/verification/paper-36-ports-20261119.CogEVn/verified-conditions.json`.
+`conditions.csv` gives the 43 selected task--depth rows with links to their
+original result and audit through the archive directory and hashes. These
+rows include accepted replacements. Use the per-task attempt inventories
+when counting interruptions and retries. Four of the 43 qualified executions
+received a negative common-world score. The separate
+`16m-effect-intervals.json` preserves request IDs and monotonic intervals for
+all 70 simulator calls in the three 16M conditions.
+
+The cohort-wide measurement is reproducible from the same source-bound trials.
+From the repository root, supply the verified cohort and a new output file:
+
+```sh
+cargo run --release --locked --manifest-path analysis/Cargo.toml -- --effect-overlap output/verification/paper-36-ports-20261119.CogEVn/verified-conditions.json effect-overlap.json
+```
+
+The reader verifies the original event, audit and result hashes and matches every
+simulator callback to one domain request and its completed result. It counts a
+pair when two different participants' intervals share positive time on the same
+runner clock. The report retains both request IDs and measures the peak number
+of distinct participants with calls in progress. Calls include simulated delays.
+
+The 43 archived build manifests contain two versions of the Hibana core sources.
+Both differ from the core source set in the 7H terminal-delivery build.
+`core-source-comparison.json` records the manifest hash for each trial and
+the differing paths. The historical qualifications retain their original
+scope. Testing the current build requires fresh regression runs.
+
+The companion `model-delivery.json` checks the hash of each of the 197
+participant traces. All 2,466 shell calls have a subsequent server completion
+whose call ID, arguments and returned contents match the exchange.
+The separate 7H cancellation record is in
+`output/verification/7h-schema-guide-20261119.FTJvex/material-delivery-depth-0.json`.

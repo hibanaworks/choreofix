@@ -38,22 +38,29 @@ pub async fn simulator(
 }
 
 pub struct Guest {
-    input: mpsc::Sender<Request>,
+    input: mpsc::Sender<Result<Request>>,
     notify: Notification,
 }
 
 impl Guest {
     #[cfg(test)]
-    pub(crate) fn test_input() -> Result<(Self, mpsc::Receiver<Request>, Io)> {
+    pub(crate) fn test_input() -> Result<(Self, mpsc::Receiver<Result<Request>>, Io)> {
         let (input, receive) = mpsc::channel();
         let (notify, ready) = notification()?;
         Ok((Self { input, notify }, receive, ready))
     }
     pub(crate) fn send(&self, message: Value, reply: Reply) -> Result<()> {
         self.input
-            .send((message, reply))
+            .send(Ok((message, reply)))
             .map_err(|_| "guest runtime closed")?;
         self.notify.notify()?;
+        Ok(())
+    }
+
+    pub(crate) fn stop(&self, reason: String) -> Result<()> {
+        if self.input.send(Err(reason.into())).is_ok() {
+            self.notify.notify()?;
+        }
         Ok(())
     }
 
@@ -121,7 +128,7 @@ async fn runtime_loop(
     mut child: Process,
     mut input: Io,
     mut lines: Lines,
-    commands: mpsc::Receiver<Request>,
+    commands: mpsc::Receiver<Result<Request>>,
     mut commands_ready: Io,
     trace: Trace,
     simulator: Simulator,
@@ -142,7 +149,7 @@ async fn runtime_loop(
             }, async {
                 race(async {
                     match wire::receive(&commands, &mut commands_ready).await? {
-                        Some(command) => Ok(Input::Command(command)),
+                        Some(command) => Ok(Input::Command(command?)),
                         None => core::future::pending().await,
                     }
                 }, async {
@@ -206,6 +213,7 @@ async fn runtime_loop(
     for (id, reply) in pending.into_values().chain(
         commands
             .try_iter()
+            .filter_map(std::result::Result::ok)
             .map(|(mut command, reply)| (command["id"].take(), reply)),
     ) {
         if let Err(error) = wire::respond(
@@ -322,6 +330,160 @@ mod tests {
         }
         std::fs::remove_dir_all(output)?;
         Ok(())
+    }
+
+    #[hibana_runtime::main]
+    #[test]
+    #[ignore = "isolated child process and original simulator; explicitly run by ordinary CI"]
+    async fn trial_failure_preserves_both_reports_and_admitted_effects() -> Result<()> {
+        use crate::{evidence::digest, journal, record_outcomes, trial_error};
+        use std::{fs, time::Duration};
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()?;
+        std::env::set_current_dir(&root)?;
+        let output =
+            std::env::temp_dir().join(format!("choreofix-peer-failure-{}", std::process::id()));
+        fs::create_dir(&output)?;
+        for failed_peer in ["guest", "model", "guest_while_model_idle"] {
+            let directory = output.join(failed_peer);
+            fs::create_dir(&directory)?;
+            let script = directory.join("child.sh");
+            let effect = json!({"type":"execute","id":83,"agent":"PHILOSOPHER_A",
+                "tool":"think","arguments":{"philosopher":"PHILOSOPHER_A"}});
+            let after = match failed_peer {
+                "model" => {
+                    "printf '%s\\n' '{\"type\":\"terminal\",\"id\":1,\"stdout\":\"submitted\"}'\nwhile IFS= read -r input; do :; done"
+                }
+                _ => "exit 1",
+            };
+            fs::write(
+                &script,
+                format!("IFS= read -r command\nprintf '%s\\n' '{effect}'\n{after}\n"),
+            )?;
+            let trace = Trace::create(&directory.join("events.jsonl"))?;
+            let (world, _) = Simulator::new("9E", 0, 0.1, trace.clone(), &[])?;
+            let (guest, runtime) =
+                guest(Path::new("/bin/sh"), &script, &[], &directory, trace, world)?;
+            race(
+                record_outcomes(&directory, (&guest, runtime), async |guest_failure| {
+                    if failed_peer == "guest_while_model_idle" {
+                        let (reply, _receive) = mpsc::channel();
+                        let (notify, _ready) = notification()?;
+                        guest.send(
+                            json!({"id":41,"agent":"PHILOSOPHER_A","command":"think"}),
+                            (reply, notify),
+                        )?;
+                        assert_eq!(guest_failure.read(&mut [0]).await?, 1);
+                        return Err("guest failure reached idle model driver".into());
+                    }
+                    let reply = guest.command("PHILOSOPHER_A", "think".into()).await;
+                    if failed_peer == "model" {
+                        assert_eq!(reply?["stdout"], "submitted");
+                        return Err("model connection lost".into());
+                    }
+                    Ok(vec![json!({"participant":"A","status":"harness_error",
+                    "error":reply.unwrap_err().to_string()})])
+                }),
+                hibana_runtime::host::deadline(Duration::from_secs(5)),
+            )
+            .await?;
+            let runtime: Value =
+                serde_json::from_slice(&fs::read(directory.join("guest-outcome.json"))?)?;
+            let model: Vec<Value> =
+                serde_json::from_slice(&fs::read(directory.join("model-outcomes.json"))?)?;
+            assert!(trial_error(std::slice::from_ref(&runtime)).is_some());
+            assert!(trial_error(&model).is_some());
+            let score = &runtime["result"]["score"];
+            assert_eq!(score["complete"], false);
+            let events = score["events"]
+                .as_array()
+                .expect("original simulator score");
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0]["tool"], "think");
+            assert_eq!(events[0]["agent"], "PHILOSOPHER_A");
+            let path = directory.join("events.jsonl");
+            let rows = journal::records(&path)?;
+            let effects: Vec<_> = rows
+                .iter()
+                .filter(|row| row["direction"] == "domain_end")
+                .collect();
+            assert_eq!(effects.len(), 1);
+            assert_eq!(effects[0]["message"]["id"], 83);
+            eprintln!(
+                "{failed_peer} scored one accepted effect; journal SHA-256 {}",
+                digest(&path)?
+            );
+        }
+        fs::remove_dir_all(output)?;
+        Ok(())
+    }
+
+    #[hibana_runtime::main]
+    #[test]
+    #[ignore = "requires the actual 7H runtime, wash and the original simulator"]
+    async fn early_fact_checker_exit_preserves_the_actual_document_score() -> Result<()> {
+        use crate::{evidence, journal, record_outcomes, trial_error};
+        use std::{fs, path::PathBuf, time::Duration};
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()?;
+        std::env::set_current_dir(&root)?;
+        let output =
+            PathBuf::from(std::env::var_os("CHOREOFIX_EVIDENCE_ROOT").ok_or("evidence root")?)
+                .join("7h-early-fact-checker-exit");
+        fs::create_dir(&output)?;
+        let binary = PathBuf::from(
+            std::env::var_os("CHOREOFIX_LARGE_DOCUMENT_WASI_BINARY").ok_or("7H executable")?,
+        );
+        let wash = root.join("vendor/hibana-wash/target/wasm32-wasip1/release/hibana-wash.wasm");
+        let trace = Trace::create(&output.join("events.jsonl"))?;
+        let (world, _) = simulator("7H", 0, &output, trace.clone()).await?;
+        let (guest, runtime) = guest(&binary, &wash, &["7H"], &output, trace, world)?;
+        race(record_outcomes(&output, (&guest, runtime), async |guest_failure| {
+            let args = json!({"section_name":"CHAPTER_1","content_notes":"Introduce the research question"});
+            let written = guest.command("WRITER_A", format!("echo '{args}' > /service/write_section/CHAPTER_1; cat /service/write_section/CHAPTER_1")).await?;
+            let text = written["stdout"].as_str().ok_or("writer output")?;
+            let body = &text[text.find('{').ok_or("missing actual chapter response")?..];
+            let result = serde_json::Deserializer::from_str(body).into_iter::<Value>().next().ok_or("empty chapter response")??;
+            assert_eq!(result["success"], true);
+            let exit = guest.command("FACT_CHECKER", "exit 0".into()).await;
+            if let Ok(reply) = exit {
+                assert_eq!(reply["exit_status"], 0, "{reply}");
+            }
+            guest_failure.read(&mut [0]).await?;
+            Err("7H guest closed with the remaining document work outstanding".into())
+        }), hibana_runtime::host::deadline(Duration::from_secs(25))).await?;
+        let guest_report: Value =
+            serde_json::from_slice(&fs::read(output.join("guest-outcome.json"))?)?;
+        let participants: Vec<Value> =
+            serde_json::from_slice(&fs::read(output.join("model-outcomes.json"))?)?;
+        assert!(trial_error(std::slice::from_ref(&guest_report)).is_some());
+        assert!(trial_error(&participants).is_some());
+        let score = &guest_report["result"]["score"];
+        assert_eq!(score["complete"], false);
+        let calls = score["events"].as_array().ok_or("7H common score events")?;
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["tool"], "write_section");
+        assert_eq!(calls[0]["agent"], "WRITER_A");
+        let path = output.join("events.jsonl");
+        let rows = journal::records(&path)?;
+        assert_eq!(
+            rows.iter()
+                .filter(|r| r["direction"] == "domain_end")
+                .count(),
+            1
+        );
+        evidence::save(
+            &output.join("case.json"),
+            &json!({"task":"7H","depth":0,
+            "scope":"real wash early exit and common scoring after failure","model_calls":0,
+            "task_complete":false,"scored_benchmark":false,"effects":calls.len(),
+            "events_sha256":evidence::digest(&path)?,"runtime_sha256":evidence::digest(&binary)?,
+            "wash_sha256":evidence::digest(&wash)?,"test_binary_sha256":evidence::digest(&std::env::current_exe()?)?}),
+        )
     }
 
     #[hibana_runtime::main]

@@ -26,16 +26,11 @@ fn take<'a>(
     used: &mut BTreeSet<u64>,
     matches: impl Fn(&Frame) -> bool,
 ) -> Result<&'a Frame> {
+    let location = std::panic::Location::caller();
     let (id, frame) = one(frames
         .iter()
         .filter(|(id, frame)| !used.contains(*id) && matches(frame)))
-    .map_err(|error| {
-        format!(
-            "{error} at {}:{}",
-            std::panic::Location::caller().file(),
-            std::panic::Location::caller().line()
-        )
-    })?;
+    .map_err(|error| format!("{error} at {}:{}", location.file(), location.line()))?;
     used.insert(*id);
     Ok(frame)
 }
@@ -117,9 +112,66 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             "review_own_work" => (4, 8),
             _ => return Err("unknown writing effect".into()),
         };
+        let (sender, submitted) = if tool == "write_to_document" {
+            let inbox = compiled["submissions"].as_u64().ok_or("submission role")?;
+            let editor = compiled["editor"].as_u64().ok_or("editor role")?;
+            let received = take(&journal.frames, &mut used, |f| {
+                f.direction(file, inbox)
+                    && u64::from(f.logical_label) == role
+                    && f.value().is_ok_and(|value| value == *args)
+            })?
+            .received()?;
+            if task == "2E" {
+                (editor, Some(received))
+            } else {
+                let mut sections = Vec::new();
+                for name in actor["sections"].as_array().ok_or("assigned sections")? {
+                    let service =
+                        compiled["resources"][name.as_str().ok_or("section name")?]["service"]
+                            .as_u64()
+                            .ok_or("section service")?;
+                    let primary = headers.values().any(|h| {
+                        u64::from(h[1]) == service
+                            && u64::from(h[2]) == role
+                            && h[3] == request_label
+                            && h[4] == 0
+                    });
+                    sections.push((primary, service));
+                }
+                sections.sort_unstable();
+                let [(false, second), (true, first)] = sections.as_slice() else {
+                    return Err("write requires two distinct section services".into());
+                };
+                let grant = take(&journal.frames, &mut used, |f| {
+                    f.direction(editor, *first)
+                        && u64::from(f.logical_label) == role
+                        && received < f.sent
+                        && f.value().is_ok_and(|v| v == *args)
+                })?
+                .received()?;
+                let followup = take(&journal.frames, &mut used, |f| {
+                    f.direction(*first, inbox)
+                        && u64::from(f.logical_label) == file
+                        && grant < f.sent
+                        && f.value().is_ok_and(|v| v == *args)
+                })?
+                .received()?;
+                take(&journal.frames, &mut used, |f| {
+                    f.direction(editor, *second)
+                        && u64::from(f.logical_label) == file
+                        && followup < f.sent
+                        && f.received.is_some_and(|at| at < call.emitted)
+                        && f.value().is_ok_and(|v| v == *args)
+                })?;
+                (*first, Some(grant))
+            }
+        } else {
+            (file, None)
+        };
         take(&journal.frames, &mut used, |f| {
-            f.direction(file, role)
+            f.direction(sender, role)
                 && f.logical_label == request_label
+                && submitted.is_none_or(|at| at < f.sent)
                 && f.received.is_some_and(|at| at < call.emitted)
                 && f.value().is_ok_and(|v| v == *args)
         })?;
@@ -222,7 +274,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     {
         return Err("incomplete original work or invalid outcome".into());
     }
-    let business = compiled["participants"]
+    let mut business = compiled["participants"]
         .as_object()
         .ok_or("participants")?
         .values()
@@ -232,10 +284,14 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 .as_object()
                 .ok_or("resources")?
                 .values()
-                .map(|r| r["role"].as_u64()),
+                .flat_map(|r| [r["role"].as_u64(), r["service"].as_u64()]),
         )
         .collect::<Option<BTreeSet<_>>>()
         .ok_or("compiled business role")?;
+    if compiled.get("submissions").is_some() {
+        business.insert(compiled["submissions"].as_u64().ok_or("submission role")?);
+        business.insert(compiled["editor"].as_u64().ok_or("editor role")?);
+    }
     for (id, frame) in &journal.frames {
         let wire = u16::try_from(frame.identity["frame_label"].as_u64().ok_or("wire label")?)?;
         let header = headers.get(&wire).ok_or("compiled frame")?;

@@ -130,28 +130,26 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 file_metadata::run(&mut summary_data, summary_file, [ER_FILES[3]]).await?;
             };
             let (
-                (assess_file, general_file),
-                imaging_file,
+                (assess_file, general_file, imaging_file, summary_file),
                 (referral_file, cardiac_file, findings_file, diagnosis_file),
                 review_file,
-                summary_file,
             ) = async {
                 async {
-                    let [mut assess, mut panel] = general_service.par()?;
+                    let [mut assess, mut panel, mut imaging, mut summary] = er.par()?;
                     async { assess.recv::<Loan<ASSESS_FILE>>().await };
                     async { panel.recv::<Loan<GENERAL_FILE>>().await };
+                    async { imaging.recv::<Loan<IMAGING_FILE>>().await };
+                    async { summary.recv::<Loan<SUMMARY_FILE>>().await };
                 };
-                async { imaging_service.recv::<Loan<IMAGING_FILE>>().await };
                 async {
                     let [mut referral, mut panel, mut findings, mut diagnosis] =
-                        cardiac_service.par()?;
+                        cardiologist.par()?;
                     async { referral.recv::<Loan<REFERRAL_FILE>>().await };
                     async { panel.recv::<Loan<CARDIAC_FILE>>().await };
                     async { findings.recv::<Loan<FINDINGS_FILE>>().await };
                     async { diagnosis.recv::<Loan<DIAGNOSIS_FILE>>().await };
                 };
-                async { pharmacy_service.recv::<Loan<REVIEW_FILE>>().await };
-                async { er.recv::<Loan<SUMMARY_FILE>>().await };
+                async { pharmacist.recv::<Loan<REVIEW_FILE>>().await };
             }
             .await?;
             async { localside::records::run(&mut records).await?; };

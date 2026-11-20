@@ -34,6 +34,48 @@ pub async fn run(mut document: Endpoint<DOCUMENT>, domain: &impl Domain) -> Shel
                 document.send::<a::MaterialForFact>(&result).await?;
             }
 
+            label if label == a::FactRejectionForDocument::LOGICAL_LABEL => {
+                let result = branch
+                    .recv::<a::FactRejectionForDocument>()
+                    .await?
+                    .into_value();
+                let name = imp::SECTIONS[usize::from(AUTHOR_A)];
+                imp::same(
+                    &result["data"]["input_snapshot"]["sections"][name],
+                    &sections[name],
+                )?;
+                document
+                    .send::<a::AuthorNotice>(&imp::Material::new(result)?)
+                    .await?;
+            }
+
+            label if label == a::ReviewRejectionForDocument::LOGICAL_LABEL => {
+                let result = branch
+                    .recv::<a::ReviewRejectionForDocument>()
+                    .await?
+                    .into_value();
+                let name = imp::SECTIONS[usize::from(AUTHOR_A)];
+                imp::same(
+                    &result["data"]["input_snapshot"]["sections"][name],
+                    &sections[name],
+                )?;
+                document
+                    .send::<a::AuthorNotice>(&imp::Material::new(result)?)
+                    .await?;
+            }
+
+            label if label == a::FinalForDocument::LOGICAL_LABEL => {
+                let result = branch.recv::<a::FinalForDocument>().await?.into_value();
+                let name = imp::SECTIONS[usize::from(AUTHOR_A)];
+                imp::same(
+                    &result["data"]["input_snapshot"]["sections"][name],
+                    &sections[name],
+                )?;
+                document
+                    .send::<a::AuthorNotice>(&imp::Material::new(result)?)
+                    .await?;
+            }
+
             label if label == a::Revise::LOGICAL_LABEL => {
                 let arguments = branch.recv::<a::Revise>().await?.into_value();
                 let researched = research[0].as_ref().ok_or_else(|| {
@@ -48,14 +90,6 @@ pub async fn run(mut document: Endpoint<DOCUMENT>, domain: &impl Domain) -> Shel
                 let result = imp::Reply::<AUTHOR_A, 3>::new(result)?;
                 document.send::<a::Revised>(&result).await?;
                 document.send::<a::RevisedForFact>(&result).await?;
-            }
-
-            label if label == a::FinalForDocument::LOGICAL_LABEL => {
-                let reviewed = branch.recv::<a::FinalForDocument>().await?.into_value();
-                imp::same(
-                    &reviewed["data"]["input_snapshot"]["sections"][imp::SECTIONS[0]],
-                    &sections[imp::SECTIONS[0]],
-                )?;
             }
 
             label if label == b::ResearchForDocument::LOGICAL_LABEL => {
@@ -80,6 +114,48 @@ pub async fn run(mut document: Endpoint<DOCUMENT>, domain: &impl Domain) -> Shel
                 document.send::<b::MaterialForFact>(&result).await?;
             }
 
+            label if label == b::FactRejectionForDocument::LOGICAL_LABEL => {
+                let result = branch
+                    .recv::<b::FactRejectionForDocument>()
+                    .await?
+                    .into_value();
+                let name = imp::SECTIONS[usize::from(AUTHOR_B)];
+                imp::same(
+                    &result["data"]["input_snapshot"]["sections"][name],
+                    &sections[name],
+                )?;
+                document
+                    .send::<b::AuthorNotice>(&imp::Material::new(result)?)
+                    .await?;
+            }
+
+            label if label == b::ReviewRejectionForDocument::LOGICAL_LABEL => {
+                let result = branch
+                    .recv::<b::ReviewRejectionForDocument>()
+                    .await?
+                    .into_value();
+                let name = imp::SECTIONS[usize::from(AUTHOR_B)];
+                imp::same(
+                    &result["data"]["input_snapshot"]["sections"][name],
+                    &sections[name],
+                )?;
+                document
+                    .send::<b::AuthorNotice>(&imp::Material::new(result)?)
+                    .await?;
+            }
+
+            label if label == b::FinalForDocument::LOGICAL_LABEL => {
+                let result = branch.recv::<b::FinalForDocument>().await?.into_value();
+                let name = imp::SECTIONS[usize::from(AUTHOR_B)];
+                imp::same(
+                    &result["data"]["input_snapshot"]["sections"][name],
+                    &sections[name],
+                )?;
+                document
+                    .send::<b::AuthorNotice>(&imp::Material::new(result)?)
+                    .await?;
+            }
+
             label if label == b::Revise::LOGICAL_LABEL => {
                 let arguments = branch.recv::<b::Revise>().await?.into_value();
                 let researched = research[1].as_ref().ok_or_else(|| {
@@ -94,14 +170,6 @@ pub async fn run(mut document: Endpoint<DOCUMENT>, domain: &impl Domain) -> Shel
                 let result = imp::Reply::<AUTHOR_B, 3>::new(result)?;
                 document.send::<b::Revised>(&result).await?;
                 document.send::<b::RevisedForFact>(&result).await?;
-            }
-
-            label if label == b::FinalForDocument::LOGICAL_LABEL => {
-                let reviewed = branch.recv::<b::FinalForDocument>().await?.into_value();
-                imp::same(
-                    &reviewed["data"]["input_snapshot"]["sections"][imp::SECTIONS[1]],
-                    &sections[imp::SECTIONS[1]],
-                )?;
             }
 
             label if label == c::ResearchForDocument::LOGICAL_LABEL => {
@@ -126,6 +194,48 @@ pub async fn run(mut document: Endpoint<DOCUMENT>, domain: &impl Domain) -> Shel
                 document.send::<c::MaterialForFact>(&result).await?;
             }
 
+            label if label == c::FactRejectionForDocument::LOGICAL_LABEL => {
+                let result = branch
+                    .recv::<c::FactRejectionForDocument>()
+                    .await?
+                    .into_value();
+                let name = imp::SECTIONS[usize::from(AUTHOR_C)];
+                imp::same(
+                    &result["data"]["input_snapshot"]["sections"][name],
+                    &sections[name],
+                )?;
+                document
+                    .send::<c::AuthorNotice>(&imp::Material::new(result)?)
+                    .await?;
+            }
+
+            label if label == c::ReviewRejectionForDocument::LOGICAL_LABEL => {
+                let result = branch
+                    .recv::<c::ReviewRejectionForDocument>()
+                    .await?
+                    .into_value();
+                let name = imp::SECTIONS[usize::from(AUTHOR_C)];
+                imp::same(
+                    &result["data"]["input_snapshot"]["sections"][name],
+                    &sections[name],
+                )?;
+                document
+                    .send::<c::AuthorNotice>(&imp::Material::new(result)?)
+                    .await?;
+            }
+
+            label if label == c::FinalForDocument::LOGICAL_LABEL => {
+                let result = branch.recv::<c::FinalForDocument>().await?.into_value();
+                let name = imp::SECTIONS[usize::from(AUTHOR_C)];
+                imp::same(
+                    &result["data"]["input_snapshot"]["sections"][name],
+                    &sections[name],
+                )?;
+                document
+                    .send::<c::AuthorNotice>(&imp::Material::new(result)?)
+                    .await?;
+            }
+
             label if label == c::Revise::LOGICAL_LABEL => {
                 let arguments = branch.recv::<c::Revise>().await?.into_value();
                 let researched = research[2].as_ref().ok_or_else(|| {
@@ -140,14 +250,6 @@ pub async fn run(mut document: Endpoint<DOCUMENT>, domain: &impl Domain) -> Shel
                 let result = imp::Reply::<AUTHOR_C, 3>::new(result)?;
                 document.send::<c::Revised>(&result).await?;
                 document.send::<c::RevisedForFact>(&result).await?;
-            }
-
-            label if label == c::FinalForDocument::LOGICAL_LABEL => {
-                let reviewed = branch.recv::<c::FinalForDocument>().await?.into_value();
-                imp::same(
-                    &reviewed["data"]["input_snapshot"]["sections"][imp::SECTIONS[2]],
-                    &sections[imp::SECTIONS[2]],
-                )?;
             }
 
             Combine::LOGICAL_LABEL => {

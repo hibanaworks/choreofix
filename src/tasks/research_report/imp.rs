@@ -43,19 +43,15 @@ pub fn material(
     Ok(result["data"]["artifact"].clone())
 }
 pub fn reviewed(result: &Value, snapshot: &Value, scope: &str) -> ShellResult<()> {
-    for category in ["sections", "references"] {
-        if snapshot[category]
-            .as_object()
-            .is_none_or(|rows| rows.len() != 2)
-            || [SECTION_A, SECTION_B].into_iter().any(|section| {
-                !snapshot[category][section]["id"].is_string()
-                    || !snapshot[category][section]["content"].is_string()
-            })
-        {
-            return Err(ShellError::message(
-                "review needs both actual sections and references",
-            ));
-        }
+    if !matches!(scope, SECTION_A | SECTION_B)
+        || ["sections", "references"].into_iter().any(|category| {
+            let artifact = &snapshot[category][scope];
+            !artifact["id"].is_string() || !artifact["content"].is_string()
+        })
+    {
+        return Err(ShellError::message(
+            "review needs the section and its references",
+        ));
     }
     if result["tool_name"] != "review_sections"
         || !result["success"].is_boolean()
@@ -72,7 +68,7 @@ pub fn reviewed(result: &Value, snapshot: &Value, scope: &str) -> ShellResult<()
             }
     {
         return Err(ShellError::message(
-            "review differs from the current complete document",
+            "review differs from the current section or its references",
         ));
     }
     Ok(())
@@ -95,6 +91,16 @@ pub fn combine_inputs(
         return Err(ShellError::message(
             "combination must preserve both actual sections",
         ));
+    }
+    for category in ["sections", "references"] {
+        if snapshot[category]
+            .as_object()
+            .is_none_or(|rows| rows.len() != 2)
+        {
+            return Err(ShellError::message(
+                "combination needs both sections and references",
+            ));
+        }
     }
     for (review, scope) in reviews.iter().zip([SECTION_A, SECTION_B]) {
         reviewed(review, snapshot, scope)?;

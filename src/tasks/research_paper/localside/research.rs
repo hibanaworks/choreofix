@@ -1,7 +1,7 @@
 //! One research participant; independent authors use disjoint projected fragments.
 use super::super::{global::*, imp};
 use crate::shell::{ShellError, ShellResult, imp::service::Domain};
-use hibana::EndpointBorrow;
+use hibana::{EndpointBorrow, g::Message};
 
 #[hibana_runtime::scope]
 pub async fn run<'borrow, 'run, const AUTHOR: u8, C: ChapterMessages<AUTHOR>>(
@@ -34,4 +34,39 @@ pub async fn run<'borrow, 'run, const AUTHOR: u8, C: ChapterMessages<AUTHOR>>(
         Ok::<(), ShellError>(())
     }
     .await
+}
+
+pub async fn supplemental<const AUTHOR: u8, C: ChapterMessages<AUTHOR>>(
+    endpoint: &mut EndpointBorrow<'_, '_, RESEARCH_SERVICE>,
+    domain: &impl Domain,
+) -> ShellResult<()> {
+    loop {
+        let branch = endpoint.offer().await?;
+        match branch.label() {
+            label if label == C::ResearchDone::LOGICAL_LABEL => {
+                branch.recv::<C::ResearchDone>().await?;
+                return Ok(());
+            }
+            label if label == C::Supplement::LOGICAL_LABEL => {
+                let arguments = branch.recv::<C::Supplement>().await?.into_value();
+                let actual = domain
+                    .execute(
+                        imp::AUTHORS[usize::from(AUTHOR)],
+                        "research_topic",
+                        arguments.clone(),
+                    )
+                    .await
+                    .map_err(ShellError::message)?;
+                imp::same(&actual["data"]["topic"], &arguments["topic"])?;
+                endpoint
+                    .send::<C::Supplemented>(&imp::Reply::<AUTHOR, 7>::new(actual)?)
+                    .await?;
+            }
+            label => {
+                return Err(ShellError::message(format!(
+                    "unexpected supplemental research operation {label}"
+                )));
+            }
+        }
+    }
 }

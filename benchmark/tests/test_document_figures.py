@@ -314,8 +314,14 @@ class FigureDocumentCausality(unittest.IsolatedAsyncioTestCase):
                 "make_editorial_decision", agent_id="EDITOR_IN_CHIEF",
                 review_summary="Free prose summarizing the actual reviewer reports",
             )).success)
-        await registry.call("revise_section", agent_id="WRITER_B", section_name="CHAPTER_2",
-                            feedback="Resolve the editor's requested terminology change")
+        self.assertFalse((await registry.call(
+            "revise_section", agent_id="WRITER_B", section_name="CHAPTER_2",
+            feedback="This section belongs to another writer",
+        )).success)
+        self.assertTrue((await registry.call(
+            "revise_section", agent_id="WRITER_A", section_name="CHAPTER_2",
+            feedback="Resolve the editor's requested terminology change",
+        )).success)
         await registry.call("fact_check", agent_id="FACT_CHECKER", section_name="CHAPTERS_1_2")
         await registry.call("review_sections", agent_id="REVIEWER", section_name="CHAPTERS_1_2")
         sim._delay_multiplier = 1
@@ -335,3 +341,149 @@ class FigureDocumentCausality(unittest.IsolatedAsyncioTestCase):
                             sections="CHAPTER_4,CHAPTER_3,CHAPTER_2,CHAPTER_1")
         self.assertTrue(sim.is_complete())
         self.assertEqual(len(sim.violations), 1)
+
+    async def test_7h_major_rechecks_and_minor_edits_reuse_the_actual_review(self):
+        sim, registry = world("7H")
+        for agent, chapter, content in (
+            ("WRITER_C", "CHAPTER_4", "Actual evaluation"),
+            ("WRITER_B", "CHAPTER_3", "Actual contribution"),
+            ("WRITER_A", "CHAPTER_2", "Background"),
+            ("WRITER_A", "CHAPTER_1", "Introduktion to the results"),
+        ):
+            self.assertTrue((await registry.call(
+                "write_section", agent_id=agent, section_name=chapter, content_notes=content,
+            )).success)
+            await registry.call("update_references", agent_id=agent, section_name=chapter)
+        for chapter in ("CHAPTER_4", "CHAPTER_1", "CHAPTER_3"):
+            figure = await registry.call("create_figure", agent_id="FIGURE_CREATOR",
+                                         description=f"Evidence for {chapter}")
+            await registry.call("insert_figure", agent_id="FIGURE_CREATOR",
+                                section_name=chapter, figure_id=figure.data["figure_id"])
+        for scope in ("CHAPTER_3", "CHAPTER_4", "CHAPTERS_1_2"):
+            self.assertTrue((await registry.call(
+                "fact_check", agent_id="FACT_CHECKER", section_name=scope,
+            )).success)
+            if scope != "CHAPTERS_1_2":
+                comments = {"feedback": ""} if scope == "CHAPTER_3" else {}
+                accepted = await registry.call("review_sections", agent_id="REVIEWER",
+                                               section_name=scope, **comments)
+                self.assertTrue(accepted.success)
+                if comments:
+                    self.assertEqual(accepted.data["feedback"], "")
+                else:
+                    self.assertNotIn("feedback", accepted.data)
+        invalid = await registry.call("review_sections", agent_id="REVIEWER",
+                                      section_name="CHAPTERS_1_2", decision="major", feedback=42)
+        self.assertEqual(invalid.data["status"], "invalid_review")
+        self.assertNotIn("review_id", invalid.data)
+        feedback = 'Why does the introduction say “all”?\nExplain the scope.'
+        major = await registry.call("review_sections", agent_id="REVIEWER",
+                                    section_name="CHAPTERS_1_2", decision="major", feedback=feedback)
+        self.assertEqual(major.data["status"], "needs_revision")
+        self.assertEqual(major.data["feedback"], feedback)
+        self.assertFalse((await registry.call(
+            "revise_section", agent_id="WRITER_A", section_name="CHAPTER_1",
+            review_id=major.data["review_id"],
+        )).success)
+        draft = await registry.call("revise_section", agent_id="WRITER_A", section_name="CHAPTER_1",
+                                    feedback="Explain how the evidence supports the contribution")
+        await registry.call("fact_check", agent_id="FACT_CHECKER", section_name="CHAPTERS_1_2")
+        self.assertFalse((await registry.call(
+            "make_editorial_decision", agent_id="EDITOR_IN_CHIEF", review_summary="Still needs re-review",
+        )).success)
+
+        minor = await registry.call(
+            "review_sections", agent_id="REVIEWER", section_name="CHAPTERS_1_2", decision="minor",
+            minor_edits=[
+                {"section_name": "CHAPTER_1", "before": "Introduktion", "after": "Introduction"},
+                {"section_name": "CHAPTER_1", "before": "the results", "after": "the findings"},
+                {"section_name": "CHAPTER_2", "before": "Background", "after": "Context"},
+            ],
+        )
+        receipt = minor.data["review_id"]
+        self.assertFalse(minor.success)
+        self.assertEqual(minor.data["status"], "minor_revision")
+        self.assertEqual((await registry.call(
+            "review_sections", agent_id="REVIEWER", section_name="CHAPTERS_1_2", decision="accept",
+        )).data["status"], "awaiting_revision")
+        for agent, chapter, identifier in (
+            ("WRITER_B", "CHAPTER_1", receipt),
+            ("WRITER_A", "CHAPTER_3", receipt),
+            ("WRITER_A", "CHAPTER_1", "forged-review"),
+        ):
+            self.assertFalse((await registry.call(
+                "revise_section", agent_id=agent, section_name=chapter, review_id=identifier,
+            )).success)
+        background = await registry.call("revise_section", agent_id="WRITER_A",
+                                         section_name="CHAPTER_2", review_id=receipt)
+        self.assertEqual(background.data["artifact"]["content"], "Context")
+        await registry.call("fact_check", agent_id="FACT_CHECKER", section_name="CHAPTERS_1_2")
+        self.assertEqual((await registry.call(
+            "review_sections", agent_id="REVIEWER", section_name="CHAPTERS_1_2", decision="accept",
+        )).data["status"], "awaiting_revision")
+        self.assertFalse((await registry.call(
+            "make_editorial_decision", agent_id="EDITOR_IN_CHIEF", review_summary="One required edit remains",
+        )).success)
+        applied = await registry.call("revise_section", agent_id="WRITER_A",
+                                      section_name="CHAPTER_1", review_id=receipt)
+        self.assertTrue(applied.success)
+        self.assertEqual(applied.data["artifact"]["previous_id"], draft.data["artifact"]["id"])
+        self.assertEqual(applied.data["artifact"]["content"],
+                         draft.data["artifact"]["content"].replace("Introduktion", "Introduction")
+                         .replace("the results", "the findings"))
+        self.assertFalse((await registry.call(
+            "revise_section", agent_id="WRITER_A", section_name="CHAPTER_1", review_id=receipt,
+        )).success)
+        self.assertFalse((await registry.call(
+            "make_editorial_decision", agent_id="EDITOR_IN_CHIEF", review_summary="Facts need a new check",
+        )).success)
+        await registry.call("fact_check", agent_id="FACT_CHECKER", section_name="CHAPTERS_1_2")
+        editorial = await registry.call("make_editorial_decision", agent_id="EDITOR_IN_CHIEF",
+                                        review_summary="The factual check and required edit are complete")
+        self.assertTrue(editorial.success)
+        self.assertEqual(editorial.data["review_receipts"]["CHAPTERS_1_2"], receipt)
+        combined = await registry.call("combine_sections", agent_id="EDITOR_IN_CHIEF",
+                                       sections="CHAPTER_1,CHAPTER_2,CHAPTER_3,CHAPTER_4")
+        self.assertEqual(combined.data["input_snapshot"]["sections"]["CHAPTER_1"], applied.data["artifact"])
+        self.assertTrue(sim.is_complete())
+        self.assertEqual(sim.violations, [])
+
+    async def test_7h_minor_edit_binds_unique_passage_and_current_scope(self):
+        sim, registry = world("7H")
+        sim._failure_specs = [FailureSpec("review_sections", "REVIEWER", 0)]
+        await registry.call("write_section", agent_id="WRITER_C", section_name="CHAPTER_4",
+                            content_notes="aaa with a typo")
+        await registry.call("update_references", agent_id="WRITER_C", section_name="CHAPTER_4")
+        figure = await registry.call("create_figure", agent_id="FIGURE_CREATOR", description="Plot")
+        await registry.call("insert_figure", agent_id="FIGURE_CREATOR", section_name="CHAPTER_4",
+                            figure_id=figure.data["figure_id"])
+        await registry.call("fact_check", agent_id="FACT_CHECKER", section_name="CHAPTER_4")
+        for edits in (
+            [{"section_name": "CHAPTER_3", "before": "typo", "after": "term"}],
+            [{"section_name": "CHAPTER_4", "before": "aa", "after": "term"}],
+            [{"section_name": "CHAPTER_4", "before": "with a typo", "after": "without it"},
+             {"section_name": "CHAPTER_4", "before": "typo", "after": "term"}],
+        ):
+            invalid = await registry.call(
+                "review_sections", agent_id="REVIEWER", section_name="CHAPTER_4", decision="minor",
+                minor_edits=edits,
+            )
+            self.assertEqual(invalid.data["status"], "invalid_review")
+            self.assertNotIn("review_id", invalid.data)
+        forced = await registry.call(
+            "review_sections", agent_id="REVIEWER", section_name="CHAPTER_4", decision="minor",
+            minor_edits=[{"section_name": "CHAPTER_4", "before": "typo", "after": "term"}],
+        )
+        self.assertEqual(forced.data["status"], "needs_revision")
+        self.assertNotIn("minor_replacements", forced.data)
+        await registry.call("revise_section", agent_id="WRITER_C", section_name="CHAPTER_4",
+                            feedback="Include the actual comparison")
+        await registry.call("fact_check", agent_id="FACT_CHECKER", section_name="CHAPTER_4")
+        minor = await registry.call(
+            "review_sections", agent_id="REVIEWER", section_name="CHAPTER_4", decision="minor",
+            minor_edits=[{"section_name": "CHAPTER_4", "before": "typo", "after": "term"}],
+        )
+        await registry.call("update_references", agent_id="WRITER_C", section_name="CHAPTER_4")
+        stale = await registry.call("revise_section", agent_id="WRITER_C", section_name="CHAPTER_4",
+                                    review_id=minor.data["review_id"])
+        self.assertEqual(stale.data["status"], "invalid_review_receipt")

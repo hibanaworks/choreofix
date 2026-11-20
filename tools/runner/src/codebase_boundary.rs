@@ -19,6 +19,7 @@ struct Case {
     delay: f64,
     failures: &'static [(&'static str, u32)],
     adversarial: bool,
+    order: Option<Vec<&'static str>>,
 }
 fn response(reply: &Value) -> Result<Value> {
     let text = reply["stdout"].as_str().ok_or("stdout")?;
@@ -218,6 +219,17 @@ async fn inputs<const N: usize>(
     actors: [Value; N],
     case: &Case,
 ) -> Result<()> {
+    if let Some(order) = &case.order {
+        for &name in order {
+            let actor = actors
+                .iter()
+                .find(|a| a["agent"] == name)
+                .ok_or("ordered participant")?;
+            preparation(guest, actor, case).await?;
+            finish(guest, actor, case).await?;
+        }
+        return Ok(());
+    }
     if case.adversarial {
         async {
             for actor in actors {
@@ -306,10 +318,61 @@ async fn direct_files_keep_original_module_effects_and_retries() -> Result<()> {
                 delay,
                 failures,
                 adversarial,
+                order: None,
             });
         }
     }
-    save(&directory.join("assignments.json"),&json!(assignments.iter().map(|c|json!({"task":c.task,"name":c.name,"depth":c.depth,"delay":c.delay,"failures":c.failures,"adversarial_inputs":c.adversarial})).collect::<Vec<_>>()))?;
+    let [a, b, c, d, e, f, g] = [
+        "DEVELOPER_A",
+        "DEVELOPER_B",
+        "DEVELOPER_C",
+        "DEVELOPER_D",
+        "DEVELOPER_E",
+        "DEVELOPER_F",
+        "DEVELOPER_G",
+    ];
+    for (task, name, order) in [
+        ("1E", "abc", vec![a, b, c]),
+        ("1E", "acb", vec![a, c, b]),
+        ("1E", "bac", vec![b, a, c]),
+        ("1E", "bca", vec![b, c, a]),
+        ("1E", "cab", vec![c, a, b]),
+        ("1E", "cba", vec![c, b, a]),
+        ("1M", "abcde", vec![a, b, c, d, e]),
+        ("1M", "bcdea", vec![b, c, d, e, a]),
+        ("1M", "cdeab", vec![c, d, e, a, b]),
+        ("1M", "deabc", vec![d, e, a, b, c]),
+        ("1M", "eabcd", vec![e, a, b, c, d]),
+        ("1M", "edcba", vec![e, d, c, b, a]),
+        ("1H", "abcdefg", vec![a, b, c, d, e, f, g]),
+        ("1H", "bcdefga", vec![b, c, d, e, f, g, a]),
+        ("1H", "cdefgab", vec![c, d, e, f, g, a, b]),
+        ("1H", "defgabc", vec![d, e, f, g, a, b, c]),
+        ("1H", "efgabcd", vec![e, f, g, a, b, c, d]),
+        ("1H", "fgabcde", vec![f, g, a, b, c, d, e]),
+        ("1H", "gabcdef", vec![g, a, b, c, d, e, f]),
+        ("1H", "gfedcba", vec![g, f, e, d, c, b, a]),
+    ] {
+        assignments.push(Case {
+            task,
+            name,
+            depth: 0,
+            delay: 0.01,
+            failures: &[],
+            adversarial: false,
+            order: Some(order),
+        });
+    }
+    assignments.push(Case {
+        task: "1H",
+        name: "b-repairs-first",
+        depth: 0,
+        delay: 0.01,
+        failures: &[("run_local_tests", 0)],
+        adversarial: false,
+        order: Some(vec![b, c, d, e, f, g, a]),
+    });
+    save(&directory.join("assignments.json"),&json!(assignments.iter().map(|c|json!({"task":c.task,"name":c.name,"depth":c.depth,"delay":c.delay,"failures":c.failures,"adversarial_inputs":c.adversarial,"participant_order":c.order})).collect::<Vec<_>>()))?;
     // Complementary invocations retain the full inventory and name their
     // tested range. A selected range cannot claim the whole qualification.
     let selected = std::env::var_os("CHOREOFIX_CODEBASE_CASES")
@@ -345,7 +408,7 @@ async fn direct_files_keep_original_module_effects_and_retries() -> Result<()> {
         let projection = crate::projection::archive(&runtime, &output, case.task)?;
         save(
             &output.join("case.json"),
-            &json!({"task":case.task,"depth":case.depth,"domain_delay_multiplier":case.delay,"external_failure_specs":case.failures,"adversarial_inputs":case.adversarial,"test_barriers":if case.adversarial{"none"}else{"shell stimuli wait for actual design and implementation results before submitting commits"},"model_calls":0,"scored_benchmark":false,"build":receipt,"wasm_sha256":digest(wasm)?,"runtime_binary_sha256":projection["runtime_binary_sha256"],"compiled_projection_sha256":digest(&output.join("projection.json"))?,"auditor_binary_sha256":digest(&auditor)?,"harness_binary_sha256":digest(&std::env::current_exe()?)?,"harness_source_sha256":digest(Path::new("tools/runner/src/codebase_boundary.rs"))?,"audit_source_sha256":digest(Path::new("tools/runner/src/codebase_audit.rs"))?}),
+            &json!({"task":case.task,"depth":case.depth,"domain_delay_multiplier":case.delay,"external_failure_specs":case.failures,"adversarial_inputs":case.adversarial,"participant_order":case.order,"test_barriers":if case.order.is_some(){"each developer completes before the next starts designing"}else if case.adversarial{"none"}else{"shell stimuli wait for actual design and implementation results before submitting commits"},"model_calls":0,"scored_benchmark":false,"build":receipt,"wasm_sha256":digest(wasm)?,"runtime_binary_sha256":projection["runtime_binary_sha256"],"compiled_projection_sha256":digest(&output.join("projection.json"))?,"auditor_binary_sha256":digest(&auditor)?,"harness_binary_sha256":digest(&std::env::current_exe()?)?,"harness_source_sha256":digest(Path::new("tools/runner/src/codebase_boundary.rs"))?,"audit_source_sha256":digest(Path::new("tools/runner/src/codebase_audit.rs"))?}),
         )?;
         let trace = Trace::create(&output.join("events.jsonl"))?;
         let (simulator, fixture) = oracle::Simulator::new(
@@ -402,11 +465,39 @@ async fn direct_files_keep_original_module_effects_and_retries() -> Result<()> {
             case.task == "1H" || case.failures.is_empty()
         );
         assert_eq!(result["score"]["violations"], json!([]));
+        if let Some(order) = &case.order {
+            let events = result["score"]["events"].as_array().ok_or("score events")?;
+            let mut expected = Vec::new();
+            for &name in order {
+                expected.extend(
+                    ["design_feature", "implement_code", "commit_changes"]
+                        .map(|tool| (name, tool, true)),
+                );
+                if case.name == "b-repairs-first" {
+                    expected.push((name, "run_local_tests", false));
+                    expected.extend(
+                        ["implement_code", "commit_changes"].map(|tool| (name, tool, true)),
+                    );
+                }
+                expected.push((name, "run_local_tests", true));
+            }
+            let actual = events
+                .iter()
+                .map(|event| {
+                    Ok((
+                        event["agent"].as_str().ok_or("agent")?,
+                        event["tool"].as_str().ok_or("effect")?,
+                        event["success"].as_bool().ok_or("effect outcome")?,
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            assert_eq!(actual, expected);
+        }
         let status = Command::new(&auditor)
             .arg("--check-protocol-mutants")
             .arg(output.join("events.jsonl"))
             .arg(output.join("mutants"))
-            .stdout(Stdio::from(fs::File::create(output.join("mutants.log"))?))
+            .stdout(Stdio::null())
             .stderr(Stdio::from(fs::File::create(
                 output.join("mutants-stderr.log"),
             )?))
@@ -424,6 +515,7 @@ async fn direct_files_keep_original_module_effects_and_retries() -> Result<()> {
             assert_eq!(
                 audit["max_disjoint_commits"],
                 match case.task {
+                    _ if case.order.is_some() => 1,
                     "1E" => 1,
                     "1M" => 2,
                     "1H" => 3,

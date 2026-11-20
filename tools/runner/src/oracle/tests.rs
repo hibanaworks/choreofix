@@ -846,3 +846,303 @@ async fn staged_release_inputs_preserve_all_seven_agents_and_original_operation_
     fs::remove_dir_all(directory)?;
     Ok(())
 }
+
+#[hibana_runtime::main]
+#[test]
+async fn wafer_measurements_can_be_repeated_while_other_materials_are_unstarted() -> Result<()> {
+    for etch_first in [false, true] {
+        wafer_trial(etch_first).await?;
+    }
+    Ok(())
+}
+
+impl choreofix::shell::imp::service::Domain for Simulator {
+    async fn execute(
+        &self,
+        agent: &'static str,
+        tool: &'static str,
+        arguments: Value,
+    ) -> std::result::Result<Value, String> {
+        let reply = self
+            .call(json!({"type":"execute","id":tool,"agent":agent,"tool":tool,
+            "arguments":arguments}))
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(reply["result"].clone())
+    }
+}
+
+#[hibana_runtime::scope]
+async fn wafer_trial(etch_first: bool) -> Result<()> {
+    use choreofix::{
+        imp::projection::{record, rows},
+        shell::{global::Loan, imp::bus::Bus},
+        tasks::wafer_fabrication::spot_checks::*,
+    };
+    use hibana::runtime::{
+        SessionKitStorage,
+        ids::SessionId,
+        program::{RoleProgram, project},
+    };
+    std::env::set_current_dir(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()?,
+    )?;
+    let evidence = std::env::var_os("CHOREOFIX_EVIDENCE_ROOT");
+    let parent = evidence
+        .as_ref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let directory = parent.join(format!(
+        "wafer-15e-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+    ));
+    fs::create_dir(&directory)?;
+    let journal = directory.join("events.jsonl");
+    let trace = Trace::create(&journal)?;
+    let (world, fixture) = Simulator::new("15E", 0, 0.0, trace.clone(), &[])?;
+    let actors = fixture["fixtures"].as_array().ok_or("wafer participants")?;
+    assert_eq!(actors.len(), 6);
+    for actor in actors {
+        assert!(actor.get("calls").is_none());
+        assert!(
+            actor["operations"]
+                .as_array()
+                .is_some_and(|ops| !ops.is_empty())
+        );
+    }
+    let (litho, dep, etch) = ("LITHOGRAPHER", "DEPOSITOR", "ETCHER");
+    let (metro, controller, integration) = (
+        "METROLOGY_ENGINEER",
+        "PROCESS_CONTROLLER",
+        "INTEGRATION_ENGINEER",
+    );
+    let (stepper, chamber, etcher) = ("run_stepper_exposure", "run_deposition", "run_etch_process");
+    let (measure, monitor) = ("run_metrology_measurement", "check_monitoring");
+    let film = (metro, measure, "measurement", "thickness_measurement");
+    let steps = [
+        (dep, chamber, "process", "cvd_growth"),
+        (dep, monitor, "check_type", "deposition_rate"),
+        film,
+        film,
+        (etch, etcher, "process", "reactive_ion_etch"),
+        (etch, monitor, "check_type", "etch_rate"),
+        (metro, measure, "measurement", "profile_measurement"),
+        (litho, stepper, "process", "photo_exposure"),
+        (litho, monitor, "check_type", "exposure_dose"),
+        (litho, etcher, "process", "pattern_transfer_etch"),
+        (litho, monitor, "check_type", "etch_endpoint"),
+        (metro, measure, "measurement", "cd_measurement"),
+        (controller, monitor, "check_type", "cross_reference"),
+        (litho, measure, "measurement", "alignment_check"),
+        (dep, measure, "measurement", "thickness_verification"),
+        (integration, stepper, "process", "overlay_alignment"),
+        (integration, measure, "measurement", "overlay_alignment"),
+    ];
+    let mut receipts = Vec::new();
+    for (index, (agent, tool, field, value)) in steps.into_iter().enumerate() {
+        let reply = world
+            .call(
+                json!({"type":"execute","id":index + 1,"agent":agent,"tool":tool,
+            "arguments":{(field):value}}),
+            )
+            .await?;
+        assert_eq!(reply["result"]["success"], true, "{reply}");
+        receipts.push(
+            reply["result"]["data"]["receipt"]
+                .as_u64()
+                .ok_or("wafer receipt")?,
+        );
+        if value == "cross_reference" {
+            assert_eq!(
+                reply["result"]["data"]["inputs"],
+                json!([receipts[11], receipts[3], receipts[6]])
+            );
+        }
+    }
+    assert_eq!(receipts.iter().collect::<BTreeSet<_>>().len(), steps.len());
+    let session = SessionId::new(150);
+    let (bus, _, _) = Bus::open([], [(session, WAFER)]);
+    let source = source();
+    let pa: RoleProgram<ALIGNER> = project(&source);
+    let pi: RoleProgram<ENGINEER> = project(&source);
+    let pw: RoleProgram<WAFER> = project(&source);
+    let pd: RoleProgram<DEPOSITION_CHAMBER> = project(&source);
+    let pe: RoleProgram<ETCH_CHAMBER> = project(&source);
+    let compiled = json!({"type":"compiled_projection","format_version":1,"task":"15E",
+        "programs":[rows(&pa),rows(&pi),rows(&pw),rows(&pd),rows(&pe)]});
+    trace.record("runtime", &compiled)?;
+    let capture = |row| {
+        for frame in bus.transport.take_observations() {
+            trace.record("runtime", &frame).unwrap();
+        }
+        trace
+            .record(
+                "runtime",
+                &json!({"type":"protocol_capture","producer":0,
+            "records":[record(row)]}),
+            )
+            .unwrap();
+    };
+    let mut slab = vec![0; 1024 * 1024];
+    let mut kit = SessionKitStorage::uninit();
+    let rv = kit
+        .init()
+        .rendezvous(&mut slab, &bus.transport)
+        .map_err(|e| format!("{e:?}"))?;
+    rv.observe(&capture);
+    let tap = rv.tap();
+    let result = async {
+        let mut aligner = rv.enter(session, &pa).unwrap();
+        let mut engineer = rv.enter(session, &pi).unwrap();
+        let wafer = rv.enter(session, &pw).unwrap();
+        let mut dep = rv.enter(session, &pd).unwrap();
+        let mut etch = rv.enter(session, &pe).unwrap();
+        async {
+            aligner.send::<Loan<WAFER>>(wafer).await.unwrap();
+            let _returned = aligner.recv::<Loan<WAFER>>().await.unwrap();
+            Ok(())
+        };
+        async {
+            deposition(&mut dep, &world).await.unwrap();
+        };
+        async {
+            etching(&mut etch, &world).await.unwrap();
+        };
+        async {
+            let mut wafer = engineer.recv::<Loan<WAFER>>().await.unwrap();
+            let film = SpotCheck::from_bytes(br#"{"process":"film_integrity_check"}"#).unwrap();
+            let uniformity =
+                SpotCheck::from_bytes(br#"{"process":"etch_uniformity_check"}"#).unwrap();
+            let mut replies = Vec::new();
+            for check_etch in [etch_first, !etch_first] {
+                let bytes = if check_etch {
+                    wafer.send::<Uniformity>(&uniformity).await.unwrap();
+                    wafer.recv::<UniformityResult>().await.unwrap().to_vec()
+                } else {
+                    wafer.send::<Film>(&film).await.unwrap();
+                    wafer.recv::<FilmResult>().await.unwrap().to_vec()
+                };
+                let reply = choreofix::imp::json::decode(&bytes).unwrap();
+                assert_eq!(reply["success"], true, "{reply}");
+                assert_eq!(reply["data"]["inputs"], json!([receipts[15], receipts[16]]));
+                assert_eq!(
+                    reply["tool_name"],
+                    if check_etch {
+                        "run_etch_process"
+                    } else {
+                        "run_deposition"
+                    }
+                );
+                replies.push(reply["data"]["receipt"].clone());
+            }
+            assert_ne!(replies[0], replies[1]);
+            engineer.send::<Loan<WAFER>>(wafer).await.unwrap();
+            Ok(())
+        };
+        Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+    };
+    hibana_runtime::race(result, async {
+        hibana_runtime::host::deadline(std::time::Duration::from_secs(5)).await
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    for frame in bus.transport.take_observations() {
+        trace.record("runtime", &frame)?;
+    }
+    trace.record(
+        "runtime",
+        &json!({"type":"protocol_checkpoint","producer":0,
+        "session":session.raw(),"checkpoint":tap.checkpoint()}),
+    )?;
+    let artifact = json!({"compiled":compiled});
+    let journal_rows = fs::read_to_string(&journal)?
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<std::result::Result<Vec<Value>, _>>()?;
+    let epf = crate::projection::check_dynamic(&artifact, &journal_rows)?;
+    let calls = epf["sessions"][0]["acceptances"]
+        .as_array()
+        .ok_or("EPF source occurrences")?;
+    assert_eq!(calls.len(), 6, "loan, two requests and responses, return");
+    for (order, name, chamber) in [
+        (
+            if etch_first { 1 } else { 0 },
+            "run_deposition",
+            DEPOSITION_CHAMBER,
+        ),
+        (
+            if etch_first { 0 } else { 1 },
+            "run_etch_process",
+            ETCH_CHAMBER,
+        ),
+    ] {
+        let request = &calls[1 + 2 * order];
+        let reply = &calls[2 + 2 * order];
+        assert_eq!(request["send_view"], WAFER);
+        assert_eq!(request["receive_commit"]["view"], chamber);
+        assert_eq!(reply["send_view"], chamber);
+        assert_eq!(reply["receive_commit"]["view"], WAFER);
+        let frame = |call: &Value| -> Result<(usize, Value)> {
+            let (index, row) = journal_rows
+                .iter()
+                .enumerate()
+                .find(|(_, row)| {
+                    let message = &row["message"];
+                    row["direction"] == "runtime"
+                        && message["type"] == "protocol_frame"
+                        && message["action"] == "send"
+                        && message["frame_id"] == call["frame_id"]
+                })
+                .ok_or("missing accepted frame")?;
+            let bytes: Vec<u8> = serde_json::from_value(row["message"]["payload"].clone())?;
+            Ok((index, serde_json::from_slice(&bytes)?))
+        };
+        let (_, submitted) = frame(request)?;
+        let (reply_sent, returned) = frame(reply)?;
+        let effects: Vec<_> = journal_rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| {
+                row["message"]["id"] == name
+                    && (row["direction"] == "domain_start" || row["direction"] == "domain_end")
+            })
+            .collect();
+        let [(start, invoked), (end, finished)] = effects[..] else {
+            panic!("two effect boundaries required for {name}");
+        };
+        assert_eq!(invoked["direction"], "domain_start");
+        assert_eq!(finished["direction"], "domain_end");
+        assert!(
+            request["receive_commit"]["journal_row"].as_u64().unwrap() < start as u64
+                && start < end
+                && end < reply_sent
+        );
+        assert_eq!(submitted, invoked["message"]["arguments"]);
+        assert_eq!(returned, finished["message"]["result"]);
+    }
+
+    let score = world.call(json!({"type":"score"})).await?;
+    assert_eq!(
+        score["events"].as_array().ok_or("wafer effects")?.len(),
+        steps.len() + 2
+    );
+    assert_eq!(score["complete"], true);
+    assert_eq!(score["violations"], json!([]));
+    drop(world);
+    if evidence.is_some() {
+        save(
+            &directory.join("result.json"),
+            &json!({"score":score,"source":fixture,"etch_first":etch_first,"epf":epf,
+            "journal_sha256":crate::evidence::digest(&journal)?, "model_calls":0,
+            "scored_benchmark":false,"scope":"The first 17 calls use the common simulator. The two final spot checks pass through projected native Endpoints in the same run."}),
+        )?;
+        println!("{}", directory.display());
+    } else {
+        fs::remove_dir_all(&directory)?;
+    }
+    Ok(())
+}

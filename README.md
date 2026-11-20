@@ -1,33 +1,26 @@
 # ChoreoFix
 
-The current direct ChoreoFS boundary has source-bound qualification for **27 of
-48 tasks** across 21 families; 21 tasks and final-source all-family certification
-remain unfinished. Seven Luna/xhigh agents completed 6H's depth-2 recovery in
-517.34 seconds, with complete EPF capture, 53 checked effects and common-world
-success. Five Luna/xhigh agents also completed direct 4M in 79.73 seconds with
-687,694 inclusive tokens, complete EPF capture and 12 checked effects.
-Three Luna/xhigh scientists completed direct 13E in 76.46 seconds with 564,435
-inclusive tokens, complete EPF capture, eight checked effects and no violations.
-Four Luna/xhigh scientists completed direct 13M in 113.93 seconds with 872,510
-inclusive tokens, seventeen checked effects and no violations. Its eight real-Wasm
-conditions and saved model run pass EPF, independent effect checks and scoring.
-See [the plan](plan.md) and [6H's current scope](benchmark/ports/6H.md).
+ChoreoFix tests whether a global choreography can be the sole source of authority
+for agents that share resources. Each agent chooses commands in its own
+[hibana-wash](https://github.com/hibanaworks/hibana-wash) shell. WASI file
+operations on ChoreoFS drive the projected [Hibana](https://github.com/hibanaworks/hibana)
+endpoints, and a shared effect requires the corresponding endpoint. We check the
+protocol execution with EPF, match admitted requests to actual simulator effects,
+and score the business outcome. Whether this design preserves the original
+choices or makes a workflow cheaper to change is an empirical question.
 
-Development uses the canonical sibling worktrees for Hibana, EPF, WASI and
-hibana-runtime. CI selects the published runtime revision recorded by the core.
-Historical checkpoint results retain their own sources and boundary; they are
-not current qualification.
+## Status
 
-ChoreoFix evaluates multi-agent coordination with
-[Hibana](https://github.com/hibanaworks/hibana). A global protocol defines the
-communication and transfer of resource endpoints. Participants choose their
-shell commands and how to perform their work; projected endpoints check shared
-operations before those operations reach the task simulator.
+| Question | Evidence through 20 November 2026 |
+| --- | --- |
+| How many tasks have run through the direct boundary with live agents? | 36 of 48 tasks across 29 families, on their recorded sources. The [inventory](analysis/README.md) identifies 43 selected task/depth conditions. |
+| What remains open? | 12 task qualifications and a common final revision. In 4H, seven scripted Wasm participants run through design, implementation, review, testing and schema migration. DevOps can choose any of the six migration orders while holding the staging Endpoint. A failed test now returns the service Endpoint so its developer can submit a fresh implementation. Re-review and retesting of that repair, deployment, rollback and registration remain open. [Development records](plan.md) |
+| What has been compared? | 0 of 2,592 original and supplemental episodes scored, and 0 of 1,368 additional planned comparisons. The pilots measure ChoreoFix on their own recorded conditions. |
+| Which choices have been checked? | Wasm guests completed all 90 upstream 9E sequences of thoughts and meals, plus one in which B and C ate between A's three thoughts. In 9M and 9H, each seat ate first while the others stayed idle. For every first seat, the remaining diners completed in both directions around the table (24 Wasm trials). Five live diners started in B, A, C, E, D order and seven in E, D, B, G, C, A, F order. Peak overlap was two and three meals, respectively. In 1E all six commit orders ran through wash. [Reproduction and limits](analysis/arbitration.md) |
+| Which extra ordering constraints are known in the qualified tasks? | 1H still groups commits into fixed waves. In 3E, A has priority over B for both the initial section write and the reference update. In 6M either approved developer can merge first, although integration still waits for both initial preparations. 6H also orders merges by the required deployment order. In the revised 4M, either module can publish before the other developer starts. The 36 task qualifications each cover the schedules recorded for that version. [Task-by-task evidence](analysis/arbitration.md#fixed-priorities-in-previously-qualified-ports) |
 
-Each model has its own [hibana-wash](https://github.com/hibanaworks/hibana-wash)
-Wasm instance. WASI requests pass through Hibana endpoints to ChoreoFS. Each
-instance has a separate, caller-supplied 2 MiB memory region. Participants run
-concurrently on [hibana-runtime](https://github.com/hibanaworks/hibana-runtime).
+[Paper draft](paper/choreofix.tex) · [Per-task evidence](benchmark/ports) ·
+[Work plan and run history](plan.md) · [CI workflow](.github/workflows/quality.yml)
 
 ## Experiment
 
@@ -48,263 +41,22 @@ still require task, connection and statistical-design qualification; the current
 executable matrix covers the 2,592 runs above. The first comparison remains
 latest TraceFix against ChoreoFix, with 432 runs each.
 
-The paper comparison is pinned to
-`87b01a2c0ae53c5045c9ce3d43cd0235b1831275`; the latest comparison and benchmark
-inputs are pinned to `36b4bd108fcd74f7efb17613aebbe3fdf55499a9`.
-Comparison implementations remain unchanged. The shared simulator lives in
-`benchmark/` and is fixed by `simulator-manifest.json`. Its versioned
-contracts model 4M's repository contents, publication
-and completed exact-content validation before publication. It checks necessary
-causality while allowing independent legal operation orders. The same
-environment and outcome criteria apply to every condition; earlier results
-retain their recorded simulator version.
-The `common-environment-v12` added actual shared build inputs, object files,
-completed test/validation receipts and captured link inputs for 10E/10M/10H.
-It preserves both first-builder orders in 10E, including B's rebuild after A
-changes the provided type definitions, and actual two-slot capacity in 10H.
-The same world shares document/figure data and material-bound cascading laboratory QC.
-Its 136 direct tests include 7E's 48 valid orders
-among 720 preparation/review permutations and all 720 orders of 7M's independent
-initial writes and reference updates. Later evidence cannot authorize an earlier
-publication. These data tests do not qualify the three application ports.
-7M's completed-content reads pass direct tests, but its application port and
-7H's minor-edit distinction remain open.
-The version-7 rules also bind 6E/6M/6H source candidates,
-reviews, merges, CI and staging to completed, content-matching data. Unsafe
-publication/deployment remains an observable effect; later evidence cannot
-authorize it retroactively. These development tools are abstract world models,
-not a compiler. Its repair records distinguish replacement of a failed
-publication from an unrelated next merge. Draft fixes and reviews may run
-while CI is pending; publication waits for the completed failure evidence.
-The recorded v7 qualification passed 87 tests, including 720 reordered 6M test/review/merge
-schedules with exactly 80 valid outcomes. Earlier qualified ports keep their
-original world versions. The 7E port now passes eleven actual-Wasm conditions
-and a three-model pilot, as recorded below; other document ports remain unfinished.
-The 11E environment maps each job to its actual workstation and returns completed
-job data in reports. It accepts all 24 job orders, concurrent independent machine
-use and replacement of an early report; it does not impose a workflow. These
-simulator corrections alone do not qualify a ChoreoFix port. The 11E port now
-passes the actual-Wasm and repaired-source model qualification described below.
-See the [source-bound scope](benchmark/ports/11E.md).
-The current `common-environment-v13` gives 11M actual part identities,
-current completed quality receipts, part-bound rework orders and the original
-two-tool/single-inspector capacities. Independent job and inspection orders stay
-free. All 147 common-world tests and 17 Rust input-tool tests pass, including
-720 job orders and 720 inspection orders in separate finite groups. The 11M
-application port remains unfinished; these world tests do not qualify it.
-See the [world preparation](benchmark/ports/11M.md). Existing qualifications keep
-their actual earlier world versions.
-The 14E environment checks prepared-cell and compound inputs, binds an actual
-lead decision to completed analyses, and requires that decision before final
-documentation. Its synthetic latency model is common to every method and makes
-exclusive-instrument conflicts and independent-instrument overlap observable.
-The 13E environment binds prepared cells, purified compound, assay and quality
-results to completed input occurrences. Final validation needs both quality
-results for the same assay and compound; independent legal orders stay valid.
-Its three actual-Wasm conditions and one three-model pilot pass common scoring,
-EPF and effect audits on their recorded source.
-The 5E/5M/5H medical world uses actual completed patient results and repairs the
-public `test_type` input. Independent test panels, imaging and medication review
-remain independent; diagnosis needs its own current results. Seventy common-world
-tests pass, including all 72 data-valid 5E orders. These tests qualify the world;
-the separate 5E participant qualification is described below. They do not
-observe absent prescription/administration effects or relabel earlier pilots
-as contract version 3.
-ChoreoFix may improve the coordination procedure while preserving
-participants, resource safety and necessary data dependencies. Those changes
-are recorded in the [experiment contract](benchmark/experiment-contract.json)
-before scoring. The [matrix](experiment.json) fixes the model, repetitions,
-timeouts and tool-call limits.
+The [matrix](experiment.json) fixes failure depths, the 1,800-second episode
+budget, the 200-call participant limit and the model. The four paper conditions
+use upstream revision `87b01a2`, and the additional TraceFix condition uses
+`36b4bd1`. Participants in the ChoreoFix qualifications use
+`gpt-6-luna` with `xhigh` through Codex App Server. The common simulator and
+its source manifest are in [benchmark](benchmark/). Each qualification retains
+its own source, binary, simulator version, successes and failed attempts.
 
-Participants use `gpt-6-luna` with `xhigh` through the existing ChatGPT login
-and Codex App Server. The runner checks the returned model, effort and login
-type. Development of the comparison clients' subscription connection is on hold;
-it does not gate ChoreoFix's own experiments. A future same-condition comparison
-will require qualification preserving the clients' original prompts, history,
-tool schemas and execution order.
-
-## Status
-
-**Scored runs: 0 / 2,592.** The full task port and controlled comparison are
-unfinished. Existing results are integration qualifications, not benchmark
-success rates. The additional planned comparisons also have zero scored runs.
-Development uses the current canonical core, EPF and WASI worktrees, including
-the core source undergoing validation. Each qualification freezes its actual
-sources and checks the concrete receiver/effect boundaries on that combination.
-Using the current source does not establish that its qualification is complete.
-Older pilots below retain their recorded version-1 environments. Separate
-version-2 qualification has passed for 4M and 14E: eight real-Wasm conditions
-and one five-model/four-model pilot respectively, with common scoring and
-EPF/effect audits. The subsequent 13E qualification adds three Wasm conditions
-and one three-model pilot. These source-bound results do not certify the other
-tasks' common causal scoring.
-The minimal receiver-contract composition is
-implemented; applying it to every effect entry and completing the remaining
-task ports are still required. These obligations do not depend on developing a
-comparison client.
-
-Historical source-bound Wasm qualification records cover
-three/five/seven-person Dining, seven-person collaborative
-coding with reconsideration, collaborative writing at three/five/seven participants,
-the three-person API, API-coordination, CI/CD, code-review and research-report tasks,
-five-person shared-library refactoring, four-person drug discovery and
-three-person pharmaceutical synthesis, four-person synthesis/QC reconsideration,
-three-person medical consultation, five-person multi-specialty care and
-seven-person two-patient emergency care, the three-person shared document and
-the two-builder and three-builder shared-library builds with their integrator,
-the two-technician manufacturing task with its supervisor, five-person feature
-delivery, the three-chef kitchen with delegated equipment and actual ingredients,
-and five-person regulatory discovery with actual scientific results and reconsideration.
-Code review includes
-revisions after rejected reviews. The API checks
-preserve both the original successful outcome and terminal test failure.
-Audits check resource transfers, requests, returned results, shared effects,
-file reads and guest exits. Record mutations check that the audits reject
-missing or altered operations.
-
-Shared refactoring (`4M`) has 64 native/EPF conditions, two receiver-negative
-probes, five actual-Wasm conditions and one five-model pilot. The pilot passed
-the common published-content outcome and EPF/effect audits in 61.07 seconds,
-using 660,689 inclusive tokens. Its 14 actual effects and 7,191 captured records
-are bound to the saved binary and source. This revised common task is identified
-separately from the upstream task; these are unscored historical qualifications.
-Current direct-file qualification is tracked separately in the experiment contract.
-
-Regulatory discovery (`14M`) passes twelve actual-Wasm conditions with 231
-effects, dynamic EPF/effect audits and 1,890 rejected record mutations. One
-five-model depth-two pilot completes in 288.26 seconds with 2,005,631 inclusive
-tokens, 38 effects, two selected reanalysis plans and zero violations. Three
-independent effects overlap. The saved pilot passes the corrected auditor;
-its original harness failure from omitted report metadata remains recorded.
-These are source-bound qualifications, not scored comparisons. See the
-[scope and evidence](benchmark/ports/14M.md).
-
-Shared document (`7E`) passes eleven actual-Wasm conditions and a three-model
-depth-two pilot in 189.48 seconds with 919,803 inclusive tokens. Both actual
-review failures lead to reconsideration before publication; all guests complete,
-with ten effects, zero violations and passing dynamic EPF/effect audits. Eleven
-altered run records are rejected. Earlier failed pilots remain preserved and
-are not converted into successful measurements. See the [source-bound scope](benchmark/ports/7E.md).
-
-Shared build (`10E`) passes eight actual-Wasm conditions and one three-model
-pilot in 48.05 seconds with 261,400 inclusive tokens. Both initial builder
-orders are tested, including B's rebuild after A changes the shared types.
-Complete EPF capture and separate effect audits pass, with zero violations.
-The eight mechanism records reject 420 frame mutations; eleven altered model-run
-records are also rejected. These are source-bound qualifications, not scored
-comparisons or execution of a real compiler. See the [scope and evidence](benchmark/ports/10E.md).
-
-Three-builder build (`10M`) passes all 26 actual-Wasm conditions and one
-five-model depth-two pilot in 115.34 seconds with 769,827 inclusive tokens.
-The 478-event global projects 15 roles; its actual objects, tests, repairs and
-link inputs pass separate EPF and effect audits, with zero violations.
-All five model turns overlap, and one actual build/test pair overlaps.
-The mechanism records reject 7,102 frame mutations; eleven altered model-run
-records are also rejected. A production receiver rejects changed resource
-arguments before any effect in native and strict-provenance Miri tests.
-These are source-bound qualifications using a synthetic compiler data model.
-See the [scope and evidence](benchmark/ports/10M.md).
-
-Manufacturing (`11E`) passes 36 actual-Wasm conditions, including all 24 job
-orders and eight contended-machine/retry schedules. The records pass dynamic EPF
-and independent effect audits, rejecting 2,040 frame mutations. On the repaired
-source, three Luna xhigh participants complete the task in 38.28 seconds with
-280,303 inclusive tokens, five effects, zero violations and one actual pair of
-overlapping independent jobs. Eleven altered model-run records are rejected.
-The first pilot failed because its localside skipped a required retry; that
-failure remains preserved. This is an unscored qualification, not a success-rate
-estimate. See the [scope and evidence](benchmark/ports/11E.md).
-
-Pharmaceutical synthesis (`13E`) passes three scripted Wasm conditions and one
-three-model pilot. The pilot completed in 42.35 seconds with 356,591 inclusive
-tokens, eight actual effects, no violations and passing EPF/effect audits.
-The common world tests input causality without reading the task choreography.
-See the [source-bound scope](benchmark/ports/13E.md).
-
-Medical consultation (`5E`) passes nine scripted real-Wasm conditions, three
-strict-provenance Miri functions and one three-model pilot. The pilot takes
-31.45 seconds and 257,121 inclusive tokens, with six actual effects, zero
-violations and passing dynamic EPF/effect audits. Scripted conditions preserve
-partial-panel reconsideration and CT before, between or after panel requests.
-The common world checks actual patient inputs without prescribing a workflow.
-Its absent prescribing/administration effects are not certified. See the
-[source-bound scope and limits](benchmark/ports/5E.md).
-
-The subsequent common-world version 4 corrects 5H's ICU bed capacity from the
-default one to the specified two. All 73 world tests pass, including 90 legal
-5H image orders and actual overlapping ICU calls. Effect/scorer code is unchanged;
-earlier pilot records keep their original contracts and hashes.
-The direct-file `5H` port passes eleven real-Wasm conditions and a seven-model
-pilot through common scoring, complete dynamic EPF and actual-effect audits.
-The pilot takes 68.85 seconds, 1,081,788 inclusive tokens and completes 16 effects
-with zero violations and seven overlapping effect pairs. Both patient-independence
-schedules finish one patient's care before the other patient's assessment starts.
-The mechanism suite also observes concurrent CT/MRI imaging and interpretation.
-This was the 21st qualified direct-file task. Source-bound scope and
-limits are recorded in [the 5H port](benchmark/ports/5H.md).
-
-Review (`6E`) was the 22nd qualified direct-file task. Its independent
-feature protocols pass all 34 real-Wasm conditions and a three-Luna/xhigh pilot
-on one checking binary. The pilot completes in 164.67 seconds with 976,699
-inclusive tokens, four reviews (two rejected), ten effects and zero violations.
-Complete EPF and separate effect/common-world audits pass; 3,080 effect-record
-and eleven run-record mutations are rejected. Only rejected attempts repeat,
-with approval and merge outside the roll. The source shrinks from 1,461 to 181
-events without changing the simulator or adopting core/WASI runtime changes.
-See [the exact scope and measurements](benchmark/ports/6E.md).
-
-Feature delivery (`6M`) was the 23rd qualified direct-file task.
-Six five-Wasm conditions pass the complete EPF capture, request/effect and
-common-score checks. A five-Luna/xhigh pilot freely using wash and private files
-also passes, including two review rejections and two failed CI results followed
-by repair: 482.10 seconds, 3,854,537 inclusive tokens, 26 effects and zero
-violations. This is an unscored source-bound qualification.
-See [the protocol policy and evidence](benchmark/ports/6M.md).
-
-Staged integration (`6H`) is the 24th qualified direct-file task; 24 remain.
-Both seven-Wasm conditions and a seven-Luna/xhigh depth-2 pilot pass complete
-EPF, independent request/effect/reply checks and neutral common scoring on the
-same executable. The pilot completes in 517.34 seconds with 8,533,959 inclusive
-tokens, 53 effects and zero violations, including two failed reviews, two failed
-CI results, two failed staging validations and two real rollbacks. No domain
-effects overlap in this pilot; seven model turns do overlap. These are finite,
-unscored observations. See [the source-bound scope](benchmark/ports/6H.md).
-
-Multi-specialty care (`5M`) passes nine direct-file real-Wasm conditions and
-one five-model pilot on the same runtime. The pilot completes in 75.24 seconds
-with 776,651 inclusive tokens, 12 effects, zero violations and passing complete
-EPF/effect/common-world audits. Early own-work reads return recoverable errors;
-the agents choose subsequent operations themselves. The scripted suite retains
-all six causal imaging orders and actual concurrent CT/MRI effects, and rejects
-360 effect-record mutations. See [the exact scope](benchmark/ports/5M.md).
-
-Drug discovery (`14E`) has two production-receiver negative probes, three
-actual-Wasm conditions covering both decisions, and one four-model pilot. The
-pilot passed the common outcome and EPF/effect audits in 57.86 seconds, with
-12 actual analyses, no resource conflicts and 492,253 inclusive tokens. Its
-5 overlaps between independent instrument effects and 4,744 captured records
-are retained with the exact source and binary. These are unscored results;
-the shared simulator does not enforce this port's choreography. The
-[port contract](benchmark/ports/14E.md) separates the two.
-
-The report port has 27 scripted Wasm conditions and one three-model pilot,
-with original scoring, EPF execution checks and actual-effect audits.
-Its current evidence rejects 6,797 record mutations across those 28 traces.
-These are mechanism qualifications on their recorded sources, not scored
-comparisons or a completed qualification of every port on the final core.
-
-The API-coordination port (`4E`) has five actual-Wasm conditions, including both
-implementation orders and repeated API changes, plus one three-model pilot.
-All pass original scoring, EPF source-execution interpretation and the separate
-actual-effect audit. The pilot took 38.38 seconds and 287,517 inclusive tokens.
-These results are tied to their recorded sources and are not scored comparisons.
-
-The plan records unscored subscription pilots with their exact sources and
-binaries. They do not qualify later revisions or establish benchmark success rates.
-
-The [work plan](plan.md) distinguishes implemented ports, verified paths,
-remaining tasks and scored results. [The paper draft](paper/choreofix.tex)
-remains a draft until the experiments and analysis are complete.
+For a comparison intended to isolate enforcement, both arms must allow the
+same schedules, expose the same commands and replies, and let an agent recover
+from the same rejected calls. A native procedure that fixes resource priority
+or changes acquisition order is reported separately. The [experiment
+contract](benchmark/experiment-contract.json) records these distinctions.
+The [maintenance study](analysis/arbitration.md#maintenance-study) measures
+edits to authorization decisions directly. Comparison-client development is
+on hold while ChoreoFix's own task experiments continue.
 
 ## Protocols and participant code
 

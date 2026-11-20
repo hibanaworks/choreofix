@@ -5,7 +5,7 @@ use crate::shell::{
     imp::{review_reply::ReviewReply, service::Domain},
 };
 use core::cell::Cell;
-use hibana::{Endpoint, runtime::resolver::DecisionArm};
+use hibana::{Endpoint, g::Message, runtime::resolver::DecisionArm};
 use serde_json::Value;
 #[hibana_runtime::scope]
 pub async fn run<D: Domain>(
@@ -13,53 +13,17 @@ pub async fn run<D: Domain>(
     (domain, actual): (&D, &Cell<Option<Value>>),
 ) -> ShellResult<()> {
     let mut build = owner.recv::<BuildLoan>().await?;
-    {
-        let (mut publication, mut checked) = loop {
-            let inputs = imp::decode(build.recv::<PublicationA>().await?)?;
-            let tests: [Value; 3] = serde_json::from_value(inputs["tests"].clone())
-                .map_err(|error| ShellError::message(error.to_string()))?;
-            let publication = &inputs["publication"];
-            imp::ci_inputs(publication, &tests, 0)?;
-            let bytes = imp::encode(publication)?;
-            build.send::<FilePublicationA>(&bytes.as_slice()).await?;
-            let arguments = build.recv::<CiRequestA>().await?.into_value();
-            let value = domain
-                .execute("CI_RUNNER", "run_tests", arguments)
-                .await
-                .map_err(ShellError::message)?;
-            imp::ci_result(&value, publication, &tests, 0)?;
-            let bytes = imp::encode(&value)?;
-            actual.set(Some(value.clone()));
-            match actual_outcome(actual)
-                .map_err(|error| ShellError::message(format!("{error:?}")))?
-            {
-                DecisionArm::Left => {
-                    build
-                        .send::<CiPassedA>(&ReviewReply::<true>::from_bytes(&bytes)?)
-                        .await?;
-                    build.send::<FileCiResultA>(&bytes.as_slice()).await?;
-                    let context = serde_json::json!({"publication":publication,"ci":value});
-                    imp::staging_inputs(&context, 0)?;
-                    let bytes = imp::encode(&context)?;
-                    build.send::<StagingReadyA>(&bytes.as_slice()).await?;
-                    break (publication.clone(), value);
-                }
-                DecisionArm::Right => {
-                    build
-                        .send::<CiFailedA>(&ReviewReply::<false>::from_bytes(&bytes)?)
-                        .await?;
-                    build.send::<FileCiResultA>(&bytes.as_slice()).await?;
-                }
-            }
-        };
-        loop {
-            let stage = imp::decode(build.recv::<StageUpdateA>().await?)?;
-            imp::publication_stage(&stage, &publication, &checked, 0)?;
-            if stage["success"] == true {
-                break;
-            }
-            (publication, checked) = loop {
-                let inputs = imp::decode(build.recv::<PublicationA>().await?)?;
+    let mut checked = [Value::Null, Value::Null, Value::Null];
+    loop {
+        let event = owner.offer().await?;
+        match event.label() {
+            PublicationA::LOGICAL_LABEL | RepairPublicationA::LOGICAL_LABEL => {
+                let submission = event.label();
+                let inputs = if submission == RepairPublicationA::LOGICAL_LABEL {
+                    imp::decode(event.recv::<RepairPublicationA>().await?)?
+                } else {
+                    imp::decode(event.recv::<PublicationA>().await?)?
+                };
                 let tests: [Value; 3] = serde_json::from_value(inputs["tests"].clone())
                     .map_err(|error| ShellError::message(error.to_string()))?;
                 let publication = &inputs["publication"];
@@ -72,79 +36,55 @@ pub async fn run<D: Domain>(
                     .await
                     .map_err(ShellError::message)?;
                 imp::ci_result(&value, publication, &tests, 0)?;
-                let bytes = imp::encode(&value)?;
                 actual.set(Some(value.clone()));
-                match actual_outcome(actual)
-                    .map_err(|error| ShellError::message(format!("{error:?}")))?
-                {
-                    DecisionArm::Left => {
+                let bytes = imp::encode(&value)?;
+                match (
+                    submission,
+                    actual_outcome(actual)
+                        .map_err(|error| ShellError::message(format!("{error:?}")))?,
+                ) {
+                    (PublicationA::LOGICAL_LABEL, DecisionArm::Left) => {
+                        build
+                            .send::<CiPassedA>(&ReviewReply::<true>::from_bytes(&bytes)?)
+                            .await?;
+                    }
+                    (PublicationA::LOGICAL_LABEL, DecisionArm::Right) => {
+                        build
+                            .send::<CiFailedA>(&ReviewReply::<false>::from_bytes(&bytes)?)
+                            .await?;
+                    }
+                    (RepairPublicationA::LOGICAL_LABEL, DecisionArm::Left) => {
                         build
                             .send::<StageCiPassedA>(&ReviewReply::<true>::from_bytes(&bytes)?)
                             .await?;
-                        build.send::<FileCiResultA>(&bytes.as_slice()).await?;
-                        let context = serde_json::json!({"publication":publication,"ci":value});
-                        imp::staging_inputs(&context, 0)?;
-                        let bytes = imp::encode(&context)?;
-                        build.send::<StagingReadyA>(&bytes.as_slice()).await?;
-                        break (publication.clone(), value);
                     }
-                    DecisionArm::Right => {
+                    (RepairPublicationA::LOGICAL_LABEL, DecisionArm::Right) => {
                         build
                             .send::<StageCiFailedA>(&ReviewReply::<false>::from_bytes(&bytes)?)
                             .await?;
-                        build.send::<FileCiResultA>(&bytes.as_slice()).await?;
                     }
+                    _ => unreachable!("received publication contract"),
                 }
-            };
-        }
-    }
-    {
-        let (mut publication, mut checked) = loop {
-            let inputs = imp::decode(build.recv::<PublicationB>().await?)?;
-            let tests: [Value; 3] = serde_json::from_value(inputs["tests"].clone())
-                .map_err(|error| ShellError::message(error.to_string()))?;
-            let publication = &inputs["publication"];
-            imp::ci_inputs(publication, &tests, 1)?;
-            let bytes = imp::encode(publication)?;
-            build.send::<FilePublicationB>(&bytes.as_slice()).await?;
-            let arguments = build.recv::<CiRequestB>().await?.into_value();
-            let value = domain
-                .execute("CI_RUNNER", "run_tests", arguments)
-                .await
-                .map_err(ShellError::message)?;
-            imp::ci_result(&value, publication, &tests, 1)?;
-            let bytes = imp::encode(&value)?;
-            actual.set(Some(value.clone()));
-            match actual_outcome(actual)
-                .map_err(|error| ShellError::message(format!("{error:?}")))?
-            {
-                DecisionArm::Left => {
-                    build
-                        .send::<CiPassedB>(&ReviewReply::<true>::from_bytes(&bytes)?)
-                        .await?;
-                    build.send::<FileCiResultB>(&bytes.as_slice()).await?;
-                    let context = serde_json::json!({"publication":publication,"ci":value});
-                    imp::staging_inputs(&context, 1)?;
-                    let bytes = imp::encode(&context)?;
-                    build.send::<StagingReadyB>(&bytes.as_slice()).await?;
-                    break (publication.clone(), value);
-                }
-                DecisionArm::Right => {
-                    build
-                        .send::<CiFailedB>(&ReviewReply::<false>::from_bytes(&bytes)?)
-                        .await?;
-                    build.send::<FileCiResultB>(&bytes.as_slice()).await?;
+                build.send::<FileCiResultA>(&bytes.as_slice()).await?;
+                if value["success"] == true {
+                    let material = serde_json::json!({"publication":publication,"integrated_publication":publication,"ci":value});
+                    imp::staging_inputs(&material, 0)?;
+                    let bytes = imp::encode(&material)?;
+                    build.send::<StagingReadyA>(&bytes.as_slice()).await?;
+                    checked[0] = material;
                 }
             }
-        };
-        loop {
-            let stage = imp::decode(build.recv::<StageUpdateB>().await?)?;
-            imp::publication_stage(&stage, &publication, &checked, 1)?;
-            if stage["success"] == true {
-                break;
+            StageUpdateA::LOGICAL_LABEL => {
+                let stage = imp::decode(event.recv::<StageUpdateA>().await?)?;
+                imp::publication_stage(&stage, &checked[0], 0)?;
             }
-            (publication, checked) = loop {
-                let inputs = imp::decode(build.recv::<PublicationB>().await?)?;
+            PublicationB::LOGICAL_LABEL | RepairPublicationB::LOGICAL_LABEL => {
+                let submission = event.label();
+                let inputs = if submission == RepairPublicationB::LOGICAL_LABEL {
+                    imp::decode(event.recv::<RepairPublicationB>().await?)?
+                } else {
+                    imp::decode(event.recv::<PublicationB>().await?)?
+                };
                 let tests: [Value; 3] = serde_json::from_value(inputs["tests"].clone())
                     .map_err(|error| ShellError::message(error.to_string()))?;
                 let publication = &inputs["publication"];
@@ -157,79 +97,55 @@ pub async fn run<D: Domain>(
                     .await
                     .map_err(ShellError::message)?;
                 imp::ci_result(&value, publication, &tests, 1)?;
-                let bytes = imp::encode(&value)?;
                 actual.set(Some(value.clone()));
-                match actual_outcome(actual)
-                    .map_err(|error| ShellError::message(format!("{error:?}")))?
-                {
-                    DecisionArm::Left => {
+                let bytes = imp::encode(&value)?;
+                match (
+                    submission,
+                    actual_outcome(actual)
+                        .map_err(|error| ShellError::message(format!("{error:?}")))?,
+                ) {
+                    (PublicationB::LOGICAL_LABEL, DecisionArm::Left) => {
+                        build
+                            .send::<CiPassedB>(&ReviewReply::<true>::from_bytes(&bytes)?)
+                            .await?;
+                    }
+                    (PublicationB::LOGICAL_LABEL, DecisionArm::Right) => {
+                        build
+                            .send::<CiFailedB>(&ReviewReply::<false>::from_bytes(&bytes)?)
+                            .await?;
+                    }
+                    (RepairPublicationB::LOGICAL_LABEL, DecisionArm::Left) => {
                         build
                             .send::<StageCiPassedB>(&ReviewReply::<true>::from_bytes(&bytes)?)
                             .await?;
-                        build.send::<FileCiResultB>(&bytes.as_slice()).await?;
-                        let context = serde_json::json!({"publication":publication,"ci":value});
-                        imp::staging_inputs(&context, 1)?;
-                        let bytes = imp::encode(&context)?;
-                        build.send::<StagingReadyB>(&bytes.as_slice()).await?;
-                        break (publication.clone(), value);
                     }
-                    DecisionArm::Right => {
+                    (RepairPublicationB::LOGICAL_LABEL, DecisionArm::Right) => {
                         build
                             .send::<StageCiFailedB>(&ReviewReply::<false>::from_bytes(&bytes)?)
                             .await?;
-                        build.send::<FileCiResultB>(&bytes.as_slice()).await?;
                     }
+                    _ => unreachable!("received publication contract"),
                 }
-            };
-        }
-    }
-    {
-        let (mut publication, mut checked) = loop {
-            let inputs = imp::decode(build.recv::<PublicationC>().await?)?;
-            let tests: [Value; 3] = serde_json::from_value(inputs["tests"].clone())
-                .map_err(|error| ShellError::message(error.to_string()))?;
-            let publication = &inputs["publication"];
-            imp::ci_inputs(publication, &tests, 2)?;
-            let bytes = imp::encode(publication)?;
-            build.send::<FilePublicationC>(&bytes.as_slice()).await?;
-            let arguments = build.recv::<CiRequestC>().await?.into_value();
-            let value = domain
-                .execute("CI_RUNNER", "run_tests", arguments)
-                .await
-                .map_err(ShellError::message)?;
-            imp::ci_result(&value, publication, &tests, 2)?;
-            let bytes = imp::encode(&value)?;
-            actual.set(Some(value.clone()));
-            match actual_outcome(actual)
-                .map_err(|error| ShellError::message(format!("{error:?}")))?
-            {
-                DecisionArm::Left => {
-                    build
-                        .send::<CiPassedC>(&ReviewReply::<true>::from_bytes(&bytes)?)
-                        .await?;
-                    build.send::<FileCiResultC>(&bytes.as_slice()).await?;
-                    let context = serde_json::json!({"publication":publication,"ci":value});
-                    imp::staging_inputs(&context, 2)?;
-                    let bytes = imp::encode(&context)?;
-                    build.send::<StagingReadyC>(&bytes.as_slice()).await?;
-                    break (publication.clone(), value);
-                }
-                DecisionArm::Right => {
-                    build
-                        .send::<CiFailedC>(&ReviewReply::<false>::from_bytes(&bytes)?)
-                        .await?;
-                    build.send::<FileCiResultC>(&bytes.as_slice()).await?;
+                build.send::<FileCiResultB>(&bytes.as_slice()).await?;
+                if value["success"] == true {
+                    let material = serde_json::json!({"publication":publication,"integrated_publication":publication,"ci":value});
+                    imp::staging_inputs(&material, 1)?;
+                    let bytes = imp::encode(&material)?;
+                    build.send::<StagingReadyB>(&bytes.as_slice()).await?;
+                    checked[1] = material;
                 }
             }
-        };
-        loop {
-            let stage = imp::decode(build.recv::<StageUpdateC>().await?)?;
-            imp::publication_stage(&stage, &publication, &checked, 2)?;
-            if stage["success"] == true {
-                break;
+            StageUpdateB::LOGICAL_LABEL => {
+                let stage = imp::decode(event.recv::<StageUpdateB>().await?)?;
+                imp::publication_stage(&stage, &checked[1], 1)?;
             }
-            (publication, checked) = loop {
-                let inputs = imp::decode(build.recv::<PublicationC>().await?)?;
+            PublicationC::LOGICAL_LABEL | RepairPublicationC::LOGICAL_LABEL => {
+                let submission = event.label();
+                let inputs = if submission == RepairPublicationC::LOGICAL_LABEL {
+                    imp::decode(event.recv::<RepairPublicationC>().await?)?
+                } else {
+                    imp::decode(event.recv::<PublicationC>().await?)?
+                };
                 let tests: [Value; 3] = serde_json::from_value(inputs["tests"].clone())
                     .map_err(|error| ShellError::message(error.to_string()))?;
                 let publication = &inputs["publication"];
@@ -242,34 +158,55 @@ pub async fn run<D: Domain>(
                     .await
                     .map_err(ShellError::message)?;
                 imp::ci_result(&value, publication, &tests, 2)?;
-                let bytes = imp::encode(&value)?;
                 actual.set(Some(value.clone()));
-                match actual_outcome(actual)
-                    .map_err(|error| ShellError::message(format!("{error:?}")))?
-                {
-                    DecisionArm::Left => {
+                let bytes = imp::encode(&value)?;
+                match (
+                    submission,
+                    actual_outcome(actual)
+                        .map_err(|error| ShellError::message(format!("{error:?}")))?,
+                ) {
+                    (PublicationC::LOGICAL_LABEL, DecisionArm::Left) => {
+                        build
+                            .send::<CiPassedC>(&ReviewReply::<true>::from_bytes(&bytes)?)
+                            .await?;
+                    }
+                    (PublicationC::LOGICAL_LABEL, DecisionArm::Right) => {
+                        build
+                            .send::<CiFailedC>(&ReviewReply::<false>::from_bytes(&bytes)?)
+                            .await?;
+                    }
+                    (RepairPublicationC::LOGICAL_LABEL, DecisionArm::Left) => {
                         build
                             .send::<StageCiPassedC>(&ReviewReply::<true>::from_bytes(&bytes)?)
                             .await?;
-                        build.send::<FileCiResultC>(&bytes.as_slice()).await?;
-                        let context = serde_json::json!({"publication":publication,"ci":value});
-                        imp::staging_inputs(&context, 2)?;
-                        let bytes = imp::encode(&context)?;
-                        build.send::<StagingReadyC>(&bytes.as_slice()).await?;
-                        break (publication.clone(), value);
                     }
-                    DecisionArm::Right => {
+                    (RepairPublicationC::LOGICAL_LABEL, DecisionArm::Right) => {
                         build
                             .send::<StageCiFailedC>(&ReviewReply::<false>::from_bytes(&bytes)?)
                             .await?;
-                        build.send::<FileCiResultC>(&bytes.as_slice()).await?;
                     }
+                    _ => unreachable!("received publication contract"),
                 }
-            };
+                build.send::<FileCiResultC>(&bytes.as_slice()).await?;
+                if value["success"] == true {
+                    let material = serde_json::json!({"publication":publication,"integrated_publication":publication,"ci":value});
+                    imp::staging_inputs(&material, 2)?;
+                    let bytes = imp::encode(&material)?;
+                    build.send::<StagingReadyC>(&bytes.as_slice()).await?;
+                    checked[2] = material;
+                }
+            }
+            StageUpdateC::LOGICAL_LABEL => {
+                let stage = imp::decode(event.recv::<StageUpdateC>().await?)?;
+                imp::publication_stage(&stage, &checked[2], 2)?;
+            }
+            TaskExit::LOGICAL_LABEL => {
+                if event.recv::<TaskExit>().await? != 0 {
+                    return Err(ShellError::message("staged integration failed"));
+                }
+                return Ok(());
+            }
+            label => return Err(ShellError::message(format!("unexpected CI input {label}"))),
         }
     }
-    if build.recv::<TaskExit>().await? != 0 {
-        return Err(ShellError::message("staged integration failed"));
-    }
-    Ok(())
 }

@@ -336,7 +336,7 @@ async fn all_writing_levels_use_actual_section_endpoints() -> Result<()> {
                 .arg("--check-writing-mutants")
                 .arg(output.join("events.jsonl"))
                 .arg(output.join("mutants"))
-                .stdout(Stdio::from(fs::File::create(output.join("mutants.log"))?))
+                .stdout(Stdio::null())
                 .stderr(Stdio::from(fs::File::create(
                     output.join("mutants-stderr.log"),
                 )?))
@@ -379,5 +379,97 @@ async fn all_writing_levels_use_actual_section_endpoints() -> Result<()> {
         &json!({"status":"passed","cases":cases,"model_calls":0,"scored_benchmark":false}),
     )?;
     println!("{}", directory.display());
+    Ok(())
+}
+
+/// Each writer completes through wash before the next writer starts reading.
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires the source-qualified writing executable and wash Wasm"]
+async fn writers_can_finish_in_different_orders() -> Result<()> {
+    std::env::set_current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))?;
+    let executable = PathBuf::from(
+        std::env::var_os("CHOREOFIX_WRITING_WASI_BINARY").ok_or("writing executable")?,
+    )
+    .canonicalize()?;
+    let wash = Path::new("vendor/hibana-wash/target/wasm32-wasip1/release/hibana-wash.wasm");
+    let root = PathBuf::from(std::env::var_os("CHOREOFIX_EVIDENCE_ROOT").ok_or("evidence root")?)
+        .join("writer-orders");
+    fs::create_dir_all(root.parent().ok_or("orders directory")?)?;
+    fs::create_dir(&root)?;
+    let receipt = PathBuf::from(
+        std::env::var_os("CHOREOFIX_WRITING_BUILD_RECEIPT").ok_or("writing build receipt")?,
+    );
+    let receipt = archive_build_receipt(&executable, &receipt, &root)?;
+    for (task, orders) in [
+        ("2E", &["ABC", "ACB", "BAC", "BCA", "CAB", "CBA"][..]),
+        (
+            "2M",
+            &["ABCDE", "BCDEA", "CDEAB", "DEABC", "EABCD", "EDCBA"][..],
+        ),
+        (
+            "2H",
+            &[
+                "ABCDEFG", "BCDEFGA", "CDEFGAB", "DEFGABC", "EFGABCD", "FGABCDE", "GABCDEF",
+                "GFEDCBA",
+            ][..],
+        ),
+    ] {
+        let root = root.join(task);
+        fs::create_dir(&root)?;
+        let projection = crate::projection::archive(&executable, &root, task)?;
+        for &order in orders {
+            let case = root.join(order);
+            fs::create_dir(&case)?;
+            fs::hard_link(root.join("projection.json"), case.join("projection.json"))?;
+            let events = case.join("events.jsonl");
+            let trace = Trace::create(&events)?;
+            let (world, fixture) = oracle::Simulator::new(task, 0, 0.01, trace.clone(), &[])?;
+            save(
+                &case.join("case.json"),
+                &json!({"task":task,"depth":0,"order":order,"model_calls":0,"scored_benchmark":false,"build":receipt,"runtime_binary_sha256":projection["runtime_binary_sha256"],"compiled_projection_sha256":digest(&case.join("projection.json"))?,"guest_wasm_sha256":digest(wash)?,"simulator_manifest_sha256":digest(Path::new("benchmark/simulator-manifest.json"))?,"harness_binary_sha256":digest(&std::env::current_exe()?)?}),
+            )?;
+            let (guest, trial) = process::guest(&executable, wash, &[task], &case, trace, world)?;
+            let ((), result) = hibana_runtime::race(
+                async {
+                    async {
+                        for seat in order.bytes() {
+                            participant(
+                                &guest,
+                                fixture["fixtures"][usize::from(seat - b'A')].clone(),
+                                false,
+                            )
+                            .await?;
+                        }
+                        Ok(())
+                    };
+                    async { trial.await };
+                },
+                hibana_runtime::host::deadline(Duration::from_secs(90)),
+            )
+            .await?;
+            save(&case.join("result.json"), &result)?;
+            assert_eq!(result["runtime_exit_code"], 0);
+            assert_eq!(result["protocol"]["status"], "complete");
+            assert_eq!(result["score"]["complete"], true);
+            assert_eq!(result["score"]["violations"], json!([]));
+            let expected: Vec<_> = order
+                .chars()
+                .map(|seat| format!("RESEARCHER_{seat}"))
+                .collect();
+            let actual: Vec<_> = result["score"]["events"]
+                .as_array()
+                .ok_or("world events")?
+                .iter()
+                .filter(|e| e["tool"] == "write_to_document")
+                .map(|e| e["agent"].as_str().ok_or("writer"))
+                .collect::<std::result::Result<_, _>>()?;
+            assert_eq!(actual, expected);
+            let audit = crate::writing_audit::audit(&events)?;
+            assert_eq!(audit["actual_resource_endpoint_returns"], 2 * order.len());
+            assert_eq!(audit["violations"], 0);
+            save(&case.join("audit.json"), &audit)?;
+        }
+    }
     Ok(())
 }

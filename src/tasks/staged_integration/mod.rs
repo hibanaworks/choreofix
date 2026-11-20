@@ -60,6 +60,7 @@ pub async fn run_stdio(module: &[u8]) -> crate::shell::ShellResult<()> {
         ],
         [
             (session, REPO),
+            (session, MERGE_REQUESTS),
             (session, TEST_ENV),
             (session, BUILD_SERVER),
             (session, STAGING_ENV),
@@ -172,6 +173,7 @@ pub async fn run_stdio(module: &[u8]) -> crate::shell::ShellResult<()> {
             let mut ci_data = rv.enter(session, &p.ci_data)?;
             let mut release_data = rv.enter(session, &p.release_data)?;
             let repo_resource = rv.enter(session, &p.repo)?;
+            let merge_requests = rv.enter(session, &p.merge_requests)?;
             let environment = rv.enter(session, &p.environment)?;
             let build = rv.enter(session, &p.build)?;
             let staging = rv.enter(session, &p.staging)?;
@@ -188,6 +190,8 @@ pub async fn run_stdio(module: &[u8]) -> crate::shell::ShellResult<()> {
                 let [mut repo, mut test, mut ci, mut stage] = resource_init.par()?;
                 async {
                     repo.send::<RepoLoan>(repo_resource).await?;
+                    repo.send::<crate::shell::global::Loan<MERGE_REQUESTS>>(merge_requests)
+                        .await?;
                 };
                 async {
                     test.send::<TestLoan>(environment).await?;

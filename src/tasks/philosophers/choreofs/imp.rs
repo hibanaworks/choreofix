@@ -67,6 +67,33 @@ impl WirePayload for PhilosopherArguments {
     }
 }
 
+/// Shell JSON keeps the user's whitespace and additional fields on the wire.
+pub struct Thought<'a>(&'a [u8]);
+impl WireEncode for Thought<'_> {
+    fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
+        output
+            .get_mut(..self.0.len())
+            .ok_or(CodecError::Truncated)?
+            .copy_from_slice(self.0);
+        Ok(self.0.len())
+    }
+}
+impl WirePayload for Thought<'_> {
+    const SCHEMA_ID: u32 = 0x5048_4902;
+    type Decoded<'a> = Value;
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        let value = serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
+        valid_object(&value)
+            .then_some(())
+            .ok_or(CodecError::Malformed)
+    }
+    fn decode_validated_payload<'a>(
+        input: hibana::runtime::wire::ReceivedPayload<'a, Self>,
+    ) -> Value {
+        serde_json::from_slice(input.as_bytes()).expect("validated think arguments")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

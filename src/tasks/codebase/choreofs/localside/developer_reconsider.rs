@@ -8,8 +8,9 @@ pub(crate) async fn run<'run, const ROLE: u8, const FIRST: u8, const SECOND: u8>
     domain: &impl Domain,
     test_result: &input::TestResult,
 ) -> ShellResult<()> {
+    let [mut primary, mut secondary, mut file] = endpoint.par()?;
     let input = input::assignment(ROLE);
-    let arguments = endpoint.recv::<DesignRequest<ROLE>>().await?.into_value();
+    let arguments = file.recv::<DesignRequest<ROLE>>().await?.into_value();
     let designed = domain
         .execute(input.agent, "design_feature", arguments)
         .await
@@ -21,13 +22,10 @@ pub(crate) async fn run<'run, const ROLE: u8, const FIRST: u8, const SECOND: u8>
         ));
     }
     let bytes = wire::encode(&designed)?;
-    endpoint.send::<DesignCompleted>(&bytes.as_slice()).await?;
+    file.send::<DesignCompleted>(&bytes.as_slice()).await?;
 
     loop {
-        let arguments = endpoint
-            .recv::<ImplementRequest<ROLE>>()
-            .await?
-            .into_value();
+        let arguments = file.recv::<ImplementRequest<ROLE>>().await?.into_value();
         let implemented = domain
             .execute(input.agent, "implement_code", arguments)
             .await
@@ -41,92 +39,96 @@ pub(crate) async fn run<'run, const ROLE: u8, const FIRST: u8, const SECOND: u8>
             ));
         }
         let bytes = wire::encode(&implemented)?;
-        endpoint
-            .send::<ImplementCompleted>(&bytes.as_slice())
-            .await?;
+        file.send::<ImplementCompleted>(&bytes.as_slice()).await?;
 
-        let admitted = endpoint.recv::<CommitRequest<ROLE>>().await?;
+        let admitted = primary.recv::<CommitRequest<ROLE>>().await?;
         let arguments = wire::ModuleArguments::from_bytes(admitted.as_bytes())?;
-        let (mut first, mut second) = async {
-            let [mut a, mut b] = endpoint.par()?;
-            async { a.recv::<Loan<FIRST>>().await };
-            async { b.recv::<Loan<SECOND>>().await };
-        }
-        .await?;
-        let (request_a, request_b) = async {
-            let [mut a, mut b] = endpoint.par()?;
+        let (bytes, committed) = {
+            let ((mut first, request_a), (mut second, request_b)) = async {
+                async {
+                    let mut first = primary.recv::<ModuleLoan<ROLE, FIRST>>().await?;
+                    let request = async {
+                        async {
+                            first.send::<ModuleRequest<FIRST>>(&arguments).await?;
+                        };
+                        Ok(primary.recv::<ModuleRequest<FIRST>>().await?)
+                    }
+                    .await?;
+                    Ok((first, request))
+                };
+                async {
+                    let mut second = secondary.recv::<ModuleLoan<ROLE, SECOND>>().await?;
+                    let request = async {
+                        async {
+                            second.send::<ModuleRequest<SECOND>>(&arguments).await?;
+                        };
+                        Ok(secondary.recv::<ModuleRequest<SECOND>>().await?)
+                    }
+                    .await?;
+                    Ok((second, request))
+                };
+            }
+            .await?;
+            let admitted = admitted.into_value();
+            if request_a != request_b || request_a.into_value() != admitted {
+                return Err(ShellError::message(
+                    "module requests differ from the actual file request",
+                ));
+            }
+            let committed = domain
+                .execute(input.agent, "commit_changes", admitted)
+                .await
+                .map_err(ShellError::message)?;
+            wire::result(&committed, "commit_changes", input.agent)?;
+            if committed["success"] != true
+                || committed["data"]["artifact"]["source"] != implemented["data"]["artifact"]
+            {
+                return Err(ShellError::message(
+                    "module effect did not consume its actual implementation",
+                ));
+            }
+            let bytes = wire::encode(&committed)?;
             async {
                 async {
-                    first.send::<ModuleRequest<FIRST>>(&arguments).await?;
+                    async {
+                        async {
+                            primary
+                                .send::<ModuleCompleted<FIRST>>(&bytes.as_slice())
+                                .await?;
+                        };
+                        let received = first.recv::<ModuleCompleted<FIRST>>().await?;
+                        if received[..] != bytes {
+                            return Err(ShellError::message("first module result differs"));
+                        }
+                        Ok(())
+                    }
+                    .await?;
+                    primary.send::<Loan<FIRST>>(first).await?;
                 };
-                Ok(a.recv::<ModuleRequest<FIRST>>().await?)
-            };
-            async {
                 async {
-                    second.send::<ModuleRequest<SECOND>>(&arguments).await?;
+                    async {
+                        async {
+                            secondary
+                                .send::<ModuleCompleted<SECOND>>(&bytes.as_slice())
+                                .await?;
+                        };
+                        let received = second.recv::<ModuleCompleted<SECOND>>().await?;
+                        if received[..] != bytes {
+                            return Err(ShellError::message("second module result differs"));
+                        }
+                        Ok(())
+                    }
+                    .await?;
+                    secondary.send::<Loan<SECOND>>(second).await?;
                 };
-                Ok(b.recv::<ModuleRequest<SECOND>>().await?)
-            };
-        }
-        .await?;
-        let admitted = admitted.into_value();
-        if request_a != request_b || request_a.into_value() != admitted {
-            return Err(ShellError::message(
-                "module requests differ from the actual file request",
-            ));
-        }
-        let committed = domain
-            .execute(input.agent, "commit_changes", admitted)
-            .await
-            .map_err(ShellError::message)?;
-        wire::result(&committed, "commit_changes", input.agent)?;
-        if committed["success"] != true
-            || committed["data"]["artifact"]["source"] != implemented["data"]["artifact"]
-        {
-            return Err(ShellError::message(
-                "module effect did not consume its actual implementation",
-            ));
-        }
-        let bytes = wire::encode(&committed)?;
-        async {
-            let [mut a, mut b] = endpoint.par()?;
-            async {
-                async {
-                    a.send::<ModuleCompleted<FIRST>>(&bytes.as_slice()).await?;
-                };
-                let received = first.recv::<ModuleCompleted<FIRST>>().await?;
-                if received[..] != bytes {
-                    return Err(ShellError::message("first module result differs"));
-                }
                 Ok(())
-            };
-            async {
-                async {
-                    b.send::<ModuleCompleted<SECOND>>(&bytes.as_slice()).await?;
-                };
-                let received = second.recv::<ModuleCompleted<SECOND>>().await?;
-                if received[..] != bytes {
-                    return Err(ShellError::message("second module result differs"));
-                }
-                Ok(())
-            };
-            Ok(())
-        }
-        .await?;
-        async {
-            let [mut a, mut b] = endpoint.par()?;
-            async {
-                a.send::<Loan<FIRST>>(first).await?;
-            };
-            async {
-                b.send::<Loan<SECOND>>(second).await?;
-            };
-            Ok(())
-        }
-        .await?;
-        endpoint.send::<CommitCompleted>(&bytes.as_slice()).await?;
+            }
+            .await?;
+            (bytes, committed)
+        };
+        file.send::<CommitCompleted>(&bytes.as_slice()).await?;
 
-        let arguments = endpoint.recv::<TestRequest<ROLE>>().await?.into_value();
+        let arguments = file.recv::<TestRequest<ROLE>>().await?.into_value();
         let tested = domain
             .execute(input.agent, "run_local_tests", arguments)
             .await
@@ -139,26 +141,9 @@ pub(crate) async fn run<'run, const ROLE: u8, const FIRST: u8, const SECOND: u8>
         }
         let bytes = wire::encode(&tested)?;
         test_result.record(tested.clone());
-        let branch = endpoint.offer().await?;
+        let branch = file.offer().await?;
         drop(branch);
-        async {
-            let [mut file, mut first_owner, mut second_owner] = endpoint.par()?;
-            async {
-                file.send::<TestCompleted>(&bytes.as_slice()).await?;
-            };
-            async {
-                first_owner
-                    .send::<ModuleTestResult<SECOND>>(&bytes.as_slice())
-                    .await?;
-            };
-            async {
-                second_owner
-                    .send::<ModuleTestResult<FIRST>>(&bytes.as_slice())
-                    .await?;
-            };
-            Ok(())
-        }
-        .await?;
+        file.send::<TestCompleted>(&bytes.as_slice()).await?;
         if tested["success"] == true {
             return Ok(());
         }

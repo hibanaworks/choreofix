@@ -9,7 +9,11 @@ pub const AGENTS: [&str; 7] = [
     "PHILOSOPHER_F",
     "PHILOSOPHER_G",
 ];
+pub const THINK_REQUEST: u8 = 230;
+pub const THINK_COMPLETED: u8 = 231;
 pub mod roles {
+    pub const MEAL_REQUESTS: u8 = 70;
+    pub const TABLE: u8 = 71;
     pub const A: u8 = 0;
     pub const FORK_A: u8 = 7;
     pub const A_WASI: u8 = 14;
@@ -18,7 +22,6 @@ pub mod roles {
     pub const A_THINK_FILE: u8 = 35;
     pub const THINK_A: u8 = 42;
     pub const A_EAT_FILE: u8 = 49;
-    pub const A_THINK_CLOSE: u8 = 56;
     pub const A_EAT_CLOSE: u8 = 63;
     pub const B: u8 = 1;
     pub const FORK_B: u8 = 8;
@@ -28,7 +31,6 @@ pub mod roles {
     pub const B_THINK_FILE: u8 = 36;
     pub const THINK_B: u8 = 43;
     pub const B_EAT_FILE: u8 = 50;
-    pub const B_THINK_CLOSE: u8 = 57;
     pub const B_EAT_CLOSE: u8 = 64;
     pub const C: u8 = 2;
     pub const FORK_C: u8 = 9;
@@ -38,7 +40,6 @@ pub mod roles {
     pub const C_THINK_FILE: u8 = 37;
     pub const THINK_C: u8 = 44;
     pub const C_EAT_FILE: u8 = 51;
-    pub const C_THINK_CLOSE: u8 = 58;
     pub const C_EAT_CLOSE: u8 = 65;
     pub const D: u8 = 3;
     pub const FORK_D: u8 = 10;
@@ -48,7 +49,6 @@ pub mod roles {
     pub const D_THINK_FILE: u8 = 38;
     pub const THINK_D: u8 = 45;
     pub const D_EAT_FILE: u8 = 52;
-    pub const D_THINK_CLOSE: u8 = 59;
     pub const D_EAT_CLOSE: u8 = 66;
     pub const E: u8 = 4;
     pub const FORK_E: u8 = 11;
@@ -58,7 +58,6 @@ pub mod roles {
     pub const E_THINK_FILE: u8 = 39;
     pub const THINK_E: u8 = 46;
     pub const E_EAT_FILE: u8 = 53;
-    pub const E_THINK_CLOSE: u8 = 60;
     pub const E_EAT_CLOSE: u8 = 67;
     pub const F: u8 = 5;
     pub const FORK_F: u8 = 12;
@@ -68,7 +67,6 @@ pub mod roles {
     pub const F_THINK_FILE: u8 = 40;
     pub const THINK_F: u8 = 47;
     pub const F_EAT_FILE: u8 = 54;
-    pub const F_THINK_CLOSE: u8 = 61;
     pub const F_EAT_CLOSE: u8 = 68;
     pub const G: u8 = 6;
     pub const FORK_G: u8 = 13;
@@ -78,6 +76,5 @@ pub mod roles {
     pub const G_THINK_FILE: u8 = 41;
     pub const THINK_G: u8 = 48;
     pub const G_EAT_FILE: u8 = 55;
-    pub const G_THINK_CLOSE: u8 = 62;
     pub const G_EAT_CLOSE: u8 = 69;
 }

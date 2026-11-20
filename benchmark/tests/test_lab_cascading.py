@@ -109,6 +109,30 @@ class LabCascadingWorld(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.sim.progress['reagent_units_remaining'], 0)
         self.assertFalse((await self.call(ANALYSIS)).success)
 
+    async def test_qc_rejection_keeps_actual_measurements_but_cannot_certify_old_material(self):
+        # Scientific measurements remain possible on rejected material. The
+        # same old assay still cannot clear QC or produce an approved final.
+        for analyses in itertools.permutations(QUALITY[:3]):
+            if analyses.index(CHROMATOGRAPHY) > analyses.index(MOLECULAR):
+                continue
+            self.setUp()
+            for operation in PREPARATION:
+                self.assertTrue((await self.call(operation)).success, operation)
+            self.sim._failure_specs = [FailureSpec('verify_result', call_index=0)]
+            rejected = await self.call(QC)
+            self.assertEqual(rejected.data['status'], 'rejected')
+            for operation in analyses:
+                measured = await self.call(operation)
+                self.assertTrue(measured.success, (operation, measured.data))
+                self.assertEqual(measured.data['inputs']['synthesis'],
+                                 rejected.data['inputs']['synthesis'])
+            self.assertFalse((await self.call(QC)).success)
+            self.assertTrue((await self.call(ASSAY)).success)
+            self.assertFalse((await self.call(QC)).success)
+            self.assertFalse((await self.call(FINAL)).success)
+            self.assertFalse(self.sim.is_complete())
+            self.assertEqual(self.sim.violations, [])
+
     async def test_a_pending_synthesis_spends_stock_but_cannot_supply_material(self):
         self.sim._delay_multiplier = 1
         self.sim.tool_delay = lambda tool, **kwargs: (0.02, 0.02) if tool == 'run_synthesis' else (0, 0)

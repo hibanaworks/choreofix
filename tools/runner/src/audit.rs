@@ -28,7 +28,20 @@ fn check_resource_assignments(task: &str, fixture: &Value, metadata: &Value) -> 
             .iter()
             .map(|v| v.as_str().ok_or("resource name"))
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        let mut expected = if field == "resources" {
+        let mut expected = if matches!(task, "7H" | "8M") {
+            let mut names = BTreeSet::new();
+            for operation in actor["operations"]
+                .as_array()
+                .ok_or("original operations")?
+            {
+                names.extend(crate::oracle::resources_for_call(
+                    metadata,
+                    actor["agent"].as_str().ok_or("participant")?,
+                    &json!({"tool":operation["name"]}),
+                )?);
+            }
+            names.into_iter().collect::<Vec<_>>()
+        } else if field == "resources" && !matches!(task, "14H" | "16M") {
             // The tools' physical resources are data, not a list of known task IDs.
             let mut names = Vec::new();
             for call in actor["calls"].as_array().ok_or("participant assignments")? {
@@ -106,6 +119,150 @@ fn tokens(value: &Value) -> Result<u64> {
     Ok(total)
 }
 
+pub(crate) fn shell_exchanges(
+    rows: &[Value],
+    expected: &Value,
+    can_collect: bool,
+) -> Result<Vec<(String, Value)>> {
+    // Each guest command occupies one position in submission order, even if its
+    // terminal output is later collected through another model RPC.
+    let mut commands = Vec::<(&Value, Option<Value>)>::new();
+    let mut interrupted = BTreeSet::<usize>::new();
+    let mut active = BTreeMap::<String, (&Value, Option<usize>, Option<&Value>)>::new();
+    let mut rpc_ids = BTreeSet::new();
+    let mut item_ids = BTreeSet::new();
+    for row in rows {
+        let message = &row["message"];
+        if row["direction"] == "send" && message.get("method").is_none() {
+            let rpc = message["id"].to_string();
+            if let Some((_, _, sent)) = active.get_mut(&rpc) {
+                if sent.replace(&message["result"]).is_some() {
+                    return Err("duplicate shell response".into());
+                }
+            } else if rpc_ids.contains(&rpc) {
+                return Err("reply sent after model closed shell call".into());
+            }
+            continue;
+        }
+        if row["direction"] != "receive" {
+            continue;
+        }
+        model::check_model_item(message)?;
+        let params = &message["params"];
+        if message["method"] == "item/tool/call" {
+            let rpc = message["id"].to_string();
+            let item = params["callId"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .ok_or("missing tool callId")?;
+            if params["tool"] != "shell" || !rpc_ids.insert(rpc.clone()) || !item_ids.insert(item) {
+                return Err("duplicate or unexpected model tool".into());
+            }
+            let args = params["arguments"].as_object().ok_or("shell arguments")?;
+            let ordinal = if can_collect && args.is_empty() {
+                interrupted.pop_first()
+            } else if args.len() == 1
+                && let Some(command) = params["arguments"]["command"].as_str()
+            {
+                if command.len() <= 4096 {
+                    commands.push((params, None));
+                    Some(commands.len() - 1)
+                } else {
+                    None
+                }
+            } else {
+                return Err("unexpected shell arguments".into());
+            };
+            active.insert(rpc, (params, ordinal, None));
+        } else if message["method"] == "item/completed"
+            && params["item"]["type"] == "dynamicToolCall"
+        {
+            let rpc = active
+                .iter()
+                .find(|(_, (request, _, _))| model::same_tool_call(request, params))
+                .map(|(id, _)| id.clone())
+                .ok_or("model completed an unknown shell call")?;
+            let (request, ordinal, sent) = active.remove(&rpc).unwrap();
+            let cancelled = model::cancelled_tool(params);
+            if cancelled {
+                if let Some(i) = ordinal {
+                    interrupted.insert(i);
+                }
+            } else {
+                model::check_tool_completion(
+                    request,
+                    sent.ok_or("shell call closed before its reply")?,
+                    params,
+                )?;
+            }
+            if let Some(sent) = sent {
+                if sent["success"] != true {
+                    return Err("failed shell dispatch".into());
+                }
+                let items = sent["contentItems"].as_array().ok_or("tool reply")?;
+                let collect = request["arguments"]
+                    .as_object()
+                    .is_some_and(|a| a.is_empty());
+                let recovered = collect && ordinal.is_some();
+                if items.len() != if recovered { 2 } else { 1 }
+                    || items.iter().any(|item| item["type"] != "inputText")
+                {
+                    return Err("tool reply shape".into());
+                }
+                let response: Value =
+                    serde_json::from_str(items[0]["text"].as_str().ok_or("tool text")?)?;
+                if let Some(i) = ordinal {
+                    let (original, recorded) = &mut commands[i];
+                    if recovered {
+                        let origin: Value = serde_json::from_str(
+                            items[1]["text"]
+                                .as_str()
+                                .ok_or("original command receipt")?,
+                        )?;
+                        if origin
+                            != json!({"original_call":original["callId"],"command":original["arguments"]["command"]})
+                        {
+                            return Err("terminal output names a different original call".into());
+                        }
+                    }
+                    if recorded
+                        .as_ref()
+                        .is_some_and(|previous| *previous != response)
+                    {
+                        return Err("terminal output changed between deliveries".into());
+                    }
+                    *recorded = Some(response);
+                } else {
+                    let expected = if collect {
+                        json!({"status":"no_interrupted_command"})
+                    } else {
+                        json!({"status":"script_too_long","limit_utf8_bytes":4096})
+                    };
+                    if response != expected {
+                        return Err("unexpected local shell response".into());
+                    }
+                }
+            }
+        }
+    }
+    if !active.is_empty()
+        || !interrupted.is_empty()
+        || *expected != rpc_ids.len()
+        || rpc_ids.is_empty()
+    {
+        return Err("incomplete tool exchanges".into());
+    }
+    commands
+        .into_iter()
+        .map(|(request, out)| {
+            Ok((
+                request["arguments"]["command"].as_str().unwrap().to_owned(),
+                out.ok_or("missing terminal output")?,
+            ))
+        })
+        .collect()
+}
+
 fn participant(root: &Path, agent: &str, runtime: &[Value]) -> Result<Value> {
     let directory = root.join(agent);
     let report = load(&directory.join("participant.json"))?;
@@ -166,66 +323,13 @@ fn participant(root: &Path, agent: &str, runtime: &[Value]) -> Result<Value> {
         return Err("usage differs from raw event".into());
     }
     let total = tokens(usage)?;
-    let mut pending = BTreeMap::new();
-    let mut ids = BTreeSet::new();
-    let mut exchanges = Vec::new();
-    for row in &rows {
-        let message = &row["message"];
-        if row["direction"] == "receive" {
-            if let Some(kind) = message["params"]["item"]["type"].as_str()
-                && ![
-                    "dynamicToolCall",
-                    "reasoning",
-                    "userMessage",
-                    "agentMessage",
-                ]
-                .contains(&kind)
-            {
-                return Err("native model tool item present".into());
-            }
-            if message["method"] == "item/tool/call" {
-                let id = message["id"].to_string();
-                if !ids.insert(id.clone()) || message["params"]["tool"] != "shell" {
-                    return Err("duplicate or unexpected model tool".into());
-                }
-                let arguments = &message["params"]["arguments"];
-                if arguments.as_object().is_none_or(|v| v.len() != 1) {
-                    return Err("unexpected shell arguments".into());
-                }
-                pending.insert(
-                    id,
-                    arguments["command"]
-                        .as_str()
-                        .ok_or("shell command")?
-                        .to_owned(),
-                );
-            }
-        } else if row["direction"] == "send"
-            && let Some(command) = pending.remove(&message["id"].to_string())
-        {
-            if message["result"]["success"] != true {
-                return Err("failed shell dispatch".into());
-            }
-            let items = message["result"]["contentItems"]
-                .as_array()
-                .ok_or("tool reply")?;
-            if items.len() != 1 || items[0]["type"] != "inputText" {
-                return Err("tool reply shape".into());
-            }
-            let response: Value =
-                serde_json::from_str(items[0]["text"].as_str().ok_or("tool text")?)?;
-            if command.len() > 4096 {
-                if response != json!({"status":"script_too_long","limit_utf8_bytes":4096}) {
-                    return Err("script limit response".into());
-                }
-            } else {
-                exchanges.push((command, response));
-            }
-        }
-    }
-    if !pending.is_empty() || report["tool_calls"] != ids.len() || ids.is_empty() {
-        return Err("incomplete tool exchanges".into());
-    }
+    let exchanges = shell_exchanges(
+        &rows,
+        &report["tool_calls"],
+        thread["dynamicTools"][0]["inputSchema"]
+            .get("required")
+            .is_none(),
+    )?;
     let mut commands = BTreeMap::new();
     let mut delivered = Vec::new();
     let mut exited = false;
@@ -237,17 +341,24 @@ fn participant(root: &Path, agent: &str, runtime: &[Value]) -> Result<Value> {
         if row["direction"] == "to_runtime" && message["type"] == "command" {
             if exited
                 || commands
-                    .insert(message["id"].to_string(), message["command"].clone())
+                    .insert(message["id"].to_string(), delivered.len())
                     .is_some()
             {
                 return Err("duplicate or after-exit command".into());
             }
+            delivered.push((
+                message["command"]
+                    .as_str()
+                    .ok_or("runtime command")?
+                    .to_owned(),
+                Value::Null,
+            ));
         } else if row["direction"] == "runtime"
             && ["terminal", "exit", "terminal_closed"]
                 .contains(&message["type"].as_str().unwrap_or(""))
             && !message["id"].is_null()
         {
-            let command = commands
+            let position = commands
                 .remove(&message["id"].to_string())
                 .ok_or("terminal reply without command")?;
             let reply = match message["type"].as_str() {
@@ -258,14 +369,14 @@ fn participant(root: &Path, agent: &str, runtime: &[Value]) -> Result<Value> {
                 }
                 _ => json!({"status":"guest_closed"}),
             };
-            delivered.push((command.as_str().ok_or("runtime command")?.to_owned(), reply));
+            delivered[position].1 = reply;
         }
     }
     if !commands.is_empty() || !exited || delivered != exchanges {
         return Err("model commands/replies differ from actual guest transport".into());
     }
     Ok(
-        json!({"participant":agent,"inclusive_tokens":total,"usage":usage,"tool_calls":ids.len(),
+        json!({"participant":agent,"inclusive_tokens":total,"usage":usage,"tool_calls":report["tool_calls"],
         "turn_start_unix_ns":turn["unix_ns"],"turn_end_unix_ns":completed["unix_ns"]}),
     )
 }
@@ -352,6 +463,29 @@ pub fn run(root: &Path) -> Result<Value> {
         return Err("task identity, depth or participant set differs from original inputs".into());
     }
     check_resource_assignments(task, fixture, &metadata)?;
+    if matches!(task, "7H" | "8M" | "14H" | "16M") {
+        let schemas = load(&root.join(format!("source/benchmark/descriptions/{task}/tools.json")))?;
+        if fixture["tool_schemas"] != schemas {
+            return Err("tool schemas differ from the common task".into());
+        }
+        let tools = schemas.as_array().ok_or("tool schemas")?;
+        for actor in fixture["fixtures"].as_array().ok_or("fixture actors")? {
+            let expected = tools
+                .iter()
+                .map(|tool| &tool["function"])
+                .filter(|tool| {
+                    tool["agent_ids"]
+                        .as_array()
+                        .is_some_and(|agents| agents.contains(&actor["agent"]))
+                })
+                .collect::<Vec<_>>();
+            if (expected.is_empty() && !(task == "16M" && actor["agent"] == "BUILD_MASTER"))
+                || actor["operations"] != json!(expected)
+            {
+                return Err("participant operations differ from the common task".into());
+            }
+        }
+    }
     if fixture["adapter"] != "rust_upstream_api"
         || fixture["test_delays"] != json!({})
         || fixture["delay_multiplier"] != 1.0
@@ -422,10 +556,16 @@ pub fn run(root: &Path) -> Result<Value> {
         "1E" | "1M" | "1H" => crate::codebase_audit::audit(&root.join("events.jsonl"))?,
         "2E" | "2M" | "2H" => crate::writing_audit::audit(&root.join("events.jsonl"))?,
         "3E" => crate::report_audit::audit(&root.join("events.jsonl"))?,
+        "3M" => crate::research_paper_audit::audit(&root.join("events.jsonl"))?,
+        "3H" => crate::survey_paper_audit::audit(&root.join("events.jsonl"))?,
         "4E" => crate::coordination_audit::audit(&root.join("events.jsonl"))?,
         "4M" => crate::refactor_audit::audit(&root.join("events.jsonl"))?,
         "13E" => crate::lab_audit::audit(&root.join("events.jsonl"))?,
         "13M" => crate::lab_quality_audit::audit(&root.join("events.jsonl"))?,
+        "13H" => crate::lab_cascading_audit::audit(&root.join("events.jsonl"))?,
+        "14E" => crate::drug_discovery_audit::audit(&root.join("events.jsonl"))?,
+        "14M" => crate::regulatory_discovery_audit::audit(&root.join("events.jsonl"))?,
+        "14H" => crate::multi_round_discovery_audit::audit(&root.join("events.jsonl"))?,
         "5E" => crate::medical_audit::audit(&root.join("events.jsonl"))?,
         "5M" => crate::multi_specialty_audit::audit(&root.join("events.jsonl"))?,
         "5H" => crate::critical_care_audit::audit(&root.join("events.jsonl"))?,
@@ -433,12 +573,16 @@ pub fn run(root: &Path) -> Result<Value> {
         "6M" => crate::feature_delivery_audit::audit(&root.join("events.jsonl"))?,
         "6H" => crate::staged_integration_audit::audit(&root.join("events.jsonl"))?,
         "7E" => crate::document_audit::audit(&root.join("events.jsonl"))?,
+        "7M" => crate::figure_document_audit::audit(&root.join("events.jsonl"))?,
+        "7H" => crate::large_document_audit::audit(&root.join("events.jsonl"))?,
         "10E" => crate::build_audit::audit(&root.join("events.jsonl"))?,
         "11E" => crate::manufacturing_audit::audit(&root.join("events.jsonl"))?,
         "12E" => crate::kitchen_audit::audit(&root.join("events.jsonl"))?,
         "10M" => crate::cascading_build_audit::audit(&root.join("events.jsonl"))?,
         "8E" => crate::api_audit::audit(&root.join("events.jsonl"))?,
+        "8M" => crate::full_stack_api_audit::audit(&root.join("events.jsonl"))?,
         "16E" => crate::cicd_audit::audit(&root.join("events.jsonl"))?,
+        "16M" => crate::cicd_pipeline_audit::audit(&root.join("events.jsonl"))?,
         "9E" | "9M" | "9H" => crate::philosophers_audit::audit(&root.join("events.jsonl"))?,
         _ => return Err("task has no delegated WASI implementation".into()),
     };
@@ -688,6 +832,37 @@ pub fn check_mutants(root: &Path, output: &Path) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recorded_guest_output_must_reach_the_same_model_call() {
+        let params = json!({"tool":"shell","arguments":{"command":"cat /service/material"},"threadId":"t","turnId":"u","callId":"exec"});
+        let request = json!({"direction":"receive","message":{"method":"item/tool/call","id":15,"params":params}});
+        let items = json!([{"type":"inputText","text":"{\"stdout\":\"manuscript\"}"}]);
+        let reply = json!({"direction":"send","message":{"id":15,"result":{"success":true,"contentItems":items}}});
+        let ack = json!({"direction":"receive","message":{"method":"item/completed","params":{"threadId":"t","turnId":"u","item":{"type":"dynamicToolCall","id":"exec","tool":"shell","arguments":params["arguments"],"status":"completed","success":true,"contentItems":items}}}});
+        let rows = [request, reply, ack];
+        let count = json!(1);
+        assert_eq!(
+            shell_exchanges(&rows, &count, true).unwrap(),
+            vec![(
+                "cat /service/material".to_owned(),
+                json!({"stdout":"manuscript"})
+            )]
+        );
+        assert!(shell_exchanges(&rows[..2], &count, true).is_err());
+        let mut early = rows.clone();
+        early.swap(1, 2);
+        assert!(shell_exchanges(&early, &count, true).is_err());
+        for (field, value) in [
+            ("contentItems", json!([])),
+            ("id", json!("other")),
+            ("arguments", json!({"command":"other"})),
+        ] {
+            let mut changed = rows.clone();
+            changed[2]["message"]["params"]["item"][field] = value;
+            assert!(shell_exchanges(&changed, &count, true).is_err(), "{field}");
+        }
+    }
 
     #[test]
     fn physical_resources_come_from_all_assigned_tools_without_a_task_allowlist() {

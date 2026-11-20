@@ -62,10 +62,10 @@ fn prepare<const OWNER: u8, const FILE: u8>() -> impl Projectable {
 // Reused by all fifteen researchers. The argument edges remain explicit at
 // each call site; this is the same two-resource choreography, not a dispatcher.
 fn writing<const OWNER: u8, const FIRST: u8, const SECOND: u8>(
-    (request, reply): (impl Projectable, impl Projectable),
-    (first_loan, second_loan): (impl Projectable, impl Projectable),
-    (first_return, second_return): (impl Projectable, impl Projectable),
-) -> impl Projectable {
+    (request, reply): (impl Projectable + Copy, impl Projectable + Copy),
+    (first_loan, second_loan): (impl Projectable + Copy, impl Projectable + Copy),
+    (first_return, second_return): (impl Projectable + Copy, impl Projectable + Copy),
+) -> impl Projectable + Copy {
     g::seq(
         request,
         g::seq(
@@ -93,6 +93,8 @@ fn review<const OWNER: u8, const FILE: u8>() -> impl Projectable {
     )
 }
 
+pub type Submitted<const ROLE: u8> = g::Msg<ROLE, Arguments<ROLE, 2>>;
+
 pub mod roles2e {
     pub const A: u8 = 0;
     pub const A_FILE: u8 = 80;
@@ -109,11 +111,10 @@ pub mod roles2e {
     pub const C_VM: u8 = 98;
     pub const C_IO: u8 = 114;
     pub const C_DATA: u8 = 130;
-    pub const INTRO: u8 = 32;
+    pub const SUBMISSIONS: u8 = 31;
+    pub const EDITOR: u8 = 32;
     pub const INTRO_RESOURCE: u8 = 64;
-    pub const METHODS: u8 = 33;
     pub const METHODS_RESOURCE: u8 = 65;
-    pub const RESULTS: u8 = 34;
     pub const RESULTS_RESOURCE: u8 = 66;
 }
 pub struct Programs2E {
@@ -132,67 +133,93 @@ pub struct Programs2E {
     pub c_vm: RoleProgram<{ roles2e::C_VM }>,
     pub c_io: RoleProgram<{ roles2e::C_IO }>,
     pub c_data: RoleProgram<{ roles2e::C_DATA }>,
-    pub intro: RoleProgram<{ roles2e::INTRO }>,
+    pub submissions: RoleProgram<{ roles2e::SUBMISSIONS }>,
+    pub editor: RoleProgram<{ roles2e::EDITOR }>,
     pub intro_resource: RoleProgram<{ roles2e::INTRO_RESOURCE }>,
-    pub methods: RoleProgram<{ roles2e::METHODS }>,
     pub methods_resource: RoleProgram<{ roles2e::METHODS_RESOURCE }>,
-    pub results: RoleProgram<{ roles2e::RESULTS }>,
     pub results_resource: RoleProgram<{ roles2e::RESULTS_RESOURCE }>,
 }
 pub fn project_2e() -> Programs2E {
     use roles2e::*;
     let writing_a = writing::<A, INTRO_RESOURCE, METHODS_RESOURCE>(
         (
-            g::send::<A_FILE, A, WriteRequest<A>>(),
+            g::send::<EDITOR, A, WriteRequest<A>>(),
             g::send::<A, A_FILE, WriteResult>(),
         ),
         (
-            g::send::<INTRO, A, Loan<INTRO_RESOURCE>>(),
-            g::send::<METHODS, A, Loan<METHODS_RESOURCE>>(),
+            g::send::<EDITOR, A, Loan<INTRO_RESOURCE>>(),
+            g::send::<EDITOR, A, Loan<METHODS_RESOURCE>>(),
         ),
         (
-            g::send::<A, INTRO, Loan<INTRO_RESOURCE>>(),
-            g::send::<A, METHODS, Loan<METHODS_RESOURCE>>(),
+            g::send::<A, EDITOR, Loan<INTRO_RESOURCE>>(),
+            g::send::<A, EDITOR, Loan<METHODS_RESOURCE>>(),
         ),
     );
     let writing_b = writing::<B, METHODS_RESOURCE, RESULTS_RESOURCE>(
         (
-            g::send::<B_FILE, B, WriteRequest<B>>(),
+            g::send::<EDITOR, B, WriteRequest<B>>(),
             g::send::<B, B_FILE, WriteResult>(),
         ),
         (
-            g::send::<METHODS, B, Loan<METHODS_RESOURCE>>(),
-            g::send::<RESULTS, B, Loan<RESULTS_RESOURCE>>(),
+            g::send::<EDITOR, B, Loan<METHODS_RESOURCE>>(),
+            g::send::<EDITOR, B, Loan<RESULTS_RESOURCE>>(),
         ),
         (
-            g::send::<B, METHODS, Loan<METHODS_RESOURCE>>(),
-            g::send::<B, RESULTS, Loan<RESULTS_RESOURCE>>(),
+            g::send::<B, EDITOR, Loan<METHODS_RESOURCE>>(),
+            g::send::<B, EDITOR, Loan<RESULTS_RESOURCE>>(),
         ),
     );
     let writing_c = writing::<C, INTRO_RESOURCE, RESULTS_RESOURCE>(
         (
-            g::send::<C_FILE, C, WriteRequest<C>>(),
+            g::send::<EDITOR, C, WriteRequest<C>>(),
             g::send::<C, C_FILE, WriteResult>(),
         ),
         (
-            g::send::<INTRO, C, Loan<INTRO_RESOURCE>>(),
-            g::send::<RESULTS, C, Loan<RESULTS_RESOURCE>>(),
+            g::send::<EDITOR, C, Loan<INTRO_RESOURCE>>(),
+            g::send::<EDITOR, C, Loan<RESULTS_RESOURCE>>(),
         ),
         (
-            g::send::<C, INTRO, Loan<INTRO_RESOURCE>>(),
-            g::send::<C, RESULTS, Loan<RESULTS_RESOURCE>>(),
+            g::send::<C, EDITOR, Loan<INTRO_RESOURCE>>(),
+            g::send::<C, EDITOR, Loan<RESULTS_RESOURCE>>(),
         ),
     );
-    let preparations = g::par(
-        prepare::<A, A_FILE>(),
-        g::par(prepare::<B, B_FILE>(), prepare::<C, C_FILE>()),
+    let ready = g::par(
+        g::seq(
+            prepare::<A, A_FILE>(),
+            g::send::<A_FILE, SUBMISSIONS, Submitted<A>>(),
+        ),
+        g::par(
+            g::seq(
+                prepare::<B, B_FILE>(),
+                g::send::<B_FILE, SUBMISSIONS, Submitted<B>>(),
+            ),
+            g::seq(
+                prepare::<C, C_FILE>(),
+                g::send::<C_FILE, SUBMISSIONS, Submitted<C>>(),
+            ),
+        ),
     );
-    let writes = g::seq(writing_a, g::seq(writing_b, writing_c));
+    let writes = g::route(
+        g::seq(
+            writing_a,
+            g::route(g::seq(writing_b, writing_c), g::seq(writing_c, writing_b)),
+        ),
+        g::route(
+            g::seq(
+                writing_b,
+                g::route(g::seq(writing_a, writing_c), g::seq(writing_c, writing_a)),
+            ),
+            g::seq(
+                writing_c,
+                g::route(g::seq(writing_a, writing_b), g::seq(writing_b, writing_a)),
+            ),
+        ),
+    );
     let reviews = g::par(
         review::<A, A_FILE>(),
         g::par(review::<B, B_FILE>(), review::<C, C_FILE>()),
     );
-    let task = g::seq(preparations, g::seq(writes, reviews));
+    let task = g::seq(ready, g::seq(writes, reviews));
     let initial = g::par(
         g::send::<A_DATA, A_VM, Loan<A_FILE>>(),
         g::par(
@@ -249,11 +276,10 @@ pub fn project_2e() -> Programs2E {
         c_vm: project(&protocol),
         c_io: project(&protocol),
         c_data: project(&protocol),
-        intro: project(&protocol),
+        submissions: project(&protocol),
+        editor: project(&protocol),
         intro_resource: project(&protocol),
-        methods: project(&protocol),
         methods_resource: project(&protocol),
-        results: project(&protocol),
         results_resource: project(&protocol),
     }
 }
@@ -261,14 +287,31 @@ impl Programs2E {
     pub fn observation(&self) -> serde_json::Value {
         use crate::imp::projection::rows;
         use roles2e::*;
-        serde_json::json!({"type":"compiled_projection","format_version":1,"task":"2E","session":SESSION,"participants":{
+        serde_json::json!({"type":"compiled_projection","format_version":1,"task":"2E","session":SESSION,"submissions":SUBMISSIONS,"editor":EDITOR,"participants":{
 "RESEARCHER_A":{"role":A,"file":A_FILE,"vm":A_VM,"io":A_IO,"data":A_DATA,"resources":[INTRO_RESOURCE,METHODS_RESOURCE]},
 "RESEARCHER_B":{"role":B,"file":B_FILE,"vm":B_VM,"io":B_IO,"data":B_DATA,"resources":[METHODS_RESOURCE,RESULTS_RESOURCE]},
-"RESEARCHER_C":{"role":C,"file":C_FILE,"vm":C_VM,"io":C_IO,"data":C_DATA,"resources":[INTRO_RESOURCE,RESULTS_RESOURCE]}},"resources":{"INTRO_SECTION":{"role":INTRO_RESOURCE,"service":INTRO},"METHODS_SECTION":{"role":METHODS_RESOURCE,"service":METHODS},"RESULTS_SECTION":{"role":RESULTS_RESOURCE,"service":RESULTS}},"labels":{"read":1,"draft":2,"write":3,"review":4,"read_result":5,"draft_result":6,"write_result":7,"review_result":8},"programs":[rows(&self.a),rows(&self.a_file),rows(&self.a_vm),rows(&self.a_io),rows(&self.a_data),rows(&self.b),rows(&self.b_file),rows(&self.b_vm),rows(&self.b_io),rows(&self.b_data),rows(&self.c),rows(&self.c_file),rows(&self.c_vm),rows(&self.c_io),rows(&self.c_data),rows(&self.intro),rows(&self.intro_resource),rows(&self.methods),rows(&self.methods_resource),rows(&self.results),rows(&self.results_resource)]})
+"RESEARCHER_C":{"role":C,"file":C_FILE,"vm":C_VM,"io":C_IO,"data":C_DATA,"resources":[INTRO_RESOURCE,RESULTS_RESOURCE]}},"resources":{"INTRO_SECTION":{"role":INTRO_RESOURCE,"service":EDITOR},"METHODS_SECTION":{"role":METHODS_RESOURCE,"service":EDITOR},"RESULTS_SECTION":{"role":RESULTS_RESOURCE,"service":EDITOR}},"labels":{"read":1,"draft":2,"write":3,"review":4,"read_result":5,"draft_result":6,"write_result":7,"review_result":8},"programs":[rows(&self.a),rows(&self.a_file),rows(&self.a_vm),rows(&self.a_io),rows(&self.a_data),rows(&self.b),rows(&self.b_file),rows(&self.b_vm),rows(&self.b_io),rows(&self.b_data),rows(&self.c),rows(&self.c_file),rows(&self.c_vm),rows(&self.c_io),rows(&self.c_data),rows(&self.submissions),rows(&self.editor),rows(&self.intro_resource),rows(&self.methods_resource),rows(&self.results_resource)]})
     }
 }
 
+pub type SectionClaim<const LABEL: u8, const DEV: u8> = g::Msg<LABEL, Arguments<DEV, 2>>;
+
+// One physical section can serve either of its two writers first.
+fn section_use<const DEV: u8, const OWNER: u8, const RESOURCE: u8>() -> impl Projectable + Copy {
+    g::seq(
+        g::send::<OWNER, DEV, Loan<RESOURCE>>(),
+        g::seq(
+            g::send::<RESOURCE, DEV, SectionRequest<RESOURCE>>(),
+            g::seq(
+                g::send::<DEV, RESOURCE, SectionWritten<RESOURCE>>(),
+                g::send::<DEV, OWNER, Loan<RESOURCE>>(),
+            ),
+        ),
+    )
+}
 pub mod roles2m {
+    pub const SUBMISSIONS: u8 = 31;
+    pub const EDITOR: u8 = 30;
     pub const A: u8 = 3;
     pub const A_FILE: u8 = 80;
     pub const A_VM: u8 = 96;
@@ -306,6 +349,8 @@ pub mod roles2m {
     pub const RESULTS_RESOURCE: u8 = 68;
 }
 pub struct Programs2M {
+    pub submissions: RoleProgram<{ roles2m::SUBMISSIONS }>,
+    pub editor: RoleProgram<{ roles2m::EDITOR }>,
     pub a: RoleProgram<{ roles2m::A }>,
     pub a_file: RoleProgram<{ roles2m::A_FILE }>,
     pub a_vm: RoleProgram<{ roles2m::A_VM }>,
@@ -344,101 +389,125 @@ pub struct Programs2M {
 }
 pub fn project_2m() -> Programs2M {
     use roles2m::*;
-    let writing_a = writing::<A, BACKGROUND_RESOURCE, INTRO_RESOURCE>(
-        (
-            g::send::<A_FILE, A, WriteRequest<A>>(),
-            g::send::<A, A_FILE, WriteResult>(),
-        ),
-        (
-            g::send::<BACKGROUND, A, Loan<BACKGROUND_RESOURCE>>(),
-            g::send::<INTRO, A, Loan<INTRO_RESOURCE>>(),
-        ),
-        (
-            g::send::<A, BACKGROUND, Loan<BACKGROUND_RESOURCE>>(),
-            g::send::<A, INTRO, Loan<INTRO_RESOURCE>>(),
-        ),
-    );
-    let writing_b = writing::<B, BACKGROUND_RESOURCE, METHODS_RESOURCE>(
-        (
-            g::send::<B_FILE, B, WriteRequest<B>>(),
-            g::send::<B, B_FILE, WriteResult>(),
-        ),
-        (
-            g::send::<BACKGROUND, B, Loan<BACKGROUND_RESOURCE>>(),
-            g::send::<METHODS, B, Loan<METHODS_RESOURCE>>(),
-        ),
-        (
-            g::send::<B, BACKGROUND, Loan<BACKGROUND_RESOURCE>>(),
-            g::send::<B, METHODS, Loan<METHODS_RESOURCE>>(),
-        ),
-    );
-    let writing_c = writing::<C, EXPERIMENTS_RESOURCE, METHODS_RESOURCE>(
-        (
-            g::send::<C_FILE, C, WriteRequest<C>>(),
-            g::send::<C, C_FILE, WriteResult>(),
-        ),
-        (
-            g::send::<EXPERIMENTS, C, Loan<EXPERIMENTS_RESOURCE>>(),
-            g::send::<METHODS, C, Loan<METHODS_RESOURCE>>(),
-        ),
-        (
-            g::send::<C, EXPERIMENTS, Loan<EXPERIMENTS_RESOURCE>>(),
-            g::send::<C, METHODS, Loan<METHODS_RESOURCE>>(),
-        ),
-    );
-    let writing_d = writing::<D, EXPERIMENTS_RESOURCE, RESULTS_RESOURCE>(
-        (
-            g::send::<D_FILE, D, WriteRequest<D>>(),
-            g::send::<D, D_FILE, WriteResult>(),
-        ),
-        (
-            g::send::<EXPERIMENTS, D, Loan<EXPERIMENTS_RESOURCE>>(),
-            g::send::<RESULTS, D, Loan<RESULTS_RESOURCE>>(),
-        ),
-        (
-            g::send::<D, EXPERIMENTS, Loan<EXPERIMENTS_RESOURCE>>(),
-            g::send::<D, RESULTS, Loan<RESULTS_RESOURCE>>(),
-        ),
-    );
-    let writing_e = writing::<E, INTRO_RESOURCE, RESULTS_RESOURCE>(
-        (
-            g::send::<E_FILE, E, WriteRequest<E>>(),
-            g::send::<E, E_FILE, WriteResult>(),
-        ),
-        (
-            g::send::<INTRO, E, Loan<INTRO_RESOURCE>>(),
-            g::send::<RESULTS, E, Loan<RESULTS_RESOURCE>>(),
-        ),
-        (
-            g::send::<E, INTRO, Loan<INTRO_RESOURCE>>(),
-            g::send::<E, RESULTS, Loan<RESULTS_RESOURCE>>(),
-        ),
-    );
-    let preparations = g::par(
-        prepare::<A, A_FILE>(),
+    let preparation = g::par(
         g::par(
-            prepare::<B, B_FILE>(),
+            g::par(prepare::<A, A_FILE>(), prepare::<B, B_FILE>()),
+            prepare::<C, C_FILE>(),
+        ),
+        g::par(prepare::<D, D_FILE>(), prepare::<E, E_FILE>()),
+    );
+    let submitted = g::par(
+        g::par(
             g::par(
-                prepare::<C, C_FILE>(),
-                g::par(prepare::<D, D_FILE>(), prepare::<E, E_FILE>()),
+                g::send::<A_FILE, SUBMISSIONS, Submitted<A>>(),
+                g::send::<B_FILE, SUBMISSIONS, Submitted<B>>(),
+            ),
+            g::send::<C_FILE, SUBMISSIONS, Submitted<C>>(),
+        ),
+        g::par(
+            g::send::<D_FILE, SUBMISSIONS, Submitted<D>>(),
+            g::send::<E_FILE, SUBMISSIONS, Submitted<E>>(),
+        ),
+    );
+    let background_a = g::seq(
+        g::send::<EDITOR, BACKGROUND, Submitted<A>>(),
+        g::seq(
+            g::send::<BACKGROUND, SUBMISSIONS, SectionClaim<A_FILE, A>>(),
+            g::seq(
+                g::send::<BACKGROUND, A, WriteRequest<A>>(),
+                section_use::<A, BACKGROUND, BACKGROUND_RESOURCE>(),
             ),
         ),
     );
-    let writes = g::seq(
-        g::par(writing_a, writing_c),
-        g::seq(g::par(writing_b, writing_d), writing_e),
-    );
-    let reviews = g::par(
-        review::<A, A_FILE>(),
-        g::par(
-            review::<B, B_FILE>(),
-            g::par(
-                review::<C, C_FILE>(),
-                g::par(review::<D, D_FILE>(), review::<E, E_FILE>()),
+    let background_b = g::seq(
+        g::send::<EDITOR, BACKGROUND, Submitted<B>>(),
+        g::seq(
+            g::send::<BACKGROUND, SUBMISSIONS, SectionClaim<B_FILE, B>>(),
+            g::seq(
+                g::send::<BACKGROUND, B, WriteRequest<B>>(),
+                section_use::<B, BACKGROUND, BACKGROUND_RESOURCE>(),
             ),
         ),
     );
-    let task = g::seq(preparations, g::seq(writes, reviews));
+    let background = g::route(
+        g::seq(background_a, background_b),
+        g::seq(background_b, background_a),
+    );
+    let experiments_c = g::seq(
+        g::send::<EDITOR, EXPERIMENTS, Submitted<C>>(),
+        g::seq(
+            g::send::<EXPERIMENTS, SUBMISSIONS, SectionClaim<C_FILE, C>>(),
+            g::seq(
+                g::send::<EXPERIMENTS, C, WriteRequest<C>>(),
+                section_use::<C, EXPERIMENTS, EXPERIMENTS_RESOURCE>(),
+            ),
+        ),
+    );
+    let experiments_d = g::seq(
+        g::send::<EDITOR, EXPERIMENTS, Submitted<D>>(),
+        g::seq(
+            g::send::<EXPERIMENTS, SUBMISSIONS, SectionClaim<D_FILE, D>>(),
+            g::seq(
+                g::send::<EXPERIMENTS, D, WriteRequest<D>>(),
+                section_use::<D, EXPERIMENTS, EXPERIMENTS_RESOURCE>(),
+            ),
+        ),
+    );
+    let experiments = g::route(
+        g::seq(experiments_c, experiments_d),
+        g::seq(experiments_d, experiments_c),
+    );
+    let intro_e = g::seq(
+        g::send::<EDITOR, INTRO, Submitted<E>>(),
+        g::seq(
+            g::send::<INTRO, SUBMISSIONS, SectionClaim<E_FILE, E>>(),
+            g::seq(
+                g::send::<INTRO, E, WriteRequest<E>>(),
+                section_use::<E, INTRO, INTRO_RESOURCE>(),
+            ),
+        ),
+    );
+    let intro_a = g::seq(
+        g::send::<EDITOR, INTRO, SectionClaim<A_FILE, A>>(),
+        section_use::<A, INTRO, INTRO_RESOURCE>(),
+    );
+    let intro = g::route(g::seq(intro_e, intro_a), g::seq(intro_a, intro_e));
+    let methods_b = g::seq(
+        g::send::<EDITOR, METHODS, SectionClaim<B_FILE, B>>(),
+        section_use::<B, METHODS, METHODS_RESOURCE>(),
+    );
+    let methods_c = g::seq(
+        g::send::<EDITOR, METHODS, SectionClaim<C_FILE, C>>(),
+        section_use::<C, METHODS, METHODS_RESOURCE>(),
+    );
+    let methods = g::route(g::seq(methods_b, methods_c), g::seq(methods_c, methods_b));
+    let results_d = g::seq(
+        g::send::<EDITOR, RESULTS, SectionClaim<D_FILE, D>>(),
+        section_use::<D, RESULTS, RESULTS_RESOURCE>(),
+    );
+    let results_e = g::seq(
+        g::send::<EDITOR, RESULTS, SectionClaim<E_FILE, E>>(),
+        section_use::<E, RESULTS, RESULTS_RESOURCE>(),
+    );
+    let results = g::route(g::seq(results_d, results_e), g::seq(results_e, results_d));
+    let sections = g::par(
+        g::par(g::par(background, experiments), intro),
+        g::par(methods, results),
+    );
+    let results = g::par(
+        g::par(
+            g::par(
+                g::seq(g::send::<A, A_FILE, WriteResult>(), review::<A, A_FILE>()),
+                g::seq(g::send::<B, B_FILE, WriteResult>(), review::<B, B_FILE>()),
+            ),
+            g::seq(g::send::<C, C_FILE, WriteResult>(), review::<C, C_FILE>()),
+        ),
+        g::par(
+            g::seq(g::send::<D, D_FILE, WriteResult>(), review::<D, D_FILE>()),
+            g::seq(g::send::<E, E_FILE, WriteResult>(), review::<E, E_FILE>()),
+        ),
+    );
+    let task = g::seq(preparation, g::par(submitted, g::seq(sections, results)));
     let initial = g::par(
         g::send::<A_DATA, A_VM, Loan<A_FILE>>(),
         g::par(
@@ -510,6 +579,8 @@ pub fn project_2m() -> Programs2M {
     );
     let protocol = g::seq(initial, g::par(task, g::par(private, metadata)));
     Programs2M {
+        submissions: project(&protocol),
+        editor: project(&protocol),
         a: project(&protocol),
         a_file: project(&protocol),
         a_vm: project(&protocol),
@@ -551,16 +622,18 @@ impl Programs2M {
     pub fn observation(&self) -> serde_json::Value {
         use crate::imp::projection::rows;
         use roles2m::*;
-        serde_json::json!({"type":"compiled_projection","format_version":1,"task":"2M","session":SESSION,"participants":{
+        serde_json::json!({"type":"compiled_projection","format_version":1,"task":"2M","session":SESSION,"submissions":SUBMISSIONS,"editor":EDITOR,"participants":{
 "RESEARCHER_A":{"role":A,"file":A_FILE,"vm":A_VM,"io":A_IO,"data":A_DATA,"resources":[BACKGROUND_RESOURCE,INTRO_RESOURCE]},
 "RESEARCHER_B":{"role":B,"file":B_FILE,"vm":B_VM,"io":B_IO,"data":B_DATA,"resources":[BACKGROUND_RESOURCE,METHODS_RESOURCE]},
 "RESEARCHER_C":{"role":C,"file":C_FILE,"vm":C_VM,"io":C_IO,"data":C_DATA,"resources":[EXPERIMENTS_RESOURCE,METHODS_RESOURCE]},
 "RESEARCHER_D":{"role":D,"file":D_FILE,"vm":D_VM,"io":D_IO,"data":D_DATA,"resources":[EXPERIMENTS_RESOURCE,RESULTS_RESOURCE]},
-"RESEARCHER_E":{"role":E,"file":E_FILE,"vm":E_VM,"io":E_IO,"data":E_DATA,"resources":[INTRO_RESOURCE,RESULTS_RESOURCE]}},"resources":{"BACKGROUND_SECTION":{"role":BACKGROUND_RESOURCE,"service":BACKGROUND},"INTRO_SECTION":{"role":INTRO_RESOURCE,"service":INTRO},"METHODS_SECTION":{"role":METHODS_RESOURCE,"service":METHODS},"EXPERIMENTS_SECTION":{"role":EXPERIMENTS_RESOURCE,"service":EXPERIMENTS},"RESULTS_SECTION":{"role":RESULTS_RESOURCE,"service":RESULTS}},"labels":{"read":1,"draft":2,"write":3,"review":4,"read_result":5,"draft_result":6,"write_result":7,"review_result":8},"programs":[rows(&self.a),rows(&self.a_file),rows(&self.a_vm),rows(&self.a_io),rows(&self.a_data),rows(&self.b),rows(&self.b_file),rows(&self.b_vm),rows(&self.b_io),rows(&self.b_data),rows(&self.c),rows(&self.c_file),rows(&self.c_vm),rows(&self.c_io),rows(&self.c_data),rows(&self.d),rows(&self.d_file),rows(&self.d_vm),rows(&self.d_io),rows(&self.d_data),rows(&self.e),rows(&self.e_file),rows(&self.e_vm),rows(&self.e_io),rows(&self.e_data),rows(&self.background),rows(&self.background_resource),rows(&self.intro),rows(&self.intro_resource),rows(&self.methods),rows(&self.methods_resource),rows(&self.experiments),rows(&self.experiments_resource),rows(&self.results),rows(&self.results_resource)]})
+"RESEARCHER_E":{"role":E,"file":E_FILE,"vm":E_VM,"io":E_IO,"data":E_DATA,"resources":[INTRO_RESOURCE,RESULTS_RESOURCE]}},"resources":{"BACKGROUND_SECTION":{"role":BACKGROUND_RESOURCE,"service":BACKGROUND},"INTRO_SECTION":{"role":INTRO_RESOURCE,"service":INTRO},"METHODS_SECTION":{"role":METHODS_RESOURCE,"service":METHODS},"EXPERIMENTS_SECTION":{"role":EXPERIMENTS_RESOURCE,"service":EXPERIMENTS},"RESULTS_SECTION":{"role":RESULTS_RESOURCE,"service":RESULTS}},"labels":{"read":1,"draft":2,"write":3,"review":4,"read_result":5,"draft_result":6,"write_result":7,"review_result":8},"programs":[rows(&self.submissions),rows(&self.editor),rows(&self.a),rows(&self.a_file),rows(&self.a_vm),rows(&self.a_io),rows(&self.a_data),rows(&self.b),rows(&self.b_file),rows(&self.b_vm),rows(&self.b_io),rows(&self.b_data),rows(&self.c),rows(&self.c_file),rows(&self.c_vm),rows(&self.c_io),rows(&self.c_data),rows(&self.d),rows(&self.d_file),rows(&self.d_vm),rows(&self.d_io),rows(&self.d_data),rows(&self.e),rows(&self.e_file),rows(&self.e_vm),rows(&self.e_io),rows(&self.e_data),rows(&self.background),rows(&self.background_resource),rows(&self.intro),rows(&self.intro_resource),rows(&self.methods),rows(&self.methods_resource),rows(&self.experiments),rows(&self.experiments_resource),rows(&self.results),rows(&self.results_resource)]})
     }
 }
 
 pub mod roles2h {
+    pub const SUBMISSIONS: u8 = 31;
+    pub const EDITOR: u8 = 30;
     pub const A: u8 = 8;
     pub const A_FILE: u8 = 80;
     pub const A_VM: u8 = 96;
@@ -612,6 +685,8 @@ pub mod roles2h {
     pub const DISCUSSION_RESOURCE: u8 = 70;
 }
 pub struct Programs2H {
+    pub submissions: RoleProgram<{ roles2h::SUBMISSIONS }>,
+    pub editor: RoleProgram<{ roles2h::EDITOR }>,
     pub a: RoleProgram<{ roles2h::A }>,
     pub a_file: RoleProgram<{ roles2h::A_FILE }>,
     pub a_vm: RoleProgram<{ roles2h::A_VM }>,
@@ -664,141 +739,173 @@ pub struct Programs2H {
 }
 pub fn project_2h() -> Programs2H {
     use roles2h::*;
-    let writing_a = writing::<A, BACKGROUND_RESOURCE, INTRO_RESOURCE>(
-        (
-            g::send::<A_FILE, A, WriteRequest<A>>(),
-            g::send::<A, A_FILE, WriteResult>(),
-        ),
-        (
-            g::send::<BACKGROUND, A, Loan<BACKGROUND_RESOURCE>>(),
-            g::send::<INTRO, A, Loan<INTRO_RESOURCE>>(),
-        ),
-        (
-            g::send::<A, BACKGROUND, Loan<BACKGROUND_RESOURCE>>(),
-            g::send::<A, INTRO, Loan<INTRO_RESOURCE>>(),
-        ),
-    );
-    let writing_b = writing::<B, BACKGROUND_RESOURCE, RELATED_RESOURCE>(
-        (
-            g::send::<B_FILE, B, WriteRequest<B>>(),
-            g::send::<B, B_FILE, WriteResult>(),
-        ),
-        (
-            g::send::<BACKGROUND, B, Loan<BACKGROUND_RESOURCE>>(),
-            g::send::<RELATED, B, Loan<RELATED_RESOURCE>>(),
-        ),
-        (
-            g::send::<B, BACKGROUND, Loan<BACKGROUND_RESOURCE>>(),
-            g::send::<B, RELATED, Loan<RELATED_RESOURCE>>(),
-        ),
-    );
-    let writing_c = writing::<C, METHODS_RESOURCE, RELATED_RESOURCE>(
-        (
-            g::send::<C_FILE, C, WriteRequest<C>>(),
-            g::send::<C, C_FILE, WriteResult>(),
-        ),
-        (
-            g::send::<METHODS, C, Loan<METHODS_RESOURCE>>(),
-            g::send::<RELATED, C, Loan<RELATED_RESOURCE>>(),
-        ),
-        (
-            g::send::<C, METHODS, Loan<METHODS_RESOURCE>>(),
-            g::send::<C, RELATED, Loan<RELATED_RESOURCE>>(),
-        ),
-    );
-    let writing_d = writing::<D, EXPERIMENTS_RESOURCE, METHODS_RESOURCE>(
-        (
-            g::send::<D_FILE, D, WriteRequest<D>>(),
-            g::send::<D, D_FILE, WriteResult>(),
-        ),
-        (
-            g::send::<EXPERIMENTS, D, Loan<EXPERIMENTS_RESOURCE>>(),
-            g::send::<METHODS, D, Loan<METHODS_RESOURCE>>(),
-        ),
-        (
-            g::send::<D, EXPERIMENTS, Loan<EXPERIMENTS_RESOURCE>>(),
-            g::send::<D, METHODS, Loan<METHODS_RESOURCE>>(),
-        ),
-    );
-    let writing_e = writing::<E, EXPERIMENTS_RESOURCE, RESULTS_RESOURCE>(
-        (
-            g::send::<E_FILE, E, WriteRequest<E>>(),
-            g::send::<E, E_FILE, WriteResult>(),
-        ),
-        (
-            g::send::<EXPERIMENTS, E, Loan<EXPERIMENTS_RESOURCE>>(),
-            g::send::<RESULTS, E, Loan<RESULTS_RESOURCE>>(),
-        ),
-        (
-            g::send::<E, EXPERIMENTS, Loan<EXPERIMENTS_RESOURCE>>(),
-            g::send::<E, RESULTS, Loan<RESULTS_RESOURCE>>(),
-        ),
-    );
-    let writing_f = writing::<F, DISCUSSION_RESOURCE, RESULTS_RESOURCE>(
-        (
-            g::send::<F_FILE, F, WriteRequest<F>>(),
-            g::send::<F, F_FILE, WriteResult>(),
-        ),
-        (
-            g::send::<DISCUSSION, F, Loan<DISCUSSION_RESOURCE>>(),
-            g::send::<RESULTS, F, Loan<RESULTS_RESOURCE>>(),
-        ),
-        (
-            g::send::<F, DISCUSSION, Loan<DISCUSSION_RESOURCE>>(),
-            g::send::<F, RESULTS, Loan<RESULTS_RESOURCE>>(),
-        ),
-    );
-    let writing_g = writing::<G, DISCUSSION_RESOURCE, INTRO_RESOURCE>(
-        (
-            g::send::<G_FILE, G, WriteRequest<G>>(),
-            g::send::<G, G_FILE, WriteResult>(),
-        ),
-        (
-            g::send::<DISCUSSION, G, Loan<DISCUSSION_RESOURCE>>(),
-            g::send::<INTRO, G, Loan<INTRO_RESOURCE>>(),
-        ),
-        (
-            g::send::<G, DISCUSSION, Loan<DISCUSSION_RESOURCE>>(),
-            g::send::<G, INTRO, Loan<INTRO_RESOURCE>>(),
-        ),
-    );
-    let preparations = g::par(
-        prepare::<A, A_FILE>(),
+    let preparation = g::par(
         g::par(
-            prepare::<B, B_FILE>(),
+            g::par(prepare::<A, A_FILE>(), prepare::<B, B_FILE>()),
+            g::par(prepare::<C, C_FILE>(), prepare::<D, D_FILE>()),
+        ),
+        g::par(
+            g::par(prepare::<E, E_FILE>(), prepare::<F, F_FILE>()),
+            prepare::<G, G_FILE>(),
+        ),
+    );
+    let submitted = g::par(
+        g::par(
             g::par(
-                prepare::<C, C_FILE>(),
-                g::par(
-                    prepare::<D, D_FILE>(),
-                    g::par(
-                        prepare::<E, E_FILE>(),
-                        g::par(prepare::<F, F_FILE>(), prepare::<G, G_FILE>()),
-                    ),
-                ),
+                g::send::<A_FILE, SUBMISSIONS, Submitted<A>>(),
+                g::send::<B_FILE, SUBMISSIONS, Submitted<B>>(),
+            ),
+            g::par(
+                g::send::<C_FILE, SUBMISSIONS, Submitted<C>>(),
+                g::send::<D_FILE, SUBMISSIONS, Submitted<D>>(),
+            ),
+        ),
+        g::par(
+            g::par(
+                g::send::<E_FILE, SUBMISSIONS, Submitted<E>>(),
+                g::send::<F_FILE, SUBMISSIONS, Submitted<F>>(),
+            ),
+            g::send::<G_FILE, SUBMISSIONS, Submitted<G>>(),
+        ),
+    );
+    let background_a = g::seq(
+        g::send::<EDITOR, BACKGROUND, Submitted<A>>(),
+        g::seq(
+            g::send::<BACKGROUND, SUBMISSIONS, SectionClaim<A_FILE, A>>(),
+            g::seq(
+                g::send::<BACKGROUND, A, WriteRequest<A>>(),
+                section_use::<A, BACKGROUND, BACKGROUND_RESOURCE>(),
             ),
         ),
     );
-    let writes = g::seq(
-        g::par(writing_a, g::par(writing_c, writing_e)),
-        g::seq(g::par(writing_b, g::par(writing_d, writing_f)), writing_g),
-    );
-    let reviews = g::par(
-        review::<A, A_FILE>(),
-        g::par(
-            review::<B, B_FILE>(),
-            g::par(
-                review::<C, C_FILE>(),
-                g::par(
-                    review::<D, D_FILE>(),
-                    g::par(
-                        review::<E, E_FILE>(),
-                        g::par(review::<F, F_FILE>(), review::<G, G_FILE>()),
-                    ),
-                ),
+    let background_b = g::seq(
+        g::send::<EDITOR, BACKGROUND, Submitted<B>>(),
+        g::seq(
+            g::send::<BACKGROUND, SUBMISSIONS, SectionClaim<B_FILE, B>>(),
+            g::seq(
+                g::send::<BACKGROUND, B, WriteRequest<B>>(),
+                section_use::<B, BACKGROUND, BACKGROUND_RESOURCE>(),
             ),
         ),
     );
-    let task = g::seq(preparations, g::seq(writes, reviews));
+    let background = g::route(
+        g::seq(background_a, background_b),
+        g::seq(background_b, background_a),
+    );
+    let discussion_f = g::seq(
+        g::send::<EDITOR, DISCUSSION, SectionClaim<F_FILE, F>>(),
+        section_use::<F, DISCUSSION, DISCUSSION_RESOURCE>(),
+    );
+    let discussion_g = g::seq(
+        g::send::<EDITOR, DISCUSSION, SectionClaim<G_FILE, G>>(),
+        section_use::<G, DISCUSSION, DISCUSSION_RESOURCE>(),
+    );
+    let discussion = g::route(
+        g::seq(discussion_f, discussion_g),
+        g::seq(discussion_g, discussion_f),
+    );
+    let experiments_d = g::seq(
+        g::send::<EDITOR, EXPERIMENTS, SectionClaim<D_FILE, D>>(),
+        section_use::<D, EXPERIMENTS, EXPERIMENTS_RESOURCE>(),
+    );
+    let experiments_e = g::seq(
+        g::send::<EDITOR, EXPERIMENTS, SectionClaim<E_FILE, E>>(),
+        section_use::<E, EXPERIMENTS, EXPERIMENTS_RESOURCE>(),
+    );
+    let experiments = g::route(
+        g::seq(experiments_d, experiments_e),
+        g::seq(experiments_e, experiments_d),
+    );
+    let intro_g = g::seq(
+        g::send::<EDITOR, INTRO, Submitted<G>>(),
+        g::seq(
+            g::send::<INTRO, SUBMISSIONS, SectionClaim<G_FILE, G>>(),
+            g::seq(
+                g::send::<INTRO, G, WriteRequest<G>>(),
+                section_use::<G, INTRO, INTRO_RESOURCE>(),
+            ),
+        ),
+    );
+    let intro_a = g::seq(
+        g::send::<EDITOR, INTRO, SectionClaim<A_FILE, A>>(),
+        section_use::<A, INTRO, INTRO_RESOURCE>(),
+    );
+    let intro = g::route(g::seq(intro_g, intro_a), g::seq(intro_a, intro_g));
+    let methods_c = g::seq(
+        g::send::<EDITOR, METHODS, Submitted<C>>(),
+        g::seq(
+            g::send::<METHODS, SUBMISSIONS, SectionClaim<C_FILE, C>>(),
+            g::seq(
+                g::send::<METHODS, C, WriteRequest<C>>(),
+                section_use::<C, METHODS, METHODS_RESOURCE>(),
+            ),
+        ),
+    );
+    let methods_d = g::seq(
+        g::send::<EDITOR, METHODS, Submitted<D>>(),
+        g::seq(
+            g::send::<METHODS, SUBMISSIONS, SectionClaim<D_FILE, D>>(),
+            g::seq(
+                g::send::<METHODS, D, WriteRequest<D>>(),
+                section_use::<D, METHODS, METHODS_RESOURCE>(),
+            ),
+        ),
+    );
+    let methods = g::route(g::seq(methods_c, methods_d), g::seq(methods_d, methods_c));
+    let related_b = g::seq(
+        g::send::<EDITOR, RELATED, SectionClaim<B_FILE, B>>(),
+        section_use::<B, RELATED, RELATED_RESOURCE>(),
+    );
+    let related_c = g::seq(
+        g::send::<EDITOR, RELATED, SectionClaim<C_FILE, C>>(),
+        section_use::<C, RELATED, RELATED_RESOURCE>(),
+    );
+    let related = g::route(g::seq(related_b, related_c), g::seq(related_c, related_b));
+    let results_e = g::seq(
+        g::send::<EDITOR, RESULTS, Submitted<E>>(),
+        g::seq(
+            g::send::<RESULTS, SUBMISSIONS, SectionClaim<E_FILE, E>>(),
+            g::seq(
+                g::send::<RESULTS, E, WriteRequest<E>>(),
+                section_use::<E, RESULTS, RESULTS_RESOURCE>(),
+            ),
+        ),
+    );
+    let results_f = g::seq(
+        g::send::<EDITOR, RESULTS, Submitted<F>>(),
+        g::seq(
+            g::send::<RESULTS, SUBMISSIONS, SectionClaim<F_FILE, F>>(),
+            g::seq(
+                g::send::<RESULTS, F, WriteRequest<F>>(),
+                section_use::<F, RESULTS, RESULTS_RESOURCE>(),
+            ),
+        ),
+    );
+    let results = g::route(g::seq(results_e, results_f), g::seq(results_f, results_e));
+    let sections = g::par(
+        g::par(g::par(background, discussion), g::par(experiments, intro)),
+        g::par(g::par(methods, related), results),
+    );
+    let results = g::par(
+        g::par(
+            g::par(
+                g::seq(g::send::<A, A_FILE, WriteResult>(), review::<A, A_FILE>()),
+                g::seq(g::send::<B, B_FILE, WriteResult>(), review::<B, B_FILE>()),
+            ),
+            g::par(
+                g::seq(g::send::<C, C_FILE, WriteResult>(), review::<C, C_FILE>()),
+                g::seq(g::send::<D, D_FILE, WriteResult>(), review::<D, D_FILE>()),
+            ),
+        ),
+        g::par(
+            g::par(
+                g::seq(g::send::<E, E_FILE, WriteResult>(), review::<E, E_FILE>()),
+                g::seq(g::send::<F, F_FILE, WriteResult>(), review::<F, F_FILE>()),
+            ),
+            g::seq(g::send::<G, G_FILE, WriteResult>(), review::<G, G_FILE>()),
+        ),
+    );
+    let task = g::seq(preparation, g::par(submitted, g::seq(sections, results)));
     let initial = g::par(
         g::send::<A_DATA, A_VM, Loan<A_FILE>>(),
         g::par(
@@ -900,6 +1007,8 @@ pub fn project_2h() -> Programs2H {
     );
     let protocol = g::seq(initial, g::par(task, g::par(private, metadata)));
     Programs2H {
+        submissions: project(&protocol),
+        editor: project(&protocol),
         a: project(&protocol),
         a_file: project(&protocol),
         a_vm: project(&protocol),
@@ -955,13 +1064,13 @@ impl Programs2H {
     pub fn observation(&self) -> serde_json::Value {
         use crate::imp::projection::rows;
         use roles2h::*;
-        serde_json::json!({"type":"compiled_projection","format_version":1,"task":"2H","session":SESSION,"participants":{
+        serde_json::json!({"type":"compiled_projection","format_version":1,"task":"2H","session":SESSION,"submissions":SUBMISSIONS,"editor":EDITOR,"participants":{
 "RESEARCHER_A":{"role":A,"file":A_FILE,"vm":A_VM,"io":A_IO,"data":A_DATA,"resources":[BACKGROUND_RESOURCE,INTRO_RESOURCE]},
 "RESEARCHER_B":{"role":B,"file":B_FILE,"vm":B_VM,"io":B_IO,"data":B_DATA,"resources":[BACKGROUND_RESOURCE,RELATED_RESOURCE]},
 "RESEARCHER_C":{"role":C,"file":C_FILE,"vm":C_VM,"io":C_IO,"data":C_DATA,"resources":[METHODS_RESOURCE,RELATED_RESOURCE]},
 "RESEARCHER_D":{"role":D,"file":D_FILE,"vm":D_VM,"io":D_IO,"data":D_DATA,"resources":[EXPERIMENTS_RESOURCE,METHODS_RESOURCE]},
 "RESEARCHER_E":{"role":E,"file":E_FILE,"vm":E_VM,"io":E_IO,"data":E_DATA,"resources":[EXPERIMENTS_RESOURCE,RESULTS_RESOURCE]},
 "RESEARCHER_F":{"role":F,"file":F_FILE,"vm":F_VM,"io":F_IO,"data":F_DATA,"resources":[DISCUSSION_RESOURCE,RESULTS_RESOURCE]},
-"RESEARCHER_G":{"role":G,"file":G_FILE,"vm":G_VM,"io":G_IO,"data":G_DATA,"resources":[DISCUSSION_RESOURCE,INTRO_RESOURCE]}},"resources":{"BACKGROUND_SECTION":{"role":BACKGROUND_RESOURCE,"service":BACKGROUND},"INTRO_SECTION":{"role":INTRO_RESOURCE,"service":INTRO},"RELATED_SECTION":{"role":RELATED_RESOURCE,"service":RELATED},"METHODS_SECTION":{"role":METHODS_RESOURCE,"service":METHODS},"EXPERIMENTS_SECTION":{"role":EXPERIMENTS_RESOURCE,"service":EXPERIMENTS},"RESULTS_SECTION":{"role":RESULTS_RESOURCE,"service":RESULTS},"DISCUSSION_SECTION":{"role":DISCUSSION_RESOURCE,"service":DISCUSSION}},"labels":{"read":1,"draft":2,"write":3,"review":4,"read_result":5,"draft_result":6,"write_result":7,"review_result":8},"programs":[rows(&self.a),rows(&self.a_file),rows(&self.a_vm),rows(&self.a_io),rows(&self.a_data),rows(&self.b),rows(&self.b_file),rows(&self.b_vm),rows(&self.b_io),rows(&self.b_data),rows(&self.c),rows(&self.c_file),rows(&self.c_vm),rows(&self.c_io),rows(&self.c_data),rows(&self.d),rows(&self.d_file),rows(&self.d_vm),rows(&self.d_io),rows(&self.d_data),rows(&self.e),rows(&self.e_file),rows(&self.e_vm),rows(&self.e_io),rows(&self.e_data),rows(&self.f),rows(&self.f_file),rows(&self.f_vm),rows(&self.f_io),rows(&self.f_data),rows(&self.g),rows(&self.g_file),rows(&self.g_vm),rows(&self.g_io),rows(&self.g_data),rows(&self.background),rows(&self.background_resource),rows(&self.intro),rows(&self.intro_resource),rows(&self.related),rows(&self.related_resource),rows(&self.methods),rows(&self.methods_resource),rows(&self.experiments),rows(&self.experiments_resource),rows(&self.results),rows(&self.results_resource),rows(&self.discussion),rows(&self.discussion_resource)]})
+"RESEARCHER_G":{"role":G,"file":G_FILE,"vm":G_VM,"io":G_IO,"data":G_DATA,"resources":[DISCUSSION_RESOURCE,INTRO_RESOURCE]}},"resources":{"BACKGROUND_SECTION":{"role":BACKGROUND_RESOURCE,"service":BACKGROUND},"INTRO_SECTION":{"role":INTRO_RESOURCE,"service":INTRO},"RELATED_SECTION":{"role":RELATED_RESOURCE,"service":RELATED},"METHODS_SECTION":{"role":METHODS_RESOURCE,"service":METHODS},"EXPERIMENTS_SECTION":{"role":EXPERIMENTS_RESOURCE,"service":EXPERIMENTS},"RESULTS_SECTION":{"role":RESULTS_RESOURCE,"service":RESULTS},"DISCUSSION_SECTION":{"role":DISCUSSION_RESOURCE,"service":DISCUSSION}},"labels":{"read":1,"draft":2,"write":3,"review":4,"read_result":5,"draft_result":6,"write_result":7,"review_result":8},"programs":[rows(&self.submissions),rows(&self.editor),rows(&self.a),rows(&self.a_file),rows(&self.a_vm),rows(&self.a_io),rows(&self.a_data),rows(&self.b),rows(&self.b_file),rows(&self.b_vm),rows(&self.b_io),rows(&self.b_data),rows(&self.c),rows(&self.c_file),rows(&self.c_vm),rows(&self.c_io),rows(&self.c_data),rows(&self.d),rows(&self.d_file),rows(&self.d_vm),rows(&self.d_io),rows(&self.d_data),rows(&self.e),rows(&self.e_file),rows(&self.e_vm),rows(&self.e_io),rows(&self.e_data),rows(&self.f),rows(&self.f_file),rows(&self.f_vm),rows(&self.f_io),rows(&self.f_data),rows(&self.g),rows(&self.g_file),rows(&self.g_vm),rows(&self.g_io),rows(&self.g_data),rows(&self.background),rows(&self.background_resource),rows(&self.intro),rows(&self.intro_resource),rows(&self.related),rows(&self.related_resource),rows(&self.methods),rows(&self.methods_resource),rows(&self.experiments),rows(&self.experiments_resource),rows(&self.results),rows(&self.results_resource),rows(&self.discussion),rows(&self.discussion_resource)]})
     }
 }

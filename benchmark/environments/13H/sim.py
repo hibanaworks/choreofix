@@ -42,8 +42,10 @@ class PharmaLabCascadingSim(LabQualitySim):
                             include_failure=True)
         return latest if latest is not None and not self.events[latest].success else None
 
-    def _assay(self, compound):
-        assay = super()._assay(compound)
+    def _qc_assay(self, compound):
+        # Rejection changes certification eligibility, not the existence of
+        # the measurements. Independent readers may still study this batch.
+        assay = super()._qc_assay(compound)
         rejected = self._bio_rejection()
         synthesis = self._synthesis()
         if rejected is not None and (synthesis is None or synthesis <= rejected):

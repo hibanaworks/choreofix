@@ -36,14 +36,12 @@ Its manifest resolves the same canonical sibling core/WASI sources and runtime
 pin as the application; it is not another product checkout. The full application
 tests remain a separate gate.
 
-`regulatory_discovery` compiles 14M's complete business global for all nine
-scientists/effect owners and checks its real QC receiver with zero through three
-failures across three runtimes. The successful specimen transfer must reject an
-old request on its first poll without sending a frame. Its data tests cover all
-four selective-reanalysis choices, all fifteen initial/repeated analysis
-contracts, both go/no-go decisions and stale regulatory receipts. Native and
-Clippy checks are required in `quality.yml`. This is partial
-native qualification, not a completed 14M Wasm or whole-study execution claim.
+`regulatory_discovery` compiles the same 41 projected roles used by the
+14M application and checks the exported file views. The separate
+`regulatory_discovery_boundary` runner qualification drives the real
+wash guests, exercising the four reanalysis choices, repeated rejection
+and instrument failures. It checks each completed run with EPF and its
+independent effect auditor.
 
 ```sh
 cargo +stable test --manifest-path proofs/endpoint-handoff/Cargo.toml
