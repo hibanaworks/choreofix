@@ -13,6 +13,7 @@ use std::{
     future::poll_fn,
     io::{Stdin, Stdout},
     os::fd::AsFd,
+    pin::Pin,
     task::{Context, Poll, Waker},
 };
 
@@ -52,7 +53,7 @@ struct Connection {
 }
 
 /// Own one outstanding RPC or output-flush receipt, including its cancellation.
-struct Reply<'a> {
+pub struct Reply<'a> {
     bus: &'a Bus,
     id: u64,
 }
@@ -199,29 +200,30 @@ impl Bus {
         let reply = self.reply()?;
         self.enqueue(values, Some(reply.id));
         self.wake_output();
-        reply.receive().await?;
+        reply.await?;
         Ok(())
     }
 }
 
-impl Reply<'_> {
-    fn poll_response(&self, cx: &mut Context<'_>) -> Poll<ShellResult<Value>> {
+impl Future for Reply<'_> {
+    type Output = ShellResult<Value>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.bus.connection(|connection| {
-            let (result, wake) = connection
-                .responses
-                .get_mut(&self.id)
-                .expect("an owned RPC receipt remains registered");
+            let std::collections::btree_map::Entry::Occupied(mut response) =
+                connection.responses.entry(self.id)
+            else {
+                panic!("completed RPC receipt polled again");
+            };
+            let (result, wake) = response.get_mut();
             if let Some(value) = result.take() {
+                response.remove();
                 Poll::Ready(Ok(value))
             } else {
                 *wake = Some(cx.waker().clone());
                 Poll::Pending
             }
         })
-    }
-
-    fn receive(self) -> impl Future<Output = ShellResult<Value>> {
-        poll_fn(move |cx| self.poll_response(cx))
     }
 }
 
@@ -441,10 +443,10 @@ impl<'bus> Simulator<'bus> {
     pub fn submit<P: SimulatorOperation>(
         &self,
         received: hibana::runtime::wire::ReceivedPayload<'_, P>,
-    ) -> ShellResult<impl Future<Output = ShellResult<Value>> + use<'bus, P>> {
+    ) -> ShellResult<Reply<'bus>> {
         let (agent, tool) = P::RPC;
         let args = received_arguments::<P>(received)?;
-        Ok(self.0.queue_rpc(agent, tool, args)?.receive())
+        self.0.queue_rpc(agent, tool, args)
     }
 }
 
@@ -553,10 +555,8 @@ impl Bus {
                     Err(error) => return Poll::Ready(Err(error.to_string())),
                 }
             }
-            let result = receipt
-                .as_ref()
-                .expect("completed RPC future polled again")
-                .poll_response(cx);
+            let result =
+                Pin::new(receipt.as_mut().expect("completed RPC future polled again")).poll(cx);
             if result.is_ready() {
                 receipt.take();
             }

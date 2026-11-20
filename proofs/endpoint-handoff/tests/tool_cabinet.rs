@@ -11,13 +11,16 @@ pub(crate) mod imp {
 }
 #[path = "../../../src/tasks/manufacturing_rework/mod.rs"]
 pub mod manufacturing_rework;
-use hibana::runtime::{SessionKitStorage, ids::SessionId, resolver::ResolverRef};
+use hibana::runtime::{SessionKitStorage, ids::SessionId, resolver::ResolverRef, tap::TapEvent};
 use hibana_runtime::host::deadline;
 use manufacturing_rework::{global::*, imp as data, localside};
 use serde_json::{Value, json};
 use shell::{
     ShellError, ShellResult,
-    imp::{bus::Bus, service::Domain},
+    imp::{
+        bus::Bus,
+        service::{Domain, ReceivedEffects, SimulatorOperation},
+    },
 };
 use std::{cell::Cell, time::Duration};
 
@@ -28,77 +31,153 @@ struct QualityEffects {
     rejected_inspections: usize,
     events: Cell<Vec<Value>>,
 }
-impl Domain for QualityEffects {
-    async fn execute(
-        &self,
-        agent: &'static str,
-        tool: &'static str,
-        arguments: Value,
-    ) -> Result<Value, String> {
-        let target = data::JOBS[self.job];
-        let worker = data::AGENTS[self.job % data::AGENTS.len()];
-        let station =
-            ["STATION_ALPHA", "STATION_BETA", "STATION_GAMMA"][[0, 1, 2, 1, 2, 0][self.job]];
-        if arguments["job_id"] != target
-            || agent
-                != match tool {
-                    "do_job" => worker,
-                    "inspect_quality" => "INSPECTOR",
-                    "dispatch_rework" => "DISPATCHER",
-                    _ => return Err("unknown quality-fixture operation".into()),
-                }
-        {
-            return Err("wrong quality-fixture caller or job".into());
-        }
-        let events = self.events.take();
-        let result = (|| -> Result<Value, String> {
-            let count = |tool: &str| events.iter().filter(|row| row["tool"] == tool).count();
-            let data = match tool {
-                "do_job" => {
-                    let attempt = count(tool) + 1;
-                    let order = events
-                        .iter()
-                        .rev()
-                        .find(|row| row["tool"] == "dispatch_rework");
-                    json!({"status":"completed","rework_order":order.map(|row|row["result"]["data"]["order"].clone()),
+impl ReceivedEffects for QualityEffects {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+        let arguments = data::decode(received.as_bytes());
+        async move {
+            let (agent, tool) = P::RPC;
+            let arguments = arguments?;
+            let target = data::JOBS[self.job];
+            let worker = data::AGENTS[self.job % data::AGENTS.len()];
+            let station =
+                ["STATION_ALPHA", "STATION_BETA", "STATION_GAMMA"][[0, 1, 2, 1, 2, 0][self.job]];
+            if arguments["job_id"] != target
+                || agent
+                    != match tool {
+                        "do_job" => worker,
+                        "inspect_quality" => "INSPECTOR",
+                        "dispatch_rework" => "DISPATCHER",
+                        _ => return Err(ShellError::message("unknown quality-fixture operation")),
+                    }
+            {
+                return Err(ShellError::message("wrong quality-fixture caller or job"));
+            }
+            let events = self.events.take();
+            let result = (|| -> Result<Value, String> {
+                let count = |tool: &str| events.iter().filter(|row| row["tool"] == tool).count();
+                let data = match tool {
+                    "do_job" => {
+                        let attempt = count(tool) + 1;
+                        let order = events
+                            .iter()
+                            .rev()
+                            .find(|row| row["tool"] == "dispatch_rework");
+                        json!({"status":"completed","rework_order":order.map(|row|row["result"]["data"]["order"].clone()),
                         "part":{"artifact_id":format!("part/{target}/{attempt}"),"job_id":target,
                         "worker":worker,"station":station,"attempt":attempt}})
-                }
-                "inspect_quality" => {
-                    let part = &events
-                        .iter()
-                        .rev()
-                        .find(|row| row["tool"] == "do_job")
-                        .ok_or("inspection without actual fixture material")?["result"]["data"]["part"];
-                    json!({"job_id":target,"input_part":part,"receipt":format!("inspection/{}",count(tool)+1),
-                        "inspector":"INSPECTOR","status":if count(tool)<self.rejected_inspections{"failed_inspection"}else{"inspected"}})
-                }
-                "dispatch_rework" => {
-                    let measured = &events
-                        .iter()
-                        .rev()
-                        .find(|row| row["tool"] == "inspect_quality")
-                        .ok_or("dispatch without actual fixture inspection")?["result"];
-                    if measured["success"] != false {
-                        return Err("dispatch of an approved fixture part".into());
                     }
-                    json!({"job_id":target,"worker":worker,"input_part":measured["data"]["input_part"],
+                    "inspect_quality" => {
+                        let part = &events
+                            .iter()
+                            .rev()
+                            .find(|row| row["tool"] == "do_job")
+                            .ok_or("inspection without actual fixture material")?["result"]["data"]
+                            ["part"];
+                        json!({"job_id":target,"input_part":part,"receipt":format!("inspection/{}",count(tool)+1),
+                        "inspector":"INSPECTOR","status":if count(tool)<self.rejected_inspections{"failed_inspection"}else{"inspected"}})
+                    }
+                    "dispatch_rework" => {
+                        let measured = &events
+                            .iter()
+                            .rev()
+                            .find(|row| row["tool"] == "inspect_quality")
+                            .ok_or("dispatch without actual fixture inspection")?["result"];
+                        if measured["success"] != false {
+                            return Err("dispatch of an approved fixture part".into());
+                        }
+                        json!({"job_id":target,"worker":worker,"input_part":measured["data"]["input_part"],
                         "inspection":measured["data"]["receipt"],"order":format!("rework/{}",count(tool)+1),
                         "status":"rework_dispatched","reason":arguments.get("reason").cloned().unwrap_or(json!(""))})
-                }
-                _ => unreachable!(),
-            };
-            Ok(
-                json!({"tool_name":tool,"success":tool!="inspect_quality" || count(tool)>=self.rejected_inspections,"data":data}),
-            )
-        })();
-        self.events.set(events);
-        let result = result?;
-        let mut events = self.events.take();
-        events.push(json!({"agent":agent,"tool":tool,"arguments":arguments,"result":result}));
-        self.events.set(events);
-        Ok(result)
+                    }
+                    _ => unreachable!(),
+                };
+                Ok(
+                    json!({"tool_name":tool,"success":tool!="inspect_quality" || count(tool)>=self.rejected_inspections,"data":data}),
+                )
+            })();
+            self.events.set(events);
+            let result = result.map_err(ShellError::message)?;
+            let mut events = self.events.take();
+            events.push(json!({"agent":agent,"tool":tool,"arguments":arguments,"result":result}));
+            self.events.set(events);
+            Ok(result)
+        }
     }
+}
+
+fn observer<'a>(
+    producer: usize,
+    records: &'a Cell<Vec<TapEvent>>,
+    observed_producers: &'a Cell<Vec<usize>>,
+) -> impl Fn(TapEvent) + 'a {
+    move |event| {
+        let mut order = observed_producers.take();
+        order.push(producer);
+        observed_producers.set(order);
+        let mut capture = records.take();
+        capture.push(event);
+        records.set(capture);
+    }
+}
+
+fn audit_execution<const N: usize>(
+    session: SessionId,
+    snapshot: &[TapEvent],
+    captured: &[Vec<TapEvent>; N],
+    checkpoints: [Option<u32>; N],
+    observed_producers: &[usize],
+) -> ShellResult<usize> {
+    use hibana_epf::{Acceptance, AuditStorage, ExecutionStorage, Protocol, RecordId, Unfold};
+    let captures = captured
+        .iter()
+        .zip(checkpoints)
+        .map(|(records, end)| hibana_epf::Capture::new(records, end))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| ShellError::message(format!("incomplete actor capture: {error:?}")))?;
+    let mut source_storage = vec![0; Protocol::workspace_len(snapshot).unwrap()];
+    let protocol = Protocol::new(snapshot, &mut source_storage).unwrap();
+    let count = captured.iter().map(Vec::len).sum::<usize>();
+    let capacity = count.checked_mul(2).and_then(|n| n.checked_add(1)).unwrap();
+    let mut unfolding = vec![Unfold::Source; capacity];
+    let mut order = vec![
+        RecordId {
+            producer: 0,
+            ordinal: 0
+        };
+        count
+    ];
+    let mut occurrences = vec![None; count];
+    let mut acceptances = vec![
+        Acceptance {
+            first_poll: RecordId {
+                producer: 0,
+                ordinal: 0
+            },
+            before: 0
+        };
+        count
+    ];
+    let mut scratch = vec![0; protocol.audit_workspace_len(&captures, capacity).unwrap()];
+    let audit = protocol
+        .audit(
+            &captures,
+            AuditStorage {
+                unfolding: &mut unfolding,
+                execution: ExecutionStorage {
+                    session: session.raw(),
+                    observed_producers,
+                    order: &mut order,
+                    occurrences: &mut occurrences,
+                    acceptances: &mut acceptances,
+                },
+            },
+            &mut scratch,
+        )
+        .map_err(|error| ShellError::message(format!("source execution: {error:?}")))?;
+    Ok(audit.execution().order.len())
 }
 
 /// Complete native fixture for one job continuation, not the six-job station/
@@ -125,18 +204,8 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
     let records: [Cell<Vec<hibana::runtime::tap::TapEvent>>; 4] =
         core::array::from_fn(|_| Cell::new(Vec::new()));
     let observed_producers = Cell::new(Vec::new());
-    let observers = [0usize, 1, 2, 3].map(|producer| {
-        let records = &records;
-        let observed_producers = &observed_producers;
-        move |event: hibana::runtime::tap::TapEvent| {
-            let mut order = observed_producers.take();
-            order.push(producer);
-            observed_producers.set(order);
-            let mut capture = records[producer].take();
-            capture.push(event);
-            records[producer].set(capture);
-        }
-    });
+    let observers =
+        [0, 1, 2, 3].map(|producer| observer(producer, &records[producer], &observed_producers));
     let mut worker_slab = vec![0; 1024 * 1024];
     let mut inspector_slab = vec![0; 1024 * 1024];
     let mut dispatcher_slab = vec![0; 1024 * 1024];
@@ -173,8 +242,9 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
     let mut dispatcher = dispatcher_runtime.enter(session, &dispatcher_program)?;
     let mut depot = depot_runtime.enter(session, &depot_program)?;
     let arguments_bytes = data::encode(&json!({"job_id":data::JOBS[usize::from(JOB)]}))?;
-    let arguments = data::JobArguments::<JOB>::from_bytes(&arguments_bytes)?;
-    let admitted = data::admitted(&arguments)?;
+    let arguments = data::JobArguments::<JOB, { data::DO_JOB }>::from_bytes(&arguments_bytes)?;
+    let check = data::JobArguments::<JOB, { data::INSPECT_QUALITY }>::from_bytes(&arguments_bytes)?;
+    let admitted = data::submission::<JOB>(arguments.value());
     let effects = QualityEffects {
         job: usize::from(JOB),
         rejected_inspections: rejected,
@@ -213,10 +283,11 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
             loop {
                 let part = data::decode(inspector.recv::<PartReady>().await?)?;
                 let mut job = inspector.recv::<JobLoan<CAP>>().await?;
-                job.send::<InspectRequest<JOB>>(&arguments).await?;
-                let received = inspector.recv::<InspectRequest<JOB>>().await?.value();
+                job.send::<InspectRequest<JOB>>(&check).await?;
+                let request = inspector.recv::<InspectRequest<JOB>>().await?;
+                let received = data::decode(request.as_bytes())?;
                 data::inspection_input(&part, &received)?;
-                let result = effects.execute("INSPECTOR", "inspect_quality", received.clone()).await.map_err(ShellError::message)?;
+                let result = effects.apply(request).await?;
                 data::inspected(&part, &received, &result)?;
                 let bytes = data::encode(&result)?;
                 inspector.send::<InspectionResult>(&bytes.as_slice()).await?;
@@ -254,9 +325,10 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
                         let bytes = data::encode(&json!({"job_id":data::JOBS[usize::from(JOB)],"reason":"repair the measured defect"}))?;
                         let dispatch = data::DispatchArguments::<JOB>::from_bytes(&bytes)?;
                         job.send::<DispatchRequest<JOB>>(&dispatch).await?;
-                        let received = dispatcher.recv::<DispatchRequest<JOB>>().await?.value();
+                        let request = dispatcher.recv::<DispatchRequest<JOB>>().await?;
+                        let received = data::decode(request.as_bytes())?;
                         data::rework_input(&inspection, &received)?;
-                        let result = effects.execute("DISPATCHER", "dispatch_rework", received.clone()).await.map_err(ShellError::message)?;
+                        let result = effects.apply(request).await?;
                         data::dispatched(&inspection, &received, &result)?;
                         let bytes = data::encode(&result)?;
                         dispatcher.send::<Dispatched>(&bytes.as_slice()).await?;
@@ -276,8 +348,7 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
             }
         };
         async {
-            let received = depot.recv::<JobIntent<JOB>>().await?.value();
-            let result = effects.execute(data::AGENTS[usize::from(JOB)%3], "do_job", received).await.map_err(ShellError::message)?;
+            let result = effects.apply(depot.recv::<JobIntent<JOB>>().await?).await?;
             data::completed(&admitted, &result, None)?;
             let mut part = result["data"]["part"].clone();
             let bytes = data::encode(&result)?;
@@ -295,8 +366,7 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
                         let previous = data::decode(branch.recv::<OrderEvidence>().await?)?;
                         data::inspected(&part, &arguments.value(), &previous["inspection"])?;
                         data::dispatched(&previous["inspection"],&previous["arguments"],&previous["result"])?;
-                        let received = depot.recv::<JobIntent<JOB>>().await?.value();
-                        let result = effects.execute(data::AGENTS[usize::from(JOB)%3], "do_job", received).await.map_err(ShellError::message)?;
+                        let result = effects.apply(depot.recv::<JobIntent<JOB>>().await?).await?;
                         data::completed(&admitted,&result,Some((&previous["inspection"],&previous["arguments"],&previous["result"])))?;
                         part=result["data"]["part"].clone();
                         let bytes=data::encode(&result)?;
@@ -315,10 +385,6 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
     ];
     let captured = records.each_ref().map(|records| records.take());
     let observed_producers = observed_producers.take();
-    let captures: [hibana_epf::Capture; 4] = core::array::from_fn(|producer| {
-        hibana_epf::Capture::new(&captured[producer], checkpoints[producer])
-            .expect("complete quality capture")
-    });
     let resolver_calls = captured
         .iter()
         .flatten()
@@ -332,51 +398,15 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
         "an inner rework must not rerun the outer decision"
     );
     let snapshot: Vec<_> = hibana::runtime::tap::projected(&depot_program).collect();
-    let dynamic = {
-        use hibana_epf::{Acceptance, AuditStorage, ExecutionStorage, Protocol, RecordId, Unfold};
-        let mut source_storage = vec![0; Protocol::workspace_len(&snapshot).unwrap()];
-        let protocol = Protocol::new(&snapshot, &mut source_storage).unwrap();
-        let count = captured.iter().map(Vec::len).sum::<usize>();
-        let capacity = count.checked_mul(2).and_then(|n| n.checked_add(1)).unwrap();
-        let mut unfolding = vec![Unfold::Source; capacity];
-        let mut order = vec![
-            RecordId {
-                producer: 0,
-                ordinal: 0
-            };
-            count
-        ];
-        let mut occurrences = vec![None; count];
-        let mut acceptances = vec![
-            Acceptance {
-                first_poll: RecordId {
-                    producer: 0,
-                    ordinal: 0
-                },
-                before: 0
-            };
-            count
-        ];
-        let mut scratch = vec![0; protocol.audit_workspace_len(&captures, capacity).unwrap()];
-        let audit = protocol
-            .audit(
-                &captures,
-                AuditStorage {
-                    unfolding: &mut unfolding,
-                    execution: ExecutionStorage {
-                        session: session.raw(),
-                        observed_producers: &observed_producers,
-                        order: &mut order,
-                        occurrences: &mut occurrences,
-                        acceptances: &mut acceptances,
-                    },
-                },
-                &mut scratch,
-            )
-            .map_err(|error| ShellError::message(format!("quality source execution: {error:?}")))?;
-        json!({"status":"passed","captured_records":audit.execution().order.len(),
-            "application_effects_certified":false,"scope":"complete native job-continuation source execution; fixture effects are checked separately"})
-    };
+    let count = audit_execution(
+        session,
+        &snapshot,
+        &captured,
+        checkpoints,
+        &observed_producers,
+    )?;
+    let dynamic = json!({"status":"passed","captured_records":count,
+        "application_effects_certified":false,"scope":"complete native job-continuation source execution; fixture effects are checked separately"});
     // The terminal probe runs after every legitimate participant has finished.
     // An undeclared operation on this retired actor/view may end the closed run;
     // it must not remain Pending or produce another work frame/effect.
@@ -518,6 +548,10 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
             let (bus, simulator) = connection.split();
             let inputs = [const { Cell::new(Value::Null) }; 5];
             let next = (&inputs[0], &inputs[1]);
+            let records: [Cell<Vec<TapEvent>>; 2] = core::array::from_fn(|_| Cell::default());
+            let observed_producers = Cell::default();
+            let observers =
+                [0, 1].map(|producer| observer(producer, &records[producer], &observed_producers));
             let mut host_slab = vec![0; 1024 * 1024];
             let mut caller_slab = vec![0; 1024 * 1024];
             let mut host_storage = SessionKitStorage::uninit();
@@ -528,6 +562,8 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
             let caller = caller_storage
                 .init()
                 .rendezvous(&mut caller_slab, &bus.transport)?;
+            host.observe(&observers[0]);
+            caller.observe(&observers[1]);
             host.set_resolver(
                 &programs.depot,
                 ResolverRef::<FIRST_A>::decision_state(&inputs[0], data::worker_a),
@@ -676,6 +712,17 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                 value
             });
             let events = effects.events.take();
+            let checkpoints = [host.tap().checkpoint(), caller.tap().checkpoint()];
+            let captured = records.each_ref().map(Cell::take);
+            let observed_producers = observed_producers.take();
+            let snapshot: Vec<_> = hibana::runtime::tap::projected(&programs.depot).collect();
+            let audit = audit_execution(
+                session,
+                &snapshot,
+                &captured,
+                checkpoints,
+                &observed_producers,
+            );
             if let Some(directory) = std::env::var_os("CHOREOFIX_TOOL_CASE_OUTPUT") {
                 let directory = std::path::PathBuf::from(directory);
                 std::fs::create_dir_all(&directory)?;
@@ -684,10 +731,25 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                         "{}{}{}-{profile}.json",
                         order[0], order[1], order[2]
                     )),
-                    data::encode(&json!({"order":order,"profile":profile,"events":events,
-                        "inputs":observed_inputs,"frames":bus.transport.take_observations().collect::<Vec<_>>(),
-                        "error":execution.as_ref().err().map(ToString::to_string),
-                        "controlled_native_fixture":true,"model_calls":0}))?,
+                    data::encode(&json!({
+                        "order": order,
+                        "profile": profile,
+                        "events": events,
+                        "session": session.raw(),
+                        "checkpoints": checkpoints,
+                        "observed_producers": observed_producers,
+                        "protocol": snapshot.iter().copied().map(<[u8; 16]>::from).collect::<Vec<_>>(),
+                        "records": captured.each_ref().map(|stream| {
+                            stream.iter().copied().map(<[u8; 16]>::from).collect::<Vec<_>>()
+                        }),
+                        "audited_records": audit.as_ref().ok(),
+                        "audit_error": audit.as_ref().err().map(ToString::to_string),
+                        "inputs": observed_inputs,
+                        "frames": bus.transport.take_observations().collect::<Vec<_>>(),
+                        "error": execution.as_ref().err().map(ToString::to_string),
+                        "controlled_native_fixture": true,
+                        "model_calls": 0
+                    }))?,
                 )?;
             }
             execution.map_err(|error| {
@@ -695,6 +757,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                     "order={order:?} profile={profile}: {error}; inputs={observed_inputs:?}"
                 ))
             })?;
+            assert_eq!(audit?, captured.iter().map(Vec::len).sum::<usize>());
             assert_eq!(
                 events.len(),
                 6,
@@ -760,7 +823,8 @@ async fn production_receiver_rejects_changed_tool_requests_before_effect() -> Sh
         }
     }
     impl WirePayload for Untrusted {
-        const SCHEMA_ID: u32 = <data::JobArguments<WORKER_A> as WirePayload>::SCHEMA_ID;
+        const SCHEMA_ID: u32 =
+            <data::JobArguments<WORKER_A, { data::DO_JOB }> as WirePayload>::SCHEMA_ID;
         type Decoded<'a> = &'a [u8];
         fn validate_payload(_: Payload<'_>) -> Result<(), CodecError> {
             Ok(())

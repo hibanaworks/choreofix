@@ -1,9 +1,6 @@
 //! Own the two actual tools and the accepted RPCs until their results return.
 use super::super::{global::*, imp};
-use crate::shell::{
-    ShellError, ShellResult,
-    imp::{bus::Simulator, service::Domain},
-};
+use crate::shell::{ShellError, ShellResult, imp::bus::Simulator};
 use hibana::Endpoint;
 use serde_json::{Value, json};
 use std::cell::Cell;
@@ -12,7 +9,7 @@ use std::cell::Cell;
 pub async fn run<'r>(
     endpoint: &mut Endpoint<'r, DEPOT>,
     (tool0, tool1): (Endpoint<'r, TOOL_0>, Endpoint<'r, TOOL_1>),
-    (domain, inputs): (&Simulator, &[Cell<Value>; 5]),
+    (simulator, inputs): (&Simulator, &[Cell<Value>; 5]),
 ) -> ShellResult<()> {
     // Each cell is the actual input for one resolver, not an allocation table.
     let [
@@ -24,11 +21,11 @@ pub async fn run<'r>(
     ] = inputs;
     let [mut a, mut b, mut c, mut work] = endpoint.par()?;
     let first = hibana_runtime::race(
-        async { imp::admitted(&a.recv::<Intent<WORKER_A>>().await?) },
+        async { imp::admitted(a.recv::<Intent<WORKER_A>>().await?) },
         async {
             hibana_runtime::race(
-                async { imp::admitted(&b.recv::<Intent<WORKER_B>>().await?) },
-                async { imp::admitted(&c.recv::<Intent<WORKER_C>>().await?) },
+                async { imp::admitted(b.recv::<Intent<WORKER_B>>().await?) },
+                async { imp::admitted(c.recv::<Intent<WORKER_C>>().await?) },
             )
             .await
         },
@@ -36,18 +33,16 @@ pub async fn run<'r>(
     .await?;
     first_input.set(first.clone());
     work.send::<Loan0>(tool0).await?;
-    let received = match imp::agent(&first)? {
-        "WORKER_A" => work.recv::<Request0<WORKER_A>>().await?.value(),
-        "WORKER_B" => work.recv::<Request0<WORKER_B>>().await?.value(),
-        "WORKER_C" => work.recv::<Request0<WORKER_C>>().await?.value(),
+    let mut effect0 = match imp::agent(&first)? {
+        "WORKER_A" => simulator.submit(work.recv::<Request0<WORKER_A>>().await?)?,
+        "WORKER_B" => simulator.submit(work.recv::<Request0<WORKER_B>>().await?)?,
+        "WORKER_C" => simulator.submit(work.recv::<Request0<WORKER_C>>().await?)?,
         _ => return Err(ShellError::message("unknown worker")),
     };
-    let arguments0 = imp::arguments(&first, received)?;
-    let mut effect0 = domain.execute(imp::agent(&first)?, "do_job", arguments0);
     // Borrowing an accepted RPC in a race never cancels or reissues that RPC.
     let arrived = hibana_runtime::race(
         async {
-            let result = (&mut effect0).await.map_err(ShellError::message)?;
+            let result = (&mut effect0).await?;
             imp::completed(&first, &result, None)?;
             Ok::<_, ShellError>(result)
         },
@@ -55,22 +50,22 @@ pub async fn run<'r>(
             match imp::agent(&first)? {
                 "WORKER_A" => {
                     hibana_runtime::race(
-                        async { imp::admitted(&b.recv::<Intent<WORKER_B>>().await?) },
-                        async { imp::admitted(&c.recv::<Intent<WORKER_C>>().await?) },
+                        async { imp::admitted(b.recv::<Intent<WORKER_B>>().await?) },
+                        async { imp::admitted(c.recv::<Intent<WORKER_C>>().await?) },
                     )
                     .await
                 }
                 "WORKER_B" => {
                     hibana_runtime::race(
-                        async { imp::admitted(&a.recv::<Intent<WORKER_A>>().await?) },
-                        async { imp::admitted(&c.recv::<Intent<WORKER_C>>().await?) },
+                        async { imp::admitted(a.recv::<Intent<WORKER_A>>().await?) },
+                        async { imp::admitted(c.recv::<Intent<WORKER_C>>().await?) },
                     )
                     .await
                 }
                 _ => {
                     hibana_runtime::race(
-                        async { imp::admitted(&a.recv::<Intent<WORKER_A>>().await?) },
-                        async { imp::admitted(&b.recv::<Intent<WORKER_B>>().await?) },
+                        async { imp::admitted(a.recv::<Intent<WORKER_A>>().await?) },
+                        async { imp::admitted(b.recv::<Intent<WORKER_B>>().await?) },
                     )
                     .await
                 }
@@ -86,49 +81,47 @@ pub async fn run<'r>(
         let second = match imp::agent(&first)? {
             "WORKER_A" => {
                 hibana_runtime::race(
-                    async { imp::admitted(&b.recv::<Intent<WORKER_B>>().await?) },
-                    async { imp::admitted(&c.recv::<Intent<WORKER_C>>().await?) },
+                    async { imp::admitted(b.recv::<Intent<WORKER_B>>().await?) },
+                    async { imp::admitted(c.recv::<Intent<WORKER_C>>().await?) },
                 )
                 .await?
             }
             "WORKER_B" => {
                 hibana_runtime::race(
-                    async { imp::admitted(&a.recv::<Intent<WORKER_A>>().await?) },
-                    async { imp::admitted(&c.recv::<Intent<WORKER_C>>().await?) },
+                    async { imp::admitted(a.recv::<Intent<WORKER_A>>().await?) },
+                    async { imp::admitted(c.recv::<Intent<WORKER_C>>().await?) },
                 )
                 .await?
             }
             _ => {
                 hibana_runtime::race(
-                    async { imp::admitted(&a.recv::<Intent<WORKER_A>>().await?) },
-                    async { imp::admitted(&b.recv::<Intent<WORKER_B>>().await?) },
+                    async { imp::admitted(a.recv::<Intent<WORKER_A>>().await?) },
+                    async { imp::admitted(b.recv::<Intent<WORKER_B>>().await?) },
                 )
                 .await?
             }
         };
         next_input.set(second.clone());
         work.send::<Loan0>(tool0).await?;
-        let received = match imp::agent(&second)? {
-            "WORKER_A" => work.recv::<Request0<WORKER_A>>().await?.value(),
-            "WORKER_B" => work.recv::<Request0<WORKER_B>>().await?.value(),
-            "WORKER_C" => work.recv::<Request0<WORKER_C>>().await?.value(),
+        let mut effect = match imp::agent(&second)? {
+            "WORKER_A" => simulator.submit(work.recv::<Request0<WORKER_A>>().await?)?,
+            "WORKER_B" => simulator.submit(work.recv::<Request0<WORKER_B>>().await?)?,
+            "WORKER_C" => simulator.submit(work.recv::<Request0<WORKER_C>>().await?)?,
             _ => return Err(ShellError::message("unknown worker")),
         };
-        let arguments = imp::arguments(&second, received)?;
-        let mut effect = domain.execute(imp::agent(&second)?, "do_job", arguments);
         let arrived = hibana_runtime::race(
             async {
-                let result = (&mut effect).await.map_err(ShellError::message)?;
+                let result = (&mut effect).await?;
                 imp::completed(&second, &result, None)?;
                 Ok::<_, ShellError>(result)
             },
             async {
                 if first["agent"] != "WORKER_A" && second["agent"] != "WORKER_A" {
-                    imp::admitted(&a.recv::<Intent<WORKER_A>>().await?)
+                    imp::admitted(a.recv::<Intent<WORKER_A>>().await?)
                 } else if first["agent"] != "WORKER_B" && second["agent"] != "WORKER_B" {
-                    imp::admitted(&b.recv::<Intent<WORKER_B>>().await?)
+                    imp::admitted(b.recv::<Intent<WORKER_B>>().await?)
                 } else {
-                    imp::admitted(&c.recv::<Intent<WORKER_C>>().await?)
+                    imp::admitted(c.recv::<Intent<WORKER_C>>().await?)
                 }
             },
         )
@@ -139,24 +132,20 @@ pub async fn run<'r>(
             work.send::<Reply0>(&bytes.as_slice()).await?;
             let tool0 = work.recv::<Return0>().await?;
             let third = if first["agent"] != "WORKER_A" && second["agent"] != "WORKER_A" {
-                imp::admitted(&a.recv::<Intent<WORKER_A>>().await?)?
+                imp::admitted(a.recv::<Intent<WORKER_A>>().await?)?
             } else if first["agent"] != "WORKER_B" && second["agent"] != "WORKER_B" {
-                imp::admitted(&b.recv::<Intent<WORKER_B>>().await?)?
+                imp::admitted(b.recv::<Intent<WORKER_B>>().await?)?
             } else {
-                imp::admitted(&c.recv::<Intent<WORKER_C>>().await?)?
+                imp::admitted(c.recv::<Intent<WORKER_C>>().await?)?
             };
             work.send::<Loan0>(tool0).await?;
-            let received = match imp::agent(&third)? {
-                "WORKER_A" => work.recv::<Request0<WORKER_A>>().await?.value(),
-                "WORKER_B" => work.recv::<Request0<WORKER_B>>().await?.value(),
-                "WORKER_C" => work.recv::<Request0<WORKER_C>>().await?.value(),
+            let result = match imp::agent(&third)? {
+                "WORKER_A" => simulator.submit(work.recv::<Request0<WORKER_A>>().await?)?,
+                "WORKER_B" => simulator.submit(work.recv::<Request0<WORKER_B>>().await?)?,
+                "WORKER_C" => simulator.submit(work.recv::<Request0<WORKER_C>>().await?)?,
                 _ => return Err(ShellError::message("unknown worker")),
-            };
-            let arguments = imp::arguments(&third, received)?;
-            let result = domain
-                .execute(imp::agent(&third)?, "do_job", arguments)
-                .await
-                .map_err(ShellError::message)?;
+            }
+            .await?;
             imp::completed(&third, &result, None)?;
             let bytes = imp::encode(&result)?;
             work.send::<Reply0>(&bytes.as_slice()).await?;
@@ -167,7 +156,7 @@ pub async fn run<'r>(
                 drop(work.offer().await?);
                 let [mut finishing, mut third] = work.par()?;
                 async {
-                    let result = effect.await.map_err(ShellError::message)?;
+                    let result = effect.await?;
                     imp::completed(&second, &result, None)?;
                     let bytes = imp::encode(&result)?;
                     finishing.send::<Reply0>(&bytes.as_slice()).await?;
@@ -175,17 +164,19 @@ pub async fn run<'r>(
                 };
                 async {
                     third.send::<Loan1>(tool1).await?;
-                    let received = match imp::agent(&arrived)? {
-                        "WORKER_A" => third.recv::<Request1<WORKER_A>>().await?.value(),
-                        "WORKER_B" => third.recv::<Request1<WORKER_B>>().await?.value(),
-                        "WORKER_C" => third.recv::<Request1<WORKER_C>>().await?.value(),
+                    let result = match imp::agent(&arrived)? {
+                        "WORKER_A" => {
+                            simulator.submit(third.recv::<Request1<WORKER_A>>().await?)?
+                        }
+                        "WORKER_B" => {
+                            simulator.submit(third.recv::<Request1<WORKER_B>>().await?)?
+                        }
+                        "WORKER_C" => {
+                            simulator.submit(third.recv::<Request1<WORKER_C>>().await?)?
+                        }
                         _ => return Err(ShellError::message("unknown worker")),
-                    };
-                    let arguments = imp::arguments(&arrived, received)?;
-                    let result = domain
-                        .execute(imp::agent(&arrived)?, "do_job", arguments)
-                        .await
-                        .map_err(ShellError::message)?;
+                    }
+                    .await?;
                     imp::completed(&arrived, &result, None)?;
                     let bytes = imp::encode(&result)?;
                     third.send::<Reply1>(&bytes.as_slice()).await?;
@@ -199,22 +190,20 @@ pub async fn run<'r>(
         let second = arrived;
         next_input.set(second.clone());
         work.send::<Loan1>(tool1).await?;
-        let received = match imp::agent(&second)? {
-            "WORKER_A" => work.recv::<Request1<WORKER_A>>().await?.value(),
-            "WORKER_B" => work.recv::<Request1<WORKER_B>>().await?.value(),
-            "WORKER_C" => work.recv::<Request1<WORKER_C>>().await?.value(),
+        let mut effect1 = match imp::agent(&second)? {
+            "WORKER_A" => simulator.submit(work.recv::<Request1<WORKER_A>>().await?)?,
+            "WORKER_B" => simulator.submit(work.recv::<Request1<WORKER_B>>().await?)?,
+            "WORKER_C" => simulator.submit(work.recv::<Request1<WORKER_C>>().await?)?,
             _ => return Err(ShellError::message("unknown worker")),
         };
-        let arguments1 = imp::arguments(&second, received)?;
-        let mut effect1 = domain.execute(imp::agent(&second)?, "do_job", arguments1);
         let completed = hibana_runtime::race(
             async {
-                let result = (&mut effect0).await.map_err(ShellError::message)?;
+                let result = (&mut effect0).await?;
                 imp::completed(&first, &result, None)?;
                 Ok::<_, ShellError>((TOOL_0, result))
             },
             async {
-                let result = (&mut effect1).await.map_err(ShellError::message)?;
+                let result = (&mut effect1).await?;
                 imp::completed(&second, &result, None)?;
                 Ok::<_, ShellError>((TOOL_1, result))
             },
@@ -230,31 +219,33 @@ pub async fn run<'r>(
                     available.send::<Reply0>(&bytes.as_slice()).await?;
                     let tool = available.recv::<Return0>().await?;
                     let third = if first["agent"] != "WORKER_A" && second["agent"] != "WORKER_A" {
-                        imp::admitted(&a.recv::<Intent<WORKER_A>>().await?)?
+                        imp::admitted(a.recv::<Intent<WORKER_A>>().await?)?
                     } else if first["agent"] != "WORKER_B" && second["agent"] != "WORKER_B" {
-                        imp::admitted(&b.recv::<Intent<WORKER_B>>().await?)?
+                        imp::admitted(b.recv::<Intent<WORKER_B>>().await?)?
                     } else {
-                        imp::admitted(&c.recv::<Intent<WORKER_C>>().await?)?
+                        imp::admitted(c.recv::<Intent<WORKER_C>>().await?)?
                     };
                     available.send::<Loan0>(tool).await?;
-                    let received = match imp::agent(&third)? {
-                        "WORKER_A" => available.recv::<Request0<WORKER_A>>().await?.value(),
-                        "WORKER_B" => available.recv::<Request0<WORKER_B>>().await?.value(),
-                        "WORKER_C" => available.recv::<Request0<WORKER_C>>().await?.value(),
+                    let result = match imp::agent(&third)? {
+                        "WORKER_A" => {
+                            simulator.submit(available.recv::<Request0<WORKER_A>>().await?)?
+                        }
+                        "WORKER_B" => {
+                            simulator.submit(available.recv::<Request0<WORKER_B>>().await?)?
+                        }
+                        "WORKER_C" => {
+                            simulator.submit(available.recv::<Request0<WORKER_C>>().await?)?
+                        }
                         _ => return Err(ShellError::message("unknown worker")),
-                    };
-                    let arguments = imp::arguments(&third, received)?;
-                    let result = domain
-                        .execute(imp::agent(&third)?, "do_job", arguments)
-                        .await
-                        .map_err(ShellError::message)?;
+                    }
+                    .await?;
                     imp::completed(&third, &result, None)?;
                     let bytes = imp::encode(&result)?;
                     available.send::<Reply0>(&bytes.as_slice()).await?;
                     drop(available.recv::<Return0>().await?);
                 };
                 async {
-                    let result = effect1.await.map_err(ShellError::message)?;
+                    let result = effect1.await?;
                     imp::completed(&second, &result, None)?;
                     let bytes = imp::encode(&result)?;
                     finishing.send::<Reply1>(&bytes.as_slice()).await?;
@@ -267,7 +258,7 @@ pub async fn run<'r>(
             async {
                 let [mut finishing, mut available] = work.par()?;
                 async {
-                    let result = effect0.await.map_err(ShellError::message)?;
+                    let result = effect0.await?;
                     imp::completed(&first, &result, None)?;
                     let bytes = imp::encode(&result)?;
                     finishing.send::<Reply0>(&bytes.as_slice()).await?;
@@ -278,24 +269,26 @@ pub async fn run<'r>(
                     available.send::<Reply1>(&bytes.as_slice()).await?;
                     let tool = available.recv::<Return1>().await?;
                     let third = if first["agent"] != "WORKER_A" && second["agent"] != "WORKER_A" {
-                        imp::admitted(&a.recv::<Intent<WORKER_A>>().await?)?
+                        imp::admitted(a.recv::<Intent<WORKER_A>>().await?)?
                     } else if first["agent"] != "WORKER_B" && second["agent"] != "WORKER_B" {
-                        imp::admitted(&b.recv::<Intent<WORKER_B>>().await?)?
+                        imp::admitted(b.recv::<Intent<WORKER_B>>().await?)?
                     } else {
-                        imp::admitted(&c.recv::<Intent<WORKER_C>>().await?)?
+                        imp::admitted(c.recv::<Intent<WORKER_C>>().await?)?
                     };
                     available.send::<Loan1>(tool).await?;
-                    let received = match imp::agent(&third)? {
-                        "WORKER_A" => available.recv::<Request1<WORKER_A>>().await?.value(),
-                        "WORKER_B" => available.recv::<Request1<WORKER_B>>().await?.value(),
-                        "WORKER_C" => available.recv::<Request1<WORKER_C>>().await?.value(),
+                    let result = match imp::agent(&third)? {
+                        "WORKER_A" => {
+                            simulator.submit(available.recv::<Request1<WORKER_A>>().await?)?
+                        }
+                        "WORKER_B" => {
+                            simulator.submit(available.recv::<Request1<WORKER_B>>().await?)?
+                        }
+                        "WORKER_C" => {
+                            simulator.submit(available.recv::<Request1<WORKER_C>>().await?)?
+                        }
                         _ => return Err(ShellError::message("unknown worker")),
-                    };
-                    let arguments = imp::arguments(&third, received)?;
-                    let result = domain
-                        .execute(imp::agent(&third)?, "do_job", arguments)
-                        .await
-                        .map_err(ShellError::message)?;
+                    }
+                    .await?;
                     imp::completed(&third, &result, None)?;
                     let bytes = imp::encode(&result)?;
                     available.send::<Reply1>(&bytes.as_slice()).await?;

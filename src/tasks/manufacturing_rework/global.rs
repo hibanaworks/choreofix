@@ -1,5 +1,6 @@
 //! 11M's first three tool-using jobs, preserving arrival and completion order.
 //! Workstation/QC/rework composition is still unfinished.
+use super::imp::{DO_JOB, INSPECT_QUALITY};
 use hibana::{
     Endpoint, g,
     runtime::program::{Projectable, RoleProgram, project},
@@ -25,17 +26,17 @@ pub const DISPATCHER: u8 = 27;
 pub type Intent<const WORKER: u8> = g::Msg<10, super::imp::JobArguments<WORKER>>;
 pub type Loan0<'r> = g::Msg<1, Endpoint<'r, TOOL_0>>;
 pub type Loan1<'r> = g::Msg<2, Endpoint<'r, TOOL_1>>;
-pub type Request0<const WORKER: u8> = g::Msg<3, super::imp::JobArguments<WORKER>>;
-pub type Request1<const WORKER: u8> = g::Msg<4, super::imp::JobArguments<WORKER>>;
+pub type Request0<const WORKER: u8> = g::Msg<3, super::imp::JobArguments<WORKER, DO_JOB>>;
+pub type Request1<const WORKER: u8> = g::Msg<4, super::imp::JobArguments<WORKER, DO_JOB>>;
 pub type Reply0<'a> = g::Msg<5, &'a [u8]>;
 pub type Reply1<'a> = g::Msg<6, &'a [u8]>;
 pub type Return0<'r> = g::Msg<7, Endpoint<'r, TOOL_0>>;
 pub type Return1<'r> = g::Msg<8, Endpoint<'r, TOOL_1>>;
-pub type JobIntent<const JOB: u8> = g::Msg<20, super::imp::JobArguments<JOB>>;
+pub type JobIntent<const JOB: u8> = g::Msg<20, super::imp::JobArguments<JOB, DO_JOB>>;
 pub type JobResult<'a> = g::Msg<21, &'a [u8]>;
 pub type PartReady<'a> = g::Msg<22, &'a [u8]>;
 pub type JobLoan<'r, const CAP: u8> = g::Msg<23, Endpoint<'r, CAP>>;
-pub type InspectRequest<const JOB: u8> = g::Msg<24, super::imp::JobArguments<JOB>>;
+pub type InspectRequest<const JOB: u8> = g::Msg<24, super::imp::JobArguments<JOB, INSPECT_QUALITY>>;
 pub type Approved<'a, const JOB: u8> = g::Msg<25, super::imp::InspectionReply<'a, JOB, true>>;
 pub type Failed<'a, const JOB: u8> = g::Msg<26, super::imp::InspectionReply<'a, JOB, false>>;
 pub type DispatchRequest<const JOB: u8> = g::Msg<27, super::imp::DispatchArguments<JOB>>;

@@ -1,5 +1,5 @@
 //! Exact admitted inputs and actual RPC results; no custody or workflow state.
-use crate::shell::{ShellError, ShellResult};
+use crate::shell::{ShellError, ShellResult, imp::service::SimulatorOperation};
 use hibana::runtime::resolver::{DecisionArm, ResolverError};
 use hibana::runtime::wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload};
 use serde_json::{Value, json};
@@ -15,10 +15,13 @@ pub const JOBS: [&str; 6] = [
     "alpha_job_c",
 ];
 
+pub const DO_JOB: u8 = 1;
+pub const INSPECT_QUALITY: u8 = 2;
+
 /// Exact submitted bytes. The payload codec checks the assignment before recv commits.
 #[derive(Debug)]
-pub struct JobArguments<const JOB: u8>(Vec<u8>);
-impl<const JOB: u8> JobArguments<JOB> {
+pub struct JobArguments<const JOB: u8, const OPERATION: u8 = 0>(Vec<u8>);
+impl<const JOB: u8, const OPERATION: u8> JobArguments<JOB, OPERATION> {
     pub fn from_bytes(bytes: &[u8]) -> ShellResult<Self> {
         Self::validate_payload(Payload::new(bytes))
             .map_err(|_| ShellError::message("arguments differ from the worker's assigned job"))?;
@@ -28,7 +31,12 @@ impl<const JOB: u8> JobArguments<JOB> {
         serde_json::from_slice(&self.0).expect("validated job arguments")
     }
 }
-impl<const JOB: u8> WireEncode for JobArguments<JOB> {
+impl<const JOB: u8> From<JobArguments<JOB>> for JobArguments<JOB, DO_JOB> {
+    fn from(arguments: JobArguments<JOB>) -> Self {
+        Self(arguments.0)
+    }
+}
+impl<const JOB: u8, const OPERATION: u8> WireEncode for JobArguments<JOB, OPERATION> {
     fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
         output
             .get_mut(..self.0.len())
@@ -37,9 +45,14 @@ impl<const JOB: u8> WireEncode for JobArguments<JOB> {
         Ok(self.0.len())
     }
 }
-impl<const JOB: u8> WirePayload for JobArguments<JOB> {
-    const SCHEMA_ID: u32 = 0xac11_1000 | JOB as u32;
-    type Decoded<'a> = Self;
+impl<const JOB: u8, const OPERATION: u8> WirePayload for JobArguments<JOB, OPERATION> {
+    const SCHEMA_ID: u32 = match OPERATION {
+        0 => 0xac11_1000,
+        DO_JOB => 0xac11_1100,
+        INSPECT_QUALITY => 0xac11_1200,
+        _ => panic!("unknown job operation"),
+    } | JOB as u32;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
         let value: Value =
             serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
@@ -51,9 +64,16 @@ impl<const JOB: u8> WirePayload for JobArguments<JOB> {
         }
         Ok(())
     }
-    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
-        Self(input.as_bytes().to_vec())
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
+        input
     }
+}
+impl<const JOB: u8> SimulatorOperation for JobArguments<JOB, DO_JOB> {
+    const RPC: (&'static str, &'static str) = (AGENTS[JOB as usize % AGENTS.len()], "do_job");
+}
+
+impl<const JOB: u8> SimulatorOperation for JobArguments<JOB, INSPECT_QUALITY> {
+    const RPC: (&'static str, &'static str) = ("INSPECTOR", "inspect_quality");
 }
 
 /// The dispatcher's actual optional reason is data, not a retry or phase flag.
@@ -79,7 +99,7 @@ impl<const JOB: u8> WireEncode for DispatchArguments<JOB> {
 }
 impl<const JOB: u8> WirePayload for DispatchArguments<JOB> {
     const SCHEMA_ID: u32 = 0xac11_2000 | JOB as u32;
-    type Decoded<'a> = Self;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
         let value: Value =
             serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
@@ -94,9 +114,13 @@ impl<const JOB: u8> WirePayload for DispatchArguments<JOB> {
         }
         Ok(())
     }
-    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
-        Self(input.as_bytes().to_vec())
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
+        input
     }
+}
+
+impl<const JOB: u8> SimulatorOperation for DispatchArguments<JOB> {
+    const RPC: (&'static str, &'static str) = ("DISPATCHER", "dispatch_rework");
 }
 
 /// A verdict for this job's real material, with success bound to the wire type.
@@ -136,22 +160,17 @@ impl<const JOB: u8, const APPROVED: bool> WirePayload for InspectionReply<'_, JO
         input.as_bytes()
     }
 }
-pub fn admitted<const JOB: u8>(arguments: &JobArguments<JOB>) -> ShellResult<Value> {
-    Ok(json!({"agent":AGENTS[usize::from(JOB) % AGENTS.len()], "arguments":arguments.value()}))
+pub fn submission<const JOB: u8>(arguments: Value) -> Value {
+    json!({"agent":AGENTS[usize::from(JOB) % AGENTS.len()], "arguments":arguments})
+}
+pub fn admitted<const JOB: u8>(received: ReceivedPayload<JobArguments<JOB>>) -> ShellResult<Value> {
+    Ok(submission::<JOB>(decode(received.as_bytes())?))
 }
 pub fn agent(admitted: &Value) -> ShellResult<&'static str> {
     AGENTS
         .into_iter()
         .find(|agent| admitted["agent"] == *agent)
         .ok_or_else(|| ShellError::message("admitted worker missing"))
-}
-pub fn arguments(admitted: &Value, arguments: Value) -> ShellResult<Value> {
-    if arguments != admitted["arguments"] {
-        return Err(ShellError::message(
-            "resource request differs from admitted arguments",
-        ));
-    }
-    Ok(arguments)
 }
 fn part_attempt(part: &Value, job: usize) -> ShellResult<u64> {
     let station = match job {
@@ -452,7 +471,7 @@ mod tests {
         let arguments = JobArguments::<JOB>::from_bytes(&encoded).unwrap();
         assert_eq!(arguments.value(), expected);
         assert_eq!(
-            admitted(&arguments).unwrap()["agent"],
+            submission::<JOB>(arguments.value())["agent"],
             AGENTS[usize::from(JOB) % AGENTS.len()]
         );
         for (other, job) in JOBS.into_iter().enumerate() {

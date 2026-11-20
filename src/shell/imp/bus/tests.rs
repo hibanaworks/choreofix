@@ -392,10 +392,10 @@ async fn cancelling_one_rpc_removes_only_its_own_receipt() -> ShellResult<()> {
     let id = cancelled.id;
     let retained = bus.reply()?;
     let retained_id = retained.id;
-    hibana_runtime::race(cancelled.receive(), async { Ok(Value::Null) }).await?;
+    hibana_runtime::race(cancelled, async { Ok(Value::Null) }).await?;
     assert!(bus.respond(id, json!("late")).is_err());
     bus.respond(retained_id, json!("live"))?;
-    assert_eq!(retained.receive().await?, json!("live"));
+    assert_eq!(retained.await?, json!("live"));
     assert!(bus.connection(|connection| connection.responses.is_empty()));
     Ok(())
 }
@@ -404,11 +404,11 @@ async fn cancelling_one_rpc_removes_only_its_own_receipt() -> ShellResult<()> {
 #[test]
 async fn duplicate_rpc_reply_cannot_replace_the_first_value() -> ShellResult<()> {
     let (bus, _, _) = Bus::open([], []);
-    let receipt = bus.reply()?;
+    let mut receipt = bus.reply()?;
     let id = receipt.id;
     bus.respond(id, json!("first"))?;
     assert!(bus.respond(id, json!("replacement")).is_err());
-    assert_eq!(receipt.receive().await?, json!("first"));
+    assert_eq!((&mut receipt).await?, json!("first"));
     assert!(bus.respond(id, json!("replay")).is_err());
     Ok(())
 }
