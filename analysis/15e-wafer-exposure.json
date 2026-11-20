@@ -1,0 +1,200 @@
+{
+  "task": "15E",
+  "archive": "output/verification/wafer-exposure-15e-20261121.6nhMJy",
+  "scope": "Six scripted wash guests. Lithographer exposure and depositor growth use independent physical instrument Endpoints. Each of two concurrent cases drives both physical calls with a 0.5-second simulated tool duration. Exposure-dose, both etching sequences, and the two post-validation checks are fixtures.",
+  "model_calls": 0,
+  "scored_benchmark": false,
+  "runtime_sha256": "7f187a3d1eca67a711d4aa5a490bd9c4b3a47b7d5295ee13331d7f119815c978",
+  "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+  "test_binary_sha256": "60ae9c5f6cf92b8969d8927a79a29754ef1084ade1a94b4f5944f80830bbd68b",
+  "build_receipt_sha256": "3244cf0fd51efab4920ee3a5d63b583de265582d4607ff0cad88933ef852e230",
+  "source_manifest_sha256": "b8e16ab98acb95bd340b2175cd3df92a2db954b91327a068b711b01343401ead",
+  "cases": [
+    {
+      "case": "dep-litho-etch",
+      "shell_effects": 12,
+      "fabrication_fixture_calls": 5,
+      "fixture_post_validation_calls": 2,
+      "epf_records": 5987,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "result_sha256": "8456ed3f752d35e233807ddee59f33a2d599df1986b3afeed8b4a0fbb6badbae",
+      "events_sha256": "a1b778bd2d2b72465918d91c06b94aaacb3dc82c66b3abb8929890dd0e73b1b5",
+      "photo_exposure": {
+        "rpc_id": 8,
+        "request_frame": 65,
+        "reply_frame": 126,
+        "receipt": 1,
+        "start_seconds": 0.350036833,
+        "end_seconds": 0.85254075
+      },
+      "cvd_growth": {
+        "rpc_id": 10,
+        "request_frame": 84,
+        "reply_frame": 127,
+        "receipt": 2,
+        "start_seconds": 0.373877042,
+        "end_seconds": 0.876193375
+      },
+      "requested_exposure_first": true,
+      "overlap_seconds": 0.47866370799999997
+    },
+    {
+      "case": "etch-dep-litho",
+      "shell_effects": 12,
+      "fabrication_fixture_calls": 5,
+      "fixture_post_validation_calls": 2,
+      "epf_records": 5976,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "result_sha256": "a423df4d04eb3cb7f2fc28f9f168c5d96c2ba6ac3614cc113df7d53a0d984563",
+      "events_sha256": "56e033b33ba3442c8bd448b1c91c19d765800681c99f873f92083882b5fef92d",
+      "photo_exposure": {
+        "rpc_id": 11,
+        "request_frame": 102,
+        "reply_frame": 158,
+        "receipt": 4,
+        "start_seconds": 0.403045166,
+        "end_seconds": 0.90529275
+      },
+      "cvd_growth": {
+        "rpc_id": 9,
+        "request_frame": 82,
+        "reply_frame": 143,
+        "receipt": 3,
+        "start_seconds": 0.378247958,
+        "end_seconds": 0.880676125
+      },
+      "requested_exposure_first": false,
+      "overlap_seconds": 0.477630959
+    },
+    {
+      "case": "etch-first",
+      "shell_effects": 12,
+      "fabrication_fixture_calls": 5,
+      "fixture_post_validation_calls": 2,
+      "epf_records": 5613,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "result_sha256": "733e1ded201e515d3f2b13770cd650db09bf08a9af18c3220212055784f10dbf",
+      "events_sha256": "0218e2437f35b55c25ceaaf295b6cef8bf6def82c491222b667fe250826a20fb",
+      "photo_exposure": {
+        "rpc_id": 26,
+        "request_frame": 332,
+        "reply_frame": 343,
+        "receipt": 8,
+        "start_seconds": 1.225827584,
+        "end_seconds": 1.728301584
+      },
+      "cvd_growth": {
+        "rpc_id": 8,
+        "request_frame": 65,
+        "reply_frame": 107,
+        "receipt": 1,
+        "start_seconds": 0.332102334,
+        "end_seconds": 0.834578834
+      },
+      "requested_exposure_first": null,
+      "overlap_seconds": 0
+    },
+    {
+      "case": "film-first",
+      "shell_effects": 12,
+      "fabrication_fixture_calls": 5,
+      "fixture_post_validation_calls": 2,
+      "epf_records": 5624,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "result_sha256": "f4fae90c3c3b6e5cecc2bd879ba050daae4516073e3faf594876d055af57385f",
+      "events_sha256": "92f6611ebaa39831bcfb6ebf85e7c3f442df24bf08a59a1a449abd9c78267b65",
+      "photo_exposure": {
+        "rpc_id": 9,
+        "request_frame": 65,
+        "reply_frame": 76,
+        "receipt": 1,
+        "start_seconds": 0.3780035,
+        "end_seconds": 0.880527166
+      },
+      "cvd_growth": {
+        "rpc_id": 19,
+        "request_frame": 227,
+        "reply_frame": 269,
+        "receipt": 7,
+        "start_seconds": 1.134300333,
+        "end_seconds": 1.636821083
+      },
+      "requested_exposure_first": null,
+      "overlap_seconds": 0
+    },
+    {
+      "case": "litho-etch-dep",
+      "shell_effects": 14,
+      "fabrication_fixture_calls": 7,
+      "fixture_post_validation_calls": 2,
+      "epf_records": 6517,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "result_sha256": "a6f714d709fa64a0e5124ab8e484cfd9d7ec9f833f14ba069fc47000e140c9bc",
+      "events_sha256": "8570e5d611fcce7a0eab9bb99339798610cded98b7293b22bb3242209be42610",
+      "photo_exposure": {
+        "rpc_id": 9,
+        "request_frame": 65,
+        "reply_frame": 76,
+        "receipt": 1,
+        "start_seconds": 0.334037125,
+        "end_seconds": 0.836560042
+      },
+      "cvd_growth": {
+        "rpc_id": 14,
+        "request_frame": 143,
+        "reply_frame": 226,
+        "receipt": 9,
+        "start_seconds": 0.960055125,
+        "end_seconds": 1.4624765
+      },
+      "requested_exposure_first": null,
+      "overlap_seconds": 0
+    },
+    {
+      "case": "overlay-retry",
+      "shell_effects": 14,
+      "fabrication_fixture_calls": 5,
+      "fixture_post_validation_calls": 4,
+      "epf_records": 6152,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "result_sha256": "bfd8bd222427d4a056ad1e499222df1a5de345ed21851c03d6a1ca3967515cae",
+      "events_sha256": "d50faf01f37dcfdb48f1e9ddb03069a623898ae22483b5d9e12c15afd5f66ce2",
+      "photo_exposure": {
+        "rpc_id": 18,
+        "request_frame": 233,
+        "reply_frame": 244,
+        "receipt": 6,
+        "start_seconds": 0.618433958,
+        "end_seconds": 1.120923208
+      },
+      "cvd_growth": {
+        "rpc_id": 27,
+        "request_frame": 359,
+        "reply_frame": 401,
+        "receipt": 11,
+        "start_seconds": 1.330384792,
+        "end_seconds": 1.8328415420000002
+      },
+      "requested_exposure_first": null,
+      "overlap_seconds": 0
+    }
+  ],
+  "totals": {
+    "shell_effects": 76,
+    "fabrication_fixture_calls": 32,
+    "fixture_post_validation_calls": 14,
+    "epf_records": 35869
+  }
+}

@@ -11,7 +11,6 @@ use choreofix::{
     },
 };
 use hibana::{
-    Endpoint,
     g::{self, Message},
     runtime::{
         SessionKitStorage,
@@ -110,33 +109,6 @@ fn recipient_io<const VM: u8, const INBOX: u8, const DATA: u8, const TERM: u8>()
     )
 }
 
-async fn fabrication_guest<'run, const VM: u8, const INBOX: u8, const VALIDATION: u8>(
-    mut vm: Endpoint<'run, VM>,
-    module: &[u8],
-) -> ShellResult<()> {
-    let inbox = vm.recv::<Loan<INBOX>>().await?;
-    let mut buffer = vec![0; GUEST_MEMORY_BYTES];
-    let mut validation = vec![0; GUEST_MEMORY_BYTES];
-    let mut ready = vec![0; GUEST_MEMORY_BYTES];
-    let file = ChoreoFsFile::new(INBOX_FILE, inbox)
-        .read_as::<Disposition<INBOX>>(&mut buffer)
-        .file(VALIDATION_FILE)?
-        .read_as::<Confirmation<VALIDATION>>(&mut validation)
-        .file(READY_FILE)?
-        .write_as::<FabReady<INBOX>>(&mut ready);
-    let files = ChoreoFsFiles::new(vm).file(file)?;
-    let mut memory = vec![0; GUEST_MEMORY_BYTES];
-    let mut storage = Box::new(HibanaWasiGuestStorage::uninit());
-    let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
-    let (exit, files) = guest.run().await?;
-    let status = exit.status() as i32;
-    let (mut vm, (file, ())) = files.into_parts();
-    let mut inbox = file.into_endpoint();
-    inbox.send::<FileExit>(&status).await?;
-    vm.send::<Exit>(&status).await?;
-    Ok(())
-}
-
 #[hibana_runtime::main]
 async fn main() -> ShellResult<()> {
     let path = std::env::args()
@@ -208,6 +180,10 @@ async fn main() -> ShellResult<()> {
             ),
         ),
     );
+    let exposure = g::seq(
+        g::send::<LITHO_INBOX, STAGE, Expose>(),
+        g::send::<STAGE, LITHO_INBOX, Exposed>(),
+    );
     let confirmations = g::par(
         g::par(
             g::send::<CONTROL_FILE, LITHO_INBOX, Confirmation<CONFIRM_LITHO>>(),
@@ -264,7 +240,7 @@ async fn main() -> ShellResult<()> {
                         g::seq(
                             g::seq(
                                 g::par(
-                                    measure_wafer::<LITHO_INBOX, CD>(),
+                                    g::seq(exposure, measure_wafer::<LITHO_INBOX, CD>()),
                                     g::par(
                                         g::seq(growth, measure_wafer::<DEP_INBOX, THICKNESS>()),
                                         measure_wafer::<ETCH_INBOX, PROFILE>(),
@@ -412,6 +388,12 @@ async fn main() -> ShellResult<()> {
             FdBinding::read(FdReadRow::Base),
         )
     };
+    let litho_files = [
+        INBOX_FILE,
+        VALIDATION_FILE,
+        READY_FILE,
+        instrument(b"service/run_stepper_exposure", 7),
+    ];
     let depositor_files = [
         INBOX_FILE,
         VALIDATION_FILE,
@@ -479,25 +461,49 @@ async fn main() -> ShellResult<()> {
         let dep_ep = rv.enter(session, &p_dep)?;
         let mut dep_files_ep = rv.enter(session, &p_dep_files)?;
         let mut dep_term_ep = rv.enter(session, &p_dep_term)?;
-        let etch_ep = rv.enter(session, &p_etch)?;
+        let mut etch_ep = rv.enter(session, &p_etch)?;
         let mut etch_files_ep = rv.enter(session, &p_etch_files)?;
         let mut etch_term_ep = rv.enter(session, &p_etch_term)?;
         let litho_inbox_ep = rv.enter(session, &p_litho_inbox)?;
         let dep_inbox_ep = rv.enter(session, &p_dep_inbox)?;
         let etch_inbox_ep = rv.enter(session, &p_etch_inbox)?;
-        async { fabrication_guest::<LITHO, LITHO_INBOX, CONFIRM_LITHO>(litho_ep, &module).await };
         async {
-            localside::file_metadata::run(
-                &mut litho_files_ep,
-                litho_inbox_ep,
-                [INBOX_FILE, VALIDATION_FILE, READY_FILE],
-            )
-            .await
+            let mut vm = litho_ep;
+            let inbox = vm.recv::<Loan<LITHO_INBOX>>().await?;
+            let [
+                mut disposition,
+                mut validation,
+                mut ready,
+                mut expose,
+                mut exposed,
+            ] = [(); 5].map(|_| vec![0; GUEST_MEMORY_BYTES]);
+            let file = ChoreoFsFile::new(INBOX_FILE, inbox)
+                .read_as::<Disposition<LITHO_INBOX>>(&mut disposition)
+                .file(VALIDATION_FILE)?
+                .read_as::<Confirmation<CONFIRM_LITHO>>(&mut validation)
+                .file(READY_FILE)?
+                .write_as::<FabReady<LITHO_INBOX>>(&mut ready)
+                .file(litho_files[3])?
+                .write_as::<Expose>(&mut expose)
+                .read_as::<Exposed>(&mut exposed);
+            let files = ChoreoFsFiles::new(vm).file(file)?;
+            let mut memory = vec![0; GUEST_MEMORY_BYTES];
+            let mut storage = Box::new(HibanaWasiGuestStorage::uninit());
+            let guest = storage.init(&module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut vm, (file, ())) = files.into_parts();
+            file.into_endpoint().send::<FileExit>(&status).await?;
+            vm.send::<Exit>(&status).await?;
+            Ok(())
+        };
+        async {
+            localside::file_metadata::run(&mut litho_files_ep, litho_inbox_ep, litho_files).await
         };
         async {
             localside::private_io::run(
                 &mut litho_term_ep,
-                PrivateFs::new(litho_shell, bus, &[INBOX_FILE, VALIDATION_FILE, READY_FILE]),
+                PrivateFs::new(litho_shell, bus, &litho_files),
             )
             .await
         };
@@ -546,7 +552,29 @@ async fn main() -> ShellResult<()> {
             )
             .await
         };
-        async { fabrication_guest::<ETCH, ETCH_INBOX, CONFIRM_ETCH>(etch_ep, &module).await };
+        async {
+            let inbox = etch_ep.recv::<Loan<ETCH_INBOX>>().await?;
+            let mut buffer = vec![0; GUEST_MEMORY_BYTES];
+            let mut validation = vec![0; GUEST_MEMORY_BYTES];
+            let mut ready = vec![0; GUEST_MEMORY_BYTES];
+            let file = ChoreoFsFile::new(INBOX_FILE, inbox)
+                .read_as::<Disposition<ETCH_INBOX>>(&mut buffer)
+                .file(VALIDATION_FILE)?
+                .read_as::<Confirmation<CONFIRM_ETCH>>(&mut validation)
+                .file(READY_FILE)?
+                .write_as::<FabReady<ETCH_INBOX>>(&mut ready);
+            let files = ChoreoFsFiles::new(etch_ep).file(file)?;
+            let mut memory = vec![0; GUEST_MEMORY_BYTES];
+            let mut storage = Box::new(HibanaWasiGuestStorage::uninit());
+            let guest = storage.init(&module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut vm, (file, ())) = files.into_parts();
+            let mut inbox = file.into_endpoint();
+            inbox.send::<FileExit>(&status).await?;
+            vm.send::<Exit>(&status).await?;
+            Ok(())
+        };
         async {
             localside::file_metadata::run(
                 &mut etch_files_ep,
@@ -731,6 +759,8 @@ async fn main() -> ShellResult<()> {
             }
         };
         async {
+            let exposed = effects.apply(stage.recv::<Expose>().await?).await?;
+            stage.send::<Exposed>(&encode(&exposed)?.as_slice()).await?;
             let mounted = effects.submit(stage.recv::<Mount>().await?)?;
             stepper.send::<Loan<STAGE>>(stage).await?;
             let [mut load, mut release] = stepper.par()?;

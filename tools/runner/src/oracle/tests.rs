@@ -918,8 +918,13 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
             "run_metrology_measurement":[0.0,0.0],"check_monitoring":[0.0,0.0],
             "run_etch_process":[0.0,0.0],"run_deposition":[0.5,0.5]}))
             .await?;
-        let fabrication_calls = 6 + 2 * usize::from(retry_control);
-        let guest_effects = 11 + 2 * usize::from(retry) + 2 * usize::from(retry_control);
+        let fabrication_calls = 5 + 2 * usize::from(retry_control);
+        let guest_effects = 12 + 2 * usize::from(retry) + 2 * usize::from(retry_control);
+        let exposure_first = match case {
+            "dep-litho-etch" => Some(true),
+            "etch-dep-litho" => Some(false),
+            _ => None,
+        };
         let (guest, runtime) =
             process::guest(&binary, &wash, &[], &directory, trace, world.clone())?;
         let ((), outcome) = hibana_runtime::race(
@@ -936,7 +941,6 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                     ];
                     let processing: [&[(&str, &str, &str)]; 3] = [
                         &[
-                            ("run_stepper_exposure", "process", "photo_exposure"),
                             ("check_monitoring", "check_type", "exposure_dose"),
                             ("run_etch_process", "process", "pattern_transfer_etch"),
                             ("check_monitoring", "check_type", "etch_endpoint"),
@@ -963,6 +967,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                     };
                     let mut inputs = [Value::Null, Value::Null, Value::Null];
                     let mut readings = [Value::Null, Value::Null, Value::Null];
+                    let expose = "echo '{\"process\":\"photo_exposure\"}' > /service/run_stepper_exposure";
                     let mut first_measure = true;
                     for (i, prepare) in schedule {
                         let who = recipients[i].0;
@@ -970,6 +975,17 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                         let dimension = dimensions[i];
                         if prepare {
                             let mut receipts = Vec::new();
+                            if who == "LITHOGRAPHER" {
+                                if exposure_first.is_none() {
+                                    let wrong = guest.command(who, "echo '{\"process\":\"overlay_alignment\"}' | dd of=/service/run_stepper_exposure oflag=nonblock".into()).await?;
+                                    assert!(wrong["stdout"].as_str().is_some_and(|s| s.contains("Invalid argument")), "{wrong}");
+                                    assert_eq!(guest.command(who, expose.into()).await?["stdout"], "wash> ");
+                                }
+                                let result = wafer_shell_result(&guest.command(who, "cat /service/run_stepper_exposure".into()).await?)?;
+                                assert_eq!(result["success"], true, "{result}");
+                                assert_eq!(result["data"]["process"], "photo_exposure");
+                                receipts.push(result["data"]["receipt"].clone());
+                            }
                             if who == "DEPOSITOR" {
                                 let growth = "/service/run_deposition";
                                 let rate = "/service/check_monitoring";
@@ -977,7 +993,13 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                                 let sample = format!("echo '{{\"check_type\":\"deposition_rate\"}}' > {rate}; cat {rate}");
                                 let early = guest.command(who, format!("echo '{{\"check_type\":\"deposition_rate\"}}' | dd of={rate} oflag=nonblock")).await?;
                                 assert!(early["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{early}");
+                                if exposure_first == Some(true) {
+                                    assert_eq!(guest.command("LITHOGRAPHER", expose.into()).await?["stdout"], "wash> ");
+                                }
                                 assert_eq!(guest.command(who, grow).await?["stdout"], "wash> ");
+                                if exposure_first == Some(false) {
+                                    assert_eq!(guest.command("LITHOGRAPHER", expose.into()).await?["stdout"], "wash> ");
+                                }
                                 let mut measured = wafer_shell_result(&guest.command(who, sample.clone()).await?)?;
                                 if retry_control {
                                     assert_eq!(measured["data"]["status"], "check_failed");
@@ -1268,6 +1290,25 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
             retry,
             retry_control,
         )?;
+        if let Some(photo_first) = exposure_first {
+            let interval = |process: &str| -> Result<(u64, u64)> {
+                let effect = effects
+                    .iter()
+                    .find(|e| e["arguments"]["process"] == process)
+                    .ok_or("missing fabrication interval")?;
+                Ok((
+                    effect["effect_start_row"].as_u64().ok_or("missing start")?,
+                    effect["effect_end_row"].as_u64().ok_or("missing end")?,
+                ))
+            };
+            let photo = interval("photo_exposure")?;
+            let growth = interval("cvd_growth")?;
+            assert_eq!(photo.0 < growth.0, photo_first, "unexpected load order");
+            assert!(
+                photo.0.max(growth.0) < photo.1.min(growth.1),
+                "both independent instruments must be active together"
+            );
+        }
         check_spot_check_effects(&epf, &rows, &outcome["score"], order[0] == etch)?;
         let captures = epf["sessions"][0]["acceptances"]
             .as_array()
@@ -1428,7 +1469,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
             &directory.join("result.json"),
             &json!({"task":"15E","order":order,"wasm_participants":6,"disposition":decision,"deliveries":delivered,"deferred_reads":deferred_reads,
             "model_calls":0,"scored_benchmark":false,"fabrication_fixture_calls":fabrication_calls, "fixture_post_validation_calls":2 + 2 * usize::from(retry),
-                "shell_effects":guest_effects,"measurements":measurements,"instrument_effects":effects,"confirmations":confirmations,"injected_first_check_failure":retry_control,"injected_first_measurement_failure":retry,"early_reads":2,"rejected_wrong_operations":2,"score":outcome["score"],"epf":epf,
+                "shell_effects":guest_effects,"concurrent_load_exposure_first":exposure_first,"measurements":measurements,"instrument_effects":effects,"confirmations":confirmations,"injected_first_check_failure":retry_control,"injected_first_measurement_failure":retry,"early_reads":2,"rejected_wrong_operations":2,"score":outcome["score"],"epf":epf,
             "events_sha256":digest(&journal)?,"runtime_binary_sha256":digest(&binary)?,
             "wash_sha256":digest(&wash)?,"build_receipt_sha256":digest(&output.join("build-receipt.json"))?}),
         )?;
@@ -1821,6 +1862,17 @@ fn check_wafer_effects(
             Measure::LOGICAL_LABEL,
             Measured::LOGICAL_LABEL,
             reports.len(),
+        ),
+        (
+            "LITHOGRAPHER",
+            "run_stepper_exposure",
+            STEPPER,
+            STAGE,
+            serde_json::from_value(roles["LITHO_INBOX"].clone())?,
+            STEPPER,
+            Expose::LOGICAL_LABEL,
+            Exposed::LOGICAL_LABEL,
+            1,
         ),
         (
             "DEPOSITOR",

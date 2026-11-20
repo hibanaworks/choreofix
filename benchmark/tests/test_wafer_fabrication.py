@@ -119,6 +119,27 @@ class WaferFabrication(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.sim.is_complete())
         self.assertEqual([v.violation_type for v in self.sim.violations], ["missing_wafer_result"])
 
+    async def test_two_loaded_wafers_share_one_monitor_in_either_order(self):
+        for first, second in itertools.permutations((RATE, DOSE)):
+            with self.subTest(first=first[1]):
+                self.setUp()
+                await self.run_steps((GROW, EXPOSE, first, second))
+                self.assertEqual(self.sim.violations, [])
+
+                self.setUp()
+                await self.run_steps((GROW, EXPOSE))
+                self.sim._delay_multiplier = 0.05
+                sampling = asyncio.create_task(self.call(first))
+                await asyncio.sleep(0)
+                self.sim._delay_multiplier = 0
+                self.assertIsNone(self.sim.events[-1].completed_at)
+                self.assertTrue((await self.call(second)).success)
+                self.assertFalse(sampling.done())
+                self.assertTrue((await sampling).success)
+                self.assertEqual([(v.agent, v.tool, v.violation_type)
+                                  for v in self.sim.violations],
+                                 [(second[1], second[0], "concurrent_resource_use")])
+
     async def test_new_material_invalidates_only_its_dependent_evidence(self):
         for group in FABRICATION:
             await self.run_steps(group)

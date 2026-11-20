@@ -31,6 +31,9 @@ pub type Rate = g::Msg<DEPOSITION_RATE, InstrumentRequest<DEPOSITION_RATE>>;
 pub type RateResult<'a> = g::Msg<63, &'a [u8]>;
 pub type RatePassed<'a> = g::Msg<64, ReviewReply<'a, true>>;
 pub type RateFailed<'a> = g::Msg<65, ReviewReply<'a, false>>;
+pub const PHOTO_EXPOSURE: u8 = 66;
+pub type Expose = g::Msg<PHOTO_EXPOSURE, InstrumentRequest<PHOTO_EXPOSURE>>;
+pub type Exposed<'a> = g::Msg<67, &'a [u8]>;
 pub const CD: u8 = 50;
 pub const THICKNESS: u8 = 51;
 pub const PROFILE: u8 = 52;
@@ -140,6 +143,7 @@ impl<const CHAMBER: u8> WirePayload for InstrumentRequest<CHAMBER> {
         let (field, name) = match CHAMBER {
             DEPOSITION_CHAMBER => ("process", "film_integrity_check"),
             ETCH_CHAMBER => ("process", "etch_uniformity_check"),
+            PHOTO_EXPOSURE => ("process", "photo_exposure"),
             STEPPER => ("process", "overlay_alignment"),
             CVD_STAGE => ("process", "cvd_growth"),
             DEPOSITION_RATE => ("check_type", "deposition_rate"),
@@ -187,6 +191,10 @@ impl SimulatorOperation for InstrumentRequest<CVD_STAGE> {
 
 impl SimulatorOperation for InstrumentRequest<DEPOSITION_RATE> {
     const RPC: (&'static str, &'static str) = ("DEPOSITOR", "check_monitoring");
+}
+
+impl SimulatorOperation for InstrumentRequest<PHOTO_EXPOSURE> {
+    const RPC: (&'static str, &'static str) = ("LITHOGRAPHER", "run_stepper_exposure");
 }
 
 impl SimulatorOperation for InstrumentRequest<STEPPER> {
