@@ -1,0 +1,134 @@
+{
+  "task": "7H",
+  "depth": 0,
+  "scored_benchmark": false,
+  "qualified": false,
+  "archive": "output/verification/7h-participant-outcomes-20261121.zad315/live",
+  "previous_trial": "7h-review-inbox.json",
+  "source": {
+    "checkout_head": "cf371cf7c9524ce65a9d735ae114ba80cd5ca530",
+    "binaries": {
+      "runner": "771b1d7c57239ca75f2f2ed55323ed1978ce04337abc1d987f5adfa2bc12f8bb",
+      "runtime": "d27f50cf8b8470175a4635db81cfdbd7cdb433aa37ad7200480f98bd1a3a4d2a",
+      "wash.wasm": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca"
+    },
+    "build_receipt_sha256": "e12098f70b00c18f459c704342e0ad6360cbe4038ff111b6d1889cd9a165157d",
+    "source_manifest_sha256": "c08625a00d6507478636a6e8c43ff002a016319e18f989e4fe6e12075918c081",
+    "runtime_source_manifest_sha256": "d6e5de711ac40949385039bc943c3c6ee5e6f23cd27af91cdaae39d30e4887bd",
+    "compiled_projection_sha256": "0c5e57587caa95c3400863f11480bd0b17eb541135d6f480c9ed026a3437101e",
+    "note": "The archived source manifest and receipt include working-tree changes to the large-document application and runner."
+  },
+  "prompts": {
+    "WRITER_A": "2d064a105506ae5c4fc7fb7e9f2a34c7e3a9ee9ebd1ad981564efc7ca658cddb",
+    "WRITER_B": "24455ad158f9d63af8014e8102c22f2d24e3525a27b6e4bfce9a845a2cbd62e3",
+    "WRITER_C": "7ebbfcfa677091b6fc22919765bff4a15602d7da49babad652fc58fdd986a822",
+    "FIGURE_CREATOR": "85013edb6bc26d2b1b3eed8be1f67e6c3b42ad5b6300cba3150d0a1af764ed6a",
+    "FACT_CHECKER": "3978f5bcb5f4181397d890861e1736e067e84c57016391f642d9109e07079043",
+    "REVIEWER": "f291194036f5e05c566d43416a8543908e6f2ca707eb2dec6ddf609e1f34294e",
+    "EDITOR_IN_CHIEF": "3caea578fa9537fa493c3c571a7a09c85569ac009f2545aed8e2c99484b51ec4"
+  },
+  "elapsed_seconds": 592.145412416,
+  "participants": 7,
+  "participant_reports": {
+    "FIGURE_CREATOR": "completed",
+    "WRITER_C": "completed",
+    "WRITER_B": "completed",
+    "EDITOR_IN_CHIEF": "harness_error",
+    "FACT_CHECKER": "harness_error",
+    "REVIEWER": "harness_error",
+    "WRITER_A": "harness_error"
+  },
+  "guest_exits": {
+    "FIGURE_CREATOR": {
+      "status": 0,
+      "elapsed_seconds": 95.133873458
+    },
+    "WRITER_C": {
+      "status": 0,
+      "elapsed_seconds": 280.013724958
+    },
+    "WRITER_B": {
+      "status": 0,
+      "elapsed_seconds": 382.47446875
+    }
+  },
+  "simulator_effects": 30,
+  "simulator_complete": false,
+  "simulator_violations": [],
+  "protocol": {
+    "error": "EndpointError { operation: \"recv\", kind: SessionFault(EndpointDropped) }",
+    "status": "failed",
+    "type": "run_result"
+  },
+  "reviewer_last_delivered_result": {
+    "guest_command": 121,
+    "tool": "review_sections",
+    "scope": "CHAPTERS_1_2",
+    "status": "reviewed",
+    "success": true,
+    "elapsed_seconds": 584.815806917
+  },
+  "reviewer_last_command": {
+    "guest_command": 123,
+    "command": "exit 0",
+    "elapsed_seconds": 592.100930458
+  },
+  "hashes": {
+    "result.json": "09138ad550b7728df9697512fd0887affe6b033b1c2e48384a9c0fc3e58e3f41",
+    "events.jsonl": "3a2cc52bc2abc2a434e7bbcb8b29498693cc3fdba9394949efb3c35ac4877b9f",
+    "model-connection/events.jsonl": "4e4b950c77ba50ba0bc733fd81e15a8578206e04f87aa452917d8336f70fed39"
+  },
+  "model_usage": {
+    "models": [
+      "gpt-6-luna"
+    ],
+    "efforts": [
+      "xhigh"
+    ],
+    "tokens": 4635010,
+    "missing_usage": 0
+  },
+  "source_match_previous_trial": [
+    "runtime",
+    "wash.wasm",
+    "compiled_projection_sha256"
+  ],
+  "writers_last_decisions": {
+    "WRITER_C": {
+      "tool": "review_sections",
+      "scope": "CHAPTER_4",
+      "status": "reviewed",
+      "success": true,
+      "id": 65,
+      "elapsed_seconds": 271.710441833
+    },
+    "WRITER_B": {
+      "tool": "fact_check",
+      "scope": "CHAPTER_3",
+      "status": "reviewed",
+      "success": true,
+      "id": 83,
+      "elapsed_seconds": 372.623997042
+    }
+  },
+  "observed_capture_records": 132344,
+  "tools_in_effect_journal": {
+    "create_figure": 3,
+    "write_section": 4,
+    "update_references": 4,
+    "insert_figure": 3,
+    "fact_check": 6,
+    "review_sections": 5,
+    "revise_section": 5
+  },
+  "independent_audits": {
+    "run": {
+      "passed": false,
+      "error": "failed or altered case result"
+    },
+    "effects": {
+      "passed": false,
+      "error": "incomplete runtime verdict"
+    }
+  }
+}

@@ -241,6 +241,20 @@ A barrier requiring all deployments to finish before any registration would lose
 
 These measurements exercise the scoring environment. The seven-guest Wasm experiments above cover preparation and schema migration. The [per-graph measurements and simulator input hashes](4h-deployment-orders.json) identify the exact evaluation inputs. The summary's SHA-256 is `bdec659bc61b38a1907a6e864d448f61c21ff9f166ae02618c991b1625b0af9f`.
 
+A failed deployment also leaves an independent service free to enter production.
+We assigned the three services the roles of failed service, independent service
+and service that depends on the failed one in all six ways. Each started with a
+reviewed and tested candidate and a completed schema migration. We failed the
+first deployment and tried all 28 placements of the independent service's stage
+and registration among the failed service's rollback, rebuild, review, test,
+restaging and registration. All 168 schedules completed with zero simulator
+violations. In six of them the independent service registered before the rollback.
+The dependent service subsequently staged against the recovered deployment's
+receipt in every run. A global that pauses all cutovers on any deployment
+failure would remove those six legal executions. These trials used the common
+simulator directly and made zero model calls.
+[Recovery schedules and receipt checks](../benchmark/tests/test_microservice_migration.py)
+
 To reproduce the seven-guest preparation test from the repository root, build the `microservice_migration` family with the runner's `--build-wasi` option. Set `CHOREOFIX_MICROSERVICE_MIGRATION_WASI_BINARY` to the built executable and `CHOREOFIX_EVIDENCE_ROOT` to a fresh directory. Run the following under the repository's resource guard.
 
 ```sh

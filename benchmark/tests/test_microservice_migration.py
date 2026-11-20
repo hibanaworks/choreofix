@@ -219,6 +219,47 @@ class MicroserviceMigrationWorld(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(recovered.success)
         self.assertNotEqual(recovered.data["candidate"], failed.data["candidate"])
 
+    async def test_independent_cutover_during_deployment_recovery(self):
+        recovery = ("rollback", "build", "review", "test", "stage", "register")
+        schedules = 0
+        for failed, independent, dependent in itertools.permutations(_SERVICES):
+            for stage_index, register_index in itertools.combinations(range(len(recovery) + 2), 2):
+                with self.subTest(failed=failed, independent=independent,
+                                  stage_index=stage_index, register_index=register_index):
+                    self.setUp()
+                    self.world._failure_specs = [
+                        FailureSpec(tool_name="deploy_service", call_index=0),
+                    ]
+                    self.assertTrue((await self.plan(dependencies={dependent: [failed]})).success)
+                    for service in _SERVICES:
+                        await self.prepare(service)
+                        self.assertTrue((await self.act("schema", service)).success)
+                    broken = await self.act("stage", failed)
+                    self.assertFalse(broken.success)
+                    self.assertEqual(broken.data["status"], "deployment_failed")
+                    steps = [(failed, action) for action in recovery]
+                    steps.insert(stage_index, (independent, "stage"))
+                    steps.insert(register_index, (independent, "register"))
+                    receipts = {}
+                    for service, action in steps:
+                        result = await self.act(action, service)
+                        self.assertTrue(result.success, result.data)
+                        receipts[service, action] = result.data
+                    self.assertEqual(receipts[failed, "rollback"]["deployment"], broken.data["receipt"])
+                    self.assertNotEqual(receipts[failed, "stage"]["candidate"], broken.data["candidate"])
+                    for service in (failed, independent):
+                        self.assertEqual(receipts[service, "register"]["deployment"],
+                                         receipts[service, "stage"]["receipt"])
+                    staged = await self.act("stage", dependent)
+                    self.assertTrue(staged.success)
+                    self.assertEqual(staged.data["dependencies"],
+                                     {failed: receipts[failed, "stage"]["receipt"]})
+                    self.assertTrue((await self.act("register", dependent)).success)
+                    self.assertTrue(self.world.is_complete())
+                    self.assertEqual(self.world.violations, [])
+                    schedules += 1
+        self.assertEqual(schedules, 168)
+
     async def test_revised_code_needs_new_receipts_before_registration(self):
         a = _SERVICES[0]
         await self.plan()

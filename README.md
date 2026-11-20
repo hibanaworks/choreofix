@@ -4,10 +4,11 @@ ChoreoFix tests whether a global choreography can be the sole source of authorit
 for agents that share resources. Each agent chooses commands in its own
 [hibana-wash](https://github.com/hibanaworks/hibana-wash) shell. WASI file
 operations on ChoreoFS drive the projected [Hibana](https://github.com/hibanaworks/hibana)
-endpoints. In review (6E) and CI/CD (16E), each simulator effect consumes the
-typed request received by its resource owner. The [6E trials](analysis/review-receipts.md)
-and [16E trials](analysis/cicd-receipts.md) exercised this path with wash and
-live agents. Other families still have resource receivers that can select a
+endpoints. In review (6E), API development (8E) and CI/CD (16E), each
+simulator effect consumes the typed request received from an Endpoint. The
+[6E](analysis/review-receipts.md), [8E](analysis/8e-received-effects.json)
+and [16E](analysis/cicd-receipts.md) trials exercised this path with wash and
+live agents. Eight qualified tasks still have receivers that can select a
 simulator tool and supply its arguments directly. We check the
 protocol execution with EPF, match admitted requests to actual simulator effects,
 and score the business outcome. Whether this design preserves the original
@@ -15,9 +16,9 @@ choices or makes a workflow cheaper to change is an empirical question.
 
 ## Status
 
-| Question | Evidence through 20 November 2026 |
+| Question | Evidence through 21 November 2026 |
 | --- | --- |
-| How many tasks have run through the direct boundary with live agents? | 36 of 48 tasks across 29 families, on their recorded sources. The [inventory](analysis/README.md) identifies 43 selected task/depth conditions. |
+| How many tasks have run through ChoreoFS with live agents? | 36 of 48 tasks across 29 families, on their recorded sources. Of the 43 selected task/depth conditions, 39 completed the common simulator task and four had a terminal negative outcome. [Pilot inventory](analysis/README.md) |
 | What remains open? | 12 task qualifications and a common final revision. In 4H, seven scripted Wasm participants run through design, implementation, review, testing and schema migration. DevOps can choose any of the six migration orders. When a test fails, the developer receives the service Endpoint back, repairs the candidate and hands it to the original reviewer. The reviewer can request further changes. Retesting the approved repair, deployment, rollback and registration remain open. [Measured review decisions](analysis/4h-repair-reviews.json) |
 | What has been compared? | 0 of 2,592 original and supplemental episodes scored, and 0 of 1,368 additional planned comparisons. The pilots measure ChoreoFix on their own recorded conditions. |
 | Which choices have been checked? | Wasm guests completed all 90 upstream 9E sequences of thoughts and meals, plus one in which B and C ate between A's three thoughts. In 9M and 9H, each seat ate first while the others stayed idle. For every first seat, the remaining diners completed in both directions around the table (24 Wasm trials). Five live diners started in B, A, C, E, D order and seven in E, D, B, G, C, A, F order. Peak overlap was two and three meals, respectively. In 1E all six commit orders ran through wash. [Reproduction and limits](analysis/arbitration.md) |
