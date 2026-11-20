@@ -32,11 +32,11 @@ pub type Loan<'run, const RESOURCE: u8> = g::Msg<10, Endpoint<'run, RESOURCE>>;
 pub type CompileIntent = g::Msg<18, super::imp::Arguments<1>>;
 pub type TestIntent = g::Msg<19, super::imp::Arguments<2>>;
 pub type DeployIntent = g::Msg<24, super::imp::Arguments<3>>;
-pub type CompileRequest = g::Msg<30, super::imp::Arguments<1>>;
+pub type CompileRequest = g::Msg<30, super::imp::Arguments<1, true>>;
 pub type CompileResult<'a> = g::Msg<31, &'a [u8]>;
-pub type TestRequest = g::Msg<32, super::imp::Arguments<2>>;
+pub type TestRequest = g::Msg<32, super::imp::Arguments<2, true>>;
 pub type TestResult<'a> = g::Msg<33, &'a [u8]>;
-pub type DeployRequest = g::Msg<34, super::imp::Arguments<3>>;
+pub type DeployRequest = g::Msg<34, super::imp::Arguments<3, true>>;
 pub type DeployResult<'a> = g::Msg<35, &'a [u8]>;
 // Each notice carries its actual result. Its source occurrence is in the global;
 // the JSON kind is display/audit data, never a second progress cursor.

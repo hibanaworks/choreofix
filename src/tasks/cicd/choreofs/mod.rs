@@ -19,7 +19,7 @@ use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasi
 #[hibana_runtime::scope]
 async fn run_guests(
     module: &[u8],
-    (bus, simulator): (&Bus, &impl crate::shell::imp::service::Domain),
+    (bus, simulator): (&Bus, &impl crate::shell::imp::service::ReceivedEffects),
     terminals: [Terminal; 3],
 ) -> ShellResult<()> {
     use global::*;

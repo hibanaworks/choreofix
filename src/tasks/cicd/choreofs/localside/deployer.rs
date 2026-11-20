@@ -110,7 +110,9 @@ pub async fn run<'run>(
                 };
                 operation.send::<DeployIntent>(&arguments).await?;
                 let mut resource = operation.recv::<Loan<DEPLOY_ENV>>().await?;
-                resource.send::<DeployRequest>(&arguments).await?;
+                resource
+                    .send::<DeployRequest>(&arguments.into_request())
+                    .await?;
                 let response = resource.recv::<DeployResult>().await?.to_vec();
                 operation.send::<Loan<DEPLOY_ENV>>(resource).await?;
                 operation

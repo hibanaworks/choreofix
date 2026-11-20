@@ -110,7 +110,9 @@ pub async fn run<'run>(
                 };
                 operation.send::<TestIntent>(&arguments).await?;
                 let mut resource = operation.recv::<Loan<BUILD_SERVER>>().await?;
-                resource.send::<TestRequest>(&arguments).await?;
+                resource
+                    .send::<TestRequest>(&arguments.into_request())
+                    .await?;
                 let response = resource.recv::<TestResult>().await?.to_vec();
                 operation.send::<Loan<BUILD_SERVER>>(resource).await?;
                 operation

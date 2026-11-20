@@ -2,7 +2,10 @@
 use super::{global::*, imp::Arguments, localside};
 use crate::shell::{
     ShellError, ShellResult,
-    imp::{bus::Bus, service::Domain},
+    imp::{
+        bus::Bus,
+        service::{ReceivedEffects, SimulatorOperation},
+    },
 };
 use hibana::{
     g,
@@ -18,13 +21,13 @@ use std::{cell::Cell, time::Duration};
 
 #[derive(Default)]
 struct Journal(Cell<Vec<Value>>);
-impl Domain for Journal {
-    async fn execute(
+impl ReceivedEffects for Journal {
+    async fn apply<P: SimulatorOperation>(
         &self,
-        agent: &'static str,
-        tool: &'static str,
-        arguments: Value,
-    ) -> Result<Value, String> {
+        received: ReceivedPayload<'_, P>,
+    ) -> ShellResult<Value> {
+        let (agent, tool) = P::RPC;
+        let arguments: Value = serde_json::from_slice(received.as_bytes()).unwrap();
         let mut rows = self.0.take();
         rows.push(json!({"agent":agent,"tool":tool,"arguments":arguments}));
         self.0.set(rows);
@@ -45,7 +48,7 @@ impl WireEncode for Forged {
     }
 }
 impl WirePayload for Forged {
-    const SCHEMA_ID: u32 = <Arguments<1> as WirePayload>::SCHEMA_ID;
+    const SCHEMA_ID: u32 = <Arguments<1, true> as WirePayload>::SCHEMA_ID;
     type Decoded<'a> = &'a [u8];
     fn validate_payload(_: Payload<'_>) -> Result<(), CodecError> {
         Ok(())
