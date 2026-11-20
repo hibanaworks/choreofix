@@ -1410,8 +1410,7 @@ pub async fn run_stdio(module: &[u8], level: &str) -> ShellResult<()> {
                 io.run(bus),
             )
             .await;
-            match &result { Ok(())=>io.emit(bus,serde_json::json!({"type":"run_result","status":"complete"})).await?, Err(error)=>io.emit(bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?, }
-            result
+            io.finish(bus, result, None).await
         }
         "2M" => {
             use global::roles2m::*;
@@ -1442,8 +1441,7 @@ pub async fn run_stdio(module: &[u8], level: &str) -> ShellResult<()> {
                 io.run(bus),
             )
             .await;
-            match &result { Ok(())=>io.emit(bus,serde_json::json!({"type":"run_result","status":"complete"})).await?, Err(error)=>io.emit(bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?, }
-            result
+            io.finish(bus, result, None).await
         }
         "2H" => {
             use global::roles2h::*;
@@ -1480,8 +1478,7 @@ pub async fn run_stdio(module: &[u8], level: &str) -> ShellResult<()> {
                 io.run(bus),
             )
             .await;
-            match &result { Ok(())=>io.emit(bus,serde_json::json!({"type":"run_result","status":"complete"})).await?, Err(error)=>io.emit(bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?, }
-            result
+            io.finish(bus, result, None).await
         }
         _ => Err(ShellError::message("expected writing task 2E, 2M or 2H")),
     }

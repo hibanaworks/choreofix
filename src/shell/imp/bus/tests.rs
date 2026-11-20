@@ -268,12 +268,7 @@ async fn failed_output_cannot_be_reopened_by_a_final_verdict() -> ShellResult<()
     bus.observe(json!({"type":"observation"}));
     assert!(owner.flush_output(&bus, &mut output).await.is_err());
     assert!(owner.output.is_none());
-    assert!(
-        owner
-            .emit(&bus, json!({"type":"run_result"}))
-            .await
-            .is_err()
-    );
+    assert!(owner.finish(&bus, Ok(()), None).await.is_err());
     Ok(())
 }
 

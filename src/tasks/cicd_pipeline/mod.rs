@@ -513,10 +513,5 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
         io.run(bus),
     )
     .await;
-    let verdict = match &result {
-        Ok(()) => json!({"type":"run_result","status":"complete"}),
-        Err(error) => json!({"type":"run_result","status":"failed","error":error.to_string()}),
-    };
-    io.emit(bus, verdict).await?;
-    result
+    io.finish(bus, result, None).await
 }

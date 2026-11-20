@@ -785,11 +785,7 @@ pub async fn run_stdio(module: &[u8]) -> crate::shell::ShellResult<()> {
         result
     };
     let result = hibana_runtime::race(participants, io.run(bus)).await;
-    match &result {
-        Ok(()) => io.emit(bus, serde_json::json!({"type":"run_result","status":"complete"})).await?,
-        Err(error) => io.emit(bus, serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
-    }
-    result
+    io.finish(bus, result, None).await
 }
 pub fn projection() -> Value {
     global::programs().observation()

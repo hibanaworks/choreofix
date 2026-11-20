@@ -453,10 +453,5 @@ pub async fn run(module: Option<&[u8]>) -> ShellResult<()> {
         result
     };
     let result = hibana_runtime::race(participants, io.run(bus)).await;
-    let message = match &result {
-        Ok(()) => json!({"type":"run_result","status":"complete"}),
-        Err(error) => json!({"type":"run_result","status":"failed","error":error.to_string()}),
-    };
-    io.emit(bus, message).await?;
-    result
+    io.finish(bus, result, None).await
 }

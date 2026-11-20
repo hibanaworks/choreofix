@@ -255,23 +255,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
         reader.run(bus),
     )
     .await;
-    match &result {
-        Ok(()) => {
-            reader
-                .emit(
-                    bus,
-                    serde_json::json!({"type":"run_result","status":"complete"}),
-                )
-                .await?
-        }
-        Err(e) => reader
-            .emit(
-                bus,
-                serde_json::json!({"type":"run_result","status":"failed","error":e.to_string()}),
-            )
-            .await?,
-    }
-    result
+    reader.finish(bus, result, None).await
 }
 
 pub fn projection() -> serde_json::Value {

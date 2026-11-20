@@ -9,7 +9,7 @@ use crate::{
     shell::{ShellError, ShellResult},
 };
 use hibana::runtime::{SessionKitStorage, ids::SessionId, resolver::ResolverRef};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::cell::Cell;
 #[hibana_runtime::scope]
 pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
@@ -396,20 +396,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
         io.run(bus),
     )
     .await;
-    match &result {
-        Ok(()) => {
-            io.emit(bus, json!({"type":"run_result","status":"complete"}))
-                .await?
-        }
-        Err(error) => {
-            io.emit(
-                bus,
-                json!({"type":"run_result","status":"failed","error":error.to_string()}),
-            )
-            .await?
-        }
-    }
-    result
+    io.finish(bus, result, None).await
 }
 pub fn projection() -> Value {
     global::programs().observation()

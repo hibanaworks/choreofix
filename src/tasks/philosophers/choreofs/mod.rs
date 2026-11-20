@@ -33,11 +33,7 @@ pub async fn run_stdio(module: &[u8], level: &str) -> ShellResult<()> {
                 reader.run(bus),
             )
             .await;
-            match &result{
- Ok(())=>reader.emit(bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
- Err(error)=>reader.emit(bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
- }
-            result
+            reader.finish(bus, result, None).await
         }
         "9M" => {
             use identity::roles::*;
@@ -78,11 +74,7 @@ pub async fn run_stdio(module: &[u8], level: &str) -> ShellResult<()> {
                 reader.run(bus),
             )
             .await;
-            match &result{
- Ok(())=>reader.emit(bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
- Err(error)=>reader.emit(bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
- }
-            result
+            reader.finish(bus, result, None).await
         }
         "9H" => {
             use identity::roles::*;
@@ -133,11 +125,7 @@ pub async fn run_stdio(module: &[u8], level: &str) -> ShellResult<()> {
                 reader.run(bus),
             )
             .await;
-            match &result{
- Ok(())=>reader.emit(bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
- Err(error)=>reader.emit(bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
- }
-            result
+            reader.finish(bus, result, None).await
         }
         _ => Err(ShellError::message("expected dining task 9E, 9M or 9H")),
     }

@@ -293,10 +293,5 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
         result
     };
     let result = hibana_runtime::race(trial, io.run(bus)).await;
-    let report = match &result {
-        Ok(()) => json!({"type":"run_result","status":"complete"}),
-        Err(error) => json!({"type":"run_result","status":"failed","error":error.to_string()}),
-    };
-    io.emit(bus, report).await?;
-    result
+    io.finish(bus, result, None).await
 }

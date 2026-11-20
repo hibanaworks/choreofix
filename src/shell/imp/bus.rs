@@ -275,10 +275,24 @@ impl ExternalIo {
         }
     }
 
-    pub async fn emit(&mut self, bus: &Bus, value: Value) -> ShellResult<()> {
-        if value["type"] != "run_result" {
-            return Err(ShellError::message("expected final trial result"));
-        }
+    /// Flush preceding observations and the final trial outcome before
+    /// returning the participants' result. Partial trials name their scope.
+    pub async fn finish(
+        mut self,
+        bus: &Bus,
+        result: ShellResult<()>,
+        scope: Option<&str>,
+    ) -> ShellResult<()> {
+        let value = match &result {
+            Ok(()) => {
+                let mut report = json!({"type":"run_result","status":"complete"});
+                if let Some(scope) = scope {
+                    report["scope"] = json!(scope);
+                }
+                report
+            }
+            Err(error) => json!({"type":"run_result","status":"failed","error":error.to_string()}),
+        };
         let stdout = self
             .output
             .as_ref()
@@ -286,7 +300,8 @@ impl ExternalIo {
         let mut output = Io::new(stdout.as_fd().try_clone_to_owned()?)?;
         let values = bus.transport.take_observations().chain([value]);
         bus.enqueue(values, None);
-        self.flush_output(bus, &mut output).await
+        self.flush_output(bus, &mut output).await?;
+        result
     }
 
     #[hibana_runtime::scope]
