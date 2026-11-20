@@ -2,7 +2,10 @@
 use super::global::*;
 use crate::{
     imp::json::{decode, encode, same},
-    shell::{ShellError, ShellResult, imp::service::Domain},
+    shell::{
+        ShellError, ShellResult,
+        imp::service::{ReceivedEffects, SimulatorOperation},
+    },
 };
 use hibana::{
     Endpoint,
@@ -18,12 +21,6 @@ const CATEGORIES: [&str; 3] = ["sections", "references", "figures"];
 #[derive(Debug)]
 pub struct Arguments<const COMBINE: bool>(Vec<u8>);
 
-impl<const COMBINE: bool> Arguments<COMBINE> {
-    fn into_value(self) -> Value {
-        serde_json::from_slice(&self.0).expect("validated survey editor request")
-    }
-}
-
 impl<const COMBINE: bool> WireEncode for Arguments<COMBINE> {
     fn encode_into(&self, out: &mut [u8]) -> Result<usize, CodecError> {
         out.get_mut(..self.0.len())
@@ -33,9 +30,20 @@ impl<const COMBINE: bool> WireEncode for Arguments<COMBINE> {
     }
 }
 
+impl<const COMBINE: bool> SimulatorOperation for Arguments<COMBINE> {
+    const RPC: (&'static str, &'static str) = (
+        EDITOR_NAME,
+        if COMBINE {
+            "combine_sections"
+        } else {
+            "make_editorial_decision"
+        },
+    );
+}
+
 impl<const COMBINE: bool> WirePayload for Arguments<COMBINE> {
     const SCHEMA_ID: u32 = 0xac3a_0000 | COMBINE as u32;
-    type Decoded<'a> = Self;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
 
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
         let value: Value =
@@ -63,8 +71,8 @@ impl<const COMBINE: bool> WirePayload for Arguments<COMBINE> {
         Ok(())
     }
 
-    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
-        Self(input.as_bytes().to_vec())
+    fn decode_validated_payload(input: ReceivedPayload<'_, Self>) -> Self::Decoded<'_> {
+        input
     }
 }
 
@@ -75,7 +83,10 @@ fn chapters(text: &str) -> impl Iterator<Item = &str> {
 }
 
 #[hibana_runtime::scope]
-pub async fn run(editor: &mut Endpoint<EDITOR>, domain: &impl Domain) -> ShellResult<Value> {
+pub async fn run(
+    editor: &mut Endpoint<EDITOR>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<Value> {
     let ((a, section_a), (b, section_b), (c, section_c), (d, section_d)) = async {
         let [mut a, mut b, mut c, mut d] = editor.par()?;
         async {
@@ -146,11 +157,9 @@ pub async fn run(editor: &mut Endpoint<EDITOR>, domain: &impl Domain) -> ShellRe
 
     let input = encode(&json!({"input_snapshot":snapshot,"review_receipts":receipts}))?;
     editor.send::<EditorialInput>(&input.as_slice()).await?;
-    let arguments = editor.recv::<Editorial>().await?.into_value();
-    let decision = domain
-        .execute(EDITOR_NAME, "make_editorial_decision", arguments.clone())
-        .await
-        .map_err(ShellError::message)?;
+    let received = editor.recv::<Editorial>().await?;
+    let arguments = decode(received.as_bytes())?;
+    let decision = effects.apply(received).await?;
     let evidence = &decision["data"];
     if decision["tool_name"] != "make_editorial_decision"
         || decision["success"] != true
@@ -168,11 +177,9 @@ pub async fn run(editor: &mut Endpoint<EDITOR>, domain: &impl Domain) -> ShellRe
     let reply = encode(&decision)?;
     editor.send::<EditorialResult>(&reply.as_slice()).await?;
 
-    let arguments = editor.recv::<Combine>().await?.into_value();
-    let combined = domain
-        .execute(EDITOR_NAME, "combine_sections", arguments.clone())
-        .await
-        .map_err(ShellError::message)?;
+    let received = editor.recv::<Combine>().await?;
+    let arguments = decode(received.as_bytes())?;
+    let combined = effects.apply(received).await?;
     let final_data = &combined["data"];
     let sections: Vec<_> =
         chapters(arguments["sections"].as_str().expect("typed sections")).collect();

@@ -4,7 +4,10 @@ use crate::{
     imp::json::{decode, encode, same},
     shell::{
         ShellError, ShellResult,
-        imp::{review_reply::ReviewReply, service::Domain},
+        imp::{
+            review_reply::ReviewReply,
+            service::{ReceivedEffects, SimulatorOperation},
+        },
     },
 };
 use hibana::{
@@ -34,10 +37,6 @@ impl<const SECTION: u8, const OPERATION: u8> ChapterArguments<SECTION, OPERATION
             .map_err(|_| ShellError::message("invalid survey chapter request"))?;
         Ok(Self(bytes))
     }
-
-    pub fn into_value(self) -> Value {
-        serde_json::from_slice(&self.0).expect("validated chapter arguments")
-    }
 }
 
 impl<const SECTION: u8, const OPERATION: u8> WireEncode for ChapterArguments<SECTION, OPERATION> {
@@ -49,9 +48,24 @@ impl<const SECTION: u8, const OPERATION: u8> WireEncode for ChapterArguments<SEC
     }
 }
 
+impl<const SECTION: u8, const OPERATION: u8> SimulatorOperation
+    for ChapterArguments<SECTION, OPERATION>
+{
+    const RPC: (&'static str, &'static str) = match OPERATION {
+        RESEARCH => (AUTHORS[SECTION as usize - 1], "research_topic"),
+        WRITE => (AUTHORS[SECTION as usize - 1], "write_section"),
+        REVISION => (AUTHORS[SECTION as usize - 1], "revise_section"),
+        REFERENCES => (AUTHORS[SECTION as usize - 1], "update_references"),
+        CREATE_FIGURE => ("DATA_ANALYST", "create_figure"),
+        INSERT_FIGURE => ("DATA_ANALYST", "insert_figure"),
+        PEER_REVIEW => ("REVIEWER", "peer_review"),
+        _ => panic!("unknown survey chapter operation"),
+    };
+}
+
 impl<const SECTION: u8, const OPERATION: u8> WirePayload for ChapterArguments<SECTION, OPERATION> {
     const SCHEMA_ID: u32 = 0xac3b_0000 | ((SECTION as u32) << 8) | OPERATION as u32;
-    type Decoded<'a> = Self;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
 
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
         let value: Value =
@@ -89,8 +103,8 @@ impl<const SECTION: u8, const OPERATION: u8> WirePayload for ChapterArguments<SE
         Ok(())
     }
 
-    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
-        Self(input.as_bytes().to_vec())
+    fn decode_validated_payload(input: ReceivedPayload<'_, Self>) -> Self::Decoded<'_> {
+        input
     }
 }
 
@@ -121,7 +135,7 @@ impl<const SECTION: u8> WirePayload for ChapterBytes<'_, SECTION> {
 
 pub async fn review<const SECTION: u8>(
     reviewer: &mut EndpointBorrow<'_, '_, REVIEWER>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     let chapter = SECTIONS[usize::from(SECTION) - 1];
     let mut draft = decode(reviewer.recv::<Draft<SECTION>>().await?)?;
@@ -131,11 +145,8 @@ pub async fn review<const SECTION: u8>(
         section
             .send::<ReviewInput<SECTION>>(&ChapterBytes(&notice))
             .await?;
-        let arguments = section.recv::<Review<SECTION>>().await?.into_value();
-        let result = domain
-            .execute("REVIEWER", "peer_review", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let received = section.recv::<Review<SECTION>>().await?;
+        let result = effects.apply(received).await?;
         let data = &result["data"];
         if result["tool_name"] != "peer_review"
             || !result["success"].is_boolean()
@@ -175,16 +186,14 @@ pub async fn review<const SECTION: u8>(
 pub async fn author<'r, const SECTION: u8, const AUTHOR: u8>(
     author: &mut Endpoint<'r, AUTHOR>,
     mut section: Endpoint<'r, SECTION>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     let index = usize::from(SECTION) - 1;
     let chapter = SECTIONS[index];
     let name = AUTHORS[index];
-    let args = section.recv::<Research<SECTION>>().await?.into_value();
-    let research = domain
-        .execute(name, "research_topic", args.clone())
-        .await
-        .map_err(ShellError::message)?;
+    let received = section.recv::<Research<SECTION>>().await?;
+    let args = decode(received.as_bytes())?;
+    let research = effects.apply(received).await?;
     if research["tool_name"] != "research_topic"
         || research["success"] != true
         || research["data"]["agent"] != name
@@ -216,11 +225,9 @@ pub async fn author<'r, const SECTION: u8, const AUTHOR: u8>(
     let (draft, references, figure) = async {
         let [mut draft, mut references, mut figures] = section.par()?;
         async {
-            let args = draft.recv::<Write<SECTION>>().await?.into_value();
-            let actual = domain
-                .execute(name, "write_section", args.clone())
-                .await
-                .map_err(ShellError::message)?;
+            let received = draft.recv::<Write<SECTION>>().await?;
+            let args = decode(received.as_bytes())?;
+            let actual = effects.apply(received).await?;
             let material = &actual["data"]["artifact"];
             if actual["tool_name"] != "write_section"
                 || actual["success"] != true
@@ -286,11 +293,9 @@ pub async fn author<'r, const SECTION: u8, const AUTHOR: u8>(
             .send::<AuthorNotice<SECTION>>(&ChapterBytes(&bytes))
             .await?;
         let mut section = author.recv::<Accepted<SECTION>>().await?;
-        let arguments = section.recv::<Revise<SECTION>>().await?.into_value();
-        let result = domain
-            .execute(name, "revise_section", arguments.clone())
-            .await
-            .map_err(ShellError::message)?;
+        let received = section.recv::<Revise<SECTION>>().await?;
+        let arguments = decode(received.as_bytes())?;
+        let result = effects.apply(received).await?;
         let mut draft = rejected["data"]["input_snapshot"].clone();
         let old = &draft["sections"][chapter];
         let actual = &result["data"]["artifact"];

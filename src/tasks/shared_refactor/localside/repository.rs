@@ -1,11 +1,15 @@
 //! The resource owner performs effects; independent views carry actual validation data.
+use super::super::arguments::Arguments;
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{Endpoint, g::Message};
 use serde_json::{Value, json};
 
 #[hibana_runtime::scope]
-pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> ShellResult<()> {
+pub async fn run(
+    owner: &mut Endpoint<REPO_OWNER>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()> {
     let mut repo = owner.recv::<RepoLoan>().await?;
     async {
         async {
@@ -45,11 +49,12 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                         Ok(())
                     }
                     .await?;
-                    let arguments = a.recv::<MergeA>().await?.into_value();
+                    let arguments = imp::decode(a.recv::<MergeA>().await?.as_bytes())?;
                     imp::publication_inputs(&arguments, &current, ("module_a", &review, &test))?;
                     let bytes =
                         imp::encode(&json!({"arguments":arguments,"review":review,"test":test}))?;
-                    a.send::<PublicationA>(&bytes.as_slice()).await?;
+                    a.send::<PublicationA>(&Arguments::try_from(bytes.as_slice())?)
+                        .await?;
                     let value = imp::decode(a.recv::<PublishedA>().await?)?;
                     imp::published(&value, &current, "module_a")?;
                     let bytes = imp::encode(&value)?;
@@ -89,11 +94,12 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                         Ok(())
                     }
                     .await?;
-                    let arguments = b.recv::<MergeB>().await?.into_value();
+                    let arguments = imp::decode(b.recv::<MergeB>().await?.as_bytes())?;
                     imp::publication_inputs(&arguments, &current, ("module_b", &review, &test))?;
                     let bytes =
                         imp::encode(&json!({"arguments":arguments,"review":review,"test":test}))?;
-                    b.send::<PublicationB>(&bytes.as_slice()).await?;
+                    b.send::<PublicationB>(&Arguments::try_from(bytes.as_slice())?)
+                        .await?;
                     let value = imp::decode(b.recv::<PublishedB>().await?)?;
                     imp::published(&value, &current, "module_b")?;
                     let bytes = imp::encode(&value)?;
@@ -113,44 +119,32 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                 let branch = repo.offer().await?;
                 match branch.label() {
                     RefactorA::LOGICAL_LABEL => {
-                        let args = branch.recv::<RefactorA>().await?.into_value();
-                        let value = domain
-                            .execute("DEVELOPER_A", "refactor_code", args)
-                            .await
-                            .map_err(ShellError::message)?;
+                        let received = branch.recv::<RefactorA>().await?;
+                        let value = effects.apply(received).await?;
                         imp::changed(&value, "module_a")?;
                         current = value["data"]["working_candidates"].clone();
                         let bytes = imp::encode(&value)?;
                         repo.send::<RefactoredA>(&bytes.as_slice()).await?;
                     }
                     RefactorSharedA::LOGICAL_LABEL => {
-                        let args = branch.recv::<RefactorSharedA>().await?.into_value();
-                        let value = domain
-                            .execute("DEVELOPER_A", "refactor_code", args)
-                            .await
-                            .map_err(ShellError::message)?;
+                        let received = branch.recv::<RefactorSharedA>().await?;
+                        let value = effects.apply(received).await?;
                         imp::changed(&value, "SHARED_LIBRARY")?;
                         current = value["data"]["working_candidates"].clone();
                         let bytes = imp::encode(&value)?;
                         repo.send::<SharedChangedA>(&bytes.as_slice()).await?;
                     }
                     RefactorB::LOGICAL_LABEL => {
-                        let args = branch.recv::<RefactorB>().await?.into_value();
-                        let value = domain
-                            .execute("DEVELOPER_B", "refactor_code", args)
-                            .await
-                            .map_err(ShellError::message)?;
+                        let received = branch.recv::<RefactorB>().await?;
+                        let value = effects.apply(received).await?;
                         imp::changed(&value, "module_b")?;
                         current = value["data"]["working_candidates"].clone();
                         let bytes = imp::encode(&value)?;
                         repo.send::<RefactoredB>(&bytes.as_slice()).await?;
                     }
                     RefactorSharedB::LOGICAL_LABEL => {
-                        let args = branch.recv::<RefactorSharedB>().await?.into_value();
-                        let value = domain
-                            .execute("DEVELOPER_B", "refactor_code", args)
-                            .await
-                            .map_err(ShellError::message)?;
+                        let received = branch.recv::<RefactorSharedB>().await?;
+                        let value = effects.apply(received).await?;
                         imp::changed(&value, "SHARED_LIBRARY")?;
                         current = value["data"]["working_candidates"].clone();
                         let bytes = imp::encode(&value)?;
@@ -171,33 +165,29 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                         break;
                     }
                     PublicationA::LOGICAL_LABEL => {
-                        let admitted = imp::decode(branch.recv::<PublicationA>().await?)?;
+                        let received = branch.recv::<PublicationA>().await?;
+                        let admitted = imp::decode(received.as_bytes())?;
                         let arguments = &admitted["arguments"];
                         imp::publication_inputs(
                             arguments,
                             &current,
                             ("module_a", &admitted["review"], &admitted["test"]),
                         )?;
-                        let value = domain
-                            .execute("DEVELOPER_A", "merge_code", arguments.clone())
-                            .await
-                            .map_err(ShellError::message)?;
+                        let value = effects.apply(received).await?;
                         imp::published(&value, &current, "module_a")?;
                         let bytes = imp::encode(&value)?;
                         repo.send::<PublishedA>(&bytes.as_slice()).await?;
                     }
                     PublicationB::LOGICAL_LABEL => {
-                        let admitted = imp::decode(branch.recv::<PublicationB>().await?)?;
+                        let received = branch.recv::<PublicationB>().await?;
+                        let admitted = imp::decode(received.as_bytes())?;
                         let arguments = &admitted["arguments"];
                         imp::publication_inputs(
                             arguments,
                             &current,
                             ("module_b", &admitted["review"], &admitted["test"]),
                         )?;
-                        let value = domain
-                            .execute("DEVELOPER_B", "merge_code", arguments.clone())
-                            .await
-                            .map_err(ShellError::message)?;
+                        let value = effects.apply(received).await?;
                         imp::published(&value, &current, "module_b")?;
                         let bytes = imp::encode(&value)?;
                         repo.send::<PublishedB>(&bytes.as_slice()).await?;

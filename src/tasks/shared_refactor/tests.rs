@@ -1,31 +1,37 @@
 //! Actual production receiver rejects forged validation data before any publication.
 use super::{arguments::Arguments, global::*, localside};
 use crate::shell::{
-    ShellResult,
-    imp::{bus::Bus, service::Domain},
+    ShellError, ShellResult,
+    imp::{
+        bus::Bus,
+        service::{ReceivedEffects, SimulatorOperation},
+    },
 };
 use core::cell::Cell;
 use hibana::runtime::{SessionKitStorage, ids::SessionId};
 use serde_json::{Value, json};
 
 struct Effects(Cell<Vec<Value>>);
-impl Domain for Effects {
-    async fn execute(
-        &self,
-        agent: &'static str,
-        tool: &'static str,
-        arguments: Value,
-    ) -> Result<Value, String> {
-        let mut calls = self.0.take();
-        calls.push(json!({"agent":agent,"tool":tool,"arguments":arguments}));
-        self.0.set(calls);
-        if tool != "refactor_code" {
-            return Err("unexpected publication effect".into());
-        }
-        Ok(json!({"tool_name":tool,"success":true,"data":{
+impl ReceivedEffects for Effects {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+        let input = crate::imp::json::decode(received.as_bytes());
+        async move {
+            let arguments = input?;
+            let (agent, tool) = P::RPC;
+            let mut calls = self.0.take();
+            calls.push(json!({"agent":agent,"tool":tool,"arguments":arguments}));
+            self.0.set(calls);
+            if tool != "refactor_code" {
+                return Err(ShellError::message("unexpected publication effect"));
+            }
+            Ok(json!({"tool_name":tool,"success":true,"data":{
             "target":arguments["target"],"source":"actual fixture source",
             "content_sha256":"0".repeat(64),
             "working_candidates":{"module_a":"1".repeat(64),"module_b":"2".repeat(64)}}}))
+        }
     }
 }
 

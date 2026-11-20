@@ -1,10 +1,13 @@
 //! The owner of the sole test environment performs each actual test.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{Endpoint, g::Message};
 use serde_json::Value;
 #[hibana_runtime::scope]
-pub async fn run<D: Domain>(owner: &mut Endpoint<TEST_OWNER>, domain: &D) -> ShellResult<()> {
+pub async fn run(
+    owner: &mut Endpoint<TEST_OWNER>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()> {
     let mut environment = owner.recv::<TestLoan>().await?;
     let mut current = Value::Null;
     loop {
@@ -15,11 +18,8 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<TEST_OWNER>, domain: &D) -> She
                     imp::decode(branch.recv::<ReadyTestA>().await?)?["module_a"].take();
             }
             TestRequestA::LOGICAL_LABEL => {
-                let args = branch.recv::<TestRequestA>().await?.into_value();
-                let value = domain
-                    .execute("TESTER", "run_tests", args)
-                    .await
-                    .map_err(ShellError::message)?;
+                let received = branch.recv::<TestRequestA>().await?;
+                let value = effects.apply(received).await?;
                 imp::validation(&value, &current, "module_a")?;
                 let bytes = imp::encode(&value)?;
                 environment.send::<TestedA>(&bytes.as_slice()).await?;
@@ -30,11 +30,8 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<TEST_OWNER>, domain: &D) -> She
                     imp::decode(branch.recv::<ReadyTestB>().await?)?["module_b"].take();
             }
             TestRequestB::LOGICAL_LABEL => {
-                let args = branch.recv::<TestRequestB>().await?.into_value();
-                let value = domain
-                    .execute("TESTER", "run_tests", args)
-                    .await
-                    .map_err(ShellError::message)?;
+                let received = branch.recv::<TestRequestB>().await?;
+                let value = effects.apply(received).await?;
                 imp::validation(&value, &current, "module_b")?;
                 let bytes = imp::encode(&value)?;
                 environment.send::<TestedB>(&bytes.as_slice()).await?;

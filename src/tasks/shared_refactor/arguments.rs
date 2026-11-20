@@ -1,13 +1,9 @@
 //! Original operation arguments for one assigned module or shared library.
+use crate::shell::imp::service::SimulatorOperation;
 use hibana::runtime::wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload};
 use serde_json::Value;
 
 pub struct Arguments<const OP: u8>(Vec<u8>);
-impl<const OP: u8> Arguments<OP> {
-    pub fn into_value(self) -> Value {
-        serde_json::from_slice(&self.0).expect("validated shared-refactor arguments")
-    }
-}
 impl<const OP: u8> TryFrom<&[u8]> for Arguments<OP> {
     type Error = CodecError;
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
@@ -25,10 +21,18 @@ impl<const OP: u8> WireEncode for Arguments<OP> {
 }
 impl<const OP: u8> WirePayload for Arguments<OP> {
     const SCHEMA_ID: u32 = 0xac04_4000 | OP as u32;
-    type Decoded<'a> = Self;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
         let value: Value =
             serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
+        let arguments = if matches!(OP, 12 | 13) {
+            if !value["review"].is_object() || !value["test"].is_object() {
+                return Err(CodecError::Malformed);
+            }
+            &value["arguments"]
+        } else {
+            &value
+        };
         let (key, target) = match OP {
             0 => ("title", "module_a_refactor"),
             1 => ("title", "module_b_refactor"),
@@ -39,18 +43,57 @@ impl<const OP: u8> WirePayload for Arguments<OP> {
             7 => ("pr_id", "module_b"),
             8 => ("suite", "module_a_tests"),
             9 => ("suite", "module_b_tests"),
-            10 => ("branch", "module_a"),
-            11 => ("branch", "module_b"),
+            10 | 12 => ("branch", "module_a"),
+            11 | 13 => ("branch", "module_b"),
             _ => return Err(CodecError::Malformed),
         };
-        if value[key] != target || value.as_object().is_none_or(|v| v.len() != 1) {
+        if arguments[key] != target || arguments.as_object().is_none_or(|v| v.len() != 1) {
             return Err(CodecError::Malformed);
         }
         Ok(())
     }
-    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
-        Self(input.as_bytes().to_vec())
+    fn decode_validated_payload(input: ReceivedPayload<'_, Self>) -> Self::Decoded<'_> {
+        input
     }
+}
+
+impl SimulatorOperation for Arguments<0> {
+    const RPC: (&'static str, &'static str) = ("ARCHITECT", "design_proposal");
+}
+impl SimulatorOperation for Arguments<1> {
+    const RPC: (&'static str, &'static str) = ("ARCHITECT", "design_proposal");
+}
+impl SimulatorOperation for Arguments<2> {
+    const RPC: (&'static str, &'static str) = ("DEVELOPER_A", "refactor_code");
+}
+impl SimulatorOperation for Arguments<3> {
+    const RPC: (&'static str, &'static str) = ("DEVELOPER_A", "refactor_code");
+}
+impl SimulatorOperation for Arguments<4> {
+    const RPC: (&'static str, &'static str) = ("DEVELOPER_B", "refactor_code");
+}
+impl SimulatorOperation for Arguments<5> {
+    const RPC: (&'static str, &'static str) = ("DEVELOPER_B", "refactor_code");
+}
+impl SimulatorOperation for Arguments<6> {
+    const RPC: (&'static str, &'static str) = ("REVIEWER", "code_review");
+}
+impl SimulatorOperation for Arguments<7> {
+    const RPC: (&'static str, &'static str) = ("REVIEWER", "code_review");
+}
+impl SimulatorOperation for Arguments<8> {
+    const RPC: (&'static str, &'static str) = ("TESTER", "run_tests");
+}
+impl SimulatorOperation for Arguments<9> {
+    const RPC: (&'static str, &'static str) = ("TESTER", "run_tests");
+}
+impl SimulatorOperation for Arguments<12> {
+    const RPC: (&'static str, &'static str) = ("DEVELOPER_A", "merge_code");
+    const ARGUMENT_FIELD: Option<&'static str> = Some("arguments");
+}
+impl SimulatorOperation for Arguments<13> {
+    const RPC: (&'static str, &'static str) = ("DEVELOPER_B", "merge_code");
+    const ARGUMENT_FIELD: Option<&'static str> = Some("arguments");
 }
 
 #[cfg(test)]

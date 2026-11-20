@@ -10,7 +10,10 @@ use crate::{
     shell::{
         ShellError, ShellResult,
         global::Loan,
-        imp::{bus::Bus, service::Domain},
+        imp::{
+            bus::Bus,
+            service::{ReceivedEffects, SimulatorOperation},
+        },
         localside::file_metadata,
     },
 };
@@ -39,139 +42,156 @@ fn artifact<'a>(effects: &'a [Value], section: &str, tools: &[&str]) -> &'a Valu
         .expect("completed fixture artifact")["data"]["artifact"]
 }
 
-impl Domain for World {
-    async fn execute(
-        &self,
-        agent: &'static str,
-        tool: &'static str,
-        args: Value,
-    ) -> Result<Value, String> {
-        hibana_runtime::yield_now().await;
-        let mut effects = self.effects.take();
-        let sequence = effects.len() + 1;
-        let id = format!("{tool}:{sequence}");
-        let sources = effects
-            .iter()
-            .filter(|event| event["tool_name"] == "research_topic")
-            .map(|event| {
-                (
-                    event["data"]["topic"].as_str().unwrap(),
-                    &event["data"]["artifact"],
-                )
-            })
-            .collect::<std::collections::BTreeMap<_, _>>();
-        let section = args["section_name"]
-            .as_str()
-            .or_else(|| args["manuscript"].as_str());
-        let mut success = true;
-        let data = match tool {
-            "research_topic" => {
-                let index = AUTHORS.iter().position(|&name| name == agent).unwrap();
-                assert_eq!(args["topic"], TOPICS[index]);
-                json!({"agent":agent,"topic":args["topic"],"artifact":{"id":id,"content":format!("Research by {agent}")}})
-            }
-            "write_section" | "update_references" | "revise_section" => {
-                let section = section.unwrap();
-                let index = SECTIONS.iter().position(|&name| name == section).unwrap();
-                assert_eq!(agent, AUTHORS[index]);
-                let content = match tool {
-                    "write_section" => args["content_notes"].as_str().unwrap().to_owned(),
-                    "update_references" => format!("Bibliography for {section}"),
-                    _ => format!("{}\n{}",artifact(&effects, section, &["write_section","revise_section"])["content"].as_str().unwrap(), args["feedback"].as_str().unwrap()),
-                };
-                let mut artifact = json!({"id":id,"content":content,"research_inputs":{TOPICS[index]:sources[TOPICS[index]]}});
-                if tool == "revise_section" {
-                    artifact["feedback"] = args["feedback"].clone();
+impl ReceivedEffects for World {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+        let input = crate::imp::json::decode(received.as_bytes());
+        async move {
+            let args = input?;
+            let (agent, tool) = P::RPC;
+            hibana_runtime::yield_now().await;
+            let mut effects = self.effects.take();
+            let sequence = effects.len() + 1;
+            let id = format!("{tool}:{sequence}");
+            let sources = effects
+                .iter()
+                .filter(|event| event["tool_name"] == "research_topic")
+                .map(|event| {
+                    (
+                        event["data"]["topic"].as_str().unwrap(),
+                        &event["data"]["artifact"],
+                    )
+                })
+                .collect::<std::collections::BTreeMap<_, _>>();
+            let section = args["section_name"]
+                .as_str()
+                .or_else(|| args["manuscript"].as_str());
+            let mut success = true;
+            let data = match tool {
+                "research_topic" => {
+                    let index = AUTHORS.iter().position(|&name| name == agent).unwrap();
+                    assert_eq!(args["topic"], TOPICS[index]);
+                    json!({"agent":agent,"topic":args["topic"],"artifact":{"id":id,"content":format!("Research by {agent}")}})
                 }
-                json!({"agent":agent,"section":section,"artifact":artifact})
-            }
-            "create_figure" => {
-                assert_eq!(agent, "DATA_ANALYST");
-                let inputs: serde_json::Map<_, _> = SECTIONS
-                    .iter()
-                    .zip(TOPICS)
-                    .filter_map(|(&chapter, topic)| {
-                        sources
-                            .get(topic)
-                            .map(|source| (chapter.to_owned(), json!({topic:source})))
-                    })
-                    .collect();
-                json!({"agent":agent,"figure_id":id,"artifact":{"id":id,"content":args["description"],"research_inputs":inputs}})
-            }
-            "insert_figure" => {
-                assert_eq!(agent, "DATA_ANALYST");
-                let created = effects
-                    .iter()
-                    .find(|event| {
-                        event["tool_name"] == "create_figure"
-                            && event["data"]["figure_id"] == args["figure_id"]
-                    })
-                    .unwrap();
-                json!({"agent":agent,"section":section.unwrap(),"figure_id":args["figure_id"],"artifact":created["data"]["artifact"]})
-            }
-            "peer_review" => {
-                assert_eq!(agent, "REVIEWER");
-                let section = section.unwrap();
-                let index = SECTIONS.iter().position(|&name| name == section).unwrap();
-                let previous = effects
-                    .iter()
-                    .filter(|event| {
-                        event["tool_name"] == "peer_review" && event["data"]["scope"] == section
-                    })
-                    .count();
-                success = previous >= self.rejects[index];
-                json!({"agent":agent,"scope":section,"review_id":id,"input_snapshot":{
-                    "sections":{section:artifact(&effects,section,&["write_section","revise_section"])},
-                    "references":{section:artifact(&effects,section,&["update_references"])},
-                    "figures":{section:artifact(&effects,section,&["insert_figure"])},
-                }})
-            }
-            "make_editorial_decision" | "combine_sections" => {
-                assert_eq!(agent, "EDITOR_IN_CHIEF");
-                let mut snapshot = json!({"sections":{},"references":{},"figures":{}});
-                let mut reviews = json!({});
-                for name in SECTIONS {
-                    snapshot["sections"][name] =
-                        artifact(&effects, name, &["write_section", "revise_section"]).clone();
-                    snapshot["references"][name] =
-                        artifact(&effects, name, &["update_references"]).clone();
-                    snapshot["figures"][name] =
-                        artifact(&effects, name, &["insert_figure"]).clone();
-                    let review = effects
+                "write_section" | "update_references" | "revise_section" => {
+                    let section = section.unwrap();
+                    let index = SECTIONS.iter().position(|&name| name == section).unwrap();
+                    assert_eq!(agent, AUTHORS[index]);
+                    let content =
+                        match tool {
+                            "write_section" => args["content_notes"].as_str().unwrap().to_owned(),
+                            "update_references" => format!("Bibliography for {section}"),
+                            _ => {
+                                format!(
+                                    "{}\n{}",
+                                    artifact(
+                                        &effects,
+                                        section,
+                                        &["write_section", "revise_section"]
+                                    )["content"]
+                                        .as_str()
+                                        .unwrap(),
+                                    args["feedback"].as_str().unwrap()
+                                )
+                            }
+                        };
+                    let mut artifact = json!({"id":id,"content":content,"research_inputs":{TOPICS[index]:sources[TOPICS[index]]}});
+                    if tool == "revise_section" {
+                        artifact["feedback"] = args["feedback"].clone();
+                    }
+                    json!({"agent":agent,"section":section,"artifact":artifact})
+                }
+                "create_figure" => {
+                    assert_eq!(agent, "DATA_ANALYST");
+                    let inputs: serde_json::Map<_, _> = SECTIONS
                         .iter()
-                        .rev()
-                        .find(|event| {
-                            event["tool_name"] == "peer_review" && event["data"]["scope"] == name
+                        .zip(TOPICS)
+                        .filter_map(|(&chapter, topic)| {
+                            sources
+                                .get(topic)
+                                .map(|source| (chapter.to_owned(), json!({topic:source})))
                         })
-                        .expect("actual review");
-                    assert_eq!(review["success"], true);
-                    reviews[name] = review["data"]["review_id"].clone();
-                }
-                if tool == "make_editorial_decision" {
-                    json!({"agent":agent,"decision_type":"finalize","decision_id":"editorial:1",
-                           "review_summary":args["review_summary"],"input_snapshot":snapshot,"review_receipts":reviews})
-                } else {
-                    let decision = effects.last().expect("actual editorial effect");
-                    assert_eq!(decision["tool_name"], "make_editorial_decision");
-                    let sections: Vec<_> = args["sections"]
-                        .as_str()
-                        .unwrap()
-                        .split(',')
-                        .map(str::trim)
                         .collect();
-                    json!({"agent":agent,"artifact_id":"combined:2","sections":sections,
+                    json!({"agent":agent,"figure_id":id,"artifact":{"id":id,"content":args["description"],"research_inputs":inputs}})
+                }
+                "insert_figure" => {
+                    assert_eq!(agent, "DATA_ANALYST");
+                    let created = effects
+                        .iter()
+                        .find(|event| {
+                            event["tool_name"] == "create_figure"
+                                && event["data"]["figure_id"] == args["figure_id"]
+                        })
+                        .unwrap();
+                    json!({"agent":agent,"section":section.unwrap(),"figure_id":args["figure_id"],"artifact":created["data"]["artifact"]})
+                }
+                "peer_review" => {
+                    assert_eq!(agent, "REVIEWER");
+                    let section = section.unwrap();
+                    let index = SECTIONS.iter().position(|&name| name == section).unwrap();
+                    let previous = effects
+                        .iter()
+                        .filter(|event| {
+                            event["tool_name"] == "peer_review" && event["data"]["scope"] == section
+                        })
+                        .count();
+                    success = previous >= self.rejects[index];
+                    json!({"agent":agent,"scope":section,"review_id":id,"input_snapshot":{
+                        "sections":{section:artifact(&effects,section,&["write_section","revise_section"])},
+                        "references":{section:artifact(&effects,section,&["update_references"])},
+                        "figures":{section:artifact(&effects,section,&["insert_figure"])},
+                    }})
+                }
+                "make_editorial_decision" | "combine_sections" => {
+                    assert_eq!(agent, "EDITOR_IN_CHIEF");
+                    let mut snapshot = json!({"sections":{},"references":{},"figures":{}});
+                    let mut reviews = json!({});
+                    for name in SECTIONS {
+                        snapshot["sections"][name] =
+                            artifact(&effects, name, &["write_section", "revise_section"]).clone();
+                        snapshot["references"][name] =
+                            artifact(&effects, name, &["update_references"]).clone();
+                        snapshot["figures"][name] =
+                            artifact(&effects, name, &["insert_figure"]).clone();
+                        let review = effects
+                            .iter()
+                            .rev()
+                            .find(|event| {
+                                event["tool_name"] == "peer_review"
+                                    && event["data"]["scope"] == name
+                            })
+                            .expect("actual review");
+                        assert_eq!(review["success"], true);
+                        reviews[name] = review["data"]["review_id"].clone();
+                    }
+                    if tool == "make_editorial_decision" {
+                        json!({"agent":agent,"decision_type":"finalize","decision_id":"editorial:1",
+                           "review_summary":args["review_summary"],"input_snapshot":snapshot,"review_receipts":reviews})
+                    } else {
+                        let decision = effects.last().expect("actual editorial effect");
+                        assert_eq!(decision["tool_name"], "make_editorial_decision");
+                        let sections: Vec<_> = args["sections"]
+                            .as_str()
+                            .unwrap()
+                            .split(',')
+                            .map(str::trim)
+                            .collect();
+                        json!({"agent":agent,"artifact_id":"combined:2","sections":sections,
                            "input_snapshot":snapshot,"review_receipts":reviews,
                            "editorial_receipts":{"finalize":decision["data"]["decision_id"]}})
+                    }
                 }
-            }
-            _ => panic!("unexpected survey effect {tool}"),
-        };
-        let result = json!({"tool_name":tool,"success":success,"data":data});
-        let mut journal = result.clone();
-        journal["arguments"] = args;
-        effects.push(journal);
-        self.effects.set(effects);
-        Ok(result)
+                _ => panic!("unexpected survey effect {tool}"),
+            };
+            let result = json!({"tool_name":tool,"success":success,"data":data});
+            let mut journal = result.clone();
+            journal["arguments"] = args;
+            effects.push(journal);
+            self.effects.set(effects);
+            Ok(result)
+        }
     }
 }
 

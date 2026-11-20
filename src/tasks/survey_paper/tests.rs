@@ -8,7 +8,7 @@ use crate::{
             bus::{Bus, Terminal},
             private_fs::PrivateFs,
             review_reply::ReviewReply,
-            service::Domain,
+            service::{ReceivedEffects, SimulatorOperation},
         },
         localside::file_metadata,
     },
@@ -44,38 +44,41 @@ struct Effects {
     stale_editorial: bool,
 }
 
-impl Domain for Effects {
-    async fn execute(
-        &self,
-        agent: &'static str,
-        tool: &'static str,
-        arguments: Value,
-    ) -> Result<Value, String> {
-        let mut calls = self.calls.take();
-        calls.push(tool);
-        self.calls.set(calls);
-        assert_eq!(agent, "EDITOR_IN_CHIEF");
-        let mut snapshot = self.snapshot.clone();
-        let data = match tool {
-            "make_editorial_decision" => {
-                if self.stale_editorial {
-                    snapshot["sections"]["section_b"]["content"] = json!("older draft");
+impl ReceivedEffects for Effects {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+        let input = crate::imp::json::decode(received.as_bytes());
+        async move {
+            let arguments = input?;
+            let (agent, tool) = P::RPC;
+            let mut calls = self.calls.take();
+            calls.push(tool);
+            self.calls.set(calls);
+            assert_eq!(agent, "EDITOR_IN_CHIEF");
+            let mut snapshot = self.snapshot.clone();
+            let data = match tool {
+                "make_editorial_decision" => {
+                    if self.stale_editorial {
+                        snapshot["sections"]["section_b"]["content"] = json!("older draft");
+                    }
+                    json!({
+                        "agent":agent,"decision_type":"finalize","decision_id":"editorial:1",
+                        "review_summary":arguments["review_summary"],"input_snapshot":snapshot,
+                        "review_receipts":self.reviews
+                    })
                 }
-                json!({
-                    "agent":agent,"decision_type":"finalize","decision_id":"editorial:1",
-                    "review_summary":arguments["review_summary"],"input_snapshot":snapshot,
-                    "review_receipts":self.reviews
-                })
-            }
-            "combine_sections" => json!({
-                "agent":agent,"artifact_id":"combined:2",
-                "sections":["section_d","section_b","section_a","section_c"],
-                "input_snapshot":snapshot,"review_receipts":self.reviews,
-                "editorial_receipts":{"finalize":"editorial:1"}
-            }),
-            _ => panic!("unexpected effect {tool}"),
-        };
-        Ok(json!({"tool_name":tool,"success":true,"data":data}))
+                "combine_sections" => json!({
+                    "agent":agent,"artifact_id":"combined:2",
+                    "sections":["section_d","section_b","section_a","section_c"],
+                    "input_snapshot":snapshot,"review_receipts":self.reviews,
+                    "editorial_receipts":{"finalize":"editorial:1"}
+                }),
+                _ => panic!("unexpected effect {tool}"),
+            };
+            Ok(json!({"tool_name":tool,"success":true,"data":data}))
+        }
     }
 }
 

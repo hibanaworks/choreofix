@@ -6,37 +6,46 @@ use super::{
 };
 use crate::{
     imp::json::{decode, encode, same},
-    shell::{ShellError, ShellResult, imp::service::Domain},
+    shell::{ShellError, ShellResult, imp::service::ReceivedEffects},
 };
 use hibana::{Endpoint, EndpointBorrow};
 use serde_json::json;
 
 pub async fn references<'r>(
     database: &mut Endpoint<'r, DATABASE>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     for _ in SECTIONS {
         let branch = database.offer().await?;
         let chapter = branch.label();
-        let args = match chapter {
-            SECTION_A => branch.recv::<References<SECTION_A>>().await?.into_value(),
-            SECTION_B => branch.recv::<References<SECTION_B>>().await?.into_value(),
-            SECTION_C => branch.recv::<References<SECTION_C>>().await?.into_value(),
-            SECTION_D => branch.recv::<References<SECTION_D>>().await?.into_value(),
+        let (research, result) = match chapter {
+            SECTION_A => {
+                let received = branch.recv::<References<SECTION_A>>().await?;
+                let effect = effects.apply(received);
+                let research = decode(database.recv::<ReferenceSource<SECTION_A>>().await?)?;
+                (research, effect.await?)
+            }
+            SECTION_B => {
+                let received = branch.recv::<References<SECTION_B>>().await?;
+                let effect = effects.apply(received);
+                let research = decode(database.recv::<ReferenceSource<SECTION_B>>().await?)?;
+                (research, effect.await?)
+            }
+            SECTION_C => {
+                let received = branch.recv::<References<SECTION_C>>().await?;
+                let effect = effects.apply(received);
+                let research = decode(database.recv::<ReferenceSource<SECTION_C>>().await?)?;
+                (research, effect.await?)
+            }
+            SECTION_D => {
+                let received = branch.recv::<References<SECTION_D>>().await?;
+                let effect = effects.apply(received);
+                let research = decode(database.recv::<ReferenceSource<SECTION_D>>().await?)?;
+                (research, effect.await?)
+            }
             _ => return Err(ShellError::message("unexpected survey database request")),
         };
-        let research = match chapter {
-            SECTION_A => decode(database.recv::<ReferenceSource<SECTION_A>>().await?)?,
-            SECTION_B => decode(database.recv::<ReferenceSource<SECTION_B>>().await?)?,
-            SECTION_C => decode(database.recv::<ReferenceSource<SECTION_C>>().await?)?,
-            SECTION_D => decode(database.recv::<ReferenceSource<SECTION_D>>().await?)?,
-            _ => unreachable!("chapter request determined the matching source"),
-        };
         let index = usize::from(chapter) - 1;
-        let result = domain
-            .execute(AUTHORS[index], "update_references", args)
-            .await
-            .map_err(ShellError::message)?;
         let artifact = &result["data"]["artifact"];
         if result["tool_name"] != "update_references"
             || result["success"] != true
@@ -95,30 +104,43 @@ pub async fn references<'r>(
 
 pub async fn figures<'r>(
     figures: &mut Endpoint<'r, FIGURES>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     for _ in SECTIONS {
         let branch = figures.offer().await?;
         let chapter = branch.label();
-        let args = match chapter {
-            SECTION_A => branch.recv::<CreateFigure<SECTION_A>>().await?.into_value(),
-            SECTION_B => branch.recv::<CreateFigure<SECTION_B>>().await?.into_value(),
-            SECTION_C => branch.recv::<CreateFigure<SECTION_C>>().await?.into_value(),
-            SECTION_D => branch.recv::<CreateFigure<SECTION_D>>().await?.into_value(),
+        let (args, research, result) = match chapter {
+            SECTION_A => {
+                let received = branch.recv::<CreateFigure<SECTION_A>>().await?;
+                let args = decode(received.as_bytes())?;
+                let effect = effects.apply(received);
+                let research = decode(figures.recv::<FigureSource<SECTION_A>>().await?)?;
+                (args, research, effect.await?)
+            }
+            SECTION_B => {
+                let received = branch.recv::<CreateFigure<SECTION_B>>().await?;
+                let args = decode(received.as_bytes())?;
+                let effect = effects.apply(received);
+                let research = decode(figures.recv::<FigureSource<SECTION_B>>().await?)?;
+                (args, research, effect.await?)
+            }
+            SECTION_C => {
+                let received = branch.recv::<CreateFigure<SECTION_C>>().await?;
+                let args = decode(received.as_bytes())?;
+                let effect = effects.apply(received);
+                let research = decode(figures.recv::<FigureSource<SECTION_C>>().await?)?;
+                (args, research, effect.await?)
+            }
+            SECTION_D => {
+                let received = branch.recv::<CreateFigure<SECTION_D>>().await?;
+                let args = decode(received.as_bytes())?;
+                let effect = effects.apply(received);
+                let research = decode(figures.recv::<FigureSource<SECTION_D>>().await?)?;
+                (args, research, effect.await?)
+            }
             _ => return Err(ShellError::message("unexpected survey figure request")),
         };
-        let research = match chapter {
-            SECTION_A => decode(figures.recv::<FigureSource<SECTION_A>>().await?)?,
-            SECTION_B => decode(figures.recv::<FigureSource<SECTION_B>>().await?)?,
-            SECTION_C => decode(figures.recv::<FigureSource<SECTION_C>>().await?)?,
-            SECTION_D => decode(figures.recv::<FigureSource<SECTION_D>>().await?)?,
-            _ => unreachable!("figure request determined the matching source"),
-        };
         let index = usize::from(chapter) - 1;
-        let result = domain
-            .execute("DATA_ANALYST", "create_figure", args.clone())
-            .await
-            .map_err(ShellError::message)?;
         let artifact = &result["data"]["artifact"];
         if result["tool_name"] != "create_figure"
             || result["success"] != true
@@ -177,7 +199,7 @@ pub async fn figures<'r>(
 
 pub async fn insert<const SECTION: u8>(
     analyst: &mut EndpointBorrow<'_, '_, ANALYST>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     let chapter = SECTIONS[usize::from(SECTION) - 1];
     let snapshot = decode(analyst.recv::<Prepared<SECTION>>().await?)?;
@@ -186,12 +208,10 @@ pub async fn insert<const SECTION: u8>(
     section
         .send::<InsertionInput<SECTION>>(&ChapterBytes(&material))
         .await?;
-    let args = section.recv::<InsertFigure<SECTION>>().await?.into_value();
+    let received = section.recv::<InsertFigure<SECTION>>().await?;
+    let args = decode(received.as_bytes())?;
     same(&args["figure_id"], &snapshot["figures"][chapter]["id"])?;
-    let result = domain
-        .execute("DATA_ANALYST", "insert_figure", args)
-        .await
-        .map_err(ShellError::message)?;
+    let result = effects.apply(received).await?;
     if result["tool_name"] != "insert_figure"
         || result["success"] != true
         || result["data"]["agent"] != "DATA_ANALYST"
