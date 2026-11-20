@@ -41,7 +41,7 @@ pub(super) const TEST_ENV: u8 = 19;
 pub(super) const ENV_OWNER: u8 = 20;
 
 pub(super) const DEVOPS_FILE: u8 = 41;
-pub(super) const SCHEMAS: u8 = 42;
+pub(super) const DEVOPS: u8 = 42;
 pub(super) const STAGING_ENV: u8 = 46;
 pub(super) const SCHEMA_A: u8 = 90;
 pub(super) const SCHEMA_B: u8 = 91;
@@ -65,6 +65,7 @@ pub(super) type TestCandidate<'a, const SERVICE: u8> = g::Msg<SERVICE, ReviewRep
 
 type Passed<'a> = g::Msg<93, ReviewReply<'a, true>>;
 type Failed<'a> = g::Msg<94, ReviewReply<'a, false>>;
+pub(super) type StagingCandidate<'a, const TESTER: u8> = g::Msg<TESTER, ReviewReply<'a, true>>;
 pub(super) type TestReport<'a> = g::Msg<95, &'a [u8]>;
 
 pub(super) type RunTests<const TESTER: u8> = g::Msg<TESTER, Arguments<TESTER>>;
@@ -306,7 +307,16 @@ fn test_result<
             report,
             g::seq(
                 g::send::<SERVICE, REVIEWER, Passed>(),
-                g::send::<REVIEWER, REVIEW_FILE, Candidate<SERVICE>>(),
+                g::par(
+                    g::send::<REVIEWER, REVIEW_FILE, Candidate<SERVICE>>(),
+                    g::seq(
+                        g::send::<TESTER, DEVOPS, StagingCandidate<TESTER>>(),
+                        g::seq(
+                            g::send::<TESTER, DEVOPS, Loan<SERVICE>>(),
+                            g::send::<SERVICE, DEVOPS_FILE, StagingCandidate<TESTER>>(),
+                        ),
+                    ),
+                ),
             ),
         ),
     );
@@ -358,14 +368,14 @@ pub(super) fn preparation() -> impl Projectable {
         ),
     );
     let staging = g::seq(
-        g::send::<ARCHITECT, SCHEMAS, Proposed<SCHEMAS>>(),
+        g::send::<ARCHITECT, DEVOPS, Proposed<DEVOPS>>(),
         g::seq(
-            g::send::<ARCHITECT, SCHEMAS, Loan<STAGING_ENV>>(),
+            g::send::<ARCHITECT, DEVOPS, Loan<STAGING_ENV>>(),
             g::seq(
                 g::send::<STAGING_ENV, DEVOPS_FILE, Proposed<DEVOPS_FILE>>(),
                 g::seq(
                     migrations,
-                    g::send::<SCHEMAS, ARCHITECT, Loan<STAGING_ENV>>(),
+                    g::send::<DEVOPS, ARCHITECT, Loan<STAGING_ENV>>(),
                 ),
             ),
         ),
@@ -446,7 +456,7 @@ pub(super) async fn architect<'run>(
     async {
         let [mut author, mut schemas, mut a, mut b, mut c] = endpoint.par()?;
         async {
-            schemas.send::<Proposed<SCHEMAS>>(&bytes.as_slice()).await?;
+            schemas.send::<Proposed<DEVOPS>>(&bytes.as_slice()).await?;
             schemas.send::<Loan<STAGING_ENV>>(staging).await?;
             let _staging = schemas.recv::<Loan<STAGING_ENV>>().await?;
         };
@@ -491,53 +501,78 @@ fn checked_migration(result: &Value, service: &str, name: &Value, plan: &Value) 
     Ok(())
 }
 
-pub(super) async fn schemas(
-    endpoint: &mut Endpoint<'_, SCHEMAS>,
+#[hibana_runtime::scope]
+pub(super) async fn devops(
+    endpoint: &mut Endpoint<'_, DEVOPS>,
     effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
-    let authored = endpoint.recv::<Proposed<SCHEMAS>>().await?.to_vec();
-    let plan = decode(&authored)?["data"]["receipt"].clone();
-    let mut staging = endpoint.recv::<Loan<STAGING_ENV>>().await?;
-    staging
-        .send::<Proposed<DEVOPS_FILE>>(&authored.as_slice())
-        .await?;
-    for _ in SERVICES {
-        let request = staging.offer().await?;
-        match request.label() {
-            SCHEMA_A => {
-                let received = request.recv::<Migrate<SCHEMA_A>>().await?;
-                let args = decode(received.as_bytes())?;
-                let name = args["migration_name"].clone();
-                let result = effects.apply(received).await?;
-                checked_migration(&result, SERVICES[0], &name, &plan)?;
-                staging
-                    .send::<Migrated<SCHEMA_A>>(&encode(&result)?.as_slice())
-                    .await?;
+    let [mut schemas, mut a, mut b, mut c] = endpoint.par()?;
+    async {
+        let authored = schemas.recv::<Proposed<DEVOPS>>().await?.to_vec();
+        let plan = decode(&authored)?["data"]["receipt"].clone();
+        let mut staging = schemas.recv::<Loan<STAGING_ENV>>().await?;
+        staging
+            .send::<Proposed<DEVOPS_FILE>>(&authored.as_slice())
+            .await?;
+        for _ in SERVICES {
+            let request = staging.offer().await?;
+            match request.label() {
+                SCHEMA_A => {
+                    let received = request.recv::<Migrate<SCHEMA_A>>().await?;
+                    let args = decode(received.as_bytes())?;
+                    let name = args["migration_name"].clone();
+                    let result = effects.apply(received).await?;
+                    checked_migration(&result, SERVICES[0], &name, &plan)?;
+                    staging
+                        .send::<Migrated<SCHEMA_A>>(&encode(&result)?.as_slice())
+                        .await?;
+                }
+                SCHEMA_B => {
+                    let received = request.recv::<Migrate<SCHEMA_B>>().await?;
+                    let args = decode(received.as_bytes())?;
+                    let name = args["migration_name"].clone();
+                    let result = effects.apply(received).await?;
+                    checked_migration(&result, SERVICES[1], &name, &plan)?;
+                    staging
+                        .send::<Migrated<SCHEMA_B>>(&encode(&result)?.as_slice())
+                        .await?;
+                }
+                SCHEMA_C => {
+                    let received = request.recv::<Migrate<SCHEMA_C>>().await?;
+                    let args = decode(received.as_bytes())?;
+                    let name = args["migration_name"].clone();
+                    let result = effects.apply(received).await?;
+                    checked_migration(&result, SERVICES[2], &name, &plan)?;
+                    staging
+                        .send::<Migrated<SCHEMA_C>>(&encode(&result)?.as_slice())
+                        .await?;
+                }
+                _ => return Err(ShellError::message("unknown migration request on staging")),
             }
-            SCHEMA_B => {
-                let received = request.recv::<Migrate<SCHEMA_B>>().await?;
-                let args = decode(received.as_bytes())?;
-                let name = args["migration_name"].clone();
-                let result = effects.apply(received).await?;
-                checked_migration(&result, SERVICES[1], &name, &plan)?;
-                staging
-                    .send::<Migrated<SCHEMA_B>>(&encode(&result)?.as_slice())
-                    .await?;
-            }
-            SCHEMA_C => {
-                let received = request.recv::<Migrate<SCHEMA_C>>().await?;
-                let args = decode(received.as_bytes())?;
-                let name = args["migration_name"].clone();
-                let result = effects.apply(received).await?;
-                checked_migration(&result, SERVICES[2], &name, &plan)?;
-                staging
-                    .send::<Migrated<SCHEMA_C>>(&encode(&result)?.as_slice())
-                    .await?;
-            }
-            _ => return Err(ShellError::message("unknown migration request on staging")),
         }
-    }
-    endpoint.send::<Loan<STAGING_ENV>>(staging).await?;
+        schemas.send::<Loan<STAGING_ENV>>(staging).await?;
+    };
+    async {
+        let tested = a.recv::<StagingCandidate<TESTER_A>>().await?.to_vec();
+        let mut service = a.recv::<Loan<SERVICE_A>>().await?;
+        service
+            .send::<StagingCandidate<TESTER_A>>(&ReviewReply::from_bytes(&tested)?)
+            .await?;
+    };
+    async {
+        let tested = b.recv::<StagingCandidate<TESTER_B>>().await?.to_vec();
+        let mut service = b.recv::<Loan<SERVICE_B>>().await?;
+        service
+            .send::<StagingCandidate<TESTER_B>>(&ReviewReply::from_bytes(&tested)?)
+            .await?;
+    };
+    async {
+        let tested = c.recv::<StagingCandidate<TESTER_C>>().await?.to_vec();
+        let mut service = c.recv::<Loan<SERVICE_C>>().await?;
+        service
+            .send::<StagingCandidate<TESTER_C>>(&ReviewReply::from_bytes(&tested)?)
+            .await?;
+    };
     Ok(())
 }
 
@@ -835,6 +870,10 @@ pub(super) async fn tester<'run, const TESTER: u8, const SERVICE: u8>(
             service
                 .send::<Passed>(&ReviewReply::from_bytes(&bytes)?)
                 .await?;
+            endpoint
+                .send::<StagingCandidate<TESTER>>(&ReviewReply::from_bytes(&bytes)?)
+                .await?;
+            endpoint.send::<Loan<SERVICE>>(service).await?;
             return Ok(result);
         } else {
             service

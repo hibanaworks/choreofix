@@ -68,11 +68,14 @@ pub(super) const REVIEW_FILES: [ChoreoFsObject<'static>; 6] = [
     operation(b"service/code_review/microservice_b", 8),
     operation(b"service/code_review/microservice_c", 9),
 ];
-pub(super) const DEVOPS_FILES: [ChoreoFsObject<'static>; 4] = [
+pub(super) const DEVOPS_FILES: [ChoreoFsObject<'static>; 7] = [
     material(b"service/plan", 4),
     operation(b"service/migrate_schema/microservice_a", 5),
     operation(b"service/migrate_schema/microservice_b", 6),
     operation(b"service/migrate_schema/microservice_c", 7),
+    material(b"service/test_result/microservice_a", 8),
+    material(b"service/test_result/microservice_b", 9),
+    material(b"service/test_result/microservice_c", 10),
 ];
 pub(super) const TEST_FILES: [ChoreoFsObject<'static>; 6] = [
     material(b"service/candidate/microservice_a", 4),
@@ -314,7 +317,10 @@ pub(super) async fn devops_guest(
         mut reply_b,
         mut request_c,
         mut reply_c,
-    ] = [(); 7].map(|_| vec![0; GUEST_MEMORY_BYTES]);
+        mut tested_a,
+        mut tested_b,
+        mut tested_c,
+    ] = [(); 10].map(|_| vec![0; GUEST_MEMORY_BYTES]);
     let file = ChoreoFsFile::new(DEVOPS_FILES[0], endpoint)
         .read_as::<Proposed<DEVOPS_FILE>>(&mut plan)
         .file(DEVOPS_FILES[1])?
@@ -325,7 +331,13 @@ pub(super) async fn devops_guest(
         .read_as::<Migrated<SCHEMA_B>>(&mut reply_b)
         .file(DEVOPS_FILES[3])?
         .write_as::<Migrate<SCHEMA_C>>(&mut request_c)
-        .read_as::<Migrated<SCHEMA_C>>(&mut reply_c);
+        .read_as::<Migrated<SCHEMA_C>>(&mut reply_c)
+        .file(DEVOPS_FILES[4])?
+        .read_as::<StagingCandidate<TESTER_A>>(&mut tested_a)
+        .file(DEVOPS_FILES[5])?
+        .read_as::<StagingCandidate<TESTER_B>>(&mut tested_b)
+        .file(DEVOPS_FILES[6])?
+        .read_as::<StagingCandidate<TESTER_C>>(&mut tested_c);
     let files = ChoreoFsFiles::new(root).file(file)?;
     let mut memory = vec![0; GUEST_MEMORY_BYTES];
     let mut storage = Box::new(HibanaWasiGuestStorage::uninit());

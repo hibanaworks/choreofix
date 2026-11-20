@@ -118,6 +118,9 @@ async fn run_wash_order(
     let (guest, runtime_exit) = process::guest(&runtime, wasm, &[], &output, trace, world)?;
     let ((),(),(),(),result)=hibana_runtime::race(async {
         async {
+            let early_result = guest.command("DEVOPS","dd if=/service/test_result/microservice_a iflag=nonblock".into()).await?;
+            let text = early_result["stdout"].as_str().ok_or("premature staging candidate read")?;
+            assert!(text.contains("Permission denied") || text.contains("Resource temporarily unavailable"), "{early_result}");
             let early = guest.command("DEVOPS", r#"echo '{"migration_name":"microservice_b_schema"}' | dd of=/service/migrate_schema/microservice_b oflag=nonblock"#.into()).await?;
             let text = early["stdout"].as_str().ok_or("early schema request output")?;
             assert!(text.contains("Permission denied") || text.contains("Resource temporarily unavailable"), "{early}");
@@ -152,6 +155,19 @@ async fn run_wash_order(
                     let text=duplicate["stdout"].as_str().ok_or("repeated schema request output")?;
                     assert!(text.contains("Permission denied"), "{duplicate}");
                 }
+                if order[0] == test_order[0] && service == order[0] {
+                    let tested=response(guest.command("DEVOPS",format!("cat /service/test_result/{service}")).await?)?;
+                    assert_eq!(tested["success"],true);
+                    assert_eq!(tested["data"]["service"],service);
+                    assert_eq!(tested["data"]["plan"],plan["data"]["receipt"]);
+                }
+            }
+            for service in test_order {
+                if order[0] == test_order[0] && service == order[0] { continue; }
+                let tested=response(guest.command("DEVOPS",format!("cat /service/test_result/{service}")).await?)?;
+                assert_eq!(tested["success"],true);
+                assert_eq!(tested["data"]["service"],service);
+                assert_eq!(tested["data"]["plan"],plan["data"]["receipt"]);
             }
             assert_eq!(guest.command("DEVOPS","exit 0".into()).await?["exit_status"],0);
             assert_eq!(guest.command("ARCHITECT","exit 0".into()).await?["exit_status"],0);
@@ -314,7 +330,7 @@ async fn run_wash_order(
     let receipts = history.bind_receives(&audit)?;
     let roles = &artifact["compiled"]["roles"];
     let file = roles["DEVOPS_FILE"].as_u64().ok_or("DevOps file role")?;
-    let schemas = roles["SCHEMAS"].as_u64().ok_or("schema effect role")?;
+    let schemas = roles["DEVOPS"].as_u64().ok_or("schema effect role")?;
     let staging = roles["STAGING_ENV"].as_u64().ok_or("staging resource")?;
     let architect = roles["ARCHITECT"].as_u64().ok_or("staging issuer")?;
     let vm = roles["DEVOPS_VM"].as_u64().ok_or("DevOps Wasm role")?;
@@ -549,6 +565,35 @@ async fn run_wash_order(
             assert_eq!(receipts[&id]["send_actor"], reviewer);
             assert_eq!(receipts[&id]["receive_commit"]["actor"], reviewer_vm);
             entry["reviewer_read"] = receipts[&id].clone();
+            let devops = role("DEVOPS".to_owned())?;
+            let devops_file = role("DEVOPS_FILE".to_owned())?;
+            let devops_vm = role("DEVOPS_VM".to_owned())?;
+            let (&candidate, sent) = journal::one(history.frames.iter().filter(|(_, f)| {
+                f.direction(tester, devops)
+                    && u64::from(f.logical_label) == tester
+                    && f.sent > completed
+                    && f.value().is_ok_and(|v| v == *value)
+            }))?;
+            let (&loan, transfer) = journal::one(history.frames.iter().filter(|(_, f)| {
+                f.direction(tester, devops)
+                    && f.logical_label == 47
+                    && f.bytes.len() == 3
+                    && f.bytes[0] as u64 == service
+                    && f.sent > sent.sent
+            }))?;
+            let granted = transfer.received()?;
+            assert!(sent.received()? < granted);
+            let (&delivery, _) = journal::one(history.frames.iter().filter(|(_, f)| {
+                f.direction(service, devops_file)
+                    && u64::from(f.logical_label) == tester
+                    && f.sent > granted
+                    && f.value().is_ok_and(|v| v == *value)
+            }))?;
+            assert_eq!(receipts[&loan]["receive_commit"]["actor"], devops);
+            assert_eq!(receipts[&delivery]["send_actor"], devops);
+            assert_eq!(receipts[&delivery]["receive_commit"]["actor"], devops_vm);
+            entry["staging_candidate"] = json!({"test_result":receipts[&candidate],
+                "service_loan":receipts[&loan],"devops_shell_read":receipts[&delivery]});
         }
         test_results.push(entry);
     }

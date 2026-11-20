@@ -73,7 +73,7 @@ test_file:TEST_FILE,
 test_data:TEST_DATA,
 test_vm:TEST_VM,
 test_io:TEST_IO,
-schemas:SCHEMAS,
+devops:DEVOPS,
 staging:STAGING_ENV,
 devops_file:DEVOPS_FILE,
 devops_vm:DEVOPS_VM,
@@ -173,13 +173,13 @@ pub(super) async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             let c_file = rv.enter(session, &programs.c_file)?;
             let review_file = rv.enter(session, &programs.review_file)?;
             let test_file = rv.enter(session, &programs.test_file)?;
-            let mut schema_side = rv.enter(session, &programs.schemas)?;
+            let mut devops_side = rv.enter(session, &programs.devops)?;
             let mut devops_data = rv.enter(session, &programs.devops_data)?;
             let devops_file = rv.enter(session, &programs.devops_file)?;
             let devops_vm = rv.enter(session, &programs.devops_vm)?;
             let mut devops_io = rv.enter(session, &programs.devops_io)?;
             async { architect(&mut architect_side, staging, &simulator).await };
-            async { schemas(&mut schema_side, &simulator).await };
+            async { devops(&mut devops_side, &simulator).await };
             async { file_metadata::run(&mut devops_data, devops_file, DEVOPS_FILES).await };
             async {
                 private_io::run(

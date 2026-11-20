@@ -218,7 +218,7 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
         let testing = testing_storage
             .init()
             .rendezvous(&mut testing_slab, &transport)?;
-        let mut schema_side = testing.enter(session, &project::<SCHEMAS>(&source))?;
+        let mut devops_side = testing.enter(session, &project::<DEVOPS>(&source))?;
         let mut devops_file = testing.enter(session, &project::<DEVOPS_FILE>(&source))?;
         let mut test_side_a = testing.enter(session, &project::<TESTER_A>(&source))?;
         let mut test_side_b = testing.enter(session, &project::<TESTER_B>(&source))?;
@@ -275,7 +275,7 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
         hibana_runtime::race(
         async {
             async { architect(&mut architect_side, staging, &journal).await };
-            async { schemas(&mut schema_side, &journal).await };
+            async { devops(&mut devops_side, &journal).await };
             async {
                 let plan = decode(devops_file.recv::<Proposed<DEVOPS_FILE>>().await?)?;
                 for index in order {
@@ -291,6 +291,17 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
                     };
                     assert_eq!(reply["data"]["service"],SERVICES[index]);
                     assert_eq!(reply["data"]["plan"],plan["data"]["receipt"]);
+                }
+                for index in order {
+                    let receipt = match index {
+                        0 => decode(devops_file.recv::<StagingCandidate<TESTER_A>>().await?)?,
+                        1 => decode(devops_file.recv::<StagingCandidate<TESTER_B>>().await?)?,
+                        2 => decode(devops_file.recv::<StagingCandidate<TESTER_C>>().await?)?,
+                        _ => unreachable!(),
+                    };
+                    assert_eq!(receipt["success"], true);
+                    assert_eq!(receipt["data"]["suite"], SERVICES[index]);
+                    assert_eq!(receipt["data"]["plan"], plan["data"]["receipt"]);
                 }
                 Ok(())
             };
