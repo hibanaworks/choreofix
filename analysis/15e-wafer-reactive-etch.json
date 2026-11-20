@@ -1,0 +1,224 @@
+{
+  "task": "15E",
+  "scope": "Seven scripted six-guest Wasm runs on the common wafer simulator. The etcher's file submits the reactive-ion load to the bound chamber. The chamber moves to the station after a successful load and is used there for the final uniformity check. The etch-rate check is still supplied by the fixture.",
+  "archive": "output/verification/wafer-reactive-15e-20261121.4w6MbO",
+  "build_receipt_sha256": "1dedcb919f5605e72e3cb5f3d53a40cb85983d8f8735394f30ec9f1fe8b3564c",
+  "source_manifest_sha256": "47cd760911281a81843c099aae9011f28da638a0d283c7b615803075adebd7dd",
+  "test_binary_sha256": "d7474d5d6be714af3bc820a6d95c73db346482c2222c23601cb6412f9ac0fe0f",
+  "runtime_sha256": "b22b9993dc8a452a76895dbdcf72618c344feb9fb6c5f58f6297305f4b6a3419",
+  "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+  "model_calls": 0,
+  "scored_comparison": false,
+  "live_task_qualified": false,
+  "totals": {
+    "guest_effects": 96,
+    "fixture_effects": 46,
+    "epf_records": 48612,
+    "etch_attempts": 8,
+    "chamber_transfers": 7
+  },
+  "cases": [
+    {
+      "case": "dep-litho-etch",
+      "result_sha256": "aee89159b50bbfde812e024aeea115a8189fe6111859f2e5b6c5dd35e06670c6",
+      "guest_effects": 13,
+      "fixture_effects": 6,
+      "epf_records": 6974,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "simulator_violations": 0,
+      "etch_attempts": [
+        {
+          "success": true,
+          "request_frame": 206,
+          "reply_frame": 215,
+          "receipt": 7
+        }
+      ],
+      "captured_transfer": [
+        {
+          "frame_id": 214,
+          "occurrence": 9425,
+          "from": 33,
+          "to": 34
+        }
+      ],
+      "duplicate_rejected": true,
+      "events_sha256": "0c51699c33cb80d46e04bfc1006e6159e77e1e07dd2302f04c18c71d0ebb2cd3"
+    },
+    {
+      "case": "etch-dep-litho",
+      "result_sha256": "fc8ec2c4907f575550de8524f0ececbd07c74a9c41035c52be77ff853670aa95",
+      "guest_effects": 13,
+      "fixture_effects": 6,
+      "epf_records": 6963,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "simulator_violations": 0,
+      "etch_attempts": [
+        {
+          "success": true,
+          "request_frame": 67,
+          "reply_frame": 74,
+          "receipt": 1
+        }
+      ],
+      "captured_transfer": [
+        {
+          "frame_id": 73,
+          "occurrence": 9403,
+          "from": 33,
+          "to": 34
+        }
+      ],
+      "duplicate_rejected": true,
+      "events_sha256": "ee90098d56c1821f4cebdb8f6d57b38e01ee02644f2cd34e456f846ca61d3ab4"
+    },
+    {
+      "case": "etch-first",
+      "result_sha256": "191925722829029ba173a454c1dcbcb410209826d4d7a1158498a6df95e71f83",
+      "guest_effects": 13,
+      "fixture_effects": 6,
+      "epf_records": 6600,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "simulator_violations": 0,
+      "etch_attempts": [
+        {
+          "success": true,
+          "request_frame": 254,
+          "reply_frame": 263,
+          "receipt": 5
+        }
+      ],
+      "captured_transfer": [
+        {
+          "frame_id": 262,
+          "occurrence": 8743,
+          "from": 33,
+          "to": 34
+        }
+      ],
+      "duplicate_rejected": true,
+      "events_sha256": "19539a906eb2bdd79fe5f89d2cb35d8e0d7fd6bb200fe48cddc0b22542bc12b2"
+    },
+    {
+      "case": "film-first",
+      "result_sha256": "107f8b207d2eb077e99326cfbe6d26307824979f82e350f23505e8cbb9dfad25",
+      "guest_effects": 13,
+      "fixture_effects": 6,
+      "epf_records": 6600,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "simulator_violations": 0,
+      "etch_attempts": [
+        {
+          "success": true,
+          "request_frame": 382,
+          "reply_frame": 391,
+          "receipt": 10
+        }
+      ],
+      "captured_transfer": [
+        {
+          "frame_id": 390,
+          "occurrence": 8743,
+          "from": 33,
+          "to": 34
+        }
+      ],
+      "duplicate_rejected": true,
+      "events_sha256": "6bcd8b49abc9522c7425717e1323f4920cedb12455cee1b6382f8dc2d2d24978"
+    },
+    {
+      "case": "litho-etch-dep",
+      "result_sha256": "abf18dab8935089d61641291819541c80a93e9f4bd027b40130a57b0fe809d79",
+      "guest_effects": 15,
+      "fixture_effects": 8,
+      "epf_records": 7504,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "simulator_violations": 0,
+      "etch_attempts": [
+        {
+          "success": true,
+          "request_frame": 128,
+          "reply_frame": 135,
+          "receipt": 6
+        }
+      ],
+      "captured_transfer": [
+        {
+          "frame_id": 134,
+          "occurrence": 10333,
+          "from": 33,
+          "to": 34
+        }
+      ],
+      "duplicate_rejected": true,
+      "events_sha256": "42b9143b9131d2c66eec5eed4a53bb862839f59aaca81ebc8ad76665e50a6c50"
+    },
+    {
+      "case": "overlay-retry",
+      "result_sha256": "ec62118fce7a1b1bd610a3852cc624bec71d9449d65cb4335b29dbd32a0a8eaa",
+      "guest_effects": 15,
+      "fixture_effects": 8,
+      "epf_records": 7139,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "simulator_violations": 0,
+      "etch_attempts": [
+        {
+          "success": true,
+          "request_frame": 67,
+          "reply_frame": 74,
+          "receipt": 1
+        }
+      ],
+      "captured_transfer": [
+        {
+          "frame_id": 73,
+          "occurrence": 9253,
+          "from": 33,
+          "to": 34
+        }
+      ],
+      "duplicate_rejected": true,
+      "events_sha256": "ed2b34fac1d3deb23cc73926fe989cbb7818b0f1dc5af28e788e040e0380d503"
+    },
+    {
+      "case": "reactive-etch-retry",
+      "result_sha256": "acbf604aa24116a1b2d350ee72e05c3236c1262005ff1a85466b1f01bb9da424",
+      "guest_effects": 14,
+      "fixture_effects": 6,
+      "epf_records": 6832,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "simulator_violations": 0,
+      "etch_attempts": [
+        {
+          "success": false,
+          "request_frame": 67,
+          "reply_frame": 75,
+          "receipt": null
+        },
+        {
+          "success": true,
+          "request_frame": 108,
+          "reply_frame": 117,
+          "receipt": 2
+        }
+      ],
+      "captured_transfer": [
+        {
+          "frame_id": 116,
+          "occurrence": 9139,
+          "from": 33,
+          "to": 34
+        }
+      ],
+      "duplicate_rejected": true,
+      "events_sha256": "86a2fe2f8b2dcb89f84e48c7f2454ba45069fdeb23c8beeb9e3bd488b165e671"
+    }
+  ]
+}

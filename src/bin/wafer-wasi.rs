@@ -56,6 +56,8 @@ const MEASURER: u8 = 28;
 const MEASURE_FILE: u8 = 29;
 const MEASURE_FILES: u8 = 30;
 const MEASURE_TERM: u8 = 31;
+const ETCH_OPERATOR: u8 = 33;
+const ETCH_STATION: u8 = 34;
 type FabReady<'a, const FAB: u8> = g::Msg<FAB, &'a [u8]>;
 type Confirmation<'a, const LABEL: u8> = g::Msg<LABEL, WaferReading<'a, MONITOR>>;
 const CONFIRM_LITHO: u8 = 40;
@@ -190,6 +192,23 @@ async fn main() -> ShellResult<()> {
         g::send::<LITHO_INBOX, STAGE, Expose>(),
         g::send::<STAGE, LITHO_INBOX, Exposed>(),
     );
+    let etch_request = g::send::<ETCH_INBOX, ETCH_CHAMBER, ReactiveEtch>();
+    let etch_result = g::send::<ETCH_STATION, ETCH_INBOX, EtchResult>();
+    let loaded = g::seq(
+        g::send::<ETCH_CHAMBER, ETCH_STATION, EtchLoaded>(),
+        g::seq(
+            g::send::<ETCH_OPERATOR, ETCH_STATION, Loan<ETCH_CHAMBER>>(),
+            etch_result,
+        ),
+    );
+    let retry_etch = g::seq(
+        g::send::<ETCH_CHAMBER, ETCH_STATION, EtchFailed>(),
+        g::seq(etch_result, etch_request),
+    );
+    let reactive = g::seq(
+        etch_request,
+        g::route(loaded, g::seq(retry_etch.roll(), loaded)),
+    );
     let confirmations = g::par(
         g::par(
             g::send::<CONTROL_FILE, LITHO_INBOX, Confirmation<CONFIRM_LITHO>>(),
@@ -249,7 +268,7 @@ async fn main() -> ShellResult<()> {
                                     g::seq(exposure, measure_wafer::<LITHO_INBOX, CD>()),
                                     g::par(
                                         g::seq(growth, measure_wafer::<DEP_INBOX, THICKNESS>()),
-                                        measure_wafer::<ETCH_INBOX, PROFILE>(),
+                                        g::seq(reactive, measure_wafer::<ETCH_INBOX, PROFILE>()),
                                     ),
                                 ),
                                 validation,
@@ -275,6 +294,8 @@ async fn main() -> ShellResult<()> {
     let wafer = project::<WAFER>(&source);
     let deposition_chamber = project::<DEPOSITION_CHAMBER>(&source);
     let etch_chamber = project::<ETCH_CHAMBER>(&source);
+    let etch_operator = project::<ETCH_OPERATOR>(&source);
+    let etch_station = project::<ETCH_STATION>(&source);
     let stepper = project::<STEPPER>(&source);
     let metrology = project::<METROLOGY>(&source);
     let stage = project::<STAGE>(&source);
@@ -312,12 +333,13 @@ async fn main() -> ShellResult<()> {
             "LITHO":LITHO, "LITHO_INBOX":LITHO_INBOX, "LITHO_FILES":LITHO_FILES, "LITHO_TERM":LITHO_TERM,
             "DEP":DEP, "DEP_INBOX":DEP_INBOX, "DEP_FILES":DEP_FILES, "DEP_TERM":DEP_TERM,
             "ETCH":ETCH, "ETCH_INBOX":ETCH_INBOX, "ETCH_FILES":ETCH_FILES, "ETCH_TERM":ETCH_TERM,
+            "ETCH_OPERATOR":ETCH_OPERATOR, "ETCH_STATION":ETCH_STATION,
             "MONITOR":MONITOR,"CONTROL_OPERATOR":CONTROL_OPERATOR,"MONITOR_STATION":MONITOR_STATION,"CONTROL":CONTROL,"CONTROL_FILE":CONTROL_FILE,"CONTROL_FILES":CONTROL_FILES,"CONTROL_TERM":CONTROL_TERM,
             "MEASURER":MEASURER,"MEASURE_FILE":MEASURE_FILE,"MEASURE_FILES":MEASURE_FILES,"MEASURE_TERM":MEASURE_TERM
         },
         "programs":[
             rows(&aligner), rows(&engineer), rows(&wafer), rows(&deposition_chamber),
-            rows(&etch_chamber), rows(&terminal), rows(&stepper), rows(&metrology), rows(&stage),
+            rows(&etch_chamber), rows(&etch_operator), rows(&etch_station), rows(&terminal), rows(&stepper), rows(&metrology), rows(&stage),
             rows(&p_litho), rows(&p_litho_inbox), rows(&p_litho_files), rows(&p_litho_term),
             rows(&p_dep), rows(&p_dep_inbox), rows(&p_dep_files), rows(&p_dep_term),
             rows(&p_etch), rows(&p_etch_inbox), rows(&p_etch_files), rows(&p_etch_term),rows(&p_monitor),rows(&p_control_operator),rows(&p_monitor_station),rows(&p_control),rows(&p_control_file),rows(&p_control_files),rows(&p_control_term),
@@ -357,6 +379,7 @@ async fn main() -> ShellResult<()> {
             (session, LITHO_INBOX),
             (session, DEP_INBOX),
             (session, ETCH_INBOX),
+            (session, ETCH_CHAMBER),
             (session, CONTROL_FILE),
             (session, MONITOR),
             (session, MEASURE_FILE),
@@ -407,6 +430,12 @@ async fn main() -> ShellResult<()> {
         instrument(b"service/run_deposition", 7),
         instrument(b"service/check_monitoring", 8),
     ];
+    let etcher_files = [
+        INBOX_FILE,
+        VALIDATION_FILE,
+        READY_FILE,
+        instrument(b"service/run_etch_process", 7),
+    ];
     let measure_files = [
         instrument(b"service/pattern", 4),
         instrument(b"service/film", 5),
@@ -452,7 +481,9 @@ async fn main() -> ShellResult<()> {
         let mut engineer = rv.enter(session, &engineer)?;
         let wafer = rv.enter(session, &wafer)?;
         let mut dep = rv.enter(session, &deposition_chamber)?;
+        let mut etch_operator = rv.enter(session, &etch_operator)?;
         let mut etch = rv.enter(session, &etch_chamber)?;
+        let mut etch_station = rv.enter(session, &etch_station)?;
         let mut terminal = rv.enter(session, &terminal)?;
         let mut stepper = rv.enter(session, &stepper)?;
         let mut metrology = rv.enter(session, &metrology)?;
@@ -563,12 +594,17 @@ async fn main() -> ShellResult<()> {
             let mut buffer = vec![0; GUEST_MEMORY_BYTES];
             let mut validation = vec![0; GUEST_MEMORY_BYTES];
             let mut ready = vec![0; GUEST_MEMORY_BYTES];
+            let mut process = vec![0; GUEST_MEMORY_BYTES];
+            let mut result = vec![0; GUEST_MEMORY_BYTES];
             let file = ChoreoFsFile::new(INBOX_FILE, inbox)
                 .read_as::<Disposition<ETCH_INBOX>>(&mut buffer)
                 .file(VALIDATION_FILE)?
                 .read_as::<Confirmation<CONFIRM_ETCH>>(&mut validation)
                 .file(READY_FILE)?
-                .write_as::<FabReady<ETCH_INBOX>>(&mut ready);
+                .write_as::<FabReady<ETCH_INBOX>>(&mut ready)
+                .file(etcher_files[3])?
+                .write_as::<ReactiveEtch>(&mut process)
+                .read_as::<EtchResult>(&mut result);
             let files = ChoreoFsFiles::new(etch_ep).file(file)?;
             let mut memory = vec![0; GUEST_MEMORY_BYTES];
             let mut storage = Box::new(HibanaWasiGuestStorage::uninit());
@@ -582,17 +618,12 @@ async fn main() -> ShellResult<()> {
             Ok(())
         };
         async {
-            localside::file_metadata::run(
-                &mut etch_files_ep,
-                etch_inbox_ep,
-                [INBOX_FILE, VALIDATION_FILE, READY_FILE],
-            )
-            .await
+            localside::file_metadata::run(&mut etch_files_ep, etch_inbox_ep, etcher_files).await
         };
         async {
             localside::private_io::run(
                 &mut etch_term_ep,
-                PrivateFs::new(etch_shell, bus, &[INBOX_FILE, VALIDATION_FILE, READY_FILE]),
+                PrivateFs::new(etch_shell, bus, &etcher_files),
             )
             .await
         };
@@ -890,9 +921,51 @@ async fn main() -> ShellResult<()> {
                 Ok(())
             }
             .await?;
-            deposition(&mut dep, &effects).await
+            let actual = effects.apply(dep.recv::<Film>().await?).await?;
+            dep.send::<FilmResult>(&encode(&actual)?.as_slice()).await?;
+            Ok(())
         };
-        async { etching(&mut etch, &effects).await };
+        async {
+            loop {
+                let actual = effects.apply(etch.recv::<ReactiveEtch>().await?).await?;
+                let bytes = encode(&actual)?;
+                if actual["success"] == true {
+                    etch.send::<EtchLoaded>(&ReviewReply::from_bytes(&bytes)?)
+                        .await?;
+                    etch_operator.send::<Loan<ETCH_CHAMBER>>(etch).await?;
+                    return Ok(());
+                }
+                etch.send::<EtchFailed>(&ReviewReply::from_bytes(&bytes)?)
+                    .await?;
+            }
+        };
+        async {
+            let mut chamber = loop {
+                let outcome = etch_station.offer().await?;
+                match outcome.label() {
+                    EtchFailed::LOGICAL_LABEL => {
+                        let result = outcome.recv::<EtchFailed>().await?.to_vec();
+                        etch_station.send::<EtchResult>(&result.as_slice()).await?;
+                    }
+                    EtchLoaded::LOGICAL_LABEL => {
+                        let result = outcome.recv::<EtchLoaded>().await?.to_vec();
+                        let chamber = etch_station.recv::<Loan<ETCH_CHAMBER>>().await?;
+                        etch_station.send::<EtchResult>(&result.as_slice()).await?;
+                        break chamber;
+                    }
+                    label => {
+                        return Err(ShellError::message(format!(
+                            "unexpected etch result {label}"
+                        )));
+                    }
+                }
+            };
+            let actual = effects.apply(chamber.recv::<Uniformity>().await?).await?;
+            chamber
+                .send::<UniformityResult>(&encode(&actual)?.as_slice())
+                .await?;
+            Ok(())
+        };
         async {
             localside::private_io::run(&mut terminal, PrivateFs::new(shell, bus, &files)).await
         };

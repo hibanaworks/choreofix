@@ -486,6 +486,32 @@ impl Environment {
             Some("observed_events") => self.observed_events().map(Value::Array),
             #[cfg(test)]
             Some("test_delays") => self.test_delays(&message["profile"]),
+            #[cfg(test)]
+            Some("test_failure") => (|| -> Result<Value> {
+                if !self.observed_events()?.is_empty() {
+                    return Err("fixture failures must be set before effects".into());
+                }
+                Python::attach(|py| -> Result<()> {
+                    let spec = PyModule::import(py, "benchmark.tools.sim_base")?
+                        .getattr("FailureSpec")?
+                        .call1((
+                            message["tool"].as_str().ok_or("missing fixture tool")?,
+                            message["agent"]
+                                .as_str()
+                                .ok_or("missing fixture participant")?,
+                            message["call_index"]
+                                .as_u64()
+                                .ok_or("missing fixture call index")?,
+                        ))?;
+                    self.simulator
+                        .bind(py)
+                        .getattr("_failure_specs")?
+                        .call_method1("append", (spec,))?;
+                    Ok(())
+                })?;
+                self.trace.record("simulator", &message)?;
+                Ok(json!({"configured":true}))
+            })(),
             _ => Err("unknown upstream request".into()),
         };
         wire::respond(&reply, id, result).expect("notify upstream result");

@@ -1,12 +1,8 @@
 //! Received instrument requests and their physical operations in 15E.
-use choreofix::imp::json::encode;
 use choreofix::shell::imp::review_reply::ReviewReply;
-use choreofix::shell::{
-    ShellResult,
-    imp::service::{ReceivedEffects, SimulatorOperation},
-};
+use choreofix::shell::imp::service::SimulatorOperation;
 use hibana::{
-    Endpoint, g,
+    g,
     runtime::{
         program::Projectable,
         wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload},
@@ -34,6 +30,11 @@ pub type RateFailed<'a> = g::Msg<65, ReviewReply<'a, false>>;
 pub const PHOTO_EXPOSURE: u8 = 66;
 pub type Expose = g::Msg<PHOTO_EXPOSURE, InstrumentRequest<PHOTO_EXPOSURE>>;
 pub type Exposed<'a> = g::Msg<67, &'a [u8]>;
+pub const REACTIVE_ION_ETCH: u8 = 68;
+pub type ReactiveEtch = g::Msg<REACTIVE_ION_ETCH, InstrumentRequest<REACTIVE_ION_ETCH>>;
+pub type EtchResult<'a> = g::Msg<69, &'a [u8]>;
+pub type EtchLoaded<'a> = g::Msg<70, ReviewReply<'a, true>>;
+pub type EtchFailed<'a> = g::Msg<71, ReviewReply<'a, false>>;
 pub const CD: u8 = 50;
 pub const THICKNESS: u8 = 51;
 pub const PROFILE: u8 = 52;
@@ -161,6 +162,7 @@ impl<const CHAMBER: u8> WirePayload for InstrumentRequest<CHAMBER> {
             DEPOSITION_CHAMBER => ("process", "film_integrity_check"),
             ETCH_CHAMBER => ("process", "etch_uniformity_check"),
             PHOTO_EXPOSURE => ("process", "photo_exposure"),
+            REACTIVE_ION_ETCH => ("process", "reactive_ion_etch"),
             STEPPER => ("process", "overlay_alignment"),
             CVD_STAGE => ("process", "cvd_growth"),
             DEPOSITION_RATE => ("check_type", "deposition_rate"),
@@ -214,6 +216,10 @@ impl SimulatorOperation for InstrumentRequest<PHOTO_EXPOSURE> {
     const RPC: (&'static str, &'static str) = ("LITHOGRAPHER", "run_stepper_exposure");
 }
 
+impl SimulatorOperation for InstrumentRequest<REACTIVE_ION_ETCH> {
+    const RPC: (&'static str, &'static str) = ("ETCHER", "run_etch_process");
+}
+
 impl SimulatorOperation for InstrumentRequest<STEPPER> {
     const RPC: (&'static str, &'static str) = ("INTEGRATION_ENGINEER", "run_stepper_exposure");
 }
@@ -230,26 +236,4 @@ impl SimulatorOperation for InstrumentRequest<THICKNESS> {
 }
 impl SimulatorOperation for InstrumentRequest<PROFILE> {
     const RPC: (&'static str, &'static str) = ("METROLOGY_ENGINEER", "run_metrology_measurement");
-}
-
-pub async fn deposition<'run>(
-    endpoint: &mut Endpoint<'run, DEPOSITION_CHAMBER>,
-    effects: &impl ReceivedEffects,
-) -> ShellResult<()> {
-    let result = effects.apply(endpoint.recv::<Film>().await?).await?;
-    endpoint
-        .send::<FilmResult>(&encode(&result)?.as_slice())
-        .await?;
-    Ok(())
-}
-
-pub async fn etching<'run>(
-    endpoint: &mut Endpoint<'run, ETCH_CHAMBER>,
-    effects: &impl ReceivedEffects,
-) -> ShellResult<()> {
-    let result = effects.apply(endpoint.recv::<Uniformity>().await?).await?;
-    endpoint
-        .send::<UniformityResult>(&encode(&result)?.as_slice())
-        .await?;
-    Ok(())
 }

@@ -897,6 +897,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
         ("litho-etch-dep", [etch, film], false, [0, 2, 1], true),
         ("dep-litho-etch", [film, etch], false, [1, 0, 2], true),
         ("etch-dep-litho", [etch, film], false, [2, 1, 0], true),
+        ("reactive-etch-retry", [film, etch], false, [2, 0, 1], false),
     ] {
         let directory = output.join(case);
         fs::create_dir(&directory)?;
@@ -905,6 +906,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
         let artifact = projection::archive(&binary, &directory, "15E")?;
         let trace = Trace::create(&journal)?;
         let retry_control = case == "litho-etch-dep";
+        let retry_etch = case == "reactive-etch-retry";
         let failures: &[(&str, u32)] = if retry {
             &[("run_metrology_measurement", 0)]
         } else if retry_control {
@@ -913,13 +915,17 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
             &[]
         };
         let (world, _) = Simulator::new("15E", 0, 1.0, trace.clone(), failures)?;
+        if retry_etch {
+            world.call(json!({"type":"test_failure","tool":"run_etch_process","agent":"ETCHER","call_index":0})).await?;
+        }
         world
             .set_test_delays(json!({"run_stepper_exposure":[0.5,0.5],
             "run_metrology_measurement":[0.0,0.0],"check_monitoring":[0.0,0.0],
             "run_etch_process":[0.0,0.0],"run_deposition":[0.5,0.5]}))
             .await?;
-        let fabrication_calls = 5 + 2 * usize::from(retry_control);
-        let guest_effects = 12 + 2 * usize::from(retry) + 2 * usize::from(retry_control);
+        let fabrication_calls = 4 + 2 * usize::from(retry_control);
+        let guest_effects =
+            13 + 2 * usize::from(retry) + 2 * usize::from(retry_control) + usize::from(retry_etch);
         let exposure_first = match case {
             "dep-litho-etch" => Some(true),
             "etch-dep-litho" => Some(false),
@@ -946,10 +952,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                             ("check_monitoring", "check_type", "etch_endpoint"),
                         ],
                         &[],
-                        &[
-                            ("run_etch_process", "process", "reactive_ion_etch"),
-                            ("check_monitoring", "check_type", "etch_rate"),
-                        ],
+                        &[("check_monitoring", "check_type", "etch_rate")],
                     ];
                     let mut measure_order = delivery;
                     let schedule: Vec<_> = if deferred_reads {
@@ -1012,6 +1015,24 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                                 assert_eq!(measured["success"], true, "{measured}");
                                 assert_eq!(measured["data"]["inputs"], json!([grown["data"]["receipt"]]));
                                 receipts.extend([grown["data"]["receipt"].clone(), measured["data"]["receipt"].clone()]);
+                            }
+                            if who == "ETCHER" {
+                                let path = "/service/run_etch_process";
+                                let invalid = guest.command(who, format!("echo '{{\"process\":\"pattern_transfer_etch\"}}' | dd of={path} oflag=nonblock")).await?;
+                                assert!(invalid["stdout"].as_str().is_some_and(|s| s.contains("Invalid argument")), "{invalid}");
+                                let process = format!("echo '{{\"process\":\"reactive_ion_etch\"}}' > {path}; cat {path}");
+                                let mut result = wafer_shell_result(&guest.command(who, process.clone()).await?)?;
+                                if retry_etch {
+                                    assert_eq!(result["success"], false);
+                                    assert_eq!(result["data"]["status"], "etch_failed");
+                                    let early = guest.command(who, "echo ready | dd of=/service/fab_ready oflag=nonblock".into()).await?;
+                                    assert!(early["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{early}");
+                                    result = wafer_shell_result(&guest.command(who, process).await?)?;
+                                }
+                                assert_eq!(result["success"], true, "{result}");
+                                receipts.push(result["data"]["receipt"].clone());
+                                let repeat = guest.command(who, format!("echo '{{\"process\":\"reactive_ion_etch\"}}' | dd of={path} oflag=nonblock")).await?;
+                                assert!(repeat["stdout"].as_str().is_some_and(|s| s.contains("Permission denied")), "{repeat}");
                             }
                             for &(tool, field, operation) in processing[i] {
                                 let result =
@@ -1305,6 +1326,16 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
             .map(serde_json::from_str)
             .collect::<std::result::Result<Vec<Value>, _>>()?;
         let labels = projection::frames(&artifact, &rows)?;
+        let (guest_calls, fixture_calls): (Vec<_>, Vec<_>) = rows
+            .iter()
+            .filter(|r| r["direction"] == "domain_start")
+            .partition(|r| r["message"]["id"].is_u64());
+        assert_eq!(guest_calls.len(), guest_effects);
+        assert_eq!(
+            fixture_calls.len(),
+            fabrication_calls + 2 + 2 * usize::from(retry)
+        );
+        assert!(fixture_calls.iter().all(|r| r["message"]["id"].is_string()));
         let epf = projection::check_dynamic(&artifact, &rows)?;
         let roles = &artifact["compiled"]["roles"];
         let effects = check_wafer_effects(
@@ -1313,8 +1344,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
             &rows,
             &outcome["score"],
             roles,
-            retry,
-            retry_control,
+            [retry, retry_control, retry_etch],
         )?;
         if let Some(photo_first) = exposure_first {
             let interval = |process: &str| -> Result<(u64, u64)> {
@@ -1502,7 +1532,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
             &directory.join("result.json"),
             &json!({"task":"15E","order":order,"wasm_participants":6,"disposition":decision,"deliveries":delivered,"deferred_reads":deferred_reads,
             "model_calls":0,"scored_benchmark":false,"fabrication_fixture_calls":fabrication_calls, "fixture_post_validation_calls":2 + 2 * usize::from(retry),
-                "shell_effects":guest_effects,"concurrent_load_exposure_first":exposure_first,"measurements":measurements,"instrument_effects":effects,"confirmations":confirmations,"rejected_confirmations":rejected_confirmations,"etcher_confirmation_after_inspections":deferred_reads,"injected_first_check_failure":retry_control,"injected_first_measurement_failure":retry,"early_reads":2,"rejected_wrong_operations":2,"score":outcome["score"],"epf":epf,
+                "shell_effects":guest_effects,"concurrent_load_exposure_first":exposure_first,"measurements":measurements,"instrument_effects":effects,"confirmations":confirmations,"rejected_confirmations":rejected_confirmations,"etcher_confirmation_after_inspections":deferred_reads,"injected_first_check_failure":retry_control,"injected_first_measurement_failure":retry,"injected_first_etch_failure":retry_etch,"early_reads":2,"rejected_wrong_operations":3,"rejected_duplicate_etch":true,"score":outcome["score"],"epf":epf,
             "events_sha256":digest(&journal)?,"runtime_binary_sha256":digest(&binary)?,
             "wash_sha256":digest(&wash)?,"build_receipt_sha256":digest(&output.join("build-receipt.json"))?}),
         )?;
@@ -1830,8 +1860,7 @@ fn check_wafer_effects(
     rows: &[Value],
     score: &Value,
     roles: &Value,
-    retry: bool,
-    retry_control: bool,
+    [retry, retry_control, retry_etch]: [bool; 3],
 ) -> Result<Vec<Value>> {
     use self::instruments::*;
     use hibana::g::Message;
@@ -1870,6 +1899,34 @@ fn check_wafer_effects(
     let stable = by_label(RatePassed::LOGICAL_LABEL);
     assert_eq!(stable.len(), 1);
     rates.extend(stable);
+    let mut etch_results = by_label(EtchFailed::LOGICAL_LABEL);
+    assert_eq!(etch_results.len(), usize::from(retry_etch));
+    let loaded = by_label(EtchLoaded::LOGICAL_LABEL);
+    assert_eq!(loaded.len(), 1);
+    let transfers: Vec<_> = calls
+        .iter()
+        .filter(|c| {
+            c["send_view"] == roles["ETCH_OPERATOR"]
+                && c["receive_commit"]["view"] == roles["ETCH_STATION"]
+        })
+        .collect();
+    let [transfer] = transfers.as_slice() else {
+        return Err("expected one etch chamber transfer".into());
+    };
+    assert_eq!(
+        labels.get(&transfer["frame_id"].as_u64().ok_or("etch loan frame")?),
+        Some(&choreofix::shell::global::Loan::<ETCH_CHAMBER>::LOGICAL_LABEL)
+    );
+    let step = |c: &Value| c["receive_commit"]["journal_row"].as_u64().unwrap();
+    assert!(step(loaded[0]) < step(transfer));
+    let inspected = by_label(Uniformity::LOGICAL_LABEL);
+    assert_eq!(inspected.len(), 1);
+    assert_eq!(
+        inspected[0]["receive_commit"]["actor"],
+        roles["ETCH_STATION"]
+    );
+    assert!(step(transfer) < step(inspected[0]));
+    etch_results.extend(loaded);
     let depositor_file: u8 = serde_json::from_value(roles["DEP_INBOX"].clone())?;
     let operator: u8 = serde_json::from_value(roles["CONTROL_OPERATOR"].clone())?;
     let control_file: u8 = serde_json::from_value(roles["CONTROL_FILE"].clone())?;
@@ -1917,6 +1974,17 @@ fn check_wafer_effects(
             Growth::LOGICAL_LABEL,
             Grown::LOGICAL_LABEL,
             1,
+        ),
+        (
+            "ETCHER",
+            "run_etch_process",
+            serde_json::from_value(roles["ETCH_OPERATOR"].clone())?,
+            ETCH_CHAMBER,
+            serde_json::from_value(roles["ETCH_INBOX"].clone())?,
+            serde_json::from_value(roles["ETCH_STATION"].clone())?,
+            ReactiveEtch::LOGICAL_LABEL,
+            EtchResult::LOGICAL_LABEL,
+            etch_results.len(),
         ),
         (
             "DEPOSITOR",
@@ -1973,6 +2041,7 @@ fn check_wafer_effects(
                 Measure::LOGICAL_LABEL => Some(reports[i]),
                 CrossReference::LOGICAL_LABEL => Some(checks[i]),
                 Rate::LOGICAL_LABEL => Some(rates[i]),
+                ReactiveEtch::LOGICAL_LABEL => Some(etch_results[i]),
                 _ => None,
             };
             if let Some(report) = confirmation {
@@ -2089,6 +2158,7 @@ fn check_spot_check_effects(
 #[hibana_runtime::scope]
 async fn wafer_trial(etch_first: bool) -> Result<()> {
     use self::instruments::*;
+    use choreofix::{imp::json::encode, shell::imp::service::ReceivedEffects};
     use choreofix::{
         imp::projection::{record, rows},
         shell::{global::Loan, imp::bus::Bus},
@@ -2214,10 +2284,20 @@ async fn wafer_trial(etch_first: bool) -> Result<()> {
             Ok(())
         };
         async {
-            deposition(&mut dep, &world).await.unwrap();
+            let received = dep.recv::<Film>().await.unwrap();
+            let result = world.apply(received).await.unwrap();
+            dep.send::<FilmResult>(&encode(&result).unwrap().as_slice())
+                .await
+                .unwrap();
+            Ok(())
         };
         async {
-            etching(&mut etch, &world).await.unwrap();
+            let received = etch.recv::<Uniformity>().await.unwrap();
+            let result = world.apply(received).await.unwrap();
+            etch.send::<UniformityResult>(&encode(&result).unwrap().as_slice())
+                .await
+                .unwrap();
+            Ok(())
         };
         async {
             let mut wafer = engineer.recv::<Loan<WAFER>>().await.unwrap();
