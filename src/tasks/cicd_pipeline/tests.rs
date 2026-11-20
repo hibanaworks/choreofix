@@ -1,4 +1,5 @@
 use super::{arguments::Arguments, global::*, localside};
+use crate::shell::imp::service::ResourceReceipt;
 use crate::{
     imp::json::decode,
     shell::{
@@ -63,11 +64,14 @@ impl ReceivedEffects for Calls {
 }
 
 impl PairedEffects for Calls {
-    async fn apply_pair<P: SimulatorOperation<2>>(
+    async fn apply_pair<'a, 'b, P: SimulatorOperation<2>>(
         &self,
-        build: ReceivedPayload<'_, P>,
-        store: ReceivedPayload<'_, P>,
+        build: impl Into<ResourceReceipt<'a, P>>,
+        store: impl Into<ResourceReceipt<'b, P>>,
     ) -> ShellResult<Value> {
+        let build = build.into();
+        let store = store.into();
+
         let value = decode(build.as_bytes())?;
         if decode(store.as_bytes())? != value {
             return Err(ShellError::message("resource requests differ"));

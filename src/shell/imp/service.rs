@@ -36,6 +36,34 @@ pub trait ReceivedEffects {
     ) -> impl Future<Output = ShellResult<Value>> + use<'io, Self, P>;
 }
 
+/// A single actual resource receive. A receiver can retain its bytes when the
+/// same Endpoint must receive a delegated right before the effect may run.
+pub struct ResourceReceipt<'a, P> {
+    bytes: std::borrow::Cow<'a, [u8]>,
+    payload: core::marker::PhantomData<fn(&P) -> &P>,
+}
+impl<'a, P> From<hibana::runtime::wire::ReceivedPayload<'a, P>> for ResourceReceipt<'a, P> {
+    fn from(received: hibana::runtime::wire::ReceivedPayload<'a, P>) -> Self {
+        Self {
+            bytes: received.as_bytes().into(),
+            payload: core::marker::PhantomData,
+        }
+    }
+}
+impl<P> ResourceReceipt<'_, P> {
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+    pub fn retain(
+        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> ResourceReceipt<'static, P> {
+        ResourceReceipt {
+            bytes: received.as_bytes().to_vec().into(),
+            payload: core::marker::PhantomData,
+        }
+    }
+}
+
 /// An operation on two resources consumes two actual receives of the same request.
 ///
 /// ```compile_fail
@@ -54,10 +82,10 @@ pub trait ReceivedEffects {
 /// }
 /// ```
 pub trait PairedEffects: ReceivedEffects {
-    fn apply_pair<P: SimulatorOperation<2>>(
+    fn apply_pair<'a, 'b, P: SimulatorOperation<2>>(
         &self,
-        first: hibana::runtime::wire::ReceivedPayload<'_, P>,
-        second: hibana::runtime::wire::ReceivedPayload<'_, P>,
+        first: impl Into<ResourceReceipt<'a, P>>,
+        second: impl Into<ResourceReceipt<'b, P>>,
     ) -> impl Future<Output = ShellResult<Value>>;
 }
 

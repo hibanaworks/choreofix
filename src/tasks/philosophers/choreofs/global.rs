@@ -31,6 +31,8 @@ pub const EAT_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
     },
 );
 pub type Eat<const RESOURCE: u8> = g::Msg<RESOURCE, PhilosopherArguments>;
+pub type ForkRequest<'a, const RESOURCE: u8, const DINER: u8> =
+    g::Msg<RESOURCE, super::imp::ForkRequest<'a, DINER>>;
 pub type Meal<'a, const RESOURCE: u8> = g::Msg<RESOURCE, &'a [u8]>;
 pub type Loan<'r, const RESOURCE: u8> = g::Msg<10, Endpoint<'r, RESOURCE>>;
 pub type CloseAuthority<'run, const RESOURCE: u8> = g::Msg<165, Endpoint<'run, RESOURCE>>;
@@ -98,12 +100,13 @@ fn file_io<const FILE: u8, const OWNER: u8>() -> impl Projectable {
     );
     g::route(prestat, g::route(prestat_name, g::route(directory, io))).roll()
 }
-pub type Think<'a> = g::Msg<{ super::identity::THINK_REQUEST }, super::imp::Thought<'a>>;
+pub type Think<'a, const VIEW: u8> =
+    g::Msg<{ super::identity::THINK_REQUEST }, super::imp::Thought<'a, VIEW>>;
 pub type ThinkCompleted = g::Msg<{ super::identity::THINK_COMPLETED }, ()>;
 
 fn thinking<const FILE: u8, const OWNER: u8>() -> impl Projectable {
     g::seq(
-        g::send::<FILE, OWNER, Think>(),
+        g::send::<FILE, OWNER, Think<OWNER>>(),
         g::send::<OWNER, FILE, ThinkCompleted>(),
     )
     .roll()
@@ -136,16 +139,16 @@ fn meal<
     const RIGHT_FORK: u8,
 >() -> impl Projectable + Copy {
     let requests = g::par(
-        g::send::<CLOSE, LEFT, Eat<LEFT_FORK>>(),
+        g::send::<CLOSE, LEFT, Eat<LEFT>>(),
         g::send::<CLOSE, RIGHT, Eat<RIGHT_FORK>>(),
     );
     let loans = g::par(
         g::seq(
-            g::send::<LEFT_FORK, CLOSE, Eat<LEFT_FORK>>(),
+            g::send::<LEFT_FORK, CLOSE, ForkRequest<LEFT_FORK, CLOSE>>(),
             g::send::<LEFT, CLOSE, Loan<LEFT_FORK>>(),
         ),
         g::seq(
-            g::send::<RIGHT_FORK, CLOSE, Eat<RIGHT_FORK>>(),
+            g::send::<RIGHT_FORK, CLOSE, ForkRequest<RIGHT_FORK, CLOSE>>(),
             g::send::<RIGHT, CLOSE, Loan<RIGHT_FORK>>(),
         ),
     );
@@ -338,7 +341,7 @@ pub fn project_9e() -> Programs9E {
 // Each fork lends its single Endpoint to both of its neighbors once.
 fn fork_visit<const CLOSE: u8, const FORK: u8, const RESOURCE: u8>() -> impl Projectable + Copy {
     g::seq(
-        g::send::<RESOURCE, CLOSE, Eat<RESOURCE>>(),
+        g::send::<RESOURCE, CLOSE, ForkRequest<RESOURCE, CLOSE>>(),
         g::seq(
             g::send::<FORK, CLOSE, Loan<RESOURCE>>(),
             g::seq(

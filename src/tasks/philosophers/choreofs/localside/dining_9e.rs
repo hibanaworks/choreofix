@@ -21,7 +21,7 @@ use hibana_wasip1_runtime::{
 #[hibana_runtime::scope]
 pub(crate) async fn run(
     module: &[u8],
-    (bus, simulator): (&Bus, &impl crate::shell::imp::service::Domain),
+    (bus, simulator): (&Bus, &impl crate::shell::imp::service::PairedEffects),
     terminals: [Terminal; 3],
 ) -> ShellResult<()> {
     use global::*;
@@ -187,11 +187,8 @@ pub(crate) async fn run(
                             break status;
                         }
                         identity::THINK_REQUEST => {
-                            let arguments = branch.recv::<Think>().await?;
-                            let result = simulator
-                                .execute(identity::AGENTS[0], "think", arguments)
-                                .await
-                                .map_err(ShellError::message)?;
+                            let received = branch.recv::<Think<THINK_A>>().await?;
+                            let result = simulator.apply(received).await?;
                             data.replace(result)?;
                             io.send::<ThinkCompleted>(&()).await?;
                         }
@@ -342,7 +339,7 @@ pub(crate) async fn run(
                                 let [mut left, mut right] = operation.par()?;
                                 async {
                                     async {
-                                        left.send::<Eat<FORK_A_RESOURCE>>(&admitted).await?;
+                                        left.send::<Eat<FORK_A>>(&admitted).await?;
                                     };
                                     async {
                                         right.send::<Eat<FORK_C_RESOURCE>>(&admitted).await?;
@@ -354,27 +351,31 @@ pub(crate) async fn run(
                             let ((left, mut left_resource), (right, mut right_resource)) = async {
                                 let [mut left, mut right] = operation.par()?;
                                 async {
-                                    let arguments = left.recv::<Eat<FORK_A_RESOURCE>>().await?;
+                                    let arguments =
+                                        crate::shell::imp::service::ResourceReceipt::retain(
+                                            left.recv::<ForkRequest<FORK_A_RESOURCE, A>>().await?,
+                                        );
                                     let resource = left.recv::<Loan<FORK_A_RESOURCE>>().await?;
                                     Ok((arguments, resource))
                                 };
                                 async {
-                                    let arguments = right.recv::<Eat<FORK_C_RESOURCE>>().await?;
+                                    let arguments =
+                                        crate::shell::imp::service::ResourceReceipt::retain(
+                                            right.recv::<ForkRequest<FORK_C_RESOURCE, A>>().await?,
+                                        );
                                     let resource = right.recv::<Loan<FORK_C_RESOURCE>>().await?;
                                     Ok((arguments, resource))
                                 };
                             }
                             .await?;
-                            if left != admitted || right != admitted {
+                            if left.as_bytes() != admitted.as_bytes()
+                                || right.as_bytes() != admitted.as_bytes()
+                            {
                                 return Err(ShellError::message(
                                     "resource requests differ from the received file arguments",
                                 ));
                             }
-                            let agent = identity::AGENTS[usize::from(A % 7)];
-                            let result = simulator
-                                .execute(agent, "eat", admitted.into_value())
-                                .await
-                                .map_err(ShellError::message)?;
+                            let result = simulator.apply_pair(left, right).await?;
                             data.replace(result)?;
                             let response = data.bytes.as_slice();
                             async {
@@ -418,7 +419,7 @@ pub(crate) async fn run(
             }
         };
         async {
-            fork::run(&mut fork_a, resource_a).await?;
+            fork::run::<B, FORK_A, FORK_A_RESOURCE>(&mut fork_a, resource_a).await?;
         };
         async {
             let mut endpoint = a_wasi;
@@ -432,7 +433,7 @@ pub(crate) async fn run(
             let files = ChoreoFsFiles::new(endpoint)
                 .file(
                     ChoreoFsFile::new(THINK_OBJECT, think)
-                        .write_as::<Think>(&mut thought)
+                        .write_as::<Think<THINK_A>>(&mut thought)
                         .close_with::<ThinkCompleted>(),
                 )?
                 .file(
@@ -531,11 +532,8 @@ pub(crate) async fn run(
                             break status;
                         }
                         identity::THINK_REQUEST => {
-                            let arguments = branch.recv::<Think>().await?;
-                            let result = simulator
-                                .execute(identity::AGENTS[1], "think", arguments)
-                                .await
-                                .map_err(ShellError::message)?;
+                            let received = branch.recv::<Think<THINK_B>>().await?;
+                            let result = simulator.apply(received).await?;
                             data.replace(result)?;
                             io.send::<ThinkCompleted>(&()).await?;
                         }
@@ -686,7 +684,7 @@ pub(crate) async fn run(
                                 let [mut left, mut right] = operation.par()?;
                                 async {
                                     async {
-                                        left.send::<Eat<FORK_B_RESOURCE>>(&admitted).await?;
+                                        left.send::<Eat<FORK_B>>(&admitted).await?;
                                     };
                                     async {
                                         right.send::<Eat<FORK_A_RESOURCE>>(&admitted).await?;
@@ -698,27 +696,31 @@ pub(crate) async fn run(
                             let ((left, mut left_resource), (right, mut right_resource)) = async {
                                 let [mut left, mut right] = operation.par()?;
                                 async {
-                                    let arguments = left.recv::<Eat<FORK_B_RESOURCE>>().await?;
+                                    let arguments =
+                                        crate::shell::imp::service::ResourceReceipt::retain(
+                                            left.recv::<ForkRequest<FORK_B_RESOURCE, B>>().await?,
+                                        );
                                     let resource = left.recv::<Loan<FORK_B_RESOURCE>>().await?;
                                     Ok((arguments, resource))
                                 };
                                 async {
-                                    let arguments = right.recv::<Eat<FORK_A_RESOURCE>>().await?;
+                                    let arguments =
+                                        crate::shell::imp::service::ResourceReceipt::retain(
+                                            right.recv::<ForkRequest<FORK_A_RESOURCE, B>>().await?,
+                                        );
                                     let resource = right.recv::<Loan<FORK_A_RESOURCE>>().await?;
                                     Ok((arguments, resource))
                                 };
                             }
                             .await?;
-                            if left != admitted || right != admitted {
+                            if left.as_bytes() != admitted.as_bytes()
+                                || right.as_bytes() != admitted.as_bytes()
+                            {
                                 return Err(ShellError::message(
                                     "resource requests differ from the received file arguments",
                                 ));
                             }
-                            let agent = identity::AGENTS[usize::from(B % 7)];
-                            let result = simulator
-                                .execute(agent, "eat", admitted.into_value())
-                                .await
-                                .map_err(ShellError::message)?;
+                            let result = simulator.apply_pair(left, right).await?;
                             data.replace(result)?;
                             let response = data.bytes.as_slice();
                             async {
@@ -762,7 +764,7 @@ pub(crate) async fn run(
             }
         };
         async {
-            fork::run(&mut fork_b, resource_b).await?;
+            fork::run::<C, FORK_B, FORK_B_RESOURCE>(&mut fork_b, resource_b).await?;
         };
         async {
             let mut endpoint = b_wasi;
@@ -776,7 +778,7 @@ pub(crate) async fn run(
             let files = ChoreoFsFiles::new(endpoint)
                 .file(
                     ChoreoFsFile::new(THINK_OBJECT, think)
-                        .write_as::<Think>(&mut thought)
+                        .write_as::<Think<THINK_B>>(&mut thought)
                         .close_with::<ThinkCompleted>(),
                 )?
                 .file(
@@ -875,11 +877,8 @@ pub(crate) async fn run(
                             break status;
                         }
                         identity::THINK_REQUEST => {
-                            let arguments = branch.recv::<Think>().await?;
-                            let result = simulator
-                                .execute(identity::AGENTS[2], "think", arguments)
-                                .await
-                                .map_err(ShellError::message)?;
+                            let received = branch.recv::<Think<THINK_C>>().await?;
+                            let result = simulator.apply(received).await?;
                             data.replace(result)?;
                             io.send::<ThinkCompleted>(&()).await?;
                         }
@@ -1030,7 +1029,7 @@ pub(crate) async fn run(
                                 let [mut left, mut right] = operation.par()?;
                                 async {
                                     async {
-                                        left.send::<Eat<FORK_C_RESOURCE>>(&admitted).await?;
+                                        left.send::<Eat<FORK_C>>(&admitted).await?;
                                     };
                                     async {
                                         right.send::<Eat<FORK_B_RESOURCE>>(&admitted).await?;
@@ -1042,27 +1041,31 @@ pub(crate) async fn run(
                             let ((left, mut left_resource), (right, mut right_resource)) = async {
                                 let [mut left, mut right] = operation.par()?;
                                 async {
-                                    let arguments = left.recv::<Eat<FORK_C_RESOURCE>>().await?;
+                                    let arguments =
+                                        crate::shell::imp::service::ResourceReceipt::retain(
+                                            left.recv::<ForkRequest<FORK_C_RESOURCE, C>>().await?,
+                                        );
                                     let resource = left.recv::<Loan<FORK_C_RESOURCE>>().await?;
                                     Ok((arguments, resource))
                                 };
                                 async {
-                                    let arguments = right.recv::<Eat<FORK_B_RESOURCE>>().await?;
+                                    let arguments =
+                                        crate::shell::imp::service::ResourceReceipt::retain(
+                                            right.recv::<ForkRequest<FORK_B_RESOURCE, C>>().await?,
+                                        );
                                     let resource = right.recv::<Loan<FORK_B_RESOURCE>>().await?;
                                     Ok((arguments, resource))
                                 };
                             }
                             .await?;
-                            if left != admitted || right != admitted {
+                            if left.as_bytes() != admitted.as_bytes()
+                                || right.as_bytes() != admitted.as_bytes()
+                            {
                                 return Err(ShellError::message(
                                     "resource requests differ from the received file arguments",
                                 ));
                             }
-                            let agent = identity::AGENTS[usize::from(C % 7)];
-                            let result = simulator
-                                .execute(agent, "eat", admitted.into_value())
-                                .await
-                                .map_err(ShellError::message)?;
+                            let result = simulator.apply_pair(left, right).await?;
                             data.replace(result)?;
                             let response = data.bytes.as_slice();
                             async {
@@ -1106,7 +1109,7 @@ pub(crate) async fn run(
             }
         };
         async {
-            fork::run(&mut fork_c, resource_c).await?;
+            fork::run::<A, FORK_C, FORK_C_RESOURCE>(&mut fork_c, resource_c).await?;
         };
         async {
             let mut endpoint = c_wasi;
@@ -1120,7 +1123,7 @@ pub(crate) async fn run(
             let files = ChoreoFsFiles::new(endpoint)
                 .file(
                     ChoreoFsFile::new(THINK_OBJECT, think)
-                        .write_as::<Think>(&mut thought)
+                        .write_as::<Think<THINK_C>>(&mut thought)
                         .close_with::<ThinkCompleted>(),
                 )?
                 .file(

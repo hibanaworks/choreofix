@@ -625,7 +625,11 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                                 if side == 0 { fork_owner } else { resource },
                             )?
                         } else {
-                            find(controller, fork_owner, resource)?
+                            find(
+                                controller,
+                                fork_owner,
+                                if side == 0 { fork_owner } else { resource },
+                            )?
                         };
                         let (request_id, request) = find(resource, receiver, resource)?;
                         let (loan_id, _) = find(fork_owner, receiver, 10)?;

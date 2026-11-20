@@ -1,4 +1,4 @@
-use crate::shell::{ShellError, ShellResult};
+use crate::shell::{ShellError, ShellResult, imp::service::SimulatorOperation};
 use hibana::runtime::wire::{CodecError, Payload, WireEncode, WirePayload};
 use serde_json::Value;
 
@@ -24,6 +24,9 @@ impl PhilosopherArguments {
         Self::from_value(value)
     }
 
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
     pub fn into_value(self) -> Value {
         serde_json::from_slice(&self.0).expect("validated canonical philosopher arguments")
     }
@@ -68,8 +71,8 @@ impl WirePayload for PhilosopherArguments {
 }
 
 /// Shell JSON keeps the user's whitespace and additional fields on the wire.
-pub struct Thought<'a>(&'a [u8]);
-impl WireEncode for Thought<'_> {
+pub struct Thought<'a, const VIEW: u8>(&'a [u8]);
+impl<const VIEW: u8> WireEncode for Thought<'_, VIEW> {
     fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
         output
             .get_mut(..self.0.len())
@@ -78,9 +81,9 @@ impl WireEncode for Thought<'_> {
         Ok(self.0.len())
     }
 }
-impl WirePayload for Thought<'_> {
-    const SCHEMA_ID: u32 = 0x5048_4902;
-    type Decoded<'a> = Value;
+impl<const VIEW: u8> WirePayload for Thought<'_, VIEW> {
+    const SCHEMA_ID: u32 = 0x5048_5000 | VIEW as u32;
+    type Decoded<'a> = hibana::runtime::wire::ReceivedPayload<'a, Self>;
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
         let value = serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
         valid_object(&value)
@@ -89,9 +92,53 @@ impl WirePayload for Thought<'_> {
     }
     fn decode_validated_payload<'a>(
         input: hibana::runtime::wire::ReceivedPayload<'a, Self>,
-    ) -> Value {
-        serde_json::from_slice(input.as_bytes()).expect("validated think arguments")
+    ) -> Self::Decoded<'a> {
+        input
     }
+}
+
+impl<const VIEW: u8> SimulatorOperation for Thought<'_, VIEW> {
+    const RPC: (&'static str, &'static str) = (
+        super::identity::AGENTS[(VIEW - super::identity::roles::THINK_A) as usize],
+        "think",
+    );
+}
+
+/// A physical fork's contribution to the projected diner's meal.
+pub struct ForkRequest<'a, const VIEW: u8>(pub &'a PhilosopherArguments);
+impl<const VIEW: u8> ForkRequest<'_, VIEW> {
+    // A diner's ordinary view, its close Endpoint, and its own fork identify
+    // the same physical simulator participant on the two incoming requests.
+    const DINER: u8 = {
+        use super::identity::roles::*;
+        match VIEW {
+            A..=G => VIEW - A,
+            A_EAT_CLOSE..=G_EAT_CLOSE => VIEW - A_EAT_CLOSE,
+            FORK_A..=FORK_G => VIEW - FORK_A,
+            _ => panic!("not a dining request view"),
+        }
+    };
+}
+impl<const DINER: u8> WireEncode for ForkRequest<'_, DINER> {
+    fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
+        self.0.encode_into(output)
+    }
+}
+impl<const DINER: u8> WirePayload for ForkRequest<'_, DINER> {
+    const SCHEMA_ID: u32 = 0x5048_5100 | Self::DINER as u32;
+    type Decoded<'a> = hibana::runtime::wire::ReceivedPayload<'a, Self>;
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        PhilosopherArguments::validate_payload(input)
+    }
+    fn decode_validated_payload<'a>(
+        input: hibana::runtime::wire::ReceivedPayload<'a, Self>,
+    ) -> Self::Decoded<'a> {
+        input
+    }
+}
+impl<const DINER: u8> SimulatorOperation<2> for ForkRequest<'_, DINER> {
+    const RPC: (&'static str, &'static str) =
+        (super::identity::AGENTS[Self::DINER as usize], "eat");
 }
 
 #[cfg(test)]

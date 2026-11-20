@@ -1,4 +1,5 @@
 use super::{global::*, imp, localside, wire::Arguments};
+use crate::shell::imp::service::ResourceReceipt;
 use crate::shell::{
     ShellError, ShellResult,
     imp::{
@@ -73,11 +74,14 @@ impl ReceivedEffects for BuildData {
     }
 }
 impl PairedEffects for BuildData {
-    async fn apply_pair<P: SimulatorOperation<2>>(
+    async fn apply_pair<'a, 'b, P: SimulatorOperation<2>>(
         &self,
-        first: ReceivedPayload<'_, P>,
-        second: ReceivedPayload<'_, P>,
+        first: impl Into<ResourceReceipt<'a, P>>,
+        second: impl Into<ResourceReceipt<'b, P>>,
     ) -> ShellResult<Value> {
+        let first = first.into();
+        let second = second.into();
+
         let value = imp::decode(first.as_bytes())?;
         if value != imp::decode(second.as_bytes())? {
             return Err(ShellError::message("compile inputs disagree"));

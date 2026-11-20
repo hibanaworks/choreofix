@@ -1,4 +1,5 @@
 //! The external connection owns terminal output and simulator RPC correlation.
+use crate::shell::imp::service::ResourceReceipt;
 use crate::{
     shell::imp::service::{Domain, PairedEffects, ReceivedEffects, SimulatorOperation},
     shell::{ShellError, ShellResult},
@@ -475,11 +476,14 @@ impl<'bus> ReceivedEffects for Simulator<'bus> {
 }
 
 impl PairedEffects for Simulator<'_> {
-    async fn apply_pair<P: SimulatorOperation<2>>(
+    async fn apply_pair<'a, 'b, P: SimulatorOperation<2>>(
         &self,
-        first: hibana::runtime::wire::ReceivedPayload<'_, P>,
-        second: hibana::runtime::wire::ReceivedPayload<'_, P>,
+        first: impl Into<ResourceReceipt<'a, P>>,
+        second: impl Into<ResourceReceipt<'b, P>>,
     ) -> ShellResult<Value> {
+        let first = first.into();
+        let second = second.into();
+
         let decode = |bytes: &[u8]| {
             serde_json::from_slice::<Value>(bytes)
                 .map_err(|error| ShellError::message(error.to_string()))
