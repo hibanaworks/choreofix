@@ -2,37 +2,31 @@
 use super::super::global::*;
 use crate::shell::global::Loan;
 use crate::shell::imp::review_reply::ReviewReply;
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{Endpoint, g::Message};
 
 pub async fn run<'run>(
     mut endpoint: Endpoint<'run, REVIEW_A>,
     mut research: Endpoint<'run, RESEARCH_A>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     loop {
         let branch = research.offer().await?;
-        let arguments = match branch.label() {
+        let request = match branch.label() {
             ConfirmApprovedA::LOGICAL_LABEL => {
                 let bytes = branch.recv::<ConfirmApprovedA>().await?.to_vec();
                 let receipt = ReviewReply::<true>::from_bytes(&bytes)?;
                 research.send::<ConfirmApprovedA>(&receipt).await?;
                 break;
             }
-            ReviewA::LOGICAL_LABEL => branch.recv::<ReviewA>().await?.into_value(),
+            ReviewRequestA::LOGICAL_LABEL => branch.recv::<ReviewRequestA>().await?,
             label => {
                 return Err(ShellError::message(format!(
                     "unexpected report service request {label}"
                 )));
             }
         };
-        if arguments["section_name"] != SECTION_A {
-            return Err(ShellError::message("review target differs"));
-        }
-        let result = domain
-            .execute("EDITOR", "review_sections", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let result = effects.apply(request).await?;
         let bytes =
             serde_json::to_vec(&result).map_err(|error| ShellError::message(error.to_string()))?;
         match result["success"].as_bool() {

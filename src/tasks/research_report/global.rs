@@ -97,8 +97,8 @@ pub type FeedbackA<'a> = g::Msg<108, &'a [u8]>;
 pub type FeedbackB<'a> = g::Msg<109, &'a [u8]>;
 pub type DocumentLoan<'r> = g::Msg<10, Endpoint<'r, DOCUMENT>>;
 pub type DatabaseLoan<'r> = g::Msg<11, Endpoint<'r, DATABASE>>;
-pub type ResearchA = g::Msg<1, ReportArguments<19>>;
-pub type ResearchB = g::Msg<3, ReportArguments<20>>;
+pub type ResearchA = g::Msg<1, ReportArguments<19, true>>;
+pub type ResearchB = g::Msg<3, ReportArguments<20, true>>;
 pub type ResearchResult<'a> = g::Msg<2, &'a [u8]>;
 pub type WriteA = g::Msg<69, ReportArguments<21>>;
 pub type ReviseA = g::Msg<76, ReportArguments<23>>;
@@ -106,15 +106,25 @@ pub type WriteB = g::Msg<169, ReportArguments<22>>;
 pub type ReviseB = g::Msg<176, ReportArguments<24>>;
 pub type ReferencesA = g::Msg<60, ReportArguments<25>>;
 pub type ReferencesB = g::Msg<160, ReportArguments<26>>;
-pub type WriteOnDocument = g::Msg<190, ReportArguments<2>>;
-pub type ReviseOnDocument = g::Msg<191, ReportArguments<3>>;
-pub type CombineOnDocument = g::Msg<192, ReportArguments<6>>;
+const WRITE_ON_DOCUMENT: u8 = 190;
+pub type WriteOnDocumentA = g::Msg<WRITE_ON_DOCUMENT, ReportArguments<21, true>>;
+pub type WriteOnDocumentB = g::Msg<WRITE_ON_DOCUMENT, ReportArguments<22, true>>;
+const REVISE_ON_DOCUMENT: u8 = 191;
+pub type ReviseOnDocumentA = g::Msg<REVISE_ON_DOCUMENT, ReportArguments<23, true>>;
+pub type ReviseOnDocumentB = g::Msg<REVISE_ON_DOCUMENT, ReportArguments<24, true>>;
+pub type CombineOnDocument = g::Msg<192, ReportArguments<29, true>>;
 pub type DocumentResult<'a> = g::Msg<193, &'a [u8]>;
-pub type ReferencesOnDatabase = g::Msg<194, ReportArguments<4>>;
+const REFERENCES_ON_DATABASE: u8 = 194;
+pub type ReferencesOnDatabaseA = g::Msg<REFERENCES_ON_DATABASE, ReportArguments<25, true>>;
+pub type ReferencesOnDatabaseB = g::Msg<REFERENCES_ON_DATABASE, ReportArguments<26, true>>;
 pub type DatabaseResult<'a> = g::Msg<195, &'a [u8]>;
 pub type Combine = g::Msg<70, ReportArguments<29>>;
-pub type ReviewA = g::Msg<71, ReportArguments<27>>;
-pub type ReviewB = g::Msg<171, ReportArguments<28>>;
+const REVIEW_A_LABEL: u8 = 71;
+pub type ReviewA = g::Msg<REVIEW_A_LABEL, ReportArguments<27>>;
+pub type ReviewRequestA = g::Msg<REVIEW_A_LABEL, ReportArguments<27, true>>;
+const REVIEW_B_LABEL: u8 = 171;
+pub type ReviewB = g::Msg<REVIEW_B_LABEL, ReportArguments<28>>;
+pub type ReviewRequestB = g::Msg<REVIEW_B_LABEL, ReportArguments<28, true>>;
 pub type ReviewResultA<'a> = g::Msg<172, &'a [u8]>;
 pub type ReviewResultB<'a> = g::Msg<173, &'a [u8]>;
 pub type CombinedReply<'a> = g::Msg<174, &'a [u8]>;
@@ -138,14 +148,14 @@ fn review_input<M: g::Message>() -> impl Projectable {
 fn section_review_a() -> impl Projectable {
     g::seq(
         g::send::<REVIEW_WASI, A_WASI, ReviewA>(),
-        g::send::<A_WASI, RESEARCH_A, ReviewA>(),
+        g::send::<A_WASI, RESEARCH_A, ReviewRequestA>(),
     )
 }
 
 fn section_review_b() -> impl Projectable {
     g::seq(
         g::send::<REVIEW_WASI, B_WASI, ReviewB>(),
-        g::send::<B_WASI, RESEARCH_B, ReviewB>(),
+        g::send::<B_WASI, RESEARCH_B, ReviewRequestB>(),
     )
 }
 
@@ -155,7 +165,7 @@ fn writing_a() -> impl Projectable + Copy {
         g::seq(
             g::send::<INITIAL_DOCUMENT, A_WASI, DocumentLoan>(),
             g::seq(
-                g::send::<DOCUMENT, INITIAL_DOCUMENT, WriteOnDocument>(),
+                g::send::<DOCUMENT, INITIAL_DOCUMENT, WriteOnDocumentA>(),
                 g::seq(
                     g::send::<INITIAL_DOCUMENT, DOCUMENT, DocumentResult>(),
                     g::par(
@@ -174,7 +184,7 @@ fn writing_b() -> impl Projectable + Copy {
         g::seq(
             g::send::<INITIAL_DOCUMENT, B_WASI, DocumentLoan>(),
             g::seq(
-                g::send::<DOCUMENT, INITIAL_DOCUMENT, WriteOnDocument>(),
+                g::send::<DOCUMENT, INITIAL_DOCUMENT, WriteOnDocumentB>(),
                 g::seq(
                     g::send::<INITIAL_DOCUMENT, DOCUMENT, DocumentResult>(),
                     g::par(
@@ -194,7 +204,7 @@ fn revise_a() -> impl Projectable {
             g::seq(
                 g::send::<DOCUMENT_SERVICE, A_WASI, RevisionArgumentsA>(),
                 g::seq(
-                    g::send::<DOCUMENT, DOCUMENT_SERVICE, ReviseOnDocument>(),
+                    g::send::<DOCUMENT, DOCUMENT_SERVICE, ReviseOnDocumentA>(),
                     g::seq(
                         g::send::<DOCUMENT_SERVICE, DOCUMENT, DocumentResult>(),
                         g::par(
@@ -215,7 +225,7 @@ fn revise_b() -> impl Projectable {
             g::seq(
                 g::send::<DOCUMENT_SERVICE, B_WASI, RevisionArgumentsB>(),
                 g::seq(
-                    g::send::<DOCUMENT, DOCUMENT_SERVICE, ReviseOnDocument>(),
+                    g::send::<DOCUMENT, DOCUMENT_SERVICE, ReviseOnDocumentB>(),
                     g::seq(
                         g::send::<DOCUMENT_SERVICE, DOCUMENT, DocumentResult>(),
                         g::par(
@@ -234,7 +244,7 @@ fn references_a() -> impl Projectable + Copy {
         g::seq(
             g::send::<DATABASE_SERVICE, A_WASI, DatabaseLoan>(),
             g::seq(
-                g::send::<DATABASE, DATABASE_SERVICE, ReferencesOnDatabase>(),
+                g::send::<DATABASE, DATABASE_SERVICE, ReferencesOnDatabaseA>(),
                 g::seq(
                     g::par(
                         g::send::<DATABASE_SERVICE, DATABASE, DatabaseResult>(),
@@ -255,7 +265,7 @@ fn references_b() -> impl Projectable + Copy {
         g::seq(
             g::send::<DATABASE_SERVICE, B_WASI, DatabaseLoan>(),
             g::seq(
-                g::send::<DATABASE, DATABASE_SERVICE, ReferencesOnDatabase>(),
+                g::send::<DATABASE, DATABASE_SERVICE, ReferencesOnDatabaseB>(),
                 g::seq(
                     g::par(
                         g::send::<DATABASE_SERVICE, DATABASE, DatabaseResult>(),
@@ -758,10 +768,10 @@ impl Programs {
                 ("ReviseB", ReviseB::LOGICAL_LABEL),
                 ("ReferencesA", ReferencesA::LOGICAL_LABEL),
                 ("ReferencesB", ReferencesB::LOGICAL_LABEL),
-                ("WriteOnDocument", WriteOnDocument::LOGICAL_LABEL),
-                ("ReviseOnDocument", ReviseOnDocument::LOGICAL_LABEL),
+                ("WriteOnDocument", WRITE_ON_DOCUMENT),
+                ("ReviseOnDocument", REVISE_ON_DOCUMENT),
                 ("CombineOnDocument", CombineOnDocument::LOGICAL_LABEL),
-                ("ReferencesOnDatabase", ReferencesOnDatabase::LOGICAL_LABEL),
+                ("ReferencesOnDatabase", REFERENCES_ON_DATABASE),
                 ("DocumentResult", DocumentResult::LOGICAL_LABEL),
                 ("DatabaseResult", DatabaseResult::LOGICAL_LABEL),
                 ("Combine", Combine::LOGICAL_LABEL),

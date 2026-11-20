@@ -1,9 +1,13 @@
 //! Actual backend replies and affine finalization through production localsides.
-use super::{global::*, localside};
+use super::{global::*, imp, localside};
 use crate::shell::{
     ShellError, ShellResult,
     global::Loan,
-    imp::{bus::Bus, report_arguments::ReportArguments, service::Domain},
+    imp::{
+        bus::Bus,
+        report_arguments::ReportArguments,
+        service::{ReceivedEffects, SimulatorOperation},
+    },
 };
 use hibana::{
     g,
@@ -14,18 +18,20 @@ use std::{cell::Cell, collections::VecDeque};
 
 // Actual supplied effect results and arguments only, with no protocol state.
 struct Replies(Cell<(VecDeque<Value>, Vec<Value>)>);
-impl Domain for Replies {
-    async fn execute(
-        &self,
-        agent: &'static str,
-        tool: &'static str,
-        arguments: Value,
-    ) -> Result<Value, String> {
-        let (mut replies, mut calls) = self.0.take();
-        calls.push(json!({"agent":agent,"tool":tool,"arguments":arguments}));
-        let result = replies.pop_front().ok_or("unexpected effect")?;
-        self.0.set((replies, calls));
-        Ok(result)
+impl ReceivedEffects for Replies {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+        let arguments = imp::decode(received.as_bytes());
+        async move {
+            let (agent, tool) = P::RPC;
+            let (mut replies, mut calls) = self.0.take();
+            calls.push(json!({"agent":agent,"tool":tool,"arguments":arguments?}));
+            let reply = replies.pop_front();
+            self.0.set((replies, calls));
+            reply.ok_or_else(|| ShellError::message("unexpected effect"))
+        }
     }
 }
 #[hibana_runtime::main]
@@ -65,12 +71,16 @@ async fn section_a_uses_actual_results_and_retires_its_review_authority() -> She
             ),
         );
         let source = g::seq(
-            g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>(),
+            g::send::<REVIEW_WASI, RESEARCH_A, ReviewRequestA>(),
             g::seq(
                 g::route(
                     positive,
                     g::seq(
-                        g::seq(negative, g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>()).roll(),
+                        g::seq(
+                            negative,
+                            g::send::<REVIEW_WASI, RESEARCH_A, ReviewRequestA>(),
+                        )
+                        .roll(),
                         positive,
                     ),
                 ),
@@ -118,7 +128,7 @@ async fn section_a_uses_actual_results_and_retires_its_review_authority() -> She
         let outcomes:Vec<_>=(0..=rejections).map(|attempt|json!({"success":attempt==rejections,"data":{"review_id":format!("a:{attempt}")}})).collect();
         let domain = Replies(Cell::new((outcomes.clone().into(), Vec::new())));
         let review_arguments =
-            ReportArguments::<27>::from_bytes(br#"{"section_name":"section_a"}"#)?;
+            ReportArguments::<27, true>::from_bytes(br#"{"section_name":"section_a"}"#)?;
         let combine_arguments =
             ReportArguments::<29>::from_bytes(br#"{"sections":"section_a,section_b"}"#)?;
         let result = hibana_runtime::race(
@@ -128,7 +138,7 @@ async fn section_a_uses_actual_results_and_retires_its_review_authority() -> She
                 };
                 async {
                     for outcome in &outcomes {
-                        editor.send::<ReviewA>(&review_arguments).await?;
+                        editor.send::<ReviewRequestA>(&review_arguments).await?;
                         let received = if outcome["success"] == true {
                             editor.recv::<ApprovedA>().await?
                         } else {
@@ -261,12 +271,16 @@ async fn section_b_uses_actual_results_and_retires_its_review_authority() -> She
             ),
         );
         let source = g::seq(
-            g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>(),
+            g::send::<REVIEW_WASI, RESEARCH_B, ReviewRequestB>(),
             g::seq(
                 g::route(
                     positive,
                     g::seq(
-                        g::seq(negative, g::send::<REVIEW_WASI, RESEARCH_B, ReviewB>()).roll(),
+                        g::seq(
+                            negative,
+                            g::send::<REVIEW_WASI, RESEARCH_B, ReviewRequestB>(),
+                        )
+                        .roll(),
                         positive,
                     ),
                 ),
@@ -314,7 +328,7 @@ async fn section_b_uses_actual_results_and_retires_its_review_authority() -> She
         let outcomes:Vec<_>=(0..=rejections).map(|attempt|json!({"success":attempt==rejections,"data":{"review_id":format!("b:{attempt}")}})).collect();
         let domain = Replies(Cell::new((outcomes.clone().into(), Vec::new())));
         let review_arguments =
-            ReportArguments::<28>::from_bytes(br#"{"section_name":"section_b"}"#)?;
+            ReportArguments::<28, true>::from_bytes(br#"{"section_name":"section_b"}"#)?;
         let combine_arguments =
             ReportArguments::<29>::from_bytes(br#"{"sections":"section_a,section_b"}"#)?;
         let result = hibana_runtime::race(
@@ -324,7 +338,7 @@ async fn section_b_uses_actual_results_and_retires_its_review_authority() -> She
                 };
                 async {
                     for outcome in &outcomes {
-                        editor.send::<ReviewB>(&review_arguments).await?;
+                        editor.send::<ReviewRequestB>(&review_arguments).await?;
                         let received = if outcome["success"] == true {
                             editor.recv::<ApprovedB>().await?
                         } else {
@@ -441,7 +455,7 @@ async fn section_a_single_review_retires_without_a_repeatable_fragment() -> Shel
             ),
         );
         let source = g::seq(
-            g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>(),
+            g::send::<REVIEW_WASI, RESEARCH_A, ReviewRequestA>(),
             g::seq(
                 positive,
                 g::seq(
@@ -488,7 +502,7 @@ async fn section_a_single_review_retires_without_a_repeatable_fragment() -> Shel
         let outcomes:Vec<_>=(0..=rejections).map(|attempt|json!({"success":attempt==rejections,"data":{"review_id":format!("a:{attempt}")}})).collect();
         let domain = Replies(Cell::new((outcomes.clone().into(), Vec::new())));
         let review_arguments =
-            ReportArguments::<27>::from_bytes(br#"{"section_name":"section_a"}"#)?;
+            ReportArguments::<27, true>::from_bytes(br#"{"section_name":"section_a"}"#)?;
         let combine_arguments =
             ReportArguments::<29>::from_bytes(br#"{"sections":"section_a,section_b"}"#)?;
         let result = hibana_runtime::race(
@@ -498,7 +512,7 @@ async fn section_a_single_review_retires_without_a_repeatable_fragment() -> Shel
                 };
                 async {
                     for outcome in &outcomes {
-                        editor.send::<ReviewA>(&review_arguments).await?;
+                        editor.send::<ReviewRequestA>(&review_arguments).await?;
                         let received = if outcome["success"] == true {
                             editor.recv::<ApprovedA>().await?
                         } else {
@@ -604,7 +618,7 @@ async fn malformed_review_verdict_never_sends_an_approval() -> ShellResult<()> {
         json!({"success":null}),
     ] {
         let source = g::seq(
-            g::send::<REVIEW_WASI, RESEARCH_A, ReviewA>(),
+            g::send::<REVIEW_WASI, RESEARCH_A, ReviewRequestA>(),
             g::seq(
                 g::send::<REVIEW_A, DOCUMENT_SERVICE, ApprovedA>(),
                 g::seq(
@@ -635,14 +649,15 @@ async fn malformed_review_verdict_never_sends_an_approval() -> ShellResult<()> {
         let review = rv.enter(session, &p_review)?;
         let mut editor = rv.enter(session, &p_editor)?;
         let domain = Replies(Cell::new(([invalid].into(), Vec::new())));
-        let review_args = ReportArguments::<27>::from_bytes(br#"{"section_name":"section_a"}"#)?;
+        let review_args =
+            ReportArguments::<27, true>::from_bytes(br#"{"section_name":"section_a"}"#)?;
         let result = hibana_runtime::race(
             async {
                 async {
                     localside::reviewer_a::run(review, research, &domain).await?;
                 };
                 async {
-                    editor.send::<ReviewA>(&review_args).await?;
+                    editor.send::<ReviewRequestA>(&review_args).await?;
                 };
                 Ok(())
             },

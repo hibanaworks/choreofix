@@ -1,6 +1,6 @@
 //! Direct receivers own actual report data and apply only admitted requests.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{Endpoint, g::Message};
 use serde_json::{Value, json};
 
@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 pub async fn initial_document<'run>(
     endpoint: &mut Endpoint<'run, INITIAL_DOCUMENT>,
     (mut document, requests): (Endpoint<'run, DOCUMENT>, &mut Endpoint<WRITE_REQUESTS>),
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     let ((document, sections), references) = async {
         let [mut writing, mut material] = endpoint.par()?;
@@ -16,27 +16,38 @@ pub async fn initial_document<'run>(
             let mut sections = json!({});
             for _ in 0..2 {
                 let claim = requests.offer().await?;
-                let (agent, section, arguments) = match claim.label() {
+                let (agent, section, arguments, result) = match claim.label() {
                     WriteA::LOGICAL_LABEL => {
                         let value = claim.recv::<WriteA>().await?;
                         writing.send::<WriteArgumentsA>(&value).await?;
-                        ("RESEARCHER_A", SECTION_A, value.into_value())
+                        writing.send::<DocumentLoan>(document).await?;
+                        let request = writing.recv::<WriteOnDocumentA>().await?;
+                        let arguments = value.into_value();
+                        imp::same(&arguments, &imp::decode(request.as_bytes())?)?;
+                        (
+                            "RESEARCHER_A",
+                            SECTION_A,
+                            arguments,
+                            effects.apply(request).await?,
+                        )
                     }
                     WriteB::LOGICAL_LABEL => {
                         let value = claim.recv::<WriteB>().await?;
                         writing.send::<WriteArgumentsB>(&value).await?;
-                        ("RESEARCHER_B", SECTION_B, value.into_value())
+                        writing.send::<DocumentLoan>(document).await?;
+                        let request = writing.recv::<WriteOnDocumentB>().await?;
+                        let arguments = value.into_value();
+                        imp::same(&arguments, &imp::decode(request.as_bytes())?)?;
+                        (
+                            "RESEARCHER_B",
+                            SECTION_B,
+                            arguments,
+                            effects.apply(request).await?,
+                        )
                     }
                     _ => return Err(ShellError::message("unexpected document submission")),
                 };
-                writing.send::<DocumentLoan>(document).await?;
-                let request = writing.recv::<WriteOnDocument>().await?.into_value();
-                imp::same(&arguments, &request)?;
-                let result = domain
-                    .execute(agent, "write_section", request.clone())
-                    .await
-                    .map_err(ShellError::message)?;
-                sections[section] = imp::material(&result, &request, (agent, "write_section"))?;
+                sections[section] = imp::material(&result, &arguments, (agent, "write_section"))?;
                 let bytes = imp::encode(&result)?;
                 writing.send::<DocumentResult>(&bytes.as_slice()).await?;
                 document = writing.recv::<DocumentLoan>().await?;
@@ -88,7 +99,7 @@ pub async fn initial_document<'run>(
 
 pub async fn document<'run>(
     endpoint: &mut Endpoint<'run, DOCUMENT_SERVICE>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     let first_request = endpoint.offer().await?;
     let section = match first_request.label() {
@@ -150,18 +161,34 @@ pub async fn document<'run>(
             DocumentLoan::LOGICAL_LABEL => {
                 branch.send::<DocumentLoan>(document).await?;
                 let admitted = endpoint.offer().await?;
-                let (arguments, section, agent, feedback) = match admitted.label() {
+                let (arguments, section, agent, result) = match admitted.label() {
                     ReviseA::LOGICAL_LABEL => {
                         let admitted = admitted.recv::<ReviseA>().await?;
                         endpoint.send::<RevisionArgumentsA>(&admitted).await?;
-                        let value = admitted.into_value();
-                        (value, SECTION_A, "RESEARCHER_A", &review_a)
+                        let request = endpoint.recv::<ReviseOnDocumentA>().await?;
+                        let arguments = admitted.into_value();
+                        imp::same(&arguments, &imp::decode(request.as_bytes())?)?;
+                        imp::require_revision(&review_a, &snapshot, SECTION_A)?;
+                        (
+                            arguments,
+                            SECTION_A,
+                            "RESEARCHER_A",
+                            effects.apply(request).await?,
+                        )
                     }
                     ReviseB::LOGICAL_LABEL => {
                         let admitted = admitted.recv::<ReviseB>().await?;
                         endpoint.send::<RevisionArgumentsB>(&admitted).await?;
-                        let value = admitted.into_value();
-                        (value, SECTION_B, "RESEARCHER_B", &review_b)
+                        let request = endpoint.recv::<ReviseOnDocumentB>().await?;
+                        let arguments = admitted.into_value();
+                        imp::same(&arguments, &imp::decode(request.as_bytes())?)?;
+                        imp::require_revision(&review_b, &snapshot, SECTION_B)?;
+                        (
+                            arguments,
+                            SECTION_B,
+                            "RESEARCHER_B",
+                            effects.apply(request).await?,
+                        )
                     }
                     label => {
                         return Err(ShellError::message(format!(
@@ -169,20 +196,8 @@ pub async fn document<'run>(
                         )));
                     }
                 };
-                let request = endpoint.recv::<ReviseOnDocument>().await?.into_value();
-                imp::same(&arguments, &request)?;
-                imp::reviewed(feedback, &snapshot, section)?;
-                if feedback["success"] != false {
-                    return Err(ShellError::message(
-                        "revision has no current negative review",
-                    ));
-                }
-                let result = domain
-                    .execute(agent, "revise_section", request.clone())
-                    .await
-                    .map_err(ShellError::message)?;
                 snapshot["sections"][section] =
-                    imp::material(&result, &request, (agent, "revise_section"))?;
+                    imp::material(&result, &arguments, (agent, "revise_section"))?;
                 let bytes = imp::encode(&result)?;
                 endpoint.send::<DocumentResult>(&bytes.as_slice()).await?;
                 document = endpoint.recv::<DocumentLoan>().await?;
@@ -218,13 +233,14 @@ pub async fn document<'run>(
     imp::same(&a, &review_a)?;
     imp::same(&b, &review_b)?;
     endpoint.send::<DocumentLoan>(document).await?;
-    let request = endpoint.recv::<CombineOnDocument>().await?.into_value();
+    let request = endpoint.recv::<CombineOnDocument>().await?;
     let reviews = [review_a, review_b];
-    imp::combine_inputs(&admitted, &request, (&snapshot, &reviews))?;
-    let result = domain
-        .execute("EDITOR", "combine_sections", request)
-        .await
-        .map_err(ShellError::message)?;
+    imp::combine_inputs(
+        &admitted,
+        &imp::decode(request.as_bytes())?,
+        (&snapshot, &reviews),
+    )?;
+    let result = effects.apply(request).await?;
     imp::combined(&result, &snapshot, &reviews)?;
     let bytes = imp::encode(&result)?;
     endpoint.send::<DocumentResult>(&bytes.as_slice()).await?;
@@ -235,31 +251,32 @@ pub async fn document<'run>(
 pub async fn database<'run>(
     endpoint: &mut Endpoint<'run, DATABASE_SERVICE>,
     (mut database, requests): (Endpoint<'run, DATABASE>, &mut Endpoint<REFERENCE_REQUESTS>),
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     for _ in 0..2 {
         let claim = requests.offer().await?;
-        let (agent, arguments) = match claim.label() {
+        let (agent, arguments, result) = match claim.label() {
             ReferencesA::LOGICAL_LABEL => {
                 let value = claim.recv::<ReferencesA>().await?;
                 endpoint.send::<ReferenceArgumentsA>(&value).await?;
-                ("RESEARCHER_A", value.into_value())
+                endpoint.send::<DatabaseLoan>(database).await?;
+                let request = endpoint.recv::<ReferencesOnDatabaseA>().await?;
+                let arguments = value.into_value();
+                imp::same(&arguments, &imp::decode(request.as_bytes())?)?;
+                ("RESEARCHER_A", arguments, effects.apply(request).await?)
             }
             ReferencesB::LOGICAL_LABEL => {
                 let value = claim.recv::<ReferencesB>().await?;
                 endpoint.send::<ReferenceArgumentsB>(&value).await?;
-                ("RESEARCHER_B", value.into_value())
+                endpoint.send::<DatabaseLoan>(database).await?;
+                let request = endpoint.recv::<ReferencesOnDatabaseB>().await?;
+                let arguments = value.into_value();
+                imp::same(&arguments, &imp::decode(request.as_bytes())?)?;
+                ("RESEARCHER_B", arguments, effects.apply(request).await?)
             }
             _ => return Err(ShellError::message("unexpected reference submission")),
         };
-        endpoint.send::<DatabaseLoan>(database).await?;
-        let request = endpoint.recv::<ReferencesOnDatabase>().await?.into_value();
-        imp::same(&arguments, &request)?;
-        let result = domain
-            .execute(agent, "update_references", request.clone())
-            .await
-            .map_err(ShellError::message)?;
-        imp::material(&result, &request, (agent, "update_references"))?;
+        imp::material(&result, &arguments, (agent, "update_references"))?;
         let bytes = imp::encode(&result)?;
         async {
             let [mut returned, mut material] = endpoint.par()?;

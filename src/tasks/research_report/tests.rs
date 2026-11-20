@@ -2,7 +2,11 @@
 use super::{global::*, imp, localside};
 use crate::shell::{
     ShellError, ShellResult,
-    imp::{bus::Bus, report_arguments::ReportArguments, service::Domain},
+    imp::{
+        bus::Bus,
+        report_arguments::ReportArguments,
+        service::{ReceivedEffects, SimulatorOperation},
+    },
 };
 use hibana::{
     g,
@@ -11,18 +15,25 @@ use hibana::{
 use serde_json::{Value, json};
 use std::cell::Cell;
 
+#[path = "../../../tests/support/untrusted_wire.rs"]
+mod untrusted;
+use untrusted::Untrusted;
+
 struct Calls(Cell<Vec<Value>>);
-impl Domain for Calls {
-    async fn execute(
-        &self,
-        _agent: &'static str,
-        _tool: &'static str,
-        arguments: Value,
-    ) -> Result<Value, String> {
-        let mut calls = self.0.take();
-        calls.push(arguments);
-        self.0.set(calls);
-        Err("the substituted request reached an effect".into())
+impl ReceivedEffects for Calls {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+        let arguments = imp::decode(received.as_bytes());
+        async move {
+            let mut calls = self.0.take();
+            calls.push(arguments?);
+            self.0.set(calls);
+            Err(ShellError::message(
+                "the substituted request reached an effect",
+            ))
+        }
     }
 }
 
@@ -40,7 +51,7 @@ async fn substituted_document_requests_are_rejected_before_the_effect() -> Shell
                     g::send::<INITIAL_DOCUMENT, A_WASI, WriteArgumentsA>(),
                     g::seq(
                         g::send::<INITIAL_DOCUMENT, A_WASI, DocumentLoan>(),
-                        g::send::<DOCUMENT, INITIAL_DOCUMENT, WriteOnDocument>(),
+                        g::send::<DOCUMENT, INITIAL_DOCUMENT, WriteOnDocumentA>(),
                     ),
                 ),
                 g::send::<DATABASE_SERVICE, INITIAL_DOCUMENT, ReferenceMaterialA>(),
@@ -68,7 +79,14 @@ async fn substituted_document_requests_are_rejected_before_the_effect() -> Shell
         let admitted = ReportArguments::<21>::from_bytes(
             br#"{"section_name":"section_a","content_notes":"accepted notes"}"#,
         )?;
-        let supplied = ReportArguments::<2>::from_bytes(&imp::encode(&supplied)?)?;
+        let wrong_section = supplied["section_name"] != SECTION_A;
+        type RawWrite = g::Msg<
+            { <WriteOnDocumentA as g::Message>::LOGICAL_LABEL },
+            Untrusted<
+                { <ReportArguments<21, true> as hibana::runtime::wire::WirePayload>::SCHEMA_ID },
+            >,
+        >;
+        let supplied = Untrusted(imp::encode(&supplied)?);
         let result = hibana_runtime::race(
             async {
                 async {
@@ -86,7 +104,7 @@ async fn substituted_document_requests_are_rejected_before_the_effect() -> Shell
                     let request = author.recv::<WriteArgumentsA>().await?;
                     let mut document = author.recv::<DocumentLoan>().await?;
                     assert_eq!(request.as_bytes(), admitted.as_bytes());
-                    document.send::<WriteOnDocument>(&supplied).await?;
+                    document.send::<RawWrite>(&supplied).await?;
                     Ok::<(), ShellError>(())
                 };
                 Ok(())
@@ -94,12 +112,21 @@ async fn substituted_document_requests_are_rejected_before_the_effect() -> Shell
             hibana_runtime::host::deadline(std::time::Duration::from_secs(5)),
         )
         .await;
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("differs from admitted arguments")
-        );
+        let error = result.expect_err("substituted request was accepted");
+        if wrong_section {
+            assert!(
+                matches!(error, ShellError::Endpoint(_))
+                    && error.to_string().contains("Codec(Malformed)"),
+                "{error:?}"
+            );
+        } else {
+            assert!(
+                error
+                    .to_string()
+                    .contains("differs from admitted arguments"),
+                "{error:?}"
+            );
+        }
         assert!(domain.0.take().is_empty());
     }
     Ok(())

@@ -1,7 +1,6 @@
 //! The editor receives actual file requests and returns actual review results.
 use super::super::global::*;
 use crate::shell::global::Loan;
-use crate::shell::imp::report_arguments::ReportArguments;
 use crate::shell::{ShellError, ShellResult, imp::review_reply::ReviewReply};
 use hibana::{Endpoint, g::Message};
 
@@ -78,8 +77,9 @@ pub async fn run<'run>(
     }
     .await?;
     let mut document = endpoint.recv::<DocumentLoan>().await?;
-    let request = ReportArguments::<6>::from_bytes(arguments.as_bytes())?;
-    document.send::<CombineOnDocument>(&request).await?;
+    document
+        .send::<CombineOnDocument>(&arguments.into())
+        .await?;
     let result = document.recv::<DocumentResult>().await?.to_vec();
     async {
         let [mut reply, mut a, mut b] = endpoint.par()?;

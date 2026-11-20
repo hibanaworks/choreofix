@@ -73,6 +73,16 @@ pub fn reviewed(result: &Value, snapshot: &Value, scope: &str) -> ShellResult<()
     }
     Ok(())
 }
+pub fn require_revision(review: &Value, snapshot: &Value, section: &str) -> ShellResult<()> {
+    reviewed(review, snapshot, section)?;
+    if review["success"] != false {
+        return Err(ShellError::message(
+            "revision has no current negative review",
+        ));
+    }
+    Ok(())
+}
+
 pub fn combine_inputs(
     admitted: &Value,
     resource: &Value,

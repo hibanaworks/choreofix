@@ -2,46 +2,39 @@
 use super::super::{global::*, imp};
 use crate::shell::{
     ShellError, ShellResult,
-    imp::{report_arguments::ReportArguments, review_reply::ReviewReply},
+    imp::{review_reply::ReviewReply, service::ReceivedEffects},
 };
 use hibana::{Endpoint, g::Message};
 
 #[hibana_runtime::scope]
 pub async fn run<const ROLE: u8>(
     endpoint: &mut Endpoint<ROLE>,
-    domain: &impl crate::shell::imp::service::Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     if ROLE != A_WASI && ROLE != B_WASI {
         return Err(ShellError::message("this report has two authors"));
     }
-    let (agent, arguments) = if ROLE == A_WASI {
-        (
-            "RESEARCHER_A",
-            endpoint.recv::<ResearchA>().await?.into_value(),
-        )
+    let result = if ROLE == A_WASI {
+        effects.apply(endpoint.recv::<ResearchA>().await?).await?
     } else {
-        (
-            "RESEARCHER_B",
-            endpoint.recv::<ResearchB>().await?.into_value(),
-        )
+        effects.apply(endpoint.recv::<ResearchB>().await?).await?
     };
-    let result = domain
-        .execute(agent, "research_topic", arguments)
-        .await
-        .map_err(ShellError::message)?;
     let bytes = imp::encode(&result)?;
     endpoint.send::<ResearchResult>(&bytes.as_slice()).await?;
     async {
         let [mut writing, mut references] = endpoint.par()?;
         async {
-            let admitted = if ROLE == A_WASI {
-                writing.recv::<WriteArgumentsA>().await?.into_value()
+            let mut document = if ROLE == A_WASI {
+                let admitted = writing.recv::<WriteArgumentsA>().await?;
+                let mut document = writing.recv::<DocumentLoan>().await?;
+                document.send::<WriteOnDocumentA>(&admitted.into()).await?;
+                document
             } else {
-                writing.recv::<WriteArgumentsB>().await?.into_value()
+                let admitted = writing.recv::<WriteArgumentsB>().await?;
+                let mut document = writing.recv::<DocumentLoan>().await?;
+                document.send::<WriteOnDocumentB>(&admitted.into()).await?;
+                document
             };
-            let mut document = writing.recv::<DocumentLoan>().await?;
-            let arguments = ReportArguments::<2>::from_bytes(&imp::encode(&admitted)?)?;
-            document.send::<WriteOnDocument>(&arguments).await?;
             let result = document.recv::<DocumentResult>().await?.to_vec();
             async {
                 let [mut response, mut returned] = writing.par()?;
@@ -62,14 +55,21 @@ pub async fn run<const ROLE: u8>(
             Ok::<(), ShellError>(())
         };
         async {
-            let admitted = if ROLE == A_WASI {
-                references.recv::<ReferenceArgumentsA>().await?.into_value()
+            let mut database = if ROLE == A_WASI {
+                let admitted = references.recv::<ReferenceArgumentsA>().await?;
+                let mut database = references.recv::<DatabaseLoan>().await?;
+                database
+                    .send::<ReferencesOnDatabaseA>(&admitted.into())
+                    .await?;
+                database
             } else {
-                references.recv::<ReferenceArgumentsB>().await?.into_value()
+                let admitted = references.recv::<ReferenceArgumentsB>().await?;
+                let mut database = references.recv::<DatabaseLoan>().await?;
+                database
+                    .send::<ReferencesOnDatabaseB>(&admitted.into())
+                    .await?;
+                database
             };
-            let mut database = references.recv::<DatabaseLoan>().await?;
-            let arguments = ReportArguments::<4>::from_bytes(&imp::encode(&admitted)?)?;
-            database.send::<ReferencesOnDatabase>(&arguments).await?;
             let result = database.recv::<DatabaseResult>().await?.to_vec();
             async {
                 let [mut response, mut returned] = references.par()?;
@@ -101,21 +101,21 @@ pub async fn run<const ROLE: u8>(
         match branch.label() {
             ReviewA::LOGICAL_LABEL if ROLE == A_WASI => {
                 let arguments = branch.recv::<ReviewA>().await?;
-                endpoint.send::<ReviewA>(&arguments).await?;
+                endpoint.send::<ReviewRequestA>(&arguments.into()).await?;
             }
             ReviewB::LOGICAL_LABEL if ROLE == B_WASI => {
                 let arguments = branch.recv::<ReviewB>().await?;
-                endpoint.send::<ReviewB>(&arguments).await?;
+                endpoint.send::<ReviewRequestB>(&arguments.into()).await?;
             }
             DocumentLoan::LOGICAL_LABEL => {
                 let mut document = branch.recv::<DocumentLoan>().await?;
-                let admitted = if ROLE == A_WASI {
-                    endpoint.recv::<RevisionArgumentsA>().await?.into_value()
+                if ROLE == A_WASI {
+                    let admitted = endpoint.recv::<RevisionArgumentsA>().await?;
+                    document.send::<ReviseOnDocumentA>(&admitted.into()).await?;
                 } else {
-                    endpoint.recv::<RevisionArgumentsB>().await?.into_value()
-                };
-                let arguments = ReportArguments::<3>::from_bytes(&imp::encode(&admitted)?)?;
-                document.send::<ReviseOnDocument>(&arguments).await?;
+                    let admitted = endpoint.recv::<RevisionArgumentsB>().await?;
+                    document.send::<ReviseOnDocumentB>(&admitted.into()).await?;
+                }
                 let result = document.recv::<DocumentResult>().await?.to_vec();
                 async {
                     let [mut response, mut returned] = endpoint.par()?;
