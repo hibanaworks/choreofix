@@ -204,14 +204,19 @@ operation, and its bytes determine the arguments. In 10M a compilation consumes
 two requests, one from each required resource endpoint. The compiler compares
 both with the submitted build arguments before making one simulator call.
 Some ports still select an operation and supply its arguments to a privileged
-simulator connection. For example, the 8E backend reads the submitted file
-contents and supplies the operation name at the call site. Those receivers
+simulator connection. In the selected 8E runs, the backend read the submitted
+file contents and supplied the operation name at the call site. Those receivers
 remain part of the trusted boundary. We found this interface in the archived
 receiver sources for 3E, 7E, 8E, 13E/M/H and 14E/M/H. Together these nine
 tasks account for 12 of the 43 selected conditions and 178 of their 732
 simulator calls. Their successful run audits establish correspondence for the
 recorded calls. The receiver API in those builds still permits a host caller
 to supply the tool and arguments.
+In a subsequent 8E build, all three simulator calls consumed typed receives.
+Two additional three-agent trials passed the protocol and effect audits.
+The original simulator scored the depth-zero trial complete and returned the
+injected terminal test failure at depth two. The 43-condition analysis uses the
+original builds.
 All trials trust the runtime, codecs, transport, executor and simulator integration. The simulator
 independently records actual domain effects and resource violations.
 

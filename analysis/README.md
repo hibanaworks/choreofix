@@ -214,6 +214,12 @@ contribute 12 selected conditions and 178 simulator calls. Each condition's
 authenticates its contents against that condition's recorded runtime manifest.
 The 178 counts all calls in those conditions. It does not measure bypasses.
 
+On 21 November, the three 8E operations were rerun with typed Endpoint receives.
+The three scripted Wasm trials and two live trials used the same application
+binary. The live trials preserved both the successful outcome at depth 0 and
+the terminal test failure at depth 2. The [receipts and hashes](8e-received-effects.json)
+supplement the original 43 selected conditions.
+
 The cohort-wide measurement is reproducible from the same source-bound trials.
 From the repository root, supply the verified cohort and a new output file:
 

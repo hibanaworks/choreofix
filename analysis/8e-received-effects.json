@@ -1,0 +1,93 @@
+{
+  "task": "8E",
+  "scored_comparison": false,
+  "archive": "output/verification/8e-received-api-20261121.yYvl01",
+  "live_git_base": "39cffd3ca36653fcc22288ef01314216c2db403a",
+  "source_manifest_sha256": "01ae1329729be0d7806e8ca87b8fe699da2e931645a75ab84750f19eadc5eb57",
+  "source_note": "The build receipt includes the working tree patch for three large-document files.",
+  "runtime_sha256": "d225a83ecd56a712c408f2083a5b7f0e67d2e9e813f67f995a615a22e6f06a75",
+  "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+  "projection_sha256": "a0ac99a4ad59053800747e6e8c680947fa56cce34ed4098bbc854f3fc075a9e0",
+  "wasm_summary": "wasm/api-outcome-owner-1795194177367589000/summary.json",
+  "wasm_summary_sha256": "9beb0e81e1f28a634f852e109244373f1df46d1d6270febcdb8dd45ae9471e55",
+  "scripted_wasm": [
+    {
+      "depth": 0,
+      "directory": "wasm/api-outcome-owner-1795194177367589000/depth-0",
+      "events_sha256": "d8637fb6ed7a627f741f67d80d21627089e0ca4d2fd654e184eca31db26641aa",
+      "protocol_audit": "passed",
+      "captured_records": 3803,
+      "effects": 3,
+      "resource_returns": 2,
+      "violations": 0,
+      "business_complete": true,
+      "record_mutations_rejected": 18
+    },
+    {
+      "depth": 1,
+      "directory": "wasm/api-outcome-owner-1795194177367589000/depth-1",
+      "events_sha256": "ddac25675db415703785e478765ce56b656c8661a4905eb2625a555e8583873d",
+      "protocol_audit": "passed",
+      "captured_records": 3836,
+      "effects": 3,
+      "resource_returns": 2,
+      "violations": 0,
+      "business_complete": false,
+      "record_mutations_rejected": 18
+    },
+    {
+      "depth": 2,
+      "directory": "wasm/api-outcome-owner-1795194177367589000/depth-2",
+      "events_sha256": "9855970f3fa2294b0f8ea0dd5c814b4d0d977c524cee56876bae012d3f4dd345",
+      "protocol_audit": "passed",
+      "captured_records": 3836,
+      "effects": 3,
+      "resource_returns": 2,
+      "violations": 0,
+      "business_complete": false,
+      "record_mutations_rejected": 18
+    }
+  ],
+  "live_ai": [
+    {
+      "depth": 0,
+      "directory": "live-0",
+      "events_sha256": "6140faed0c4c2fbf63a0436dcfee12947b3560a957f5d95c9be6da9da75592e9",
+      "protocol_audit": "passed",
+      "captured_records": 1380,
+      "effects": 3,
+      "resource_returns": 2,
+      "violations": 0,
+      "business_complete": true,
+      "participants": 3,
+      "returned_model": "gpt-6-luna",
+      "returned_effort": "xhigh",
+      "inclusive_tokens": 276581,
+      "elapsed_seconds": 24.019194792,
+      "result_sha256": "9c58d10d5f5c98a5c596a26c540eb4f609ed6b264a9f7b7b334b85df0849e40c",
+      "run_audit_sha256": "9b989cc791af28ed6c55d65a9d72c6fbfe1e168ad07c8c485e5045c1045784b5",
+      "effect_audit_sha256": "4a2fef6e9ba7b57a09b0a3c05c269dc26a845a402b2d1249d6f2a7226cca7fc9",
+      "auditor_sha256": "2a63dde11962e62b2c3f737042649528c074f5ce5630c2f9e65d4bd447deba62"
+    },
+    {
+      "depth": 2,
+      "directory": "live-2",
+      "events_sha256": "8f748c23ea957891c0b851786c7e1cbf86e0462c5fb80ea17d6974a9c650cf27",
+      "protocol_audit": "passed",
+      "captured_records": 1721,
+      "effects": 3,
+      "resource_returns": 2,
+      "violations": 0,
+      "business_complete": false,
+      "participants": 3,
+      "returned_model": "gpt-6-luna",
+      "returned_effort": "xhigh",
+      "inclusive_tokens": 259807,
+      "elapsed_seconds": 29.354466833,
+      "result_sha256": "9277eefac0a6f743ead13f60d136f58754fce424135874257c4f8c79b7ca5dd1",
+      "run_audit_sha256": "a3acdfc6d04b2eeca5f40a854cf79c186fd95e98e89bc1b4a0697450454cf6b9",
+      "effect_audit_sha256": "cfade4f1b0dbc1d8212dc53d4710f0c3c3ba25eb31c3912e2e2b7291b3b11cec",
+      "auditor_sha256": "2a63dde11962e62b2c3f737042649528c074f5ce5630c2f9e65d4bd447deba62"
+    }
+  ]
+}
