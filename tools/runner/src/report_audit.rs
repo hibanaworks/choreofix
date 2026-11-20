@@ -589,11 +589,13 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                             && f.received.is_some()
                     })?;
                     let actual = material(&ordered, handoff.sent)?;
-                    if ["section_a", "section_b"].into_iter().any(|key|
-                        actual["sections"][key].is_null() || actual["references"][key].is_null())
-                        || handoff.value()? != actual
+                    if ["section_a", "section_b"].into_iter().any(|key| {
+                        actual["sections"][key].is_null() || actual["references"][key].is_null()
+                    }) || handoff.value()? != actual
                     {
-                        return Err("document transfer differs from the actual initial material".into());
+                        return Err(
+                            "document transfer differs from the actual initial material".into()
+                        );
                     }
                 }
                 for recipient in [doc_service, own, other, editor] {

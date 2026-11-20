@@ -628,10 +628,13 @@ fn repeat_b_before_a() -> impl Projectable {
     .roll()
 }
 fn transfer_initial_document<M: g::Message>() -> impl Projectable {
-    g::seq(g::send::<DOCUMENT_SERVICE, INITIAL_DOCUMENT, M>(), g::seq(
-        g::send::<INITIAL_DOCUMENT, DOCUMENT_SERVICE, ReportMaterial>(),
-        g::send::<INITIAL_DOCUMENT, DOCUMENT_SERVICE, DocumentLoan>(),
-    ))
+    g::seq(
+        g::send::<DOCUMENT_SERVICE, INITIAL_DOCUMENT, M>(),
+        g::seq(
+            g::send::<INITIAL_DOCUMENT, DOCUMENT_SERVICE, ReportMaterial>(),
+            g::send::<INITIAL_DOCUMENT, DOCUMENT_SERVICE, DocumentLoan>(),
+        ),
+    )
 }
 
 fn first_a() -> impl Projectable {
@@ -641,13 +644,22 @@ fn first_a() -> impl Projectable {
             section_review_a(),
             g::route(
                 g::seq(
-                    g::seq(outcome_a::<ApprovedA>(), transfer_initial_document::<ApprovedA>()),
+                    g::seq(
+                        outcome_a::<ApprovedA>(),
+                        transfer_initial_document::<ApprovedA>(),
+                    ),
                     g::seq(
                         review_input::<ReviewB>(),
                         review_b_result(section_review_b()),
                     ),
                 ),
-                g::seq(g::seq(outcome_a::<RejectedA>(), transfer_initial_document::<RejectedA>()), repeat_a_before_b()),
+                g::seq(
+                    g::seq(
+                        outcome_a::<RejectedA>(),
+                        transfer_initial_document::<RejectedA>(),
+                    ),
+                    repeat_a_before_b(),
+                ),
             ),
         ),
     )
@@ -659,13 +671,22 @@ fn first_b() -> impl Projectable {
             section_review_b(),
             g::route(
                 g::seq(
-                    g::seq(outcome_b::<ApprovedB>(), transfer_initial_document::<ApprovedB>()),
+                    g::seq(
+                        outcome_b::<ApprovedB>(),
+                        transfer_initial_document::<ApprovedB>(),
+                    ),
                     g::seq(
                         review_input::<ReviewA>(),
                         review_a_result(section_review_a()),
                     ),
                 ),
-                g::seq(g::seq(outcome_b::<RejectedB>(), transfer_initial_document::<RejectedB>()), repeat_b_before_a()),
+                g::seq(
+                    g::seq(
+                        outcome_b::<RejectedB>(),
+                        transfer_initial_document::<RejectedB>(),
+                    ),
+                    repeat_b_before_a(),
+                ),
             ),
         ),
     )

@@ -84,7 +84,10 @@ pub async fn run<D: Domain>(endpoint: &mut Endpoint<SPEC_OWNER>, domain: &D) -> 
                 imp::batch_cause(&result, &batch)?;
             }
             SpecFinalExhausted::LOGICAL_LABEL => {
-                imp::same_value(&branch.recv::<SpecFinalExhausted>().await?.into_value(), &batch)?;
+                imp::same_value(
+                    &branch.recv::<SpecFinalExhausted>().await?.into_value(),
+                    &batch,
+                )?;
                 return Ok(());
             }
             SpecFinalApproved::LOGICAL_LABEL => {

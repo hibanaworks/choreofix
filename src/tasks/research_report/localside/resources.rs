@@ -109,25 +109,25 @@ pub async fn document<'run>(
             let reply = crate::shell::imp::review_reply::ReviewReply::<true>::from_bytes(&bytes)?;
             endpoint.send::<ApprovedA>(&reply).await?;
             imp::decode(&bytes)?
-        },
+        }
         (SECTION_A, RejectedA::LOGICAL_LABEL) => {
             let bytes = result.recv::<RejectedA>().await?.to_vec();
             let reply = crate::shell::imp::review_reply::ReviewReply::<false>::from_bytes(&bytes)?;
             endpoint.send::<RejectedA>(&reply).await?;
             imp::decode(&bytes)?
-        },
+        }
         (SECTION_B, ApprovedB::LOGICAL_LABEL) => {
             let bytes = result.recv::<ApprovedB>().await?.to_vec();
             let reply = crate::shell::imp::review_reply::ReviewReply::<true>::from_bytes(&bytes)?;
             endpoint.send::<ApprovedB>(&reply).await?;
             imp::decode(&bytes)?
-        },
+        }
         (SECTION_B, RejectedB::LOGICAL_LABEL) => {
             let bytes = result.recv::<RejectedB>().await?.to_vec();
             let reply = crate::shell::imp::review_reply::ReviewReply::<false>::from_bytes(&bytes)?;
             endpoint.send::<RejectedB>(&reply).await?;
             imp::decode(&bytes)?
-        },
+        }
         _ => return Err(ShellError::message("review result does not match section")),
     };
     let mut snapshot = imp::decode(endpoint.recv::<ReportMaterial>().await?)?;

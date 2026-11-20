@@ -96,7 +96,10 @@ pub async fn run<D: Domain>(endpoint: &mut Endpoint<CENT_OWNER>, domain: &D) -> 
                 return Ok(());
             }
             CentFinalExhausted::LOGICAL_LABEL => {
-                imp::same_value(&branch.recv::<CentFinalExhausted>().await?.into_value(), &batch)?;
+                imp::same_value(
+                    &branch.recv::<CentFinalExhausted>().await?.into_value(),
+                    &batch,
+                )?;
                 return Ok(());
             }
             label => {
