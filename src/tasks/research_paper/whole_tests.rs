@@ -2,12 +2,15 @@
 use super::{global::*, imp, localside};
 use crate::shell::{
     ShellError, ShellResult,
-    imp::{bus::Bus, report_arguments::ReportArguments, service::Domain},
+    imp::{
+        bus::Bus,
+        service::{ReceivedEffects, SimulatorOperation},
+    },
 };
 use hibana::{
     Endpoint, EndpointBorrow,
     g::Message,
-    runtime::{SessionKitStorage, ids::SessionId, program::project, tap},
+    runtime::{SessionKitStorage, ids::SessionId, program::project, tap, wire::ReceivedPayload},
 };
 use serde_json::{Value, json};
 use std::{cell::Cell, time::Duration};
@@ -63,66 +66,68 @@ fn latest<'a>(events: &'a [Value], tools: &[&str], name: &str) -> &'a Value {
         })
         .expect("fixture requires the actual completed input")["result"]
 }
-impl Domain for Effects {
-    async fn execute(
-        &self,
-        actor: &'static str,
-        tool: &'static str,
-        arguments: Value,
-    ) -> Result<Value, String> {
-        let mut events = self.events.take();
-        let sequence = events.iter().filter(|r| r["event"] == "start").count() + 1;
-        events.push(json!({"event":"start","actor":actor,"tool":tool,"arguments":arguments,"sequence":sequence}));
-        self.events.set(events);
-        for _ in 0..match tool {
-            "research_topic" => 1,
-            "fact_check" | "review_sections" => 4,
-            "combine_sections" => 2,
-            _ => 8,
-        } {
-            hibana_runtime::yield_now().await;
-        }
-        let mut events = self.events.take();
-        let result = if tool == "combine_sections" {
-            let mut sections = json!({});
-            let mut references = json!({});
-            let mut reviews = json!({"facts":{},"reviews":{}});
-            for name in imp::SECTIONS {
-                sections[name] =
+impl ReceivedEffects for Effects {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        received: ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+        let arguments = imp::decode(received.as_bytes());
+        async move {
+            let arguments = arguments?;
+            let (actor, tool) = P::RPC;
+            let mut events = self.events.take();
+            let sequence = events.iter().filter(|r| r["event"] == "start").count() + 1;
+            events.push(json!({"event":"start","actor":actor,"tool":tool,"arguments":arguments,"sequence":sequence}));
+            self.events.set(events);
+            for _ in 0..match tool {
+                "research_topic" => 1,
+                "fact_check" | "review_sections" => 4,
+                "combine_sections" => 2,
+                _ => 8,
+            } {
+                hibana_runtime::yield_now().await;
+            }
+            let mut events = self.events.take();
+            let result = if tool == "combine_sections" {
+                let mut sections = json!({});
+                let mut references = json!({});
+                let mut reviews = json!({"facts":{},"reviews":{}});
+                for name in imp::SECTIONS {
+                    sections[name] =
                     latest(&events, &["write_section", "revise_section"], name)["data"]["artifact"]
                         .clone();
-                references[name] =
-                    latest(&events, &["update_references"], name)["data"]["artifact"].clone();
-                reviews["facts"][name] = latest(&events, &["fact_check"], name).clone();
-                reviews["reviews"][name] = latest(&events, &["review_sections"], name).clone();
-            }
-            super::publication_tests::reply(&arguments, (&sections, &references, &reviews))
-        } else {
-            let author = if tool == "research_topic" {
-                imp::AUTHORS
-                    .iter()
-                    .position(|name| *name == actor)
-                    .expect("researcher")
-            } else {
-                imp::SECTIONS
-                    .iter()
-                    .position(|name| Some(*name) == arguments["section_name"].as_str())
-                    .expect("section")
-            };
-            let name = imp::SECTIONS[author];
-            match tool {
-                "research_topic" => {
-                    json!({"tool_name":tool,"success":true,"data":{"agent":actor,"topic":arguments["topic"],"artifact":{"id":format!("research:{sequence}"),"content":format!("real fixture source {sequence}")}}})
+                    references[name] =
+                        latest(&events, &["update_references"], name)["data"]["artifact"].clone();
+                    reviews["facts"][name] = latest(&events, &["fact_check"], name).clone();
+                    reviews["reviews"][name] = latest(&events, &["review_sections"], name).clone();
                 }
-                "write_section" | "revise_section" | "update_references" => {
-                    let research = latest(&events, &["research_topic"], imp::TOPICS[author]);
-                    let mut artifact = json!({"id":format!("{tool}:{sequence}"),"content":format!("material for {name}"),
-                        "research_inputs":{imp::TOPICS[author]:research["data"]["artifact"]}});
-                    if tool == "write_section" {
-                        artifact["content"] = arguments["content_notes"].clone();
+                super::publication_tests::reply(&arguments, (&sections, &references, &reviews))
+            } else {
+                let author = if tool == "research_topic" {
+                    imp::AUTHORS
+                        .iter()
+                        .position(|name| *name == actor)
+                        .expect("researcher")
+                } else {
+                    imp::SECTIONS
+                        .iter()
+                        .position(|name| Some(*name) == arguments["section_name"].as_str())
+                        .expect("section")
+                };
+                let name = imp::SECTIONS[author];
+                match tool {
+                    "research_topic" => {
+                        json!({"tool_name":tool,"success":true,"data":{"agent":actor,"topic":arguments["topic"],"artifact":{"id":format!("research:{sequence}"),"content":format!("real fixture source {sequence}")}}})
                     }
-                    if tool == "revise_section" {
-                        artifact["content"] = json!(format!(
+                    "write_section" | "revise_section" | "update_references" => {
+                        let research = latest(&events, &["research_topic"], imp::TOPICS[author]);
+                        let mut artifact = json!({"id":format!("{tool}:{sequence}"),"content":format!("material for {name}"),
+                        "research_inputs":{imp::TOPICS[author]:research["data"]["artifact"]}});
+                        if tool == "write_section" {
+                            artifact["content"] = arguments["content_notes"].clone();
+                        }
+                        if tool == "revise_section" {
+                            artifact["content"] = json!(format!(
                                 "{}\n{}",
                                 latest(&events, &["write_section", "revise_section"], name)["data"]
                                     ["artifact"]["content"]
@@ -130,42 +135,42 @@ impl Domain for Effects {
                                     .unwrap(),
                                 arguments["feedback"].as_str().unwrap()
                             ));
-                        artifact["feedback"] = arguments["feedback"].clone();
+                            artifact["feedback"] = arguments["feedback"].clone();
+                        }
+                        json!({"tool_name":tool,"success":true,"data":{"agent":actor,"section":name,"artifact":artifact}})
                     }
-                    json!({"tool_name":tool,"success":true,"data":{"agent":actor,"section":name,"artifact":artifact}})
-                }
-                "fact_check" | "review_sections" => {
-                    let snapshot = imp::snapshot(
-                        author as u8,
-                        latest(&events, &["write_section", "revise_section"], name),
-                        latest(&events, &["update_references"], name),
-                    )
-                    .map_err(|e| e.to_string())?;
-                    let occurrence = events
-                        .iter()
-                        .filter(|row| {
-                            row["event"] == "end"
-                                && row["tool"] == tool
-                                && (row["result"]["data"]["section"] == name
-                                    || row["result"]["data"]["scope"] == name)
-                        })
-                        .count();
-                    let success =
-                        occurrence >= self.failures[author][usize::from(tool == "review_sections")];
-                    if tool == "fact_check" {
-                        json!({"tool_name":tool,"success":success,"data":{"agent":actor,"section":name,"check_id":format!("facts:{sequence}"),"input_snapshot":snapshot}})
-                    } else {
-                        let facts = latest(&events, &["fact_check"], name);
-                        json!({"tool_name":tool,"success":success,"data":{"agent":actor,"scope":name,"review_id":format!("review:{sequence}"),"input_snapshot":snapshot,
+                    "fact_check" | "review_sections" => {
+                        let snapshot = imp::snapshot(
+                            author as u8,
+                            latest(&events, &["write_section", "revise_section"], name),
+                            latest(&events, &["update_references"], name),
+                        )?;
+                        let occurrence = events
+                            .iter()
+                            .filter(|row| {
+                                row["event"] == "end"
+                                    && row["tool"] == tool
+                                    && (row["result"]["data"]["section"] == name
+                                        || row["result"]["data"]["scope"] == name)
+                            })
+                            .count();
+                        let success = occurrence
+                            >= self.failures[author][usize::from(tool == "review_sections")];
+                        if tool == "fact_check" {
+                            json!({"tool_name":tool,"success":success,"data":{"agent":actor,"section":name,"check_id":format!("facts:{sequence}"),"input_snapshot":snapshot}})
+                        } else {
+                            let facts = latest(&events, &["fact_check"], name);
+                            json!({"tool_name":tool,"success":success,"data":{"agent":actor,"scope":name,"review_id":format!("review:{sequence}"),"input_snapshot":snapshot,
                             "fact_receipts":{name:facts["data"]["check_id"]}}})
+                        }
                     }
+                    _ => return Err(ShellError::message("unexpected effect")),
                 }
-                _ => return Err("unexpected effect".into()),
-            }
-        };
-        events.push(json!({"event":"end","actor":actor,"tool":tool,"arguments":arguments,"sequence":sequence,"result":result}));
-        self.events.set(events);
-        Ok(result)
+            };
+            events.push(json!({"event":"end","actor":actor,"tool":tool,"arguments":arguments,"sequence":sequence,"result":result}));
+            self.events.set(events);
+            Ok(result)
+        }
     }
 }
 
@@ -345,7 +350,7 @@ async fn editor_file<const AUTHOR: u8, C: ChapterMessages<AUTHOR>>(
 
 #[hibana_runtime::scope]
 async fn exercise(
-    domain: &impl Domain,
+    domain: &impl ReceivedEffects,
     (starts, attack): ([usize; 3], Option<&str>),
     observed: &Cell<Vec<tap::TapEvent>>,
 ) -> ShellResult<(ShellResult<()>, Value)> {
@@ -502,7 +507,7 @@ async fn exercise(
                 Ok::<(),ShellError>(())
             };
             async {
-                let arguments=ReportArguments::<6>::from_bytes(br#"{"sections":"section_a,section_b,section_c"}"#)?;
+                let arguments=imp::Arguments::<EDITOR, { imp::COMBINE }>::from_bytes(br#"{"sections":"section_a,section_b,section_c"}"#)?;
                 async {
                     let [mut a,mut b,mut c]=file.par()?;
                     async {editor_file::<AUTHOR_A,a::Research>(&mut a).await?;};

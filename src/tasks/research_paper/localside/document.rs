@@ -1,11 +1,14 @@
 //! The unique document Endpoint and its real material stay with this I/O owner.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{Endpoint, g::Message};
 use serde_json::{Value, json};
 
 #[hibana_runtime::scope]
-pub async fn run(mut document: Endpoint<DOCUMENT>, domain: &impl Domain) -> ShellResult<()> {
+pub async fn run(
+    mut document: Endpoint<DOCUMENT>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()> {
     // Actual received research/material only; neither is an owner or progress map.
     let mut research: [Option<Value>; 3] = [None, None, None];
     let mut sections = json!({});
@@ -19,14 +22,12 @@ pub async fn run(mut document: Endpoint<DOCUMENT>, domain: &impl Domain) -> Shel
             }
 
             label if label == a::Write::LOGICAL_LABEL => {
-                let arguments = branch.recv::<a::Write>().await?.into_value();
+                let received = branch.recv::<a::Write>().await?;
+                let arguments = imp::decode(received.as_bytes())?;
                 let researched = research[0].as_ref().ok_or_else(|| {
                     ShellError::message("document request has no received research")
                 })?;
-                let result = domain
-                    .execute(imp::AUTHORS[0], "write_section", arguments.clone())
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(received).await?;
                 imp::material(AUTHOR_A, 2, &result, (&arguments, researched))?;
                 sections[imp::SECTIONS[0]] = result["data"]["artifact"].clone();
                 let result = imp::Reply::<AUTHOR_A, 2>::new(result)?;
@@ -77,14 +78,12 @@ pub async fn run(mut document: Endpoint<DOCUMENT>, domain: &impl Domain) -> Shel
             }
 
             label if label == a::Revise::LOGICAL_LABEL => {
-                let arguments = branch.recv::<a::Revise>().await?.into_value();
+                let received = branch.recv::<a::Revise>().await?;
+                let arguments = imp::decode(received.as_bytes())?;
                 let researched = research[0].as_ref().ok_or_else(|| {
                     ShellError::message("document request has no received research")
                 })?;
-                let result = domain
-                    .execute(imp::AUTHORS[0], "revise_section", arguments.clone())
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(received).await?;
                 imp::material(AUTHOR_A, 3, &result, (&arguments, researched))?;
                 sections[imp::SECTIONS[0]] = result["data"]["artifact"].clone();
                 let result = imp::Reply::<AUTHOR_A, 3>::new(result)?;
@@ -99,14 +98,12 @@ pub async fn run(mut document: Endpoint<DOCUMENT>, domain: &impl Domain) -> Shel
             }
 
             label if label == b::Write::LOGICAL_LABEL => {
-                let arguments = branch.recv::<b::Write>().await?.into_value();
+                let received = branch.recv::<b::Write>().await?;
+                let arguments = imp::decode(received.as_bytes())?;
                 let researched = research[1].as_ref().ok_or_else(|| {
                     ShellError::message("document request has no received research")
                 })?;
-                let result = domain
-                    .execute(imp::AUTHORS[1], "write_section", arguments.clone())
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(received).await?;
                 imp::material(AUTHOR_B, 2, &result, (&arguments, researched))?;
                 sections[imp::SECTIONS[1]] = result["data"]["artifact"].clone();
                 let result = imp::Reply::<AUTHOR_B, 2>::new(result)?;
@@ -157,14 +154,12 @@ pub async fn run(mut document: Endpoint<DOCUMENT>, domain: &impl Domain) -> Shel
             }
 
             label if label == b::Revise::LOGICAL_LABEL => {
-                let arguments = branch.recv::<b::Revise>().await?.into_value();
+                let received = branch.recv::<b::Revise>().await?;
+                let arguments = imp::decode(received.as_bytes())?;
                 let researched = research[1].as_ref().ok_or_else(|| {
                     ShellError::message("document request has no received research")
                 })?;
-                let result = domain
-                    .execute(imp::AUTHORS[1], "revise_section", arguments.clone())
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(received).await?;
                 imp::material(AUTHOR_B, 3, &result, (&arguments, researched))?;
                 sections[imp::SECTIONS[1]] = result["data"]["artifact"].clone();
                 let result = imp::Reply::<AUTHOR_B, 3>::new(result)?;
@@ -179,14 +174,12 @@ pub async fn run(mut document: Endpoint<DOCUMENT>, domain: &impl Domain) -> Shel
             }
 
             label if label == c::Write::LOGICAL_LABEL => {
-                let arguments = branch.recv::<c::Write>().await?.into_value();
+                let received = branch.recv::<c::Write>().await?;
+                let arguments = imp::decode(received.as_bytes())?;
                 let researched = research[2].as_ref().ok_or_else(|| {
                     ShellError::message("document request has no received research")
                 })?;
-                let result = domain
-                    .execute(imp::AUTHORS[2], "write_section", arguments.clone())
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(received).await?;
                 imp::material(AUTHOR_C, 2, &result, (&arguments, researched))?;
                 sections[imp::SECTIONS[2]] = result["data"]["artifact"].clone();
                 let result = imp::Reply::<AUTHOR_C, 2>::new(result)?;
@@ -237,14 +230,12 @@ pub async fn run(mut document: Endpoint<DOCUMENT>, domain: &impl Domain) -> Shel
             }
 
             label if label == c::Revise::LOGICAL_LABEL => {
-                let arguments = branch.recv::<c::Revise>().await?.into_value();
+                let received = branch.recv::<c::Revise>().await?;
+                let arguments = imp::decode(received.as_bytes())?;
                 let researched = research[2].as_ref().ok_or_else(|| {
                     ShellError::message("document request has no received research")
                 })?;
-                let result = domain
-                    .execute(imp::AUTHORS[2], "revise_section", arguments.clone())
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(received).await?;
                 imp::material(AUTHOR_C, 3, &result, (&arguments, researched))?;
                 sections[imp::SECTIONS[2]] = result["data"]["artifact"].clone();
                 let result = imp::Reply::<AUTHOR_C, 3>::new(result)?;
@@ -253,7 +244,9 @@ pub async fn run(mut document: Endpoint<DOCUMENT>, domain: &impl Domain) -> Shel
             }
 
             Combine::LOGICAL_LABEL => {
-                let admitted = branch.recv::<Combine>().await?.into_value();
+                let received = branch.recv::<Combine>().await?;
+                let admitted = imp::decode(received.as_bytes())?;
+                let publish = effects.apply(received);
                 let (_a, _b, _c, references, reviews) = async {
                     let [mut a, mut b, mut c, mut references, mut reviews] = document.par()?;
                     async { Ok::<_, ShellError>(a.recv::<Section<SECTION_A>>().await?) };
@@ -267,10 +260,7 @@ pub async fn run(mut document: Endpoint<DOCUMENT>, domain: &impl Domain) -> Shel
                 }
                 .await?;
                 let snapshot = imp::publication(&admitted, (&sections, &references), &reviews)?;
-                let actual = domain
-                    .execute("EDITOR", "combine_sections", admitted.clone())
-                    .await
-                    .map_err(ShellError::message)?;
+                let actual = publish.await?;
                 imp::published(&actual, (&admitted, &snapshot), &reviews)?;
                 let bytes = imp::encode(&actual)?;
                 async {

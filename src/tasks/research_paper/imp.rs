@@ -1,6 +1,6 @@
 //! Actual paper inputs and content-bound evidence. No protocol operations.
 pub use crate::imp::json::{decode, encode, same};
-use crate::shell::{ShellError, ShellResult};
+use crate::shell::{ShellError, ShellResult, imp::service::SimulatorOperation};
 use hibana::runtime::wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload};
 use serde_json::{Value, json};
 
@@ -8,23 +8,33 @@ pub const AUTHORS: [&str; 3] = ["RESEARCHER_A", "RESEARCHER_B", "RESEARCHER_C"];
 pub const SECTIONS: [&str; 3] = ["section_a", "section_b", "section_c"];
 pub const TOPICS: [&str; 3] = ["subtopic_a", "subtopic_b", "subtopic_c"];
 
-pub(crate) fn tool(operation: u8) -> ShellResult<&'static str> {
-    match operation {
-        1 | 7 => Ok("research_topic"),
-        2 => Ok("write_section"),
-        3 => Ok("revise_section"),
-        4 => Ok("update_references"),
-        5 => Ok("fact_check"),
-        6 => Ok("review_sections"),
-        _ => Err(ShellError::message("unknown paper operation")),
+pub const COMBINE: u8 = 8;
+
+pub(super) const fn operation(actor: u8, op: u8) -> Option<(&'static str, &'static str)> {
+    if actor == super::global::EDITOR && op == COMBINE {
+        return Some(("EDITOR", "combine_sections"));
     }
+    if actor as usize >= AUTHORS.len() {
+        return None;
+    }
+    let author = AUTHORS[actor as usize];
+    Some(match op {
+        1 | 7 => (author, "research_topic"),
+        2 => (author, "write_section"),
+        3 => (author, "revise_section"),
+        4 => (author, "update_references"),
+        5 => ("FACT_CHECKER", "fact_check"),
+        6 => ("EDITOR", "review_sections"),
+        _ => return None,
+    })
 }
 
 pub fn arguments(author: u8, operation: u8, value: &Value) -> ShellResult<()> {
     let section = SECTIONS
         .get(usize::from(author))
         .ok_or_else(|| ShellError::message("unknown paper author"))?;
-    tool(operation)?;
+    self::operation(author, operation)
+        .ok_or_else(|| ShellError::message("unknown paper operation"))?;
     let key = if matches!(operation, 1 | 7) {
         "topic"
     } else {
@@ -66,9 +76,6 @@ impl<const AUTHOR: u8, const OPERATION: u8> Arguments<AUTHOR, OPERATION> {
             .map_err(|_| ShellError::message("invalid paper request"))?;
         Ok(Self(bytes.to_vec()))
     }
-    pub fn into_value(self) -> Value {
-        serde_json::from_slice(&self.0).expect("validated paper arguments")
-    }
 }
 impl<const AUTHOR: u8, const OPERATION: u8> WireEncode for Arguments<AUTHOR, OPERATION> {
     fn encode_into(&self, out: &mut [u8]) -> Result<usize, CodecError> {
@@ -83,25 +90,32 @@ pub(crate) const fn arguments_schema(author: u8, operation: u8) -> u32 {
 }
 impl<const AUTHOR: u8, const OPERATION: u8> WirePayload for Arguments<AUTHOR, OPERATION> {
     const SCHEMA_ID: u32 = arguments_schema(AUTHOR, OPERATION);
-    type Decoded<'a> = Self;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        if OPERATION == COMBINE && AUTHOR == super::global::EDITOR {
+            return crate::shell::imp::report_arguments::ReportArguments::<6>::validate_payload(
+                input,
+            );
+        }
         let value = serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
         arguments(AUTHOR, OPERATION, &value).map_err(|_| CodecError::Malformed)
     }
-    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
-        Self(input.as_bytes().to_vec())
+    fn decode_validated_payload(input: ReceivedPayload<'_, Self>) -> Self::Decoded<'_> {
+        input
     }
 }
 
+impl<const AUTHOR: u8, const OPERATION: u8> SimulatorOperation for Arguments<AUTHOR, OPERATION> {
+    const RPC: (&'static str, &'static str) =
+        operation(AUTHOR, OPERATION).expect("unknown paper operation");
+}
+
 pub fn result(author: u8, operation: u8, value: &Value) -> ShellResult<()> {
-    let name = AUTHORS
-        .get(usize::from(author))
-        .ok_or_else(|| ShellError::message("unknown paper author"))?;
-    let expected_actor: &str = match operation {
-        5 => "FACT_CHECKER",
-        6 => "EDITOR",
-        _ => name,
-    };
+    let (expected_actor, tool) = self::operation(author, operation)
+        .ok_or_else(|| ShellError::message("unknown paper operation"))?;
+    if usize::from(author) >= SECTIONS.len() {
+        return Err(ShellError::message("unknown paper author"));
+    }
     let target = match operation {
         1 | 7 => value["data"]["topic"]
             .as_str()
@@ -109,7 +123,7 @@ pub fn result(author: u8, operation: u8, value: &Value) -> ShellResult<()> {
         6 => value["data"]["scope"] == SECTIONS[usize::from(author)],
         _ => value["data"]["section"] == SECTIONS[usize::from(author)],
     };
-    if value["tool_name"] != tool(operation)?
+    if value["tool_name"] != tool
         || !value["success"].is_boolean()
         || value["data"]["agent"] != expected_actor
         || !target

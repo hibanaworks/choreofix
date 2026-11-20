@@ -1,22 +1,16 @@
 //! One research participant; independent authors use disjoint projected fragments.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{EndpointBorrow, g::Message};
 
 #[hibana_runtime::scope]
 pub async fn run<'borrow, 'run, const AUTHOR: u8, C: ChapterMessages<AUTHOR>>(
     endpoint: &mut EndpointBorrow<'borrow, 'run, RESEARCH_SERVICE>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
-    let arguments = endpoint.recv::<C::Research>().await?.into_value();
-    let result = domain
-        .execute(
-            imp::AUTHORS[usize::from(AUTHOR)],
-            "research_topic",
-            arguments.clone(),
-        )
-        .await
-        .map_err(ShellError::message)?;
+    let received = endpoint.recv::<C::Research>().await?;
+    let arguments = imp::decode(received.as_bytes())?;
+    let result = effects.apply(received).await?;
     imp::research(AUTHOR, &result)?;
     imp::same(&result["data"]["topic"], &arguments["topic"])?;
     let result = imp::Reply::<AUTHOR, 1>::new(result)?;
@@ -38,7 +32,7 @@ pub async fn run<'borrow, 'run, const AUTHOR: u8, C: ChapterMessages<AUTHOR>>(
 
 pub async fn supplemental<const AUTHOR: u8, C: ChapterMessages<AUTHOR>>(
     endpoint: &mut EndpointBorrow<'_, '_, RESEARCH_SERVICE>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     loop {
         let branch = endpoint.offer().await?;
@@ -48,15 +42,9 @@ pub async fn supplemental<const AUTHOR: u8, C: ChapterMessages<AUTHOR>>(
                 return Ok(());
             }
             label if label == C::Supplement::LOGICAL_LABEL => {
-                let arguments = branch.recv::<C::Supplement>().await?.into_value();
-                let actual = domain
-                    .execute(
-                        imp::AUTHORS[usize::from(AUTHOR)],
-                        "research_topic",
-                        arguments.clone(),
-                    )
-                    .await
-                    .map_err(ShellError::message)?;
+                let received = branch.recv::<C::Supplement>().await?;
+                let arguments = imp::decode(received.as_bytes())?;
+                let actual = effects.apply(received).await?;
                 imp::same(&actual["data"]["topic"], &arguments["topic"])?;
                 endpoint
                     .send::<C::Supplemented>(&imp::Reply::<AUTHOR, 7>::new(actual)?)

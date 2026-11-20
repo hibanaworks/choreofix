@@ -40,32 +40,34 @@ impl World<'_> {
         Ok(response)
     }
 }
-impl Domain for World<'_> {
-    async fn execute(
-        &self,
-        actor: &'static str,
-        tool: &'static str,
-        arguments: Value,
-    ) -> Result<Value, String> {
-        let observations = self.observed.take();
-        let before = observations.len();
-        self.observed.set(observations);
-        let mut calls = self.calls.take();
-        let request_row = calls.len();
-        calls.push(json!({"kind":"request","actor":actor,"tool":tool,"arguments":arguments,"capture_before":before}));
-        self.calls.set(calls);
-        let response = self
-            .request(json!({"actor":actor,"tool":tool,"arguments":arguments}))
-            .await
-            .map_err(|e| e.to_string())?;
-        let result = response
-            .get("result")
-            .cloned()
-            .ok_or("missing actual world result")?;
-        let mut calls = self.calls.take();
-        calls.push(json!({"kind":"reply","request_row":request_row,"event_index":response["event_index"],"result":result}));
-        self.calls.set(calls);
-        Ok(result)
+impl<'world> ReceivedEffects for World<'world> {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        received: ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, 'world, P> {
+        let arguments = imp::decode(received.as_bytes());
+        async move {
+            let arguments = arguments?;
+            let (actor, tool) = P::RPC;
+            let observations = self.observed.take();
+            let before = observations.len();
+            self.observed.set(observations);
+            let mut calls = self.calls.take();
+            let request_row = calls.len();
+            calls.push(json!({"kind":"request","actor":actor,"tool":tool,"arguments":arguments,"capture_before":before}));
+            self.calls.set(calls);
+            let response = self
+                .request(json!({"actor":actor,"tool":tool,"arguments":arguments}))
+                .await?;
+            let result = response
+                .get("result")
+                .cloned()
+                .ok_or_else(|| ShellError::message("missing actual world result"))?;
+            let mut calls = self.calls.take();
+            calls.push(json!({"kind":"reply","request_row":request_row,"event_index":response["event_index"],"result":result}));
+            self.calls.set(calls);
+            Ok(result)
+        }
     }
 }
 
@@ -328,10 +330,14 @@ fn effect_receipts(
             if call["actor"] != "EDITOR" {
                 return Err("publication actor".into());
             }
-            (ReportArguments::<6>::SCHEMA_ID, None, None)
+            (
+                imp::Arguments::<EDITOR, { imp::COMBINE }>::SCHEMA_ID,
+                None,
+                None,
+            )
         } else {
             let operation = (1..=6)
-                .find(|op| imp::tool(*op).is_ok_and(|name| name == tool))
+                .find(|op| imp::operation(AUTHOR_A, *op).is_some_and(|(_, name)| name == tool))
                 .ok_or("unknown effect contract")?;
             let author = if operation <= 4 {
                 imp::AUTHORS.iter().position(|name| call["actor"] == *name)
@@ -409,7 +415,7 @@ fn effect_receipts(
     let declared = receipts
         .iter()
         .filter(|(_, meta, _, _, _)| {
-            meta[4] == u64::from(ReportArguments::<6>::SCHEMA_ID)
+            meta[4] == u64::from(imp::Arguments::<EDITOR, { imp::COMBINE }>::SCHEMA_ID)
                 || (0..3).any(|author| {
                     (1..=6).any(|op| meta[4] == u64::from(imp::arguments_schema(author, op)))
                 })

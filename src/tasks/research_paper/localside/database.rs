@@ -1,13 +1,13 @@
 //! One database Endpoint serializes its actual physical updates, not other work.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{Endpoint, g::Message};
 use serde_json::{Value, json};
 
 #[hibana_runtime::scope]
 pub async fn run<'r>(
     mut database: Endpoint<'r, DATABASE>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     let mut research: [Option<Value>; 3] = [None, None, None];
     let mut references = json!({});
@@ -20,14 +20,12 @@ pub async fn run<'r>(
                 research[0] = Some(actual);
             }
             label if label == a::References::LOGICAL_LABEL => {
-                let arguments = branch.recv::<a::References>().await?.into_value();
+                let received = branch.recv::<a::References>().await?;
+                let arguments = imp::decode(received.as_bytes())?;
                 let researched = research[0].as_ref().ok_or_else(|| {
                     ShellError::message("reference request has no received research")
                 })?;
-                let result = domain
-                    .execute(imp::AUTHORS[0], "update_references", arguments.clone())
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(received).await?;
                 imp::material(AUTHOR_A, 4, &result, (&arguments, researched))?;
                 references[imp::SECTIONS[0]] = result["data"]["artifact"].clone();
                 let result = imp::Reply::<AUTHOR_A, 4>::new(result)?;
@@ -41,14 +39,12 @@ pub async fn run<'r>(
                 research[1] = Some(actual);
             }
             label if label == b::References::LOGICAL_LABEL => {
-                let arguments = branch.recv::<b::References>().await?.into_value();
+                let received = branch.recv::<b::References>().await?;
+                let arguments = imp::decode(received.as_bytes())?;
                 let researched = research[1].as_ref().ok_or_else(|| {
                     ShellError::message("reference request has no received research")
                 })?;
-                let result = domain
-                    .execute(imp::AUTHORS[1], "update_references", arguments.clone())
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(received).await?;
                 imp::material(AUTHOR_B, 4, &result, (&arguments, researched))?;
                 references[imp::SECTIONS[1]] = result["data"]["artifact"].clone();
                 let result = imp::Reply::<AUTHOR_B, 4>::new(result)?;
@@ -62,14 +58,12 @@ pub async fn run<'r>(
                 research[2] = Some(actual);
             }
             label if label == c::References::LOGICAL_LABEL => {
-                let arguments = branch.recv::<c::References>().await?.into_value();
+                let received = branch.recv::<c::References>().await?;
+                let arguments = imp::decode(received.as_bytes())?;
                 let researched = research[2].as_ref().ok_or_else(|| {
                     ShellError::message("reference request has no received research")
                 })?;
-                let result = domain
-                    .execute(imp::AUTHORS[2], "update_references", arguments.clone())
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(received).await?;
                 imp::material(AUTHOR_C, 4, &result, (&arguments, researched))?;
                 references[imp::SECTIONS[2]] = result["data"]["artifact"].clone();
                 let result = imp::Reply::<AUTHOR_C, 4>::new(result)?;

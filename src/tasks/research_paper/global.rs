@@ -205,7 +205,7 @@ chapter_messages!(a, AUTHOR_A, 0);
 chapter_messages!(b, AUTHOR_B, 64);
 chapter_messages!(c, AUTHOR_C, 128);
 
-pub type Combine = g::Msg<200, crate::shell::imp::report_arguments::ReportArguments<6>>;
+pub type Combine = g::Msg<200, Arguments<EDITOR, { super::imp::COMBINE }>>;
 pub type ReferencesForPublication = g::Msg<201, ()>;
 pub type FrozenReferences<'a> = g::Msg<205, &'a [u8]>;
 pub type FrozenReviews<'a> = g::Msg<206, &'a [u8]>;

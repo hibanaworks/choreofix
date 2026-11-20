@@ -46,12 +46,11 @@ fn typed_paper_arguments_keep_free_notes_and_reject_other_sections() {
         assert!(imp::arguments(author, 7, &assigned).is_err());
     }
     let notes = br#"{"section_name":"section_a","content_notes":"an independent claim"}"#;
-    assert_eq!(
-        imp::Arguments::<AUTHOR_A, 2>::from_bytes(notes)
-            .unwrap()
-            .into_value()["content_notes"],
-        "an independent claim"
-    );
+    use hibana::runtime::wire::WireEncode;
+    let accepted = imp::Arguments::<AUTHOR_A, 2>::from_bytes(notes).unwrap();
+    let mut encoded = [0; 128];
+    let written = accepted.encode_into(&mut encoded).unwrap();
+    assert_eq!(&encoded[..written], notes);
     assert!(imp::Arguments::<AUTHOR_A, 3>::from_bytes(notes).is_err());
     assert!(imp::Arguments::<AUTHOR_B, 2>::from_bytes(notes).is_err());
 }

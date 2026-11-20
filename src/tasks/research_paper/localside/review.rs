@@ -1,13 +1,13 @@
 //! Receive a real chapter authority before each actual factual/editorial effect.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{EndpointBorrow, g::Message};
 use serde_json::Value;
 
 #[hibana_runtime::scope]
 pub async fn run<'borrow, 'run, const AUTHOR: u8, const SECTION: u8, C: ChapterMessages<AUTHOR>>(
     endpoint: &mut EndpointBorrow<'borrow, 'run, REVIEW_SERVICE>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<(Value, Value)> {
     // This owns the actual latest fact-check reply, not a separate phase flag.
     let mut factual_result = None;
@@ -17,11 +17,8 @@ pub async fn run<'borrow, 'run, const AUTHOR: u8, const SECTION: u8, C: ChapterM
             label if label == C::FactMaterial::LOGICAL_LABEL => {
                 let snapshot = branch.recv::<C::FactMaterial>().await?.into_value();
                 let mut section = endpoint.recv::<Section<SECTION>>().await?;
-                let arguments = endpoint.recv::<C::FactRequest>().await?.into_value();
-                let result = domain
-                    .execute("FACT_CHECKER", "fact_check", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let received = endpoint.recv::<C::FactRequest>().await?;
+                let result = effects.apply(received).await?;
                 imp::checked(AUTHOR, &result, &snapshot)?;
                 factual_result = Some(result.clone());
                 let reply = imp::Reply::<AUTHOR, 5>::new(result.clone())?;
@@ -53,7 +50,7 @@ pub async fn run<'borrow, 'run, const AUTHOR: u8, const SECTION: u8, C: ChapterM
             label if label == C::ReviewMaterial::LOGICAL_LABEL => {
                 let material = branch.recv::<C::ReviewMaterial>().await?.into_value();
                 let mut section = endpoint.recv::<Section<SECTION>>().await?;
-                let arguments = endpoint.recv::<C::ReviewRequest>().await?.into_value();
+                let received = endpoint.recv::<C::ReviewRequest>().await?;
                 let facts = factual_result
                     .as_ref()
                     .ok_or_else(|| ShellError::message("review has no actual factual result"))?;
@@ -64,10 +61,7 @@ pub async fn run<'borrow, 'run, const AUTHOR: u8, const SECTION: u8, C: ChapterM
                         "editorial input has no positive factual evidence",
                     ));
                 }
-                let result = domain
-                    .execute("EDITOR", "review_sections", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(received).await?;
                 imp::reviewed(AUTHOR, &result, (&material["snapshot"], facts))?;
                 let reply = imp::Reply::<AUTHOR, 6>::new(result.clone())?;
                 if result["success"] == true {
