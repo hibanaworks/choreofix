@@ -3,14 +3,11 @@ use super::{
     global::*,
     localside::{self, quality, writers},
 };
-use crate::{
-    imp::projection,
-    shell::{
-        ShellResult,
-        global::Loan,
-        imp::{bus::Bus, private_fs::PrivateFs},
-        localside::{file_metadata, private_io},
-    },
+use crate::shell::{
+    ShellResult,
+    global::Loan,
+    imp::{bus::Bus, private_fs::PrivateFs},
+    localside::{file_metadata, private_io},
 };
 use hibana::runtime::{SessionKitStorage, ids::SessionId};
 use serde_json::json;
@@ -23,7 +20,7 @@ pub fn projection() -> serde_json::Value {
 pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
     let session = SessionId::new(SESSION);
     let (
-        bus,
+        mut connection,
         mut io,
         [
             a_terminal,
@@ -53,14 +50,11 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
         ]
         .map(|role| (session, role)),
     );
+    let (bus, simulator) = connection.split();
     let trial = async {
         let programs = Programs::new();
-        bus.observe(programs.observation());
-        let capture = |event| {
-            bus.observe(json!({
-                "type":"protocol_capture","producer":0,"records":[projection::record(event)]
-            }))
-        };
+        bus.projected(programs.observation());
+        let capture = |event| bus.capture(event);
         let mut slab = vec![0; 1024 * 1024];
         let mut storage = SessionKitStorage::uninit();
         let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
@@ -100,7 +94,7 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             let editor_vm = rv.enter(session, &programs.editor_vm)?;
             let mut editor_io = rv.enter(session, &programs.editor_io)?;
             let mut archive = rv.enter(session, &programs.archive)?;
-            async { localside::creator::<4>(&mut creator, &bus).await };
+            async { localside::creator::<4>(&mut creator, &simulator).await };
             async {
                 fig_owner.send::<Loan<FIGURE_STORE>>(store).await?;
                 drop(fig_owner.recv::<Loan<FIGURE_STORE>>().await?);
@@ -114,19 +108,19 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut a_io,
-                    PrivateFs::new(a_terminal, &bus, &WRITER_A_OBJECTS),
+                    PrivateFs::new(a_terminal, bus, &WRITER_A_OBJECTS),
                 )
                 .await?;
             };
             async {
                 private_io::run(
                     &mut b_io,
-                    PrivateFs::new(b_terminal, &bus, &WRITER_B_OBJECTS),
+                    PrivateFs::new(b_terminal, bus, &WRITER_B_OBJECTS),
                 )
                 .await?;
             };
-            async { localside::snapshots(&mut a_snapshots, ("WRITER_A", &bus)).await };
-            async { localside::snapshots(&mut b_snapshots, ("WRITER_B", &bus)).await };
+            async { localside::snapshots(&mut a_snapshots, ("WRITER_A", &simulator)).await };
+            async { localside::snapshots(&mut b_snapshots, ("WRITER_B", &simulator)).await };
             let (a, b) = async {
                 let [mut a, mut b] = drafting.par()?;
                 async { a.recv::<Loan<WRITER_FILE>>().await };
@@ -137,17 +131,17 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             async { writers::writer_b(wash, b, b_vm).await };
             async {
                 let ((sections, figures), doc, references) = async {
-                    async { localside::document::<5>(&mut drafting, &bus).await };
+                    async { localside::document::<5>(&mut drafting, &simulator).await };
                     async {
                         document_owner.send::<Loan<DOCUMENT>>(doc).await?;
                         document_owner.recv::<Loan<DOCUMENT>>().await
                     };
-                    async { writers::references(&mut refs, &bus).await };
+                    async { writers::references(&mut refs, &simulator).await };
                 }
                 .await?;
                 let snapshot =
                     json!({"sections": sections, "references": references, "figures": figures});
-                quality::reconsider(&mut document_owner, doc, (snapshot, &bus)).await?;
+                quality::reconsider(&mut document_owner, doc, (snapshot, &simulator)).await?;
             };
             async {
                 file_metadata::run(&mut fig_data, fig_file, FIGURE_OBJECTS).await?;
@@ -155,7 +149,7 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut fig_io,
-                    PrivateFs::new(figure_terminal, &bus, &FIGURE_OBJECTS),
+                    PrivateFs::new(figure_terminal, bus, &FIGURE_OBJECTS),
                 )
                 .await?;
             };
@@ -175,7 +169,7 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut fact_io,
-                    PrivateFs::new(fact_terminal, &bus, &FACT_OBJECTS),
+                    PrivateFs::new(fact_terminal, bus, &FACT_OBJECTS),
                 )
                 .await?;
             };
@@ -187,14 +181,14 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
                 }
                 .await?;
                 async {
-                    while quality::facts::<FACTS_12, CHECK_12>(&mut fact12, &bus)
+                    while quality::facts::<FACTS_12, CHECK_12>(&mut fact12, &simulator)
                         .await?
                         .is_some()
                     {}
                     Ok(())
                 };
                 async {
-                    while quality::facts::<FACTS_3, CHECK_3>(&mut fact3, &bus)
+                    while quality::facts::<FACTS_3, CHECK_3>(&mut fact3, &simulator)
                         .await?
                         .is_some()
                     {}
@@ -208,13 +202,13 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut editor_io,
-                    PrivateFs::new(editor_terminal, &bus, &EDITOR_OBJECTS),
+                    PrivateFs::new(editor_terminal, bus, &EDITOR_OBJECTS),
                 )
                 .await?;
             };
             let file = editor.recv::<Loan<EDITOR_FILE>>().await?;
             async {
-                while quality::editor(&mut editor, &bus).await?.is_some() {}
+                while quality::editor(&mut editor, &simulator).await?.is_some() {}
                 Ok(())
             };
             localside::editor_guest(wash, (editor_vm, file)).await?;
@@ -223,16 +217,14 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             Ok(())
         }
         .await;
-        bus.observe(json!({
-            "type":"protocol_checkpoint","producer":0,"session":SESSION,"checkpoint":observed.checkpoint()
-        }));
+        bus.checkpoint(SESSION, observed.checkpoint());
         result
     };
-    let result = hibana_runtime::race(trial, io.run(&bus)).await;
+    let result = hibana_runtime::race(trial, io.run(bus)).await;
     let report = match &result {
         Ok(()) => json!({"type":"run_result","status":"complete"}),
         Err(error) => json!({"type":"run_result","status":"failed","error":error.to_string()}),
     };
-    io.emit(&bus, report).await?;
+    io.emit(bus, report).await?;
     result
 }

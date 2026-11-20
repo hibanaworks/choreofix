@@ -292,7 +292,15 @@ not another source of task permissions.
 
 The experiment covers all 48 TraceFix tasks. Keep comparison implementations
 unchanged. The user authorizes repairing a coarse simulator when a reproducible
-counterexample violates the stated task. The canonical common simulator is
+counterexample violates the stated task. A shared terminal, private filesystem or observation connection must not expose
+a callable effect with caller-selected agent, tool and JSON. Where a task file
+already yields a typed effect request, consume the actual Hibana receive in the
+resource receiver. Derive the external operation from its type and the input
+from its validated bytes. For multi-resource effects, keep every required
+receive and the comparison with the actual admitted data visible. Record which
+families still entrust these checks to a privileged simulator caller.
+
+The canonical common simulator is
 `benchmark/`, with one fixed source manifest used for every experimental arm.
 Do not tune a scorer to ChoreoFix's own procedure, assume misconduct, or infer
 superiority without matched evidence. Preserve original-source results and
@@ -694,8 +702,8 @@ unchecked, and strengthen that boundary. Individual proofs or fixtures are not a
 successful complete gate.
 
 Audit every effect entry: WASI imports, host APIs, argument codecs and physical
-bindings. The receiver localside invokes `Domain::execute` only after its actual
-Endpoint receives. Agreement with the received request, exact arguments and
+bindings. The receiver localside performs the effect only after its actual Endpoint
+receives. Agreement with the received request, exact arguments and
 required resource Endpoints is that receiver's explicit effect-I/O trust boundary,
 not a separate host workflow or authority. Record-mutation rejection only tests the auditor;
 test runtime rejection at the effect boundary separately. A local I/O error or

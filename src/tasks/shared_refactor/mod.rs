@@ -17,7 +17,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
     use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasiGuestStorage};
     let session = SessionId::new(SESSION);
     let (
-        bus,
+        mut connection,
         mut io,
         [
             arch_terminal,
@@ -44,12 +44,11 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             (session, TEST_FILE),
         ],
     );
+    let (bus, simulator) = connection.split();
     let participants = async {
         let p = programs();
-        bus.observe(p.observation());
-        let capture = |event| {
-            bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,"records":[crate::imp::projection::record(event)]}))
-        };
+        bus.projected(p.observation());
+        let capture = |event| bus.capture(event);
         let mut slab = vec![0; 2 * 1024 * 1024];
         let incoming_capacity = slab.len();
         let mut storage = SessionKitStorage::uninit();
@@ -89,16 +88,16 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 resource_init.send::<TestLoan>(environment).await?;
             };
             async {
-                localside::repository::run(&mut repo_owner, &bus).await?;
+                localside::repository::run(&mut repo_owner, &simulator).await?;
             };
             async {
-                localside::tests::run(&mut test_owner, &bus).await?;
+                localside::tests::run(&mut test_owner, &simulator).await?;
             };
             async {
-                localside::architect::run(&mut architect, &bus).await?;
+                localside::architect::run(&mut architect, &simulator).await?;
             };
             async {
-                localside::reviews::run(&mut reviewer, &bus).await?;
+                localside::reviews::run(&mut reviewer, &simulator).await?;
             };
             async {
                 file_metadata::run(&mut arch_data, arch_file, ARCH_FILES).await?;
@@ -147,7 +146,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut arch_io,
-                    PrivateFs::new(arch_terminal, &bus, &ARCH_FILES),
+                    PrivateFs::new(arch_terminal, bus, &ARCH_FILES),
                 )
                 .await?;
             };
@@ -184,7 +183,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 root.send::<Exit>(&status).await?;
             };
             async {
-                private_io::run(&mut a_io, PrivateFs::new(a_terminal, &bus, &A_FILES)).await?;
+                private_io::run(&mut a_io, PrivateFs::new(a_terminal, bus, &A_FILES)).await?;
             };
             async {
                 let mut request_0 = vec![0; crate::shell::GUEST_MEMORY_BYTES];
@@ -219,7 +218,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 root.send::<Exit>(&status).await?;
             };
             async {
-                private_io::run(&mut b_io, PrivateFs::new(b_terminal, &bus, &B_FILES)).await?;
+                private_io::run(&mut b_io, PrivateFs::new(b_terminal, bus, &B_FILES)).await?;
             };
             async {
                 let mut request_0 = vec![0; crate::shell::GUEST_MEMORY_BYTES];
@@ -245,7 +244,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut review_io,
-                    PrivateFs::new(review_terminal, &bus, &REVIEW_FILES),
+                    PrivateFs::new(review_terminal, bus, &REVIEW_FILES),
                 )
                 .await?;
             };
@@ -273,20 +272,20 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut test_io,
-                    PrivateFs::new(test_terminal, &bus, &TEST_FILES),
+                    PrivateFs::new(test_terminal, bus, &TEST_FILES),
                 )
                 .await?;
             };
             Ok(())
         }
         .await;
-        bus.observe(serde_json::json!({"type":"protocol_checkpoint","producer":0,"session":SESSION,"checkpoint":observations.checkpoint()}));
+        bus.checkpoint(SESSION, observations.checkpoint());
         result
     };
-    let result = hibana_runtime::race(participants, io.run(&bus)).await;
+    let result = hibana_runtime::race(participants, io.run(bus)).await;
     match &result {
- Ok(())=>io.emit(&bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
- Err(error)=>io.emit(&bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
+ Ok(())=>io.emit(bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
+ Err(error)=>io.emit(bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
  }
     result
 }

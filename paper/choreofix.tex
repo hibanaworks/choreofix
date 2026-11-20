@@ -198,8 +198,11 @@ only as historical component evidence.
 \subsection{Trusted code and claim boundary}
 The boundary assumes the supplied tool interface is the only path to the
 protected effects. Model roles cannot call native tools or choose another
-participant's identity. It also trusts the localside effect adapter, the
-runtime, codecs, transport, executor, and simulator integration. The simulator
+participant's identity. In 6E a simulator call consumes the typed Hibana
+receive. The type determines the participant and operation, and the received
+bytes determine the arguments. Other families still trust a privileged
+resource receiver to select the simulator call and supply its arguments.
+All trials trust the runtime, codecs, transport, executor and simulator integration. The simulator
 independently records actual domain effects and resource violations.
 
 Endpoint conformance is not a proof of arbitrary program termination, review
@@ -335,7 +338,10 @@ interface. A causal comparison of shell coordination would require the same
 guest, objects, prompts, and budgets in both arms.
 
 The model receives the original task description, its assigned input data, and
-the domain tool schemas. It receives no fixed command recipe. Boundary tests
+the domain tool schemas. Some task prompts also describe role-specific choices
+and recovery paths. These additions belong to the pilot condition. A paired
+enforcement comparison must freeze the actual prompts, provide the same
+information and exercise the same simulator version in both arms. Boundary tests
 also exercise scripts and several legal file-operation sequences. A private
 ``approved'' file is deliberately written before an early shared operation.
 The task endpoint still rejects the operation before the simulator receives
@@ -596,8 +602,9 @@ business failure.
 These are integration observations from development, not random samples or
 paired baseline trials. They cannot estimate a comparative completion rate,
 latency advantage, or maintenance saving. Earlier failed and interrupted
-attempts remain in the repository records. A successful replacement is not
-used to erase a failed attempt.
+attempts are retained in the local experiment archive. The public source
+repository contains summaries and reproduction commands. It does not include
+the raw journals for independent reanalysis.
 
 The 43 selected ChoreoFix runs used 67,938,442 inclusive tokens in total (median 1,027,748 per run). The inventory selects qualified conditions; it does not estimate the token budget or success rate of another arm.
 

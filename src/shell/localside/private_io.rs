@@ -37,7 +37,7 @@ pub async fn run<const ROLE: u8>(
                             .terminal
                             .read_command(io.bus, std::mem::take(&mut io.output))
                             .await?;
-                        if command.len() > 4096 || command.as_bytes().contains(&0) {
+                        if command.len() > 4096 {
                             return Err(ShellError::message(
                                 "shell command exceeds guest input bound",
                             ));
@@ -91,7 +91,7 @@ pub async fn run<const ROLE: u8>(
                         }
                         let Some(index) = io.paths.iter().position(Vec::is_empty) else {
                             break 'path_open protocol::PathOpenedRet(protocol::PathOpened::new(
-                                0, 22,
+                                0, 51,
                             ));
                         };
                         io.paths[index].extend_from_slice(path);

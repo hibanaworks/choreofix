@@ -1,6 +1,6 @@
 //! The external connection owns terminal output and simulator RPC correlation.
 use crate::{
-    shell::imp::service::Domain,
+    shell::imp::service::{Domain, ReceivedEffects, SimulatorOperation},
     shell::{ShellError, ShellResult},
 };
 use hibana::runtime::{ids::SessionId, transport::EndpointBinding};
@@ -15,6 +15,23 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
+/// Terminal and observation I/O shared by a trial.
+///
+/// ```compile_fail
+/// use choreofix::shell::imp::{bus::Bus, service::Domain};
+/// fn fabricate(io: &Bus) {
+///     let _ = io.execute("REVIEWER", "code_review", serde_json::json!({}));
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use choreofix::shell::imp::bus::Bus;
+/// use choreofix::shell::imp::service::{ReceivedEffects, SimulatorOperation};
+/// use hibana::runtime::wire::ReceivedPayload;
+/// fn submit<P: SimulatorOperation>(io: &Bus, receipt: ReceivedPayload<P>) {
+///     let _ = io.apply(receipt);
+/// }
+/// ```
 pub struct Bus {
     pub transport: crate::imp::transport::InMemoryTransport,
     connection: Cell<Connection>,
@@ -49,7 +66,7 @@ pub struct ExternalIo {
 }
 
 pub struct Terminal {
-    pub agent: &'static str,
+    agent: &'static str,
     // The current command RPC identifier, not a task phase or permission.
     identifier: Option<u64>,
 }
@@ -97,6 +114,11 @@ impl Bus {
         )
     }
 
+    /// Split the trial owner's simulator connection from ordinary terminal and capture I/O.
+    pub fn split(&mut self) -> (&Self, Simulator<'_>) {
+        (self, Simulator(self))
+    }
+
     fn connection<T>(&self, apply: impl FnOnce(&mut Connection) -> T) -> T {
         let mut connection = self.connection.take();
         let result = apply(&mut connection);
@@ -135,7 +157,20 @@ impl Bus {
     }
 
     /// Queue an immutable diagnostic observation with the I/O owner.
-    pub fn observe(&self, value: Value) {
+    pub fn projected(&self, mut projection: Value) {
+        projection["type"] = json!("compiled_projection");
+        self.observe(projection);
+    }
+
+    pub fn capture(&self, event: hibana::runtime::tap::TapEvent) {
+        self.observe(json!({"type":"protocol_capture","producer":0,"records":[crate::imp::projection::record(event)]}));
+    }
+
+    pub fn checkpoint(&self, session: u32, checkpoint: Option<u32>) {
+        self.observe(json!({"type":"protocol_checkpoint","producer":0,"session":session,"checkpoint":checkpoint}));
+    }
+
+    fn observe(&self, value: Value) {
         let values = self.transport.take_observations().chain([value]);
         self.enqueue(values, None);
     }
@@ -158,7 +193,7 @@ impl Bus {
         Ok(())
     }
 
-    pub async fn emit(&self, value: Value) -> ShellResult<()> {
+    async fn emit(&self, value: Value) -> ShellResult<()> {
         let values = self.transport.take_observations().chain([value]);
         let reply = self.reply()?;
         self.enqueue(values, Some(reply.id));
@@ -241,6 +276,9 @@ impl ExternalIo {
     }
 
     pub async fn emit(&mut self, bus: &Bus, value: Value) -> ShellResult<()> {
+        if value["type"] != "run_result" {
+            return Err(ShellError::message("expected final trial result"));
+        }
         let stdout = self
             .output
             .as_ref()
@@ -378,8 +416,37 @@ impl Terminal {
     }
 }
 
-impl Domain for Bus {
+/// The simulator connection held by the native resource receivers of a trial.
+pub struct Simulator<'bus>(&'bus Bus);
+
+impl Domain for Simulator<'_> {
     fn execute(
+        &self,
+        agent: &'static str,
+        tool: &'static str,
+        arguments: Value,
+    ) -> impl Future<Output = Result<Value, String>> {
+        self.0.rpc(agent, tool, arguments)
+    }
+}
+
+impl ReceivedEffects for Simulator<'_> {
+    async fn apply<P: SimulatorOperation>(
+        &self,
+        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> ShellResult<Value> {
+        let arguments = serde_json::from_slice(received.as_bytes())
+            .map_err(|e| ShellError::message(format!("simulator request JSON: {e}")))?;
+        let (agent, tool) = P::RPC;
+        self.0
+            .rpc(agent, tool, arguments)
+            .await
+            .map_err(ShellError::message)
+    }
+}
+
+impl Bus {
+    fn rpc(
         &self,
         agent: &'static str,
         tool: &'static str,

@@ -3,6 +3,34 @@ use hibana::runtime::resolver::{DecisionArm, ResolverError};
 use serde_json::Value;
 use std::cell::Cell;
 
+/// The physical simulator operation named by this projected wire payload.
+pub trait SimulatorOperation: hibana::runtime::wire::WirePayload {
+    const RPC: (&'static str, &'static str);
+}
+
+/// Effect I/O available to receivers whose message type fixes the operation.
+/// A receipt supplies both the payload type and the bytes to submit.
+///
+/// ```compile_fail
+/// use choreofix::shell::imp::service::ReceivedEffects;
+/// fn fabricate(receiver: &impl ReceivedEffects) {
+///     let _ = receiver.apply(serde_json::json!({"pr_id": "user_authentication"}));
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use choreofix::shell::imp::service::{Domain, ReceivedEffects};
+/// fn substitute(receiver: &impl ReceivedEffects) {
+///     let _ = receiver.execute("REVIEWER", "code_review", serde_json::json!({}));
+/// }
+/// ```
+pub trait ReceivedEffects {
+    fn apply<P: SimulatorOperation>(
+        &self,
+        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>>;
+}
+
 pub trait Domain {
     fn execute(
         &self,

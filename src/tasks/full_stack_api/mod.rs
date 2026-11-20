@@ -253,7 +253,7 @@ impl Programs {
 pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
     let session = SessionId::new(SESSION);
     let (
-        bus,
+        mut connection,
         mut io,
         [
             db_terminal,
@@ -282,9 +282,10 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
         ]
         .map(|role| (session, role)),
     );
+    let (bus, simulator) = connection.split();
     let trial = async {
         let programs = programs();
-        bus.observe(programs.observation());
+        bus.projected(programs.observation());
         let Programs {
             db_owner,
             api_owner,
@@ -320,9 +321,7 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             test_data,
         } = programs;
         let record = |event| {
-            bus.observe(json!({
-                "type":"protocol_capture", "producer":0, "records":[projection::record(event)]
-            }));
+            bus.capture(event);
         };
         let mut slab = vec![0; 1024 * 1024];
         let incoming_capacity = slab.len();
@@ -372,13 +371,13 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
                 drop(api_owner.recv::<Loan<API_GATEWAY>>().await?);
             };
             async {
-                localside::migrate(&mut db_service, &bus).await?;
+                localside::migrate(&mut db_service, &simulator).await?;
             };
             async {
-                localside::define(&mut api_service, &bus).await?;
+                localside::define(&mut api_service, &simulator).await?;
             };
             async {
-                localside::implement(&mut backend_service, &bus).await?;
+                localside::implement(&mut backend_service, &simulator).await?;
             };
             async {
                 test_owner.send::<Loan<TEST_ENV>>(test_env).await?;
@@ -416,13 +415,13 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
                 }
             };
             async {
-                localside::review(&mut review_service, &bus).await?;
+                localside::review(&mut review_service, &simulator).await?;
             };
             async {
-                localside::frontend(&mut frontend_service, &bus).await?;
+                localside::frontend(&mut frontend_service, &simulator).await?;
             };
             async {
-                localside::test(&mut test_service, &bus).await?;
+                localside::test(&mut test_service, &simulator).await?;
             };
             async {
                 file_metadata::run(&mut db_data, db_file, DB_FILES).await?;
@@ -431,12 +430,12 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
                 file_metadata::run(&mut backend_data, backend_file, BACKEND_FILES).await?;
             };
             async {
-                private_io::run(&mut db_io, PrivateFs::new(db_terminal, &bus, &DB_FILES)).await?;
+                private_io::run(&mut db_io, PrivateFs::new(db_terminal, bus, &DB_FILES)).await?;
             };
             async {
                 private_io::run(
                     &mut backend_io,
-                    PrivateFs::new(backend_terminal, &bus, &BACKEND_FILES),
+                    PrivateFs::new(backend_terminal, bus, &BACKEND_FILES),
                 )
                 .await?;
             };
@@ -446,7 +445,7 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut review_io,
-                    PrivateFs::new(review_terminal, &bus, &REVIEW_FILES),
+                    PrivateFs::new(review_terminal, bus, &REVIEW_FILES),
                 )
                 .await?;
             };
@@ -456,7 +455,7 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut frontend_io,
-                    PrivateFs::new(frontend_terminal, &bus, &FRONTEND_FILES),
+                    PrivateFs::new(frontend_terminal, bus, &FRONTEND_FILES),
                 )
                 .await?;
             };
@@ -466,7 +465,7 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut test_io,
-                    PrivateFs::new(test_terminal, &bus, &TEST_FILES),
+                    PrivateFs::new(test_terminal, bus, &TEST_FILES),
                 )
                 .await?;
             };
@@ -604,17 +603,14 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             Ok(())
         }
         .await;
-        bus.observe(json!({
-            "type":"protocol_checkpoint", "producer":0, "session":SESSION,
-            "checkpoint":observation.checkpoint()
-        }));
+        bus.checkpoint(SESSION, observation.checkpoint());
         result
     };
-    let result = hibana_runtime::race(trial, io.run(&bus)).await;
+    let result = hibana_runtime::race(trial, io.run(bus)).await;
     let report = match &result {
         Ok(()) => json!({"type":"run_result","status":"complete"}),
         Err(error) => json!({"type":"run_result","status":"failed","error":error.to_string()}),
     };
-    io.emit(&bus, report).await?;
+    io.emit(bus, report).await?;
     result
 }

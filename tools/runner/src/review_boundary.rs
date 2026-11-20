@@ -443,6 +443,22 @@ async fn run_cases(cases: Vec<ReviewCase>) -> Result<()> {
                     let a = ("DEVELOPER_A", "user_authentication", "dev_a_feature");
                     let b = ("DEVELOPER_B", "notification_feature", "dev_b_feature");
                     let people = if review_first == "notification_feature" { [b, a] } else { [a, b] };
+                    if depth == 0 && delay == 0.01 && review_first == a.1
+                        && matches!(schedule, ReviewSchedule::FinishFirst) {
+                        let denied = guest.command(a.0, "echo x > /llm/stdout".into()).await?;
+                        assert!(denied["stdout"].as_str().is_some_and(|text| text.contains("wash:")));
+                        let malformed = guest.command(a.0, "echo before\0after".into()).await?;
+                        assert!(malformed["stdout"].as_str().is_some_and(|text| text.contains("NUL is not shell text")));
+                        for slot in 0..8 {
+                            let reply = guest.command(a.0, format!("echo {slot} > /work/f{slot}")).await?;
+                            assert!(!reply["stdout"].as_str().ok_or("work file stdout")?.contains("wash:"));
+                        }
+                        let full = guest.command(a.0, "echo x > /work/full".into()).await?;
+                        assert!(full["stdout"].as_str().is_some_and(|text| text.contains("os error 51")), "{full}");
+                        let recovered = guest.command(a.0, "cat /work/f7".into()).await?;
+                        assert_eq!(recovered["stdout"].as_str().and_then(|text| text.lines().next()), Some("7"));
+                        assert!(simulator.observed_events().await?.is_empty());
+                    }
                     async {
                         for (agent, _, branch) in people {
                             async {

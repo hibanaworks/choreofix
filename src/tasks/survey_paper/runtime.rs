@@ -1,7 +1,7 @@
 //! Run all seven Wasm guests against the same source and transport.
 use super::{files, global::*, preparation, publication, quality};
 use crate::{
-    imp::projection::{record, rows},
+    imp::projection::rows,
     shell::{
         ShellResult,
         global::Loan,
@@ -150,7 +150,7 @@ pub async fn run(module: Option<&[u8]>) -> ShellResult<()> {
         return Ok(());
     };
     let session = SessionId::new(SESSION);
-    let (bus, mut io, terminals) = Bus::open(
+    let (mut connection, mut io, terminals) = Bus::open(
         [
             "RESEARCHER_A",
             "RESEARCHER_B",
@@ -177,6 +177,7 @@ pub async fn run(module: Option<&[u8]>) -> ShellResult<()> {
         ]
         .map(|role| (session, role)),
     );
+    let (bus, simulator) = connection.split();
     let [
         author_a_terminal,
         author_b_terminal,
@@ -187,9 +188,9 @@ pub async fn run(module: Option<&[u8]>) -> ShellResult<()> {
         editor_terminal,
     ] = terminals;
     let participants = async {
-        bus.observe(projection);
+        bus.projected(projection);
         let capture = |event| {
-            bus.observe(json!({"type":"protocol_capture","producer":0,"records":[record(event)]}));
+            bus.capture(event);
         };
         let mut slab = vec![0; 2 * 1024 * 1024];
         let mut storage = SessionKitStorage::uninit();
@@ -239,10 +240,10 @@ pub async fn run(module: Option<&[u8]>) -> ShellResult<()> {
             let section_c = rv.enter(session, &section_c_program)?;
             let section_d = rv.enter(session, &section_d_program)?;
             async {
-                preparation::references(&mut database, &bus).await?;
+                preparation::references(&mut database, &simulator).await?;
             };
             async {
-                preparation::figures(&mut figures, &bus).await?;
+                preparation::figures(&mut figures, &simulator).await?;
             };
 
             async {
@@ -252,14 +253,15 @@ pub async fn run(module: Option<&[u8]>) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut author_io_a,
-                    PrivateFs::new(author_a_terminal, &bus, &files::AUTHOR_OBJECTS),
+                    PrivateFs::new(author_a_terminal, bus, &files::AUTHOR_OBJECTS),
                 )
                 .await?;
             };
             async {
                 let file = author_a.recv::<Loan<AUTHOR_FILE_A>>().await?;
                 async {
-                    quality::author::<SECTION_A, AUTHOR_A>(&mut author_a, section_a, &bus).await?;
+                    quality::author::<SECTION_A, AUTHOR_A>(&mut author_a, section_a, &simulator)
+                        .await?;
                 };
                 async {
                     files::author::<SECTION_A, AUTHOR_FILE_A, AUTHOR_VM_A>(
@@ -279,14 +281,15 @@ pub async fn run(module: Option<&[u8]>) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut author_io_b,
-                    PrivateFs::new(author_b_terminal, &bus, &files::AUTHOR_OBJECTS),
+                    PrivateFs::new(author_b_terminal, bus, &files::AUTHOR_OBJECTS),
                 )
                 .await?;
             };
             async {
                 let file = author_b.recv::<Loan<AUTHOR_FILE_B>>().await?;
                 async {
-                    quality::author::<SECTION_B, AUTHOR_B>(&mut author_b, section_b, &bus).await?;
+                    quality::author::<SECTION_B, AUTHOR_B>(&mut author_b, section_b, &simulator)
+                        .await?;
                 };
                 async {
                     files::author::<SECTION_B, AUTHOR_FILE_B, AUTHOR_VM_B>(
@@ -306,14 +309,15 @@ pub async fn run(module: Option<&[u8]>) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut author_io_c,
-                    PrivateFs::new(author_c_terminal, &bus, &files::AUTHOR_OBJECTS),
+                    PrivateFs::new(author_c_terminal, bus, &files::AUTHOR_OBJECTS),
                 )
                 .await?;
             };
             async {
                 let file = author_c.recv::<Loan<AUTHOR_FILE_C>>().await?;
                 async {
-                    quality::author::<SECTION_C, AUTHOR_C>(&mut author_c, section_c, &bus).await?;
+                    quality::author::<SECTION_C, AUTHOR_C>(&mut author_c, section_c, &simulator)
+                        .await?;
                 };
                 async {
                     files::author::<SECTION_C, AUTHOR_FILE_C, AUTHOR_VM_C>(
@@ -333,14 +337,15 @@ pub async fn run(module: Option<&[u8]>) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut author_io_d,
-                    PrivateFs::new(author_d_terminal, &bus, &files::AUTHOR_OBJECTS),
+                    PrivateFs::new(author_d_terminal, bus, &files::AUTHOR_OBJECTS),
                 )
                 .await?;
             };
             async {
                 let file = author_d.recv::<Loan<AUTHOR_FILE_D>>().await?;
                 async {
-                    quality::author::<SECTION_D, AUTHOR_D>(&mut author_d, section_d, &bus).await?;
+                    quality::author::<SECTION_D, AUTHOR_D>(&mut author_d, section_d, &simulator)
+                        .await?;
                 };
                 async {
                     files::author::<SECTION_D, AUTHOR_FILE_D, AUTHOR_VM_D>(
@@ -359,7 +364,7 @@ pub async fn run(module: Option<&[u8]>) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut analyst_io,
-                    PrivateFs::new(analyst_terminal, &bus, &files::ANALYST_OBJECTS),
+                    PrivateFs::new(analyst_terminal, bus, &files::ANALYST_OBJECTS),
                 )
                 .await?;
             };
@@ -368,16 +373,16 @@ pub async fn run(module: Option<&[u8]>) -> ShellResult<()> {
                 async {
                     let [mut a, mut b, mut c, mut d] = analyst.par()?;
                     async {
-                        preparation::insert::<SECTION_A>(&mut a, &bus).await?;
+                        preparation::insert::<SECTION_A>(&mut a, &simulator).await?;
                     };
                     async {
-                        preparation::insert::<SECTION_B>(&mut b, &bus).await?;
+                        preparation::insert::<SECTION_B>(&mut b, &simulator).await?;
                     };
                     async {
-                        preparation::insert::<SECTION_C>(&mut c, &bus).await?;
+                        preparation::insert::<SECTION_C>(&mut c, &simulator).await?;
                     };
                     async {
-                        preparation::insert::<SECTION_D>(&mut d, &bus).await?;
+                        preparation::insert::<SECTION_D>(&mut d, &simulator).await?;
                     };
                     Ok::<(), crate::shell::ShellError>(())
                 };
@@ -393,7 +398,7 @@ pub async fn run(module: Option<&[u8]>) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut review_io,
-                    PrivateFs::new(reviewer_terminal, &bus, &files::REVIEW_OBJECTS),
+                    PrivateFs::new(reviewer_terminal, bus, &files::REVIEW_OBJECTS),
                 )
                 .await?;
             };
@@ -402,16 +407,16 @@ pub async fn run(module: Option<&[u8]>) -> ShellResult<()> {
                 async {
                     let [mut a, mut b, mut c, mut d] = reviewer.par()?;
                     async {
-                        quality::review::<SECTION_A>(&mut a, &bus).await?;
+                        quality::review::<SECTION_A>(&mut a, &simulator).await?;
                     };
                     async {
-                        quality::review::<SECTION_B>(&mut b, &bus).await?;
+                        quality::review::<SECTION_B>(&mut b, &simulator).await?;
                     };
                     async {
-                        quality::review::<SECTION_C>(&mut c, &bus).await?;
+                        quality::review::<SECTION_C>(&mut c, &simulator).await?;
                     };
                     async {
-                        quality::review::<SECTION_D>(&mut d, &bus).await?;
+                        quality::review::<SECTION_D>(&mut d, &simulator).await?;
                     };
                     Ok::<(), crate::shell::ShellError>(())
                 };
@@ -427,14 +432,14 @@ pub async fn run(module: Option<&[u8]>) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut editor_io,
-                    PrivateFs::new(editor_terminal, &bus, &EDITOR_OBJECTS),
+                    PrivateFs::new(editor_terminal, bus, &EDITOR_OBJECTS),
                 )
                 .await?;
             };
             async {
                 let file = editor.recv::<Loan<EDITOR_FILE>>().await?;
                 async {
-                    publication::run(&mut editor, &bus).await?;
+                    publication::run(&mut editor, &simulator).await?;
                 };
                 async {
                     super::editor_guest(module, file, editor_vm).await?;
@@ -444,15 +449,14 @@ pub async fn run(module: Option<&[u8]>) -> ShellResult<()> {
             Ok(())
         }
         .await;
-        bus.observe(json!({"type":"protocol_checkpoint","producer":0,
-            "session":SESSION,"checkpoint":observations.checkpoint()}));
+        bus.checkpoint(SESSION, observations.checkpoint());
         result
     };
-    let result = hibana_runtime::race(participants, io.run(&bus)).await;
+    let result = hibana_runtime::race(participants, io.run(bus)).await;
     let message = match &result {
         Ok(()) => json!({"type":"run_result","status":"complete"}),
         Err(error) => json!({"type":"run_result","status":"failed","error":error.to_string()}),
     };
-    io.emit(&bus, message).await?;
+    io.emit(bus, message).await?;
     result
 }

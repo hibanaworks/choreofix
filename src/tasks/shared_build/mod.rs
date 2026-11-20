@@ -19,7 +19,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
     use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasiGuestStorage};
 
     let session = SessionId::new(SESSION);
-    let (bus, mut io, [a_terminal, b_terminal, integrator_terminal]) = Bus::open(
+    let (mut connection, mut io, [a_terminal, b_terminal, integrator_terminal]) = Bus::open(
         ["BUILDER_A", "BUILDER_B", "INTEGRATOR"],
         [
             (session, CORE_LIB),
@@ -29,16 +29,12 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             (session, INTEGRATOR_FILE),
         ],
     );
+    let (bus, simulator) = connection.split();
     let result = hibana_runtime::race(
         async {
             let p = programs();
-            bus.observe(p.observation());
-            let capture = |row| {
-                bus.observe(serde_json::json!({
-                    "type":"protocol_capture","producer":0,
-                    "records":[crate::imp::projection::record(row)]
-                }))
-            };
+            bus.projected(p.observation());
+            let capture = |row| bus.capture(row);
             let mut slab = vec![0; 2 * 1024 * 1024];
             let incoming_capacity = slab.len();
             let mut storage = SessionKitStorage::uninit();
@@ -86,13 +82,13 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                     localside::resources::run(&mut service, (core, types)).await?;
                 };
                 async {
-                    localside::builder::run(&mut a, &bus).await?;
+                    localside::builder::run(&mut a, &simulator).await?;
                 };
                 async {
-                    localside::builder::run(&mut b, &bus).await?;
+                    localside::builder::run(&mut b, &simulator).await?;
                 };
                 async {
-                    localside::integrator::run(&mut integrator, &bus).await?;
+                    localside::integrator::run(&mut integrator, &simulator).await?;
                 };
                 async {
                     let mut request = vec![0; crate::shell::GUEST_MEMORY_BYTES];
@@ -112,7 +108,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                     root.send::<crate::shell::global::Exit>(&status).await?;
                 };
                 async {
-                    private_io::run(&mut a_io, PrivateFs::new(a_terminal, &bus, &FILES[..1]))
+                    private_io::run(&mut a_io, PrivateFs::new(a_terminal, bus, &FILES[..1]))
                         .await?;
                 };
                 async {
@@ -138,7 +134,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 async {
                     private_io::run(
                         &mut b_io,
-                        PrivateFs::new(b_terminal, &bus, &[FILES[0], FILES[2]]),
+                        PrivateFs::new(b_terminal, bus, &[FILES[0], FILES[2]]),
                     )
                     .await?;
                 };
@@ -162,7 +158,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 async {
                     private_io::run(
                         &mut integrator_io,
-                        PrivateFs::new(integrator_terminal, &bus, &FILES[1..2]),
+                        PrivateFs::new(integrator_terminal, bus, &FILES[1..2]),
                     )
                     .await?;
                 };
@@ -170,26 +166,23 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 Ok::<(), ShellError>(())
             }
             .await;
-            bus.observe(serde_json::json!({
-                "type":"protocol_checkpoint","producer":0,"session":SESSION,
-                "checkpoint":observations.checkpoint()
-            }));
+            bus.checkpoint(SESSION, observations.checkpoint());
             result
         },
-        io.run(&bus),
+        io.run(bus),
     )
     .await;
     match &result {
         Ok(()) => {
             io.emit(
-                &bus,
+                bus,
                 serde_json::json!({"type":"run_result","status":"complete"}),
             )
             .await?
         }
         Err(error) => {
             io.emit(
-                &bus,
+                bus,
                 serde_json::json!({
                     "type":"run_result","status":"failed","error":error.to_string()
                 }),

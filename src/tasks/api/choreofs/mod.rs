@@ -17,17 +17,20 @@ use crate::{
 use hibana::runtime::{SessionKitStorage, ids::SessionId, resolver::ResolverRef};
 use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasiGuestStorage};
 #[hibana_runtime::scope]
-async fn run_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> ShellResult<()> {
+async fn run_guests(
+    module: &[u8],
+    (bus, simulator): (&Bus, &impl crate::shell::imp::service::Domain),
+    terminals: [Terminal; 3],
+) -> ShellResult<()> {
     use global::*;
     let p = programs();
-    bus.observe(p.observation());
+    bus.projected(p.observation());
     let ac = Validation::new();
     let bc = Validation::new();
     let tc = Validation::new();
     let result = super::imp::TestInput::default();
     let capture = |event| {
-        bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,
-            "records":[crate::imp::projection::record(event)]}));
+        bus.capture(event);
     };
     let mut slab = vec![0; 2 * 1024 * 1024];
     let mut storage = SessionKitStorage::<&InMemoryTransport>::uninit();
@@ -84,17 +87,21 @@ async fn run_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> Shell
         let backend_read = rv.enter(session, &p.backend_outcome_read)?;
         let [bterm, aterm, tterm] = terminals;
         async {
-            localside::admin::run(&mut admin, (admin_file, admin_close), (bus, &ac)).await?;
+            localside::admin::run(&mut admin, (admin_file, admin_close), (simulator, &ac)).await?;
         };
         async {
-            localside::backend::run(&mut backend, (backend_file, backend_close), (bus, &bc))
-                .await?;
+            localside::backend::run(
+                &mut backend,
+                (backend_file, backend_close),
+                (simulator, &bc),
+            )
+            .await?;
         };
         async {
             localside::tester::run(
                 &mut tester,
                 (tester_file, tester_close, admin_read, backend_read),
-                (bus, &tc, &result),
+                (simulator, &tc, &result),
             )
             .await?;
         };
@@ -220,15 +227,12 @@ async fn run_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> Shell
         Ok(())
     }
     .await;
-    bus.observe(
-        serde_json::json!({"type":"protocol_checkpoint","producer":0,
-        "session":session.raw(),"checkpoint":observations.checkpoint()}),
-    );
+    bus.checkpoint(session.raw(), observations.checkpoint());
     result
 }
 pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
     let session = SessionId::new(28);
-    let (bus, mut reader, terminals) = Bus::open(
+    let (mut connection, mut reader, terminals) = Bus::open(
         ["BACKEND_DEV", "DB_ADMIN", "TESTER"],
         [
             (session, global::DATABASE_RESOURCE),
@@ -245,19 +249,24 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             (session, global::BACKEND_OUTCOME_READ),
         ],
     );
-    let result = hibana_runtime::race(run_guests(module, &bus, terminals), reader.run(&bus)).await;
+    let (bus, simulator) = connection.split();
+    let result = hibana_runtime::race(
+        run_guests(module, (bus, &simulator), terminals),
+        reader.run(bus),
+    )
+    .await;
     match &result {
         Ok(()) => {
             reader
                 .emit(
-                    &bus,
+                    bus,
                     serde_json::json!({"type":"run_result","status":"complete"}),
                 )
                 .await?
         }
         Err(e) => reader
             .emit(
-                &bus,
+                bus,
                 serde_json::json!({"type":"run_result","status":"failed","error":e.to_string()}),
             )
             .await?,

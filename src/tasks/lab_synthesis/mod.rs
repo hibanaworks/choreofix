@@ -16,7 +16,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
     use global::*;
     use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasiGuestStorage};
     let session = SessionId::new(SESSION);
-    let (bus, mut io, [chem_terminal, bio_terminal, analyst_terminal]) = Bus::open(
+    let (mut connection, mut io, [chem_terminal, bio_terminal, analyst_terminal]) = Bus::open(
         ["CHEMIST", "BIOLOGIST", "ANALYST"],
         [
             (session, SPECTROMETER),
@@ -26,13 +26,11 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             (session, ANALYST_FILE),
         ],
     );
+    let (bus, simulator) = connection.split();
     let participants = async {
         let p = programs();
-        bus.observe(p.observation());
-        let capture = |event| {
-            bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,
-            "records":[crate::imp::projection::record(event)]}))
-        };
+        bus.projected(p.observation());
+        let capture = |event| bus.capture(event);
         let mut slab = vec![0; 2 * 1024 * 1024];
         let incoming_capacity = slab.len();
         let mut storage = SessionKitStorage::uninit();
@@ -80,16 +78,16 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 localside::chemist::run(&mut chemist).await?;
             };
             async {
-                localside::biologist::run(&mut biologist, &bus).await?;
+                localside::biologist::run(&mut biologist, &simulator).await?;
             };
             async {
                 localside::analyst::run(&mut analyst).await?;
             };
             async {
-                localside::spectrometer::run(&mut spec_owner, &bus).await?;
+                localside::spectrometer::run(&mut spec_owner, &simulator).await?;
             };
             async {
-                localside::centrifuge::run(&mut cent_owner, &bus).await?;
+                localside::centrifuge::run(&mut cent_owner, &simulator).await?;
             };
             async {
                 file_metadata::run(&mut chem_data, chem_file, CHEM_FILES).await?;
@@ -138,7 +136,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut chem_io,
-                    PrivateFs::new(chem_terminal, &bus, &CHEM_FILES),
+                    PrivateFs::new(chem_terminal, bus, &CHEM_FILES),
                 )
                 .await?;
             };
@@ -172,8 +170,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 root.send::<Exit>(&status).await?;
             };
             async {
-                private_io::run(&mut bio_io, PrivateFs::new(bio_terminal, &bus, &BIO_FILES))
-                    .await?;
+                private_io::run(&mut bio_io, PrivateFs::new(bio_terminal, bus, &BIO_FILES)).await?;
             };
             async {
                 let mut result_0 = vec![0; incoming_capacity];
@@ -202,20 +199,20 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut analyst_io,
-                    PrivateFs::new(analyst_terminal, &bus, &ANALYST_FILES),
+                    PrivateFs::new(analyst_terminal, bus, &ANALYST_FILES),
                 )
                 .await?;
             };
             Ok(())
         }
         .await;
-        bus.observe(serde_json::json!({"type":"protocol_checkpoint","producer":0,"session":SESSION,"checkpoint":observations.checkpoint()}));
+        bus.checkpoint(SESSION, observations.checkpoint());
         result
     };
-    let result = hibana_runtime::race(participants, io.run(&bus)).await;
+    let result = hibana_runtime::race(participants, io.run(bus)).await;
     match &result{
-        Ok(())=>io.emit(&bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
-        Err(error)=>io.emit(&bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
+        Ok(())=>io.emit(bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
+        Err(error)=>io.emit(bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
     }
     result
 }

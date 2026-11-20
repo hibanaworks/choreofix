@@ -15,24 +15,26 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
     use global::*;
     use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasiGuestStorage};
     let session = SessionId::new(6);
-    let (bus, mut io, [a_terminal, b_terminal, review_terminal]) = Bus::open(
+    let (mut connection, mut io, [a_terminal, b_terminal, review_terminal]) = Bus::open(
         ["DEVELOPER_A", "DEVELOPER_B", "REVIEWER"],
         [
             (session, REPO),
             (session, A_FILE),
             (session, B_FILE),
             (session, A_REVIEW_FILE),
+            (session, REVIEW_A),
             (session, B_REVIEW_FILE),
+            (session, REVIEW_B),
         ],
     );
+
+    let (bus, simulator) = connection.split();
     let participants = async {
         let p = programs();
-        bus.observe(p.observation());
+        bus.projected(p.observation());
         let actual_a = super::imp::ReviewInput::default();
         let actual_b = super::imp::ReviewInput::default();
-        let capture = |event| {
-            bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,"records":[crate::imp::projection::record(event)]}))
-        };
+        let capture = |event| bus.capture(event);
         let mut slab = vec![0; 2 * 1024 * 1024];
         let incoming_capacity = slab.len();
         let mut storage = SessionKitStorage::<&crate::imp::transport::InMemoryTransport>::uninit();
@@ -40,12 +42,12 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
         rv.observe(&capture);
         let observations = rv.tap();
         rv.set_resolver(
-            &p.review_a,
+            &p.review_owner_a,
             ResolverRef::<DECIDE_A>::decision_state(&actual_a, super::imp::decide),
         )
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
         rv.set_resolver(
-            &p.review_b,
+            &p.review_owner_b,
             ResolverRef::<DECIDE_B>::decision_state(&actual_b, super::imp::decide),
         )
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
@@ -53,8 +55,10 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             let mut repo_owner = rv.enter(session, &p.repo_owner)?;
             let mut repo_init = rv.enter(session, &p.repo_init)?;
             let repository = rv.enter(session, &p.repo)?;
-            let mut review_a = rv.enter(session, &p.review_a)?;
-            let mut review_b = rv.enter(session, &p.review_b)?;
+            let mut review_owner_a = rv.enter(session, &p.review_owner_a)?;
+            let review_a = rv.enter(session, &p.review_a)?;
+            let mut review_owner_b = rv.enter(session, &p.review_owner_b)?;
+            let review_b = rv.enter(session, &p.review_b)?;
             let mut a_io = rv.enter(session, &p.a_io)?;
             let mut b_io = rv.enter(session, &p.b_io)?;
             let mut review_io = rv.enter(session, &p.review_io)?;
@@ -71,7 +75,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             let b_review_file = rv.enter(session, &p.b_review_file)?;
             repo_init.send::<RepoLoan>(repository).await?;
             async {
-                localside::repo::run(&mut repo_owner, &bus).await?;
+                localside::repo::run(&mut repo_owner, &simulator).await?;
             };
             async {
                 file_metadata::run(&mut a_data, a_file, DEVELOPER_FILES).await?;
@@ -96,10 +100,12 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             }
             .await?;
             async {
-                localside::reviewer::run_a(&mut review_a, (&bus, &actual_a)).await?;
+                localside::reviewer::run_a(&mut review_owner_a, review_a, (&simulator, &actual_a))
+                    .await?;
             };
             async {
-                localside::reviewer::run_b(&mut review_b, (&bus, &actual_b)).await?;
+                localside::reviewer::run_b(&mut review_owner_b, review_b, (&simulator, &actual_b))
+                    .await?;
             };
             async {
                 let mut implementation = vec![0; crate::shell::GUEST_MEMORY_BYTES];
@@ -128,11 +134,8 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 root.send::<crate::shell::global::Exit>(&status).await?;
             };
             async {
-                private_io::run(
-                    &mut a_io,
-                    PrivateFs::new(a_terminal, &bus, &DEVELOPER_FILES),
-                )
-                .await?;
+                private_io::run(&mut a_io, PrivateFs::new(a_terminal, bus, &DEVELOPER_FILES))
+                    .await?;
             };
             async {
                 let mut implementation = vec![0; crate::shell::GUEST_MEMORY_BYTES];
@@ -161,11 +164,8 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 root.send::<crate::shell::global::Exit>(&status).await?;
             };
             async {
-                private_io::run(
-                    &mut b_io,
-                    PrivateFs::new(b_terminal, &bus, &DEVELOPER_FILES),
-                )
-                .await?;
+                private_io::run(&mut b_io, PrivateFs::new(b_terminal, bus, &DEVELOPER_FILES))
+                    .await?;
             };
             async {
                 let mut a_request = vec![0; crate::shell::GUEST_MEMORY_BYTES];
@@ -197,20 +197,20 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut review_io,
-                    PrivateFs::new(review_terminal, &bus, &REVIEW_FILES),
+                    PrivateFs::new(review_terminal, bus, &REVIEW_FILES),
                 )
                 .await?;
             };
             Ok(())
         }
         .await;
-        bus.observe(serde_json::json!({"type":"protocol_checkpoint","producer":0,"session":session.raw(),"checkpoint":observations.checkpoint()}));
+        bus.checkpoint(session.raw(), observations.checkpoint());
         result
     };
-    let result = hibana_runtime::race(participants, io.run(&bus)).await;
+    let result = hibana_runtime::race(participants, io.run(bus)).await;
     match &result {
-        Ok(()) => io.emit(&bus, serde_json::json!({"type":"run_result","status":"complete"})).await?,
-        Err(error) => io.emit(&bus, serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
+        Ok(()) => io.emit(bus, serde_json::json!({"type":"run_result","status":"complete"})).await?,
+        Err(error) => io.emit(bus, serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
     }
     result
 }

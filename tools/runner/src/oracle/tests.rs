@@ -1,3 +1,6 @@
+#[path = "../../../../src/tasks/wafer_fabrication/spot_checks.rs"]
+mod spot_checks;
+
 use super::*;
 use std::collections::BTreeSet;
 
@@ -874,10 +877,10 @@ impl choreofix::shell::imp::service::Domain for Simulator {
 
 #[hibana_runtime::scope]
 async fn wafer_trial(etch_first: bool) -> Result<()> {
+    use self::spot_checks::*;
     use choreofix::{
         imp::projection::{record, rows},
         shell::{global::Loan, imp::bus::Bus},
-        tasks::wafer_fabrication::spot_checks::*,
     };
     use hibana::runtime::{
         SessionKitStorage,

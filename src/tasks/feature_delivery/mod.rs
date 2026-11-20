@@ -32,7 +32,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
     use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasiGuestStorage};
     let session = SessionId::new(SESSION);
     let (
-        bus,
+        mut connection,
         mut io,
         [
             a_terminal,
@@ -66,14 +66,13 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             (session, CI_FILE),
         ],
     );
+    let (bus, simulator) = connection.split();
     let participants = async {
         let p = programs();
-        bus.observe(p.observation());
+        bus.projected(p.observation());
         let review_a_actual = Cell::new(None);
         let review_b_actual = Cell::new(None);
-        let capture = |event| {
-            bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,"records":[crate::imp::projection::record(event)]}))
-        };
+        let capture = |event| bus.capture(event);
         let mut slab = vec![0; 2 * 1024 * 1024];
         let incoming_capacity = slab.len();
         let mut storage = SessionKitStorage::<&crate::imp::transport::InMemoryTransport>::uninit();
@@ -175,21 +174,21 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             }
             .await?;
             async {
-                localside::repository::run(&mut repo_owner, &bus).await?;
+                localside::repository::run(&mut repo_owner, &simulator).await?;
             };
             async {
                 localside::reviews::initial(
                     &mut review_initial,
-                    (&bus, &review_a_actual, &review_b_actual),
+                    (&simulator, &review_a_actual, &review_b_actual),
                 )
                 .await?;
             };
             async {
-                localside::tests::run(&mut test_owner, &bus).await?;
+                localside::tests::run(&mut test_owner, &simulator).await?;
             };
             async {
                 let mut build = ci_owner.recv::<BuildLoan>().await?;
-                localside::ci::run(&mut build, &bus).await?;
+                localside::ci::run(&mut build, &simulator).await?;
             };
             async {
                 file_metadata::run(&mut a_merge_data, a_merge_file, FEATURE_FILES).await?;
@@ -198,7 +197,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 .recv::<crate::shell::global::Loan<A_MERGE_FILE>>()
                 .await?;
             async {
-                localside::reviews::feature_a(&mut review_repair_a, (&bus, &review_a_actual))
+                localside::reviews::feature_a(&mut review_repair_a, (&simulator, &review_a_actual))
                     .await?;
             };
             async {
@@ -208,7 +207,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 .recv::<crate::shell::global::Loan<B_MERGE_FILE>>()
                 .await?;
             async {
-                localside::reviews::feature_b(&mut review_repair_b, (&bus, &review_b_actual))
+                localside::reviews::feature_b(&mut review_repair_b, (&simulator, &review_b_actual))
                     .await?;
             };
             async {
@@ -298,11 +297,8 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 root.send::<crate::shell::global::Exit>(&status).await?;
             };
             async {
-                private_io::run(
-                    &mut a_io,
-                    PrivateFs::new(a_terminal, &bus, &DEVELOPER_FILES),
-                )
-                .await?;
+                private_io::run(&mut a_io, PrivateFs::new(a_terminal, bus, &DEVELOPER_FILES))
+                    .await?;
             };
             async {
                 let mut request = vec![0; crate::shell::GUEST_MEMORY_BYTES];
@@ -347,11 +343,8 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 root.send::<crate::shell::global::Exit>(&status).await?;
             };
             async {
-                private_io::run(
-                    &mut b_io,
-                    PrivateFs::new(b_terminal, &bus, &DEVELOPER_FILES),
-                )
-                .await?;
+                private_io::run(&mut b_io, PrivateFs::new(b_terminal, bus, &DEVELOPER_FILES))
+                    .await?;
             };
             async {
                 let mut request_a = vec![0; crate::shell::GUEST_MEMORY_BYTES];
@@ -395,7 +388,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut review_io,
-                    PrivateFs::new(review_terminal, &bus, &REVIEW_FILES),
+                    PrivateFs::new(review_terminal, bus, &REVIEW_FILES),
                 )
                 .await?;
             };
@@ -440,7 +433,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut test_io,
-                    PrivateFs::new(test_terminal, &bus, &TEST_FILES),
+                    PrivateFs::new(test_terminal, bus, &TEST_FILES),
                 )
                 .await?;
             };
@@ -474,18 +467,18 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 root.send::<crate::shell::global::Exit>(&status).await?;
             };
             async {
-                private_io::run(&mut ci_io, PrivateFs::new(ci_terminal, &bus, &CI_FILES)).await?;
+                private_io::run(&mut ci_io, PrivateFs::new(ci_terminal, bus, &CI_FILES)).await?;
             };
             Ok(())
         }
         .await;
-        bus.observe(serde_json::json!({"type":"protocol_checkpoint","producer":0,"session":SESSION,"checkpoint":observations.checkpoint()}));
+        bus.checkpoint(SESSION, observations.checkpoint());
         result
     };
-    let result = hibana_runtime::race(participants, io.run(&bus)).await;
+    let result = hibana_runtime::race(participants, io.run(bus)).await;
     match &result {
-        Ok(()) => io.emit(&bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
-        Err(error) => io.emit(&bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
+        Ok(()) => io.emit(bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
+        Err(error) => io.emit(bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
     }
     result
 }

@@ -1,9 +1,12 @@
 //! Actual tool Endpoints and production receiver, not full 11M qualification.
+#[path = "../../../src/imp/projection.rs"]
+pub mod projection;
 #[path = "../../../src/shell/mod.rs"]
 pub mod shell;
 #[path = "../../../src/imp/transport.rs"]
 pub(crate) mod transport;
 pub(crate) mod imp {
+    pub(crate) use crate::projection;
     pub(crate) use crate::transport;
 }
 #[path = "../../../src/tasks/manufacturing_rework/mod.rs"]
@@ -510,7 +513,9 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
     for order in orders {
         for (profile, (arrivals, durations, expected_maximum)) in profiles.iter().enumerate() {
             let session = SessionId::new(SESSION);
-            let (bus, _, _) = Bus::open(data::AGENTS, [(session, TOOL_0), (session, TOOL_1)]);
+            let (mut connection, _, _) =
+                Bus::open(data::AGENTS, [(session, TOOL_0), (session, TOOL_1)]);
+            let (bus, simulator) = connection.split();
             let inputs = [const { Cell::new(Value::Null) }; 5];
             let next = (&inputs[0], &inputs[1]);
             let mut host_slab = vec![0; 1024 * 1024];
@@ -575,9 +580,13 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
             let execution = hibana_runtime::race(
                 async {
                     async {
-                        localside::tool_depot::run(&mut depot, (tool0, tool1), (&bus, &inputs))
-                            .await
-                            .map_err(|error| ShellError::message(format!("depot: {error}")))?;
+                        localside::tool_depot::run(
+                            &mut depot,
+                            (tool0, tool1),
+                            (&simulator, &inputs),
+                        )
+                        .await
+                        .map_err(|error| ShellError::message(format!("depot: {error}")))?;
                     };
                     async {
                         bus.fixture_peer::<3>(&effects, &["do_job"]).await?;
@@ -769,7 +778,9 @@ async fn production_receiver_rejects_changed_tool_requests_before_effect() -> Sh
         b"null".as_slice(),
     ] {
         let session = SessionId::new(SESSION);
-        let (bus, _, _) = Bus::open(data::AGENTS, [(session, TOOL_0), (session, TOOL_1)]);
+        let (mut connection, _, _) =
+            Bus::open(data::AGENTS, [(session, TOOL_0), (session, TOOL_1)]);
+        let (bus, simulator) = connection.split();
         let inputs = [const { Cell::new(Value::Null) }; 5];
         let mut host_slab = vec![0; 1024 * 1024];
         let mut caller_slab = vec![0; 1024 * 1024];
@@ -797,7 +808,8 @@ async fn production_receiver_rejects_changed_tool_requests_before_effect() -> Sh
         let error = hibana_runtime::race(
             async {
                 async {
-                    localside::tool_depot::run(&mut depot, (tool0, tool1), (&bus, &inputs)).await?;
+                    localside::tool_depot::run(&mut depot, (tool0, tool1), (&simulator, &inputs))
+                        .await?;
                 };
                 async {
                     bus.fixture_peer::<1>(&effects, &["do_job"]).await?;

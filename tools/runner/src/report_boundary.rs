@@ -648,7 +648,10 @@ async fn run(cases: Vec<Case>) -> Result<()> {
             let events = result["score"]["events"]
                 .as_array()
                 .ok_or("simulator events")?;
-            for (author, chunk) in [first, second].into_iter().zip(events[..6].chunks_exact(3)) {
+            for (author, chunk) in [first, second]
+                .into_iter()
+                .zip(events[..6].as_chunks::<3>().0)
+            {
                 for (event, tool) in chunk.iter().zip(tools) {
                     assert_eq!(event["agent"], author);
                     assert_eq!(event["tool"], tool);

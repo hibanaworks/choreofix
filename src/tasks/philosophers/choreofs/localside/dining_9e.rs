@@ -9,7 +9,6 @@ use crate::{
             bus::{Bus, Terminal},
             file_data::FileData,
             private_fs::PrivateFs,
-            service::Domain,
         },
         localside::private_io,
     },
@@ -20,14 +19,16 @@ use hibana_wasip1_runtime::{
 };
 
 #[hibana_runtime::scope]
-pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> ShellResult<()> {
+pub(crate) async fn run(
+    module: &[u8],
+    (bus, simulator): (&Bus, &impl crate::shell::imp::service::Domain),
+    terminals: [Terminal; 3],
+) -> ShellResult<()> {
     use global::*;
     use identity::roles::*;
     let programs = project_9e();
-    bus.observe(programs.observation());
-    let capture = |event| {
-        bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,"records":[crate::imp::projection::record(event)]}))
-    };
+    bus.projected(programs.observation());
+    let capture = |event| bus.capture(event);
     let a_input = crate::shell::imp::service::Validation::new();
     let b_input = crate::shell::imp::service::Validation::new();
     let c_input = crate::shell::imp::service::Validation::new();
@@ -187,7 +188,7 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
                         }
                         identity::THINK_REQUEST => {
                             let arguments = branch.recv::<Think>().await?;
-                            let result = bus
+                            let result = simulator
                                 .execute(identity::AGENTS[0], "think", arguments)
                                 .await
                                 .map_err(ShellError::message)?;
@@ -370,7 +371,7 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
                                 ));
                             }
                             let agent = identity::AGENTS[usize::from(A % 7)];
-                            let result = bus
+                            let result = simulator
                                 .execute(agent, "eat", admitted.into_value())
                                 .await
                                 .map_err(ShellError::message)?;
@@ -531,7 +532,7 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
                         }
                         identity::THINK_REQUEST => {
                             let arguments = branch.recv::<Think>().await?;
-                            let result = bus
+                            let result = simulator
                                 .execute(identity::AGENTS[1], "think", arguments)
                                 .await
                                 .map_err(ShellError::message)?;
@@ -714,7 +715,7 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
                                 ));
                             }
                             let agent = identity::AGENTS[usize::from(B % 7)];
-                            let result = bus
+                            let result = simulator
                                 .execute(agent, "eat", admitted.into_value())
                                 .await
                                 .map_err(ShellError::message)?;
@@ -875,7 +876,7 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
                         }
                         identity::THINK_REQUEST => {
                             let arguments = branch.recv::<Think>().await?;
-                            let result = bus
+                            let result = simulator
                                 .execute(identity::AGENTS[2], "think", arguments)
                                 .await
                                 .map_err(ShellError::message)?;
@@ -1058,7 +1059,7 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
                                 ));
                             }
                             let agent = identity::AGENTS[usize::from(C % 7)];
-                            let result = bus
+                            let result = simulator
                                 .execute(agent, "eat", admitted.into_value())
                                 .await
                                 .map_err(ShellError::message)?;
@@ -1149,6 +1150,6 @@ pub(crate) async fn run(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> S
         Ok(())
     }
     .await;
-    bus.observe(serde_json::json!({"type":"protocol_checkpoint","producer":0,"session":session.raw(),"checkpoint":observations.checkpoint()}));
+    bus.checkpoint(session.raw(), observations.checkpoint());
     result
 }

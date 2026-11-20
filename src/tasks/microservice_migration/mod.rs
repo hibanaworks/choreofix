@@ -86,7 +86,7 @@ devops_data:DEVOPS_DATA);
 pub(super) async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
     let session = SessionId::new(SESSION);
     let (
-        bus,
+        mut connection,
         mut io,
         [
             architect_terminal,
@@ -124,12 +124,11 @@ pub(super) async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
         ]
         .map(|role| (session, role)),
     );
+    let (bus, simulator) = connection.split();
     let trial = async {
         let programs = Programs::new();
-        bus.observe(programs.observation());
-        let capture = |event| {
-            bus.observe(json!({"type":"protocol_capture","producer":0,"records":[projection::record(event)]}))
-        };
+        bus.projected(programs.observation());
+        let capture = |event| bus.capture(event);
         let mut slab = vec![0; 2 * 1024 * 1024];
         let mut storage = SessionKitStorage::uninit();
         let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
@@ -184,31 +183,37 @@ pub(super) async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             let devops_file = rv.enter(session, &programs.devops_file)?;
             let devops_vm = rv.enter(session, &programs.devops_vm)?;
             let mut devops_io = rv.enter(session, &programs.devops_io)?;
-            async { architect(&mut architect_side, staging, &bus).await };
-            async { schemas(&mut schema_side, &bus).await };
+            async { architect(&mut architect_side, staging, &simulator).await };
+            async { schemas(&mut schema_side, &simulator).await };
             async { file_metadata::run(&mut devops_data, devops_file, DEVOPS_FILES).await };
             async {
                 private_io::run(
                     &mut devops_io,
-                    PrivateFs::new(devops_terminal, &bus, &DEVOPS_FILES),
+                    PrivateFs::new(devops_terminal, bus, &DEVOPS_FILES),
                 )
                 .await
             };
             async { devops_guest(wash, devops_vm).await };
-            async { developer(&mut developer_a, service_a, &bus).await };
-            async { reviewer::<REVIEWER_A, DEVELOPER_A, SERVICE_A>(&mut reviewer_a, &bus).await };
+            async { developer(&mut developer_a, service_a, &simulator).await };
             async {
-                let _tested = tester::<TESTER_A, SERVICE_A>(&mut tester_a, &bus).await?;
+                reviewer::<REVIEWER_A, DEVELOPER_A, SERVICE_A>(&mut reviewer_a, &simulator).await
             };
-            async { developer(&mut developer_b, service_b, &bus).await };
-            async { reviewer::<REVIEWER_B, DEVELOPER_B, SERVICE_B>(&mut reviewer_b, &bus).await };
             async {
-                let _tested = tester::<TESTER_B, SERVICE_B>(&mut tester_b, &bus).await?;
+                let _tested = tester::<TESTER_A, SERVICE_A>(&mut tester_a, &simulator).await?;
             };
-            async { developer(&mut developer_c, service_c, &bus).await };
-            async { reviewer::<REVIEWER_C, DEVELOPER_C, SERVICE_C>(&mut reviewer_c, &bus).await };
+            async { developer(&mut developer_b, service_b, &simulator).await };
             async {
-                let _tested = tester::<TESTER_C, SERVICE_C>(&mut tester_c, &bus).await?;
+                reviewer::<REVIEWER_B, DEVELOPER_B, SERVICE_B>(&mut reviewer_b, &simulator).await
+            };
+            async {
+                let _tested = tester::<TESTER_B, SERVICE_B>(&mut tester_b, &simulator).await?;
+            };
+            async { developer(&mut developer_c, service_c, &simulator).await };
+            async {
+                reviewer::<REVIEWER_C, DEVELOPER_C, SERVICE_C>(&mut reviewer_c, &simulator).await
+            };
+            async {
+                let _tested = tester::<TESTER_C, SERVICE_C>(&mut tester_c, &simulator).await?;
             };
             async {
                 let _environment = test_environment(&mut env_owner, environment).await?;
@@ -219,43 +224,31 @@ pub(super) async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut architect_io,
-                    PrivateFs::new(architect_terminal, &bus, &ARCHITECT_FILES),
+                    PrivateFs::new(architect_terminal, bus, &ARCHITECT_FILES),
                 )
                 .await
             };
             async { architect_guest(wash, architect_vm).await };
             async { file_metadata::run(&mut a_data, a_file, DEVELOPER_FILES).await };
             async {
-                private_io::run(
-                    &mut a_io,
-                    PrivateFs::new(a_terminal, &bus, &DEVELOPER_FILES),
-                )
-                .await
+                private_io::run(&mut a_io, PrivateFs::new(a_terminal, bus, &DEVELOPER_FILES)).await
             };
             async { developer_guest::<A_VM, DEVELOPER_A_FILE, DEVELOPER_A>(wash, a_vm).await };
             async { file_metadata::run(&mut b_data, b_file, DEVELOPER_FILES).await };
             async {
-                private_io::run(
-                    &mut b_io,
-                    PrivateFs::new(b_terminal, &bus, &DEVELOPER_FILES),
-                )
-                .await
+                private_io::run(&mut b_io, PrivateFs::new(b_terminal, bus, &DEVELOPER_FILES)).await
             };
             async { developer_guest::<B_VM, DEVELOPER_B_FILE, DEVELOPER_B>(wash, b_vm).await };
             async { file_metadata::run(&mut c_data, c_file, DEVELOPER_FILES).await };
             async {
-                private_io::run(
-                    &mut c_io,
-                    PrivateFs::new(c_terminal, &bus, &DEVELOPER_FILES),
-                )
-                .await
+                private_io::run(&mut c_io, PrivateFs::new(c_terminal, bus, &DEVELOPER_FILES)).await
             };
             async { developer_guest::<C_VM, DEVELOPER_C_FILE, DEVELOPER_C>(wash, c_vm).await };
             async { file_metadata::run(&mut review_data, review_file, REVIEW_FILES).await };
             async {
                 private_io::run(
                     &mut review_io,
-                    PrivateFs::new(review_terminal, &bus, &REVIEW_FILES),
+                    PrivateFs::new(review_terminal, bus, &REVIEW_FILES),
                 )
                 .await
             };
@@ -279,7 +272,7 @@ pub(super) async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut test_io,
-                    PrivateFs::new(test_terminal, &bus, &TEST_FILES),
+                    PrivateFs::new(test_terminal, bus, &TEST_FILES),
                 )
                 .await
             };
@@ -287,16 +280,16 @@ pub(super) async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             Ok(())
         }
         .await;
-        bus.observe(json!({"type":"protocol_checkpoint","producer":0,"session":SESSION,"checkpoint":tap.checkpoint()}));
+        bus.checkpoint(SESSION, tap.checkpoint());
         result
     };
-    let result = hibana_runtime::race(trial, io.run(&bus)).await;
+    let result = hibana_runtime::race(trial, io.run(bus)).await;
     let report = match &result {
         Ok(()) => {
             json!({"type":"run_result","status":"complete","scope":"preparation_tests_and_schema"})
         }
         Err(e) => json!({"type":"run_result","status":"failed","error":e.to_string()}),
     };
-    io.emit(&bus, report).await?;
+    io.emit(bus, report).await?;
     result
 }

@@ -23,6 +23,29 @@ impl Call {
     }
 }
 
+fn role(projection: &Value, name: &str) -> Result<u64> {
+    projection["compiled"]["roles"][name]
+        .as_u64()
+        .ok_or_else(|| format!("missing compiled review role {name}").into())
+}
+
+fn business_roles(projection: &Value) -> Result<BTreeSet<u64>> {
+    [
+        "REPO",
+        "REVIEW_A",
+        "REVIEW_B",
+        "REVIEW_OWNER_A",
+        "REVIEW_OWNER_B",
+        "A_FILE",
+        "B_FILE",
+        "A_REVIEW_FILE",
+        "B_REVIEW_FILE",
+    ]
+    .into_iter()
+    .map(|name| role(projection, name))
+    .collect()
+}
+
 fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
     if projection["compiled"]["task"] != "6E" {
         return Err("review compiled protocol task".into());
@@ -144,6 +167,8 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         scored.remove(at);
     }
 
+    let repo = role(projection, "REPO")?;
+    let business = business_roles(projection)?;
     let mut used_calls = BTreeSet::new();
     let mut checked_json = BTreeSet::new();
     let repository_calls = calls
@@ -162,9 +187,17 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
             "notification_feature" | "dev_b_feature" => 1,
             _ => return Err("unknown operation target".into()),
         };
-        let file = 32 + feature;
-        let reviewer = 2 + feature;
-        let review_file = 34 + feature;
+        let (file, reviewer, owner, review_file) = if feature == 0 {
+            ("A_FILE", "REVIEW_A", "REVIEW_OWNER_A", "A_REVIEW_FILE")
+        } else {
+            ("B_FILE", "REVIEW_B", "REVIEW_OWNER_B", "B_REVIEW_FILE")
+        };
+        let (file, reviewer, owner, review_file) = (
+            role(projection, file)?,
+            role(projection, reviewer)?,
+            role(projection, owner)?,
+            role(projection, review_file)?,
+        );
         let (result_at, result) = call.result()?;
         let next = calls
             .values()
@@ -177,8 +210,8 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
             .min()
             .unwrap_or(rows.len());
         let (from, to, request_label, reply_label) = match call.tool()? {
-            "implement_feature" => (file, 7, 200 + feature, 208 + feature),
-            "merge_code" => (file, 7, 202 + feature, 210 + feature),
+            "implement_feature" => (file, repo, 200 + feature, 208 + feature),
+            "merge_code" => (file, repo, 202 + feature, 210 + feature),
             "code_review" => (review_file, reviewer, 5 + feature, 5 + feature),
             _ => return Err("unknown effect".into()),
         };
@@ -207,7 +240,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                     return Err("implementation failed".into());
                 }
                 let ready = one(frames.values().filter(|f| {
-                    f.direction(7, reviewer)
+                    f.direction(repo, reviewer)
                         && u64::from(f.logical_label) == 5 + feature
                         && f.sent > result_at
                         && f.sent < next
@@ -242,7 +275,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                 }
                 let (impl_at, impl_result) = implementation.result()?;
                 let ready = one(frames.values().filter(|f| {
-                    f.direction(7, reviewer)
+                    f.direction(repo, reviewer)
                         && u64::from(f.logical_label) == 5 + feature
                         && f.sent > impl_at
                         && f.received.is_some_and(|at| at < call.emitted)
@@ -263,7 +296,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                     41
                 };
                 let approval = one(frames.values().filter(|f| {
-                    f.direction(reviewer, 7)
+                    f.direction(owner, repo)
                         && f.logical_label == label
                         && f.sent > result_at
                         && f.sent < next
@@ -273,7 +306,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                 let approved_at = approval.received()?;
                 checked_json.insert(approval.sent);
                 let feedback = one(frames.values().filter(|f| {
-                    f.direction(7, file)
+                    f.direction(repo, file)
                         && u64::from(f.logical_label) == file
                         && f.sent > approved_at
                         && f.sent < next
@@ -328,8 +361,8 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
             let Some(to) = f.identity["target"].as_u64() else {
                 return false;
             };
-            [2, 3, 7, 32, 33, 34, 35].contains(&from)
-                && [2, 3, 7, 32, 33, 34, 35].contains(&to)
+            business.contains(&from)
+                && business.contains(&to)
                 && serde_json::from_slice::<Value>(&f.bytes).is_ok_and(|v| v.is_object())
         })
         .map(|f| f.sent)
@@ -403,6 +436,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .as_array()
         .ok_or("participants")?;
     let journal = crate::journal::read(&rows, &labels, actors)?;
+    let business = business_roles(&projection)?;
     let selected = journal
         .frames
         .iter()
@@ -413,8 +447,8 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
             let Some(to) = f.identity["target"].as_u64() else {
                 return false;
             };
-            [2, 3, 7, 32, 33, 34, 35].contains(&from)
-                && [2, 3, 7, 32, 33, 34, 35].contains(&to)
+            business.contains(&from)
+                && business.contains(&to)
                 && serde_json::from_slice::<Value>(&f.bytes).is_ok_and(|v| v.is_object())
         })
         .map(|(&id, _)| id)

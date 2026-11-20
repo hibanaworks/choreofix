@@ -133,7 +133,7 @@ fn projection_value(programs: Vec<serde_json::Value>) -> serde_json::Value {
 pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
     let session = SessionId::new(SESSION);
     let (
-        bus,
+        mut connection,
         mut io,
         [
             front_terminal,
@@ -163,14 +163,11 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
         ]
         .map(|role| (session, role)),
     );
+    let (bus, simulator) = connection.split();
     let result = hibana_runtime::race(
         async {
             let source = with_shells();
-            let capture = |event| {
-                bus.observe(json!({
-                    "type":"protocol_capture", "producer":0, "records":[projection::record(event)]
-                }))
-            };
+            let capture = |event| bus.capture(event);
             let slab_bytes = 1024 * 1024;
             let mut slab = vec![0; slab_bytes];
             let mut storage = SessionKitStorage::uninit();
@@ -217,18 +214,22 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
                 let mut qa_io = attach!(QA_IO);
                 let mut release_io = attach!(RELEASE_IO);
                 let mut master_io = attach!(MASTER_IO);
-                bus.observe(projection_value(programs));
-                async { localside::registry_owner(&mut registry_owner, store, &bus).await };
+                bus.projected(projection_value(programs));
+                async { localside::registry_owner(&mut registry_owner, store, &simulator).await };
                 async { localside::master(&mut master, workspace).await };
                 async {
-                    localside::developer::<FRONTEND_DEV, FRONTEND_COMPONENT>(&mut frontend, &bus)
-                        .await
+                    localside::developer::<FRONTEND_DEV, FRONTEND_COMPONENT>(
+                        &mut frontend,
+                        &simulator,
+                    )
+                    .await
                 };
                 async {
-                    localside::developer::<BACKEND_DEV, BACKEND_COMPONENT>(&mut backend, &bus).await
+                    localside::developer::<BACKEND_DEV, BACKEND_COMPONENT>(&mut backend, &simulator)
+                        .await
                 };
-                async { localside::qa(&mut qa, test_env, &bus).await };
-                async { localside::release(&mut release, &bus).await };
+                async { localside::qa(&mut qa, test_env, &simulator).await };
+                async { localside::release(&mut release, &simulator).await };
                 async {
                     let branch = prod_owner.offer().await?;
                     match branch.label() {
@@ -254,7 +255,7 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
                 async {
                     private_io::run(
                         &mut front_io,
-                        PrivateFs::new(front_terminal, &bus, &files::DEVELOPER),
+                        PrivateFs::new(front_terminal, bus, &files::DEVELOPER),
                     )
                     .await?;
                 };
@@ -264,7 +265,7 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
                 async {
                     private_io::run(
                         &mut back_io,
-                        PrivateFs::new(back_terminal, &bus, &files::DEVELOPER),
+                        PrivateFs::new(back_terminal, bus, &files::DEVELOPER),
                     )
                     .await?;
                 };
@@ -272,7 +273,7 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
                     file_metadata::run(&mut qa_data, qa_file, files::QA).await?;
                 };
                 async {
-                    private_io::run(&mut qa_io, PrivateFs::new(qa_terminal, &bus, &files::QA))
+                    private_io::run(&mut qa_io, PrivateFs::new(qa_terminal, bus, &files::QA))
                         .await?;
                 };
                 async {
@@ -281,7 +282,7 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
                 async {
                     private_io::run(
                         &mut release_io,
-                        PrivateFs::new(release_terminal, &bus, &files::RELEASE),
+                        PrivateFs::new(release_terminal, bus, &files::RELEASE),
                     )
                     .await?;
                 };
@@ -291,7 +292,7 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
                 async {
                     private_io::run(
                         &mut master_io,
-                        PrivateFs::new(master_terminal, &bus, &files::MASTER),
+                        PrivateFs::new(master_terminal, bus, &files::MASTER),
                     )
                     .await?;
                 };
@@ -506,19 +507,16 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
                 Ok::<(), ShellError>(())
             }
             .await;
-            bus.observe(json!({
-                "type":"protocol_checkpoint", "producer":0, "session":session.raw(),
-                "checkpoint":observation.checkpoint()
-            }));
+            bus.checkpoint(session.raw(), observation.checkpoint());
             result
         },
-        io.run(&bus),
+        io.run(bus),
     )
     .await;
     let verdict = match &result {
         Ok(()) => json!({"type":"run_result","status":"complete"}),
         Err(error) => json!({"type":"run_result","status":"failed","error":error.to_string()}),
     };
-    io.emit(&bus, verdict).await?;
+    io.emit(bus, verdict).await?;
     result
 }

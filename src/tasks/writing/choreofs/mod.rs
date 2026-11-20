@@ -15,13 +15,15 @@ use hibana::runtime::{SessionKitStorage, ids::SessionId};
 use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasiGuestStorage};
 
 #[hibana_runtime::scope]
-async fn run_2e_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> ShellResult<()> {
+async fn run_2e_guests(
+    module: &[u8],
+    (bus, simulator): (&Bus, &impl crate::shell::imp::service::Domain),
+    terminals: [Terminal; 3],
+) -> ShellResult<()> {
     use global::roles2e::*;
     let programs = project_2e();
-    bus.observe(programs.observation());
-    let capture = |event| {
-        bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,"records":[crate::imp::projection::record(event)]}))
-    };
+    bus.projected(programs.observation());
+    let capture = |event| bus.capture(event);
     let mut slab = vec![0; 2 * 1024 * 1024];
     let incoming_capacity = slab.len();
     let mut storage = SessionKitStorage::uninit();
@@ -61,14 +63,16 @@ async fn run_2e_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> Sh
             file_metadata::run(&mut c_data, file_c, FILES).await?;
         };
         async {
-            localside::researcher::run::<A, INTRO_RESOURCE, METHODS_RESOURCE>(&mut a, bus).await?;
-        };
-        async {
-            localside::researcher::run::<B, METHODS_RESOURCE, RESULTS_RESOURCE>(&mut b, bus)
+            localside::researcher::run::<A, INTRO_RESOURCE, METHODS_RESOURCE>(&mut a, simulator)
                 .await?;
         };
         async {
-            localside::researcher::run::<C, INTRO_RESOURCE, RESULTS_RESOURCE>(&mut c, bus).await?;
+            localside::researcher::run::<B, METHODS_RESOURCE, RESULTS_RESOURCE>(&mut b, simulator)
+                .await?;
+        };
+        async {
+            localside::researcher::run::<C, INTRO_RESOURCE, RESULTS_RESOURCE>(&mut c, simulator)
+                .await?;
         };
         async {
             for _ in [A, B, C] {
@@ -276,17 +280,19 @@ async fn run_2e_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> Sh
         Ok::<(), ShellError>(())
     }
     .await;
-    bus.observe(serde_json::json!({"type":"protocol_checkpoint","producer":0,"session":SESSION,"checkpoint":observations.checkpoint()}));
+    bus.checkpoint(SESSION, observations.checkpoint());
     result
 }
 #[hibana_runtime::scope]
-async fn run_2m_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 5]) -> ShellResult<()> {
+async fn run_2m_guests(
+    module: &[u8],
+    (bus, simulator): (&Bus, &impl crate::shell::imp::service::Domain),
+    terminals: [Terminal; 5],
+) -> ShellResult<()> {
     use global::roles2m::*;
     let programs = project_2m();
-    bus.observe(programs.observation());
-    let capture = |event| {
-        bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,"records":[crate::imp::projection::record(event)]}))
-    };
+    bus.projected(programs.observation());
+    let capture = |event| bus.capture(event);
     let mut slab = vec![0; 2 * 1024 * 1024];
     let incoming_capacity = slab.len();
     let mut storage = SessionKitStorage::uninit();
@@ -349,28 +355,34 @@ async fn run_2m_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 5]) -> Sh
             file_metadata::run(&mut e_data, file_e, FILES).await?;
         };
         async {
-            localside::section_writer::run::<A, BACKGROUND_RESOURCE, INTRO_RESOURCE>(&mut a, bus)
-                .await?;
+            localside::section_writer::run::<A, BACKGROUND_RESOURCE, INTRO_RESOURCE>(
+                &mut a, simulator,
+            )
+            .await?;
         };
         async {
-            localside::section_writer::run::<B, BACKGROUND_RESOURCE, METHODS_RESOURCE>(&mut b, bus)
-                .await?;
+            localside::section_writer::run::<B, BACKGROUND_RESOURCE, METHODS_RESOURCE>(
+                &mut b, simulator,
+            )
+            .await?;
         };
         async {
             localside::section_writer::run::<C, EXPERIMENTS_RESOURCE, METHODS_RESOURCE>(
-                &mut c, bus,
+                &mut c, simulator,
             )
             .await?;
         };
         async {
             localside::section_writer::run::<D, EXPERIMENTS_RESOURCE, RESULTS_RESOURCE>(
-                &mut d, bus,
+                &mut d, simulator,
             )
             .await?;
         };
         async {
-            localside::section_writer::run::<E, INTRO_RESOURCE, RESULTS_RESOURCE>(&mut e, bus)
-                .await?;
+            localside::section_writer::run::<E, INTRO_RESOURCE, RESULTS_RESOURCE>(
+                &mut e, simulator,
+            )
+            .await?;
         };
         async {
             for _ in 0..10 {
@@ -734,17 +746,19 @@ async fn run_2m_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 5]) -> Sh
         Ok::<(), ShellError>(())
     }
     .await;
-    bus.observe(serde_json::json!({"type":"protocol_checkpoint","producer":0,"session":SESSION,"checkpoint":observations.checkpoint()}));
+    bus.checkpoint(SESSION, observations.checkpoint());
     result
 }
 #[hibana_runtime::scope]
-async fn run_2h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> ShellResult<()> {
+async fn run_2h_guests(
+    module: &[u8],
+    (bus, simulator): (&Bus, &impl crate::shell::imp::service::Domain),
+    terminals: [Terminal; 7],
+) -> ShellResult<()> {
     use global::roles2h::*;
     let programs = project_2h();
-    bus.observe(programs.observation());
-    let capture = |event| {
-        bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,"records":[crate::imp::projection::record(event)]}))
-    };
+    bus.projected(programs.observation());
+    let capture = |event| bus.capture(event);
     let mut slab = vec![0; 2 * 1024 * 1024];
     let incoming_capacity = slab.len();
     let mut storage = SessionKitStorage::uninit();
@@ -835,36 +849,46 @@ async fn run_2h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
             file_metadata::run(&mut g_data, file_g, FILES).await?;
         };
         async {
-            localside::section_writer::run::<A, BACKGROUND_RESOURCE, INTRO_RESOURCE>(&mut a, bus)
-                .await?;
+            localside::section_writer::run::<A, BACKGROUND_RESOURCE, INTRO_RESOURCE>(
+                &mut a, simulator,
+            )
+            .await?;
         };
         async {
-            localside::section_writer::run::<B, BACKGROUND_RESOURCE, RELATED_RESOURCE>(&mut b, bus)
-                .await?;
+            localside::section_writer::run::<B, BACKGROUND_RESOURCE, RELATED_RESOURCE>(
+                &mut b, simulator,
+            )
+            .await?;
         };
         async {
-            localside::section_writer::run::<C, METHODS_RESOURCE, RELATED_RESOURCE>(&mut c, bus)
-                .await?;
+            localside::section_writer::run::<C, METHODS_RESOURCE, RELATED_RESOURCE>(
+                &mut c, simulator,
+            )
+            .await?;
         };
         async {
             localside::section_writer::run::<D, EXPERIMENTS_RESOURCE, METHODS_RESOURCE>(
-                &mut d, bus,
+                &mut d, simulator,
             )
             .await?;
         };
         async {
             localside::section_writer::run::<E, EXPERIMENTS_RESOURCE, RESULTS_RESOURCE>(
-                &mut e, bus,
+                &mut e, simulator,
             )
             .await?;
         };
         async {
-            localside::section_writer::run::<F, DISCUSSION_RESOURCE, RESULTS_RESOURCE>(&mut f, bus)
-                .await?;
+            localside::section_writer::run::<F, DISCUSSION_RESOURCE, RESULTS_RESOURCE>(
+                &mut f, simulator,
+            )
+            .await?;
         };
         async {
-            localside::section_writer::run::<G, DISCUSSION_RESOURCE, INTRO_RESOURCE>(&mut g, bus)
-                .await?;
+            localside::section_writer::run::<G, DISCUSSION_RESOURCE, INTRO_RESOURCE>(
+                &mut g, simulator,
+            )
+            .await?;
         };
         async {
             for _ in 0..14 {
@@ -1362,14 +1386,14 @@ async fn run_2h_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 7]) -> Sh
         Ok::<(), ShellError>(())
     }
     .await;
-    bus.observe(serde_json::json!({"type":"protocol_checkpoint","producer":0,"session":SESSION,"checkpoint":observations.checkpoint()}));
+    bus.checkpoint(SESSION, observations.checkpoint());
     result
 }
 pub async fn run_stdio(module: &[u8], level: &str) -> ShellResult<()> {
     match level {
         "2E" => {
             use global::roles2e::*;
-            let (bus, mut io, terminals) = Bus::open(
+            let (mut connection, mut io, terminals) = Bus::open(
                 ["RESEARCHER_A", "RESEARCHER_B", "RESEARCHER_C"],
                 [
                     (SessionId::new(SESSION), INTRO_RESOURCE),
@@ -1380,14 +1404,18 @@ pub async fn run_stdio(module: &[u8], level: &str) -> ShellResult<()> {
                     (SessionId::new(SESSION), C_FILE),
                 ],
             );
-            let result =
-                hibana_runtime::race(run_2e_guests(module, &bus, terminals), io.run(&bus)).await;
-            match &result { Ok(())=>io.emit(&bus,serde_json::json!({"type":"run_result","status":"complete"})).await?, Err(error)=>io.emit(&bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?, }
+            let (bus, simulator) = connection.split();
+            let result = hibana_runtime::race(
+                run_2e_guests(module, (bus, &simulator), terminals),
+                io.run(bus),
+            )
+            .await;
+            match &result { Ok(())=>io.emit(bus,serde_json::json!({"type":"run_result","status":"complete"})).await?, Err(error)=>io.emit(bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?, }
             result
         }
         "2M" => {
             use global::roles2m::*;
-            let (bus, mut io, terminals) = Bus::open(
+            let (mut connection, mut io, terminals) = Bus::open(
                 [
                     "RESEARCHER_A",
                     "RESEARCHER_B",
@@ -1408,14 +1436,18 @@ pub async fn run_stdio(module: &[u8], level: &str) -> ShellResult<()> {
                     (SessionId::new(SESSION), E_FILE),
                 ],
             );
-            let result =
-                hibana_runtime::race(run_2m_guests(module, &bus, terminals), io.run(&bus)).await;
-            match &result { Ok(())=>io.emit(&bus,serde_json::json!({"type":"run_result","status":"complete"})).await?, Err(error)=>io.emit(&bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?, }
+            let (bus, simulator) = connection.split();
+            let result = hibana_runtime::race(
+                run_2m_guests(module, (bus, &simulator), terminals),
+                io.run(bus),
+            )
+            .await;
+            match &result { Ok(())=>io.emit(bus,serde_json::json!({"type":"run_result","status":"complete"})).await?, Err(error)=>io.emit(bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?, }
             result
         }
         "2H" => {
             use global::roles2h::*;
-            let (bus, mut io, terminals) = Bus::open(
+            let (mut connection, mut io, terminals) = Bus::open(
                 [
                     "RESEARCHER_A",
                     "RESEARCHER_B",
@@ -1442,9 +1474,13 @@ pub async fn run_stdio(module: &[u8], level: &str) -> ShellResult<()> {
                     (SessionId::new(SESSION), G_FILE),
                 ],
             );
-            let result =
-                hibana_runtime::race(run_2h_guests(module, &bus, terminals), io.run(&bus)).await;
-            match &result { Ok(())=>io.emit(&bus,serde_json::json!({"type":"run_result","status":"complete"})).await?, Err(error)=>io.emit(&bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?, }
+            let (bus, simulator) = connection.split();
+            let result = hibana_runtime::race(
+                run_2h_guests(module, (bus, &simulator), terminals),
+                io.run(bus),
+            )
+            .await;
+            match &result { Ok(())=>io.emit(bus,serde_json::json!({"type":"run_result","status":"complete"})).await?, Err(error)=>io.emit(bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?, }
             result
         }
         _ => Err(ShellError::message("expected writing task 2E, 2M or 2H")),

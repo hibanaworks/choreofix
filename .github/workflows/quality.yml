@@ -24,24 +24,24 @@ jobs:
         with:
           path: choreofix
           submodules: true
-      - name: Select the current core
+      - name: Check out the recorded Hibana revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: hibanaworks/hibana
-          ref: main
+          ref: 331afd6e4b6315e103ce9cb9311f9d9140fc0e57
           path: hibana
       - uses: ./hibana/.github/actions/checkout-runtime
-      - name: Select the current WASI runtime
+      - name: Check out the recorded WASI runtime
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: hibanaworks/hibana-wasip1-runtime
-          ref: main
+          ref: 94ed8a88026f3f1c58e8b35e3766d8b9a83cb334
           path: hibana-wasip1-runtime
-      - name: Select the current EPF
+      - name: Check out the recorded EPF
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: hibanaworks/hibana-epf
-          ref: main
+          ref: f966c2817c68994315033fa65fbf72390fa107b4
           path: hibana-epf
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:

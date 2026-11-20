@@ -31,32 +31,32 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
     use hibana::runtime::resolver::ResolverRef;
     use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasiGuestStorage};
     let session = SessionId::new(SESSION);
-    let (bus, mut io, [chem_terminal, bio_terminal, analyst_terminal, qc_terminal]) = Bus::open(
-        ["CHEMIST", "BIOLOGIST", "ANALYST", "QC_CONTROLLER"],
-        [
-            (session, SPECTROMETER),
-            (session, CENTRIFUGE),
-            (session, FUME_HOOD),
-            (session, CHEMISTRY),
-            (session, BIOLOGY),
-            (session, CHEM_FILE),
-            (session, CHEM_VM),
-            (session, BIO_FILE),
-            (session, BIO_VM),
-            (session, ANALYST_FILE),
-            (session, ANALYST_VM),
-            (session, QC_FILE),
-            (session, QC_VM),
-        ],
-    );
+    let (mut connection, mut io, [chem_terminal, bio_terminal, analyst_terminal, qc_terminal]) =
+        Bus::open(
+            ["CHEMIST", "BIOLOGIST", "ANALYST", "QC_CONTROLLER"],
+            [
+                (session, SPECTROMETER),
+                (session, CENTRIFUGE),
+                (session, FUME_HOOD),
+                (session, CHEMISTRY),
+                (session, BIOLOGY),
+                (session, CHEM_FILE),
+                (session, CHEM_VM),
+                (session, BIO_FILE),
+                (session, BIO_VM),
+                (session, ANALYST_FILE),
+                (session, ANALYST_VM),
+                (session, QC_FILE),
+                (session, QC_VM),
+            ],
+        );
+    let (bus, simulator) = connection.split();
     let participants = async {
         let p = programs();
-        bus.observe(p.observation());
+        bus.projected(p.observation());
         let qc_actual = core::cell::Cell::new(serde_json::Value::Null);
         let bio_actual = core::cell::Cell::new(serde_json::Value::Null);
-        let capture = |event| {
-            bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,"records":[crate::imp::projection::record(event)]}))
-        };
+        let capture = |event| bus.capture(event);
         let mut slab = vec![0; 2 * 1024 * 1024];
         let incoming_capacity = slab.len();
         let mut storage = SessionKitStorage::uninit();
@@ -175,13 +175,14 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 .await?;
             };
             async {
-                localside::spectrometer::run(&mut spec_service, &bus).await?;
+                localside::spectrometer::run(&mut spec_service, &simulator).await?;
             };
             async {
-                localside::centrifuge::run(&mut cent_service, (biology, &bio_actual), &bus).await?;
+                localside::centrifuge::run(&mut cent_service, (biology, &bio_actual), &simulator)
+                    .await?;
             };
             async {
-                localside::qc::run(&mut qc_service, (chemistry, &bus, &qc_actual)).await?;
+                localside::qc::run(&mut qc_service, (chemistry, &simulator, &qc_actual)).await?;
             };
             async {
                 file_metadata::run(&mut chem_data, chem_file, CHEM_FILES).await?;
@@ -247,7 +248,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut chemist_io,
-                    PrivateFs::new(chem_terminal, &bus, &CHEM_FILES),
+                    PrivateFs::new(chem_terminal, bus, &CHEM_FILES),
                 )
                 .await?;
             };
@@ -298,7 +299,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut biologist_io,
-                    PrivateFs::new(bio_terminal, &bus, &BIO_FILES),
+                    PrivateFs::new(bio_terminal, bus, &BIO_FILES),
                 )
                 .await?;
             };
@@ -341,7 +342,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut analyst_io,
-                    PrivateFs::new(analyst_terminal, &bus, &ANALYST_FILES),
+                    PrivateFs::new(analyst_terminal, bus, &ANALYST_FILES),
                 )
                 .await?;
             };
@@ -379,18 +380,18 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 Ok(())
             };
             async {
-                private_io::run(&mut qc_io, PrivateFs::new(qc_terminal, &bus, &QC_FILES)).await?;
+                private_io::run(&mut qc_io, PrivateFs::new(qc_terminal, bus, &QC_FILES)).await?;
             };
             Ok(())
         }
         .await;
-        bus.observe(serde_json::json!({"type":"protocol_checkpoint","producer":0,"session":SESSION,"checkpoint":observations.checkpoint()}));
+        bus.checkpoint(SESSION, observations.checkpoint());
         result
     };
-    let result = hibana_runtime::race(participants, io.run(&bus)).await;
+    let result = hibana_runtime::race(participants, io.run(bus)).await;
     match &result{
- Ok(())=>io.emit(&bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
- Err(error)=>io.emit(&bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
+ Ok(())=>io.emit(bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
+ Err(error)=>io.emit(bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
 }
     result
 }

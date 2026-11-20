@@ -17,14 +17,15 @@ use hibana::runtime::{SessionKitStorage, ids::SessionId};
 use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasiGuestStorage};
 
 #[hibana_runtime::scope]
-async fn run_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> ShellResult<()> {
+async fn run_guests(
+    module: &[u8],
+    (bus, simulator): (&Bus, &impl crate::shell::imp::service::Domain),
+    terminals: [Terminal; 3],
+) -> ShellResult<()> {
     use global::*;
     let p = programs();
-    bus.observe(p.observation());
-    let capture = |event| {
-        bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,
-        "records":[crate::imp::projection::record(event)]}))
-    };
+    bus.projected(p.observation());
+    let capture = |event| bus.capture(event);
     let mut slab = vec![0; 2 * 1024 * 1024];
     // A decoded value cannot be larger than this run's receive workspace.
     let incoming_capacity = slab.len();
@@ -92,7 +93,7 @@ async fn run_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> Shell
                         tester_close,
                     ),
                 ),
-                bus,
+                simulator,
             )
             .await?;
         };
@@ -239,14 +240,14 @@ async fn run_guests(module: &[u8], bus: &Bus, terminals: [Terminal; 3]) -> Shell
         Ok(())
     }
     .await;
-    bus.observe(serde_json::json!({"type":"protocol_checkpoint","producer":0,"session":session.raw(),"checkpoint":observations.checkpoint()}));
+    bus.checkpoint(session.raw(), observations.checkpoint());
     result
 }
 
 pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
     use global::*;
     let session = SessionId::new(SESSION);
-    let (bus, mut reader, terminals) = Bus::open(
+    let (mut connection, mut reader, terminals) = Bus::open(
         ["BACKEND_DEV", "FRONTEND_DEV", "TESTER"],
         [
             (session, DEFINE_CLOSE),
@@ -265,10 +266,15 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             (session, FRONTEND_OUTCOME_FILE),
         ],
     );
-    let result = hibana_runtime::race(run_guests(module, &bus, terminals), reader.run(&bus)).await;
+    let (bus, simulator) = connection.split();
+    let result = hibana_runtime::race(
+        run_guests(module, (bus, &simulator), terminals),
+        reader.run(bus),
+    )
+    .await;
     match &result {
-        Ok(())=>reader.emit(&bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
-        Err(error)=>reader.emit(&bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
+        Ok(())=>reader.emit(bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
+        Err(error)=>reader.emit(bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
     }
     result
 }

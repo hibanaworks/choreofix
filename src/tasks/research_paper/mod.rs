@@ -18,7 +18,7 @@ use serde_json::json;
 pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
     let session = SessionId::new(SESSION);
     let (
-        bus,
+        mut connection,
         mut io,
         [
             author_a_terminal,
@@ -54,13 +54,12 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
         ]
         .map(|role| (session, role)),
     );
+    let (bus, simulator) = connection.split();
     let participants = async {
         let programs = programs();
-        bus.observe(programs.observation());
+        bus.projected(programs.observation());
         let capture = |event| {
-            bus.observe(json!({"type":"protocol_capture","producer":0,
-                "records":[crate::imp::projection::record(event)],
-            }));
+            bus.capture(event);
         };
         let mut slab = vec![0; 2 * 1024 * 1024];
         let incoming_capacity = slab.len();
@@ -124,34 +123,43 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 Ok(())
             };
             async {
-                localside::document::run(document, &bus).await?;
+                localside::document::run(document, &simulator).await?;
             };
             async {
-                localside::database::run(database, &bus).await?;
+                localside::database::run(database, &simulator).await?;
             };
             async {
                 let [mut a, mut b, mut c, mut extra_a, mut extra_b, mut extra_c] =
                     research_service.par()?;
                 async {
-                    localside::research::run::<AUTHOR_A, a::Research>(&mut a, &bus).await?;
+                    localside::research::run::<AUTHOR_A, a::Research>(&mut a, &simulator).await?;
                 };
                 async {
-                    localside::research::run::<AUTHOR_B, b::Research>(&mut b, &bus).await?;
+                    localside::research::run::<AUTHOR_B, b::Research>(&mut b, &simulator).await?;
                 };
                 async {
-                    localside::research::run::<AUTHOR_C, c::Research>(&mut c, &bus).await?;
+                    localside::research::run::<AUTHOR_C, c::Research>(&mut c, &simulator).await?;
                 };
                 async {
-                    localside::research::supplemental::<AUTHOR_A, a::Research>(&mut extra_a, &bus)
-                        .await?;
+                    localside::research::supplemental::<AUTHOR_A, a::Research>(
+                        &mut extra_a,
+                        &simulator,
+                    )
+                    .await?;
                 };
                 async {
-                    localside::research::supplemental::<AUTHOR_B, b::Research>(&mut extra_b, &bus)
-                        .await?;
+                    localside::research::supplemental::<AUTHOR_B, b::Research>(
+                        &mut extra_b,
+                        &simulator,
+                    )
+                    .await?;
                 };
                 async {
-                    localside::research::supplemental::<AUTHOR_C, c::Research>(&mut extra_c, &bus)
-                        .await?;
+                    localside::research::supplemental::<AUTHOR_C, c::Research>(
+                        &mut extra_c,
+                        &simulator,
+                    )
+                    .await?;
                 };
                 Ok(())
             };
@@ -159,16 +167,22 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 let (a, b, c) = async {
                     let [mut a, mut b, mut c] = review_service.par()?;
                     async {
-                        localside::review::run::<AUTHOR_A, SECTION_A, a::Research>(&mut a, &bus)
-                            .await
+                        localside::review::run::<AUTHOR_A, SECTION_A, a::Research>(
+                            &mut a, &simulator,
+                        )
+                        .await
                     };
                     async {
-                        localside::review::run::<AUTHOR_B, SECTION_B, b::Research>(&mut b, &bus)
-                            .await
+                        localside::review::run::<AUTHOR_B, SECTION_B, b::Research>(
+                            &mut b, &simulator,
+                        )
+                        .await
                     };
                     async {
-                        localside::review::run::<AUTHOR_C, SECTION_C, c::Research>(&mut c, &bus)
-                            .await
+                        localside::review::run::<AUTHOR_C, SECTION_C, c::Research>(
+                            &mut c, &simulator,
+                        )
+                        .await
                     };
                 }
                 .await?;
@@ -208,7 +222,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut author_a_io,
-                    PrivateFs::new(author_a_terminal, &bus, &AUTHOR_FILES),
+                    PrivateFs::new(author_a_terminal, bus, &AUTHOR_FILES),
                 )
                 .await?;
             };
@@ -283,7 +297,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut author_b_io,
-                    PrivateFs::new(author_b_terminal, &bus, &AUTHOR_FILES),
+                    PrivateFs::new(author_b_terminal, bus, &AUTHOR_FILES),
                 )
                 .await?;
             };
@@ -358,7 +372,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut author_c_io,
-                    PrivateFs::new(author_c_terminal, &bus, &AUTHOR_FILES),
+                    PrivateFs::new(author_c_terminal, bus, &AUTHOR_FILES),
                 )
                 .await?;
             };
@@ -433,7 +447,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut fact_io,
-                    PrivateFs::new(fact_terminal, &bus, &FACT_FILES),
+                    PrivateFs::new(fact_terminal, bus, &FACT_FILES),
                 )
                 .await?;
             };
@@ -517,7 +531,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut editor_io,
-                    PrivateFs::new(editor_terminal, &bus, &EDITOR_FILES),
+                    PrivateFs::new(editor_terminal, bus, &EDITOR_FILES),
                 )
                 .await?;
             };
@@ -593,17 +607,15 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             Ok(())
         }
         .await;
-        bus.observe(json!({"type":"protocol_checkpoint","producer":0,
-            "session":SESSION,"checkpoint":observations.checkpoint(),
-        }));
+        bus.checkpoint(SESSION, observations.checkpoint());
         result
     };
-    let result = hibana_runtime::race(participants, io.run(&bus)).await;
+    let result = hibana_runtime::race(participants, io.run(bus)).await;
     let message = match &result {
         Ok(()) => json!({"type":"run_result","status":"complete"}),
         Err(error) => json!({"type":"run_result","status":"failed","error":error.to_string()}),
     };
-    io.emit(&bus, message).await?;
+    io.emit(bus, message).await?;
     result
 }
 

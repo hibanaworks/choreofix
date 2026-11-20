@@ -10,7 +10,7 @@ pub async fn run_stdio(module: &[u8], level: &str) -> ShellResult<()> {
     match level {
         "9E" => {
             use identity::roles::*;
-            let (bus, mut reader, terminals) = Bus::open(
+            let (mut connection, mut reader, terminals) = Bus::open(
                 ["PHILOSOPHER_A", "PHILOSOPHER_B", "PHILOSOPHER_C"],
                 [
                     (SessionId::new(identity::SESSION), FORK_A_RESOURCE),
@@ -27,20 +27,21 @@ pub async fn run_stdio(module: &[u8], level: &str) -> ShellResult<()> {
                     (SessionId::new(identity::SESSION), C_EAT_CLOSE),
                 ],
             );
+            let (bus, simulator) = connection.split();
             let result = hibana_runtime::race(
-                localside::dining_9e::run(module, &bus, terminals),
-                reader.run(&bus),
+                localside::dining_9e::run(module, (bus, &simulator), terminals),
+                reader.run(bus),
             )
             .await;
             match &result{
- Ok(())=>reader.emit(&bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
- Err(error)=>reader.emit(&bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
+ Ok(())=>reader.emit(bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
+ Err(error)=>reader.emit(bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
  }
             result
         }
         "9M" => {
             use identity::roles::*;
-            let (bus, mut reader, terminals) = Bus::open(
+            let (mut connection, mut reader, terminals) = Bus::open(
                 [
                     "PHILOSOPHER_A",
                     "PHILOSOPHER_B",
@@ -71,20 +72,21 @@ pub async fn run_stdio(module: &[u8], level: &str) -> ShellResult<()> {
                     (SessionId::new(identity::SESSION), E_EAT_CLOSE),
                 ],
             );
+            let (bus, simulator) = connection.split();
             let result = hibana_runtime::race(
-                localside::dining_9m::run(module, &bus, terminals),
-                reader.run(&bus),
+                localside::dining_9m::run(module, (bus, &simulator), terminals),
+                reader.run(bus),
             )
             .await;
             match &result{
- Ok(())=>reader.emit(&bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
- Err(error)=>reader.emit(&bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
+ Ok(())=>reader.emit(bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
+ Err(error)=>reader.emit(bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
  }
             result
         }
         "9H" => {
             use identity::roles::*;
-            let (bus, mut reader, terminals) = Bus::open(
+            let (mut connection, mut reader, terminals) = Bus::open(
                 [
                     "PHILOSOPHER_A",
                     "PHILOSOPHER_B",
@@ -125,14 +127,15 @@ pub async fn run_stdio(module: &[u8], level: &str) -> ShellResult<()> {
                     (SessionId::new(identity::SESSION), G_EAT_CLOSE),
                 ],
             );
+            let (bus, simulator) = connection.split();
             let result = hibana_runtime::race(
-                localside::dining_9h::run(module, &bus, terminals),
-                reader.run(&bus),
+                localside::dining_9h::run(module, (bus, &simulator), terminals),
+                reader.run(bus),
             )
             .await;
             match &result{
- Ok(())=>reader.emit(&bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
- Err(error)=>reader.emit(&bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
+ Ok(())=>reader.emit(bus,serde_json::json!({"type":"run_result","status":"complete"})).await?,
+ Err(error)=>reader.emit(bus,serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
  }
             result
         }

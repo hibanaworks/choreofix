@@ -1,5 +1,8 @@
 # Effect admission
 
+The `endpoint-handoff/` Cargo package contains executable Rust tests and
+fixtures. The Lean theorems are in the `.lean` files in this directory.
+
 Application verification uses native Endpoint tests, actual Wasm/ChoreoFS,
 EPF and independent real-effect/scorer audits. ChoreoFix does not run Miri or
 require an interpreter pass for each task. Memory-safety verification belongs

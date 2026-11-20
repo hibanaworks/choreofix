@@ -18,7 +18,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
     use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasiGuestStorage};
     let session = SessionId::new(SESSION);
     let (
-        bus,
+        mut connection,
         mut io,
         [
             er_a_terminal,
@@ -56,12 +56,11 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             (session, PHARMACY_FILE),
         ],
     );
+    let (bus, simulator) = connection.split();
     let participants = async {
         let p = programs();
-        bus.observe(p.observation());
-        let capture = |event| {
-            bus.observe(json!({"type":"protocol_capture","producer":0,"records":[crate::imp::projection::record(event)]}))
-        };
+        bus.projected(p.observation());
+        let capture = |event| bus.capture(event);
         let actual_a = Cell::new(Value::Null);
         let actual_b = Cell::new(Value::Null);
         let mut slab = vec![0; 2 * 1024 * 1024];
@@ -178,28 +177,30 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             }
             .await?;
             async {
-                localside::patients::patient_a(&mut patient_a, (panel_a, &actual_a), &bus).await?;
+                localside::patients::patient_a(&mut patient_a, (panel_a, &actual_a), &simulator)
+                    .await?;
             };
             async {
-                localside::patients::patient_b(&mut patient_b, (panel_b, &actual_b), &bus).await?;
+                localside::patients::patient_b(&mut patient_b, (panel_b, &actual_b), &simulator)
+                    .await?;
             };
             async {
-                localside::imaging::ct(&mut ct_service, ct, &bus).await?;
+                localside::imaging::ct(&mut ct_service, ct, &simulator).await?;
             };
             async {
-                localside::imaging::mri(&mut mri_service, mri, &bus).await?;
+                localside::imaging::mri(&mut mri_service, mri, &simulator).await?;
             };
             async {
-                localside::care::anesthesia(&mut anesthesia, room, &bus).await?;
+                localside::care::anesthesia(&mut anesthesia, room, &simulator).await?;
             };
             async {
-                localside::care::surgery(&mut surgery, &bus).await?;
+                localside::care::surgery(&mut surgery, &simulator).await?;
             };
             async {
-                localside::care::icu(&mut icu, (bed, ventilator), &bus).await?;
+                localside::care::icu(&mut icu, (bed, ventilator), &simulator).await?;
             };
             async {
-                localside::care::pharmacy(&mut pharmacy, &bus).await?;
+                localside::care::pharmacy(&mut pharmacy, &simulator).await?;
             };
             async {
                 localside::er_doctor_a::run(&mut er_a).await?;
@@ -225,46 +226,45 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut er_a_io,
-                    PrivateFs::new(er_a_terminal, &bus, &ER_A_FILES),
+                    PrivateFs::new(er_a_terminal, bus, &ER_A_FILES),
                 )
                 .await?;
             };
             async {
                 private_io::run(
                     &mut er_b_io,
-                    PrivateFs::new(er_b_terminal, &bus, &ER_B_FILES),
+                    PrivateFs::new(er_b_terminal, bus, &ER_B_FILES),
                 )
                 .await?;
             };
             async {
                 private_io::run(
                     &mut radiology_io,
-                    PrivateFs::new(radiology_terminal, &bus, &RADIOLOGY_FILES),
+                    PrivateFs::new(radiology_terminal, bus, &RADIOLOGY_FILES),
                 )
                 .await?;
             };
             async {
                 private_io::run(
                     &mut surgery_io,
-                    PrivateFs::new(surgery_terminal, &bus, &SURGERY_FILES),
+                    PrivateFs::new(surgery_terminal, bus, &SURGERY_FILES),
                 )
                 .await?;
             };
             async {
                 private_io::run(
                     &mut anesthesia_io,
-                    PrivateFs::new(anesthesia_terminal, &bus, &ANESTHESIA_FILES),
+                    PrivateFs::new(anesthesia_terminal, bus, &ANESTHESIA_FILES),
                 )
                 .await?;
             };
             async {
-                private_io::run(&mut icu_io, PrivateFs::new(icu_terminal, &bus, &ICU_FILES))
-                    .await?;
+                private_io::run(&mut icu_io, PrivateFs::new(icu_terminal, bus, &ICU_FILES)).await?;
             };
             async {
                 private_io::run(
                     &mut pharmacy_io,
-                    PrivateFs::new(pharmacy_terminal, &bus, &PHARMACY_FILES),
+                    PrivateFs::new(pharmacy_terminal, bus, &PHARMACY_FILES),
                 )
                 .await?;
             };
@@ -449,18 +449,18 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             Ok::<(), ShellError>(())
         }
         .await;
-        bus.observe(json!({"type":"protocol_checkpoint","producer":0,"session":SESSION,"checkpoint":observations.checkpoint()}));
+        bus.checkpoint(SESSION, observations.checkpoint());
         result
     };
-    let result = hibana_runtime::race(participants, io.run(&bus)).await;
+    let result = hibana_runtime::race(participants, io.run(bus)).await;
     match &result {
         Ok(()) => {
-            io.emit(&bus, json!({"type":"run_result","status":"complete"}))
+            io.emit(bus, json!({"type":"run_result","status":"complete"}))
                 .await?
         }
         Err(error) => {
             io.emit(
-                &bus,
+                bus,
                 json!({"type":"run_result","status":"failed","error":error.to_string()}),
             )
             .await?

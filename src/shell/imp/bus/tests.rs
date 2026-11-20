@@ -64,8 +64,9 @@ async fn observations_deliver_transport_evidence_without_waiting_for_an_rpc() ->
 
 #[test]
 fn an_unpolled_effect_creates_no_rpc_or_correlation() {
-    let (bus, _, _) = Bus::open([], []);
-    drop(bus.execute("A", "inspect", json!({"target":7})));
+    let (mut connection, _, _) = Bus::open([], []);
+    let (bus, simulator) = connection.split();
+    drop(simulator.execute("A", "inspect", json!({"target":7})));
     assert!(bus.connection(|c| c.outgoing.is_empty() && c.responses.is_empty() && c.sequence == 0));
 }
 
@@ -73,7 +74,7 @@ fn an_unpolled_effect_creates_no_rpc_or_correlation() {
 #[test]
 async fn losing_a_borrowed_effect_race_preserves_the_original_rpc() -> ShellResult<()> {
     let (bus, _, _) = Bus::open([], []);
-    let mut effect = bus.execute("A", "inspect", json!({"target":7}));
+    let mut effect = bus.rpc("A", "inspect", json!({"target":7}));
     let result = hibana_runtime::race(
         async { (&mut effect).await.map(Some).map_err(ShellError::message) },
         async { Ok(None) },
@@ -111,9 +112,10 @@ async fn native_world_peer_uses_the_actual_rpc_queue_and_receipts() -> ShellResu
             Ok(json!({"agent":agent,"tool":tool,"arguments":arguments}))
         }
     }
-    let (bus, _, _) = Bus::open(["A", "B"], []);
+    let (mut connection, _, _) = Bus::open(["A", "B"], []);
+    let (bus, simulator) = connection.split();
     async {
-        let value = bus
+        let value = simulator
             .execute("A", "inspect", json!({"input":1}))
             .await
             .map_err(ShellError::message)?;
@@ -123,7 +125,7 @@ async fn native_world_peer_uses_the_actual_rpc_queue_and_receipts() -> ShellResu
         );
     };
     async {
-        let value = bus
+        let value = simulator
             .execute("B", "inspect", json!({"input":2}))
             .await
             .map_err(ShellError::message)?;
@@ -278,16 +280,17 @@ async fn failed_output_cannot_be_reopened_by_a_final_verdict() -> ShellResult<()
 #[hibana_runtime::main]
 #[test]
 async fn identical_concurrent_effect_arguments_keep_distinct_rpc_replies() -> ShellResult<()> {
-    let (bus, _, _) = Bus::open([], []);
+    let (mut connection, _, _) = Bus::open([], []);
+    let (bus, simulator) = connection.split();
     async {
-        let value = bus
+        let value = simulator
             .execute("A", "inspect", json!({"target": 7}))
             .await
             .map_err(ShellError::message)?;
         assert_eq!(value, json!("first"));
     };
     async {
-        let value = bus
+        let value = simulator
             .execute("A", "inspect", json!({"target": 7}))
             .await
             .map_err(ShellError::message)?;

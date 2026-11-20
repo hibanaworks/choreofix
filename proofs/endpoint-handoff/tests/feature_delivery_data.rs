@@ -7,11 +7,14 @@ mod global {
     pub const SUITE_A: &str = "full_test_suite_after_auth";
     pub const SUITE_B: &str = "full_test_suite_after_payment";
 }
+#[path = "../../../src/imp/projection.rs"]
+pub mod projection;
 #[path = "../../../src/shell/mod.rs"]
 pub mod shell;
 #[path = "../../../src/imp/transport.rs"]
 pub(crate) mod transport;
 pub(crate) mod imp {
+    pub(crate) use crate::projection;
     pub(crate) use crate::transport;
 }
 use serde_json::{Value, json};

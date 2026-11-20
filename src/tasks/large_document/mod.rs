@@ -124,7 +124,7 @@ roles!(
 pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
     let session = SessionId::new(SESSION);
     let (
-        bus,
+        mut connection,
         mut io,
         [
             a_terminal,
@@ -158,13 +158,11 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
         ]
         .map(|role| (session, role)),
     );
+    let (bus, simulator) = connection.split();
     let trial = async {
         let programs = Programs::new();
-        bus.observe(programs.observation());
-        let capture = |event| {
-            bus.observe(json!({"type":"protocol_capture","producer":0,
-                "records":[projection::record(event)]}))
-        };
+        bus.projected(programs.observation());
+        let capture = |event| bus.capture(event);
         let mut slab = vec![0; SESSION_STORAGE_BYTES];
         let mut storage = SessionKitStorage::uninit();
         let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
@@ -211,21 +209,21 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             let editor_file = rv.enter(session, &programs.editor_file)?;
             let editor_vm = rv.enter(session, &programs.editor_vm)?;
             let mut editor_io = rv.enter(session, &programs.editor_io)?;
-            async { document_owner(&mut owner, doc, &bus).await };
+            async { document_owner(&mut owner, doc, &simulator).await };
             async {
-                write_drafts(&mut drafting, &bus).await?;
+                write_drafts(&mut drafting, &simulator).await?;
                 Ok(())
             };
             async {
-                update_references(&mut references, &bus).await?;
+                update_references(&mut references, &simulator).await?;
                 Ok(())
             };
             async { file_metadata::run(&mut a_data, a_file, A_FILES).await };
             async { file_metadata::run(&mut b_data, b_file, B_FILES).await };
             async { file_metadata::run(&mut c_data, c_file, C_FILES).await };
-            async { private_io::run(&mut a_io, PrivateFs::new(a_terminal, &bus, &A_FILES)).await };
-            async { private_io::run(&mut b_io, PrivateFs::new(b_terminal, &bus, &B_FILES)).await };
-            async { private_io::run(&mut c_io, PrivateFs::new(c_terminal, &bus, &C_FILES)).await };
+            async { private_io::run(&mut a_io, PrivateFs::new(a_terminal, bus, &A_FILES)).await };
+            async { private_io::run(&mut b_io, PrivateFs::new(b_terminal, bus, &B_FILES)).await };
+            async { private_io::run(&mut c_io, PrivateFs::new(c_terminal, bus, &C_FILES)).await };
             async { writer_a(wash, a_vm).await };
             async { writer_b(wash, b_vm).await };
             async { writer_c(wash, c_vm).await };
@@ -234,31 +232,37 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
                 drop(figure_owner.recv::<Loan<FIGURE_STORE>>().await?);
                 Ok(())
             };
-            async { figure_store(&mut creator, &bus).await };
+            async { figure_store(&mut creator, &simulator).await };
             async { file_metadata::run(&mut figure_data, file, FIGURE_FILES).await };
             async {
                 private_io::run(
                     &mut figure_io,
-                    PrivateFs::new(figure_terminal, &bus, &FIGURE_FILES),
+                    PrivateFs::new(figure_terminal, bus, &FIGURE_FILES),
                 )
                 .await
             };
             async { figure_guest(wash, vm).await };
-            async { check_and_review(&mut fact_part_i, &bus).await };
-            async { check_and_review(&mut fact_editorial, &bus).await };
+            async { check_and_review(&mut fact_part_i, &simulator).await };
+            async { check_and_review(&mut fact_editorial, &simulator).await };
             async {
-                check_chapter::<FACT_3, CHECK_3, MATERIAL_3, REVISE_3, MINOR_3>(&mut fact_3, &bus)
-                    .await
+                check_chapter::<FACT_3, CHECK_3, MATERIAL_3, REVISE_3, MINOR_3>(
+                    &mut fact_3,
+                    &simulator,
+                )
+                .await
             };
             async {
-                check_chapter::<FACT_4, CHECK_4, MATERIAL_4, REVISE_4, MINOR_4>(&mut fact_4, &bus)
-                    .await
+                check_chapter::<FACT_4, CHECK_4, MATERIAL_4, REVISE_4, MINOR_4>(
+                    &mut fact_4,
+                    &simulator,
+                )
+                .await
             };
             async { file_metadata::run(&mut fact_data, fact_file, FACT_FILES).await };
             async {
                 private_io::run(
                     &mut fact_io,
-                    PrivateFs::new(fact_terminal, &bus, &FACT_FILES),
+                    PrivateFs::new(fact_terminal, bus, &FACT_FILES),
                 )
                 .await
             };
@@ -267,17 +271,17 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut review_io,
-                    PrivateFs::new(review_terminal, &bus, &REVIEW_FILES),
+                    PrivateFs::new(review_terminal, bus, &REVIEW_FILES),
                 )
                 .await
             };
             async { review_guest(wash, review_vm).await };
-            async { edit_document(&mut editor, &bus).await };
+            async { edit_document(&mut editor, &simulator).await };
             async { file_metadata::run(&mut editor_data, editor_file, EDITOR_FILES).await };
             async {
                 private_io::run(
                     &mut editor_io,
-                    PrivateFs::new(editor_terminal, &bus, &EDITOR_FILES),
+                    PrivateFs::new(editor_terminal, bus, &EDITOR_FILES),
                 )
                 .await
             };
@@ -285,17 +289,14 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             Ok(())
         }
         .await;
-        bus.observe(
-            json!({"type":"protocol_checkpoint","producer":0,"session":SESSION,
-            "checkpoint":tap.checkpoint()}),
-        );
+        bus.checkpoint(SESSION, tap.checkpoint());
         result
     };
-    let result = hibana_runtime::race(trial, io.run(&bus)).await;
+    let result = hibana_runtime::race(trial, io.run(bus)).await;
     let report = match &result {
         Ok(()) => json!({"type":"run_result","status":"complete"}),
         Err(error) => json!({"type":"run_result","status":"failed","error":error.to_string()}),
     };
-    io.emit(&bus, report).await?;
+    io.emit(bus, report).await?;
     result
 }

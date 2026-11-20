@@ -33,8 +33,8 @@ pub struct PrivateFs<'a> {
     pub offsets: Vec<usize>,
     pub fd_flags: Vec<u16>,
     pub output: Vec<u8>,
-    pub terminal: Terminal,
-    pub bus: &'a Bus,
+    pub(crate) terminal: Terminal,
+    pub(crate) bus: &'a Bus,
 }
 
 impl<'a> PrivateFs<'a> {
@@ -155,20 +155,20 @@ impl PrivateFs<'_> {
     pub fn objects(&self) -> ChoreoFsObjectSet<Vec<ChoreoFsObject<'_>>> {
         let mut objects = vec![
             ChoreoFsObject::readable(
-                b"llm/stdin",
+                b"\0stdin",
                 ObjectId(0),
                 FdSpec::new(0, READ),
                 &self.input,
                 FdBinding::read(FdReadRow::Base),
             ),
             ChoreoFsObject::writable(
-                b"llm/stdout",
+                b"\0stdout",
                 ObjectId(1),
                 FdSpec::new(1, WRITE),
                 FdBinding::write(FdWriteRow::Base),
             ),
             ChoreoFsObject::writable(
-                b"llm/stderr",
+                b"\0stderr",
                 ObjectId(2),
                 FdSpec::new(2, WRITE),
                 FdBinding::write(FdWriteRow::Base),

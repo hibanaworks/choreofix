@@ -30,7 +30,7 @@ use std::cell::Cell;
 pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
     let session = SessionId::new(SESSION);
     let (
-        bus,
+        mut connection,
         mut io,
         [
             chem_terminal,
@@ -67,14 +67,14 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             (session, SAFETY_VM),
         ],
     );
+    let (bus, simulator) = connection.split();
     let participants = async {
         let p = programs();
-        bus.observe(p.observation());
+        bus.projected(p.observation());
         let synthesis = Cell::new(Value::Null);
         let quality = Cell::new(Value::Null);
         let capture = |event| {
-            bus.observe(json!({"type":"protocol_capture","producer":0,
-                "records":[crate::imp::projection::record(event)]}));
+            bus.capture(event);
         };
         let mut slab = vec![0; 2 * 1024 * 1024];
         let incoming_capacity = slab.len();
@@ -211,19 +211,19 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 .await?;
             };
             async {
-                localside::spectrometer::run(&mut spec_owner, &bus).await?;
+                localside::spectrometer::run(&mut spec_owner, &simulator).await?;
             };
             async {
-                localside::centrifuge::run(&mut cent_owner, &bus).await?;
+                localside::centrifuge::run(&mut cent_owner, &simulator).await?;
             };
             async {
-                localside::fume::run(&mut fume_owner, &bus, (&synthesis, &quality)).await?;
+                localside::fume::run(&mut fume_owner, &simulator, (&synthesis, &quality)).await?;
             };
             async {
-                localside::chromatograph::run(&mut chroma_owner, &bus).await?;
+                localside::chromatograph::run(&mut chroma_owner, &simulator).await?;
             };
             async {
-                localside::inspection::run(&mut inspection, &bus).await?;
+                localside::inspection::run(&mut inspection, &simulator).await?;
             };
             async {
                 file_metadata::run(&mut chem_data, chem_file, CHEM_FILES).await?;
@@ -243,28 +243,27 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut chem_io,
-                    PrivateFs::new(chem_terminal, &bus, &CHEM_FILES),
+                    PrivateFs::new(chem_terminal, bus, &CHEM_FILES),
                 )
                 .await?;
             };
             async {
-                private_io::run(&mut bio_io, PrivateFs::new(bio_terminal, &bus, &BIO_FILES))
-                    .await?;
+                private_io::run(&mut bio_io, PrivateFs::new(bio_terminal, bus, &BIO_FILES)).await?;
             };
             async {
                 private_io::run(
                     &mut analyst_io,
-                    PrivateFs::new(analyst_terminal, &bus, &ANALYST_FILES),
+                    PrivateFs::new(analyst_terminal, bus, &ANALYST_FILES),
                 )
                 .await?;
             };
             async {
-                private_io::run(&mut qc_io, PrivateFs::new(qc_terminal, &bus, &QC_FILES)).await?;
+                private_io::run(&mut qc_io, PrivateFs::new(qc_terminal, bus, &QC_FILES)).await?;
             };
             async {
                 private_io::run(
                     &mut safety_io,
-                    PrivateFs::new(safety_terminal, &bus, &SAFETY_FILES),
+                    PrivateFs::new(safety_terminal, bus, &SAFETY_FILES),
                 )
                 .await?;
             };
@@ -488,17 +487,14 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             Ok(())
         }
         .await;
-        bus.observe(
-            json!({"type":"protocol_checkpoint","producer":0,"session":SESSION,
-            "checkpoint":observations.checkpoint()}),
-        );
+        bus.checkpoint(SESSION, observations.checkpoint());
         result
     };
-    let result = hibana_runtime::race(participants, io.run(&bus)).await;
+    let result = hibana_runtime::race(participants, io.run(bus)).await;
     let message = match &result {
         Ok(()) => json!({"type":"run_result","status":"complete"}),
         Err(error) => json!({"type":"run_result","status":"failed","error":error.to_string()}),
     };
-    io.emit(&bus, message).await?;
+    io.emit(bus, message).await?;
     result
 }

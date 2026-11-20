@@ -3,11 +3,9 @@ use choreofix::{imp, shell};
 #[path = "../tasks/shared_document/mod.rs"]
 mod shared_document;
 
-#[cfg(not(test))]
 #[path = "../tasks/figure_document/mod.rs"]
 mod figure_document;
 
-#[cfg(not(test))]
 #[hibana_runtime::main]
 async fn main() -> choreofix::shell::ShellResult<()> {
     use choreofix::shell::ShellError;

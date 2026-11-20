@@ -2,7 +2,7 @@
 use super::super::{global::*, imp};
 use crate::shell::{
     ShellError, ShellResult,
-    imp::{bus::Bus, service::Domain},
+    imp::{bus::Simulator, service::Domain},
 };
 use hibana::Endpoint;
 use serde_json::{Value, json};
@@ -12,7 +12,7 @@ use std::cell::Cell;
 pub async fn run<'r>(
     endpoint: &mut Endpoint<'r, DEPOT>,
     (tool0, tool1): (Endpoint<'r, TOOL_0>, Endpoint<'r, TOOL_1>),
-    (domain, inputs): (&Bus, &[Cell<Value>; 5]),
+    (domain, inputs): (&Simulator, &[Cell<Value>; 5]),
 ) -> ShellResult<()> {
     // Each cell is the actual input for one resolver, not an allocation table.
     let [

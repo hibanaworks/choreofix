@@ -15,6 +15,12 @@ pub const REVIEW_A: u8 = 2;
 pub const REVIEW_B: u8 = 3;
 pub const REPO: u8 = 7;
 pub const REPO_INIT: u8 = 13;
+pub const REVIEW_OWNER_A: u8 = 14;
+pub const REVIEW_OWNER_B: u8 = 15;
+pub type RejectedLoanA<'r> = g::Msg<28, Endpoint<'r, REVIEW_A>>;
+pub type ApprovedLoanA<'r> = g::Msg<26, Endpoint<'r, REVIEW_A>>;
+pub type RejectedLoanB<'r> = g::Msg<29, Endpoint<'r, REVIEW_B>>;
+pub type ApprovedLoanB<'r> = g::Msg<27, Endpoint<'r, REVIEW_B>>;
 pub const A_IO: u8 = 8;
 pub const B_IO: u8 = 9;
 pub const REVIEW_IO: u8 = 10;
@@ -103,22 +109,32 @@ fn attempt_a() -> impl Projectable + Copy {
         g::send::<A_REVIEW_FILE, REVIEW_A, FileReview<TARGET_A>>(),
     )
 }
-fn outcome_a<M: g::Message>() -> impl Projectable {
-    g::seq(
-        g::send::<REVIEW_A, REPO, M>(),
+pub(super) fn feature_a() -> impl Projectable {
+    let rejected = g::seq(
+        g::send::<REVIEW_OWNER_A, REPO, RejectedLoanA>(),
         g::seq(
-            g::send::<REPO, A_FILE, FileUpdate<A_FILE>>(),
-            g::send::<REVIEW_A, A_REVIEW_FILE, FileReviewResult<TARGET_A>>(),
+            g::send::<REVIEW_OWNER_A, REPO, RejectedA>(),
+            g::seq(
+                g::send::<REPO, A_FILE, FileUpdate<A_FILE>>(),
+                g::seq(
+                    g::send::<REVIEW_A, A_REVIEW_FILE, FileReviewResult<TARGET_A>>(),
+                    g::send::<REPO, REVIEW_OWNER_A, RejectedLoanA>(),
+                ),
+            ),
         ),
-    )
-}
-fn feature_a() -> impl Projectable {
-    let rejected = g::seq(outcome_a::<RejectedA>(), attempt_a());
-    let approved = g::route(
-        outcome_a::<ApprovedA>(),
-        g::seq(rejected.roll(), outcome_a::<ApprovedA>()),
-    )
-    .resolve::<DECIDE_A>();
+    );
+    let rejected = g::seq(rejected, attempt_a());
+    let approved = g::seq(
+        g::send::<REVIEW_OWNER_A, REPO, ApprovedLoanA>(),
+        g::seq(
+            g::send::<REVIEW_OWNER_A, REPO, ApprovedA>(),
+            g::seq(
+                g::send::<REPO, A_FILE, FileUpdate<A_FILE>>(),
+                g::send::<REVIEW_A, A_REVIEW_FILE, FileReviewResult<TARGET_A>>(),
+            ),
+        ),
+    );
+    let approved = g::route(approved, g::seq(rejected.roll(), approved)).resolve::<DECIDE_A>();
     g::seq(
         g::seq(attempt_a(), approved),
         g::seq(
@@ -139,22 +155,32 @@ fn attempt_b() -> impl Projectable + Copy {
         g::send::<B_REVIEW_FILE, REVIEW_B, FileReview<TARGET_B>>(),
     )
 }
-fn outcome_b<M: g::Message>() -> impl Projectable {
-    g::seq(
-        g::send::<REVIEW_B, REPO, M>(),
+pub(super) fn feature_b() -> impl Projectable {
+    let rejected = g::seq(
+        g::send::<REVIEW_OWNER_B, REPO, RejectedLoanB>(),
         g::seq(
-            g::send::<REPO, B_FILE, FileUpdate<B_FILE>>(),
-            g::send::<REVIEW_B, B_REVIEW_FILE, FileReviewResult<TARGET_B>>(),
+            g::send::<REVIEW_OWNER_B, REPO, RejectedB>(),
+            g::seq(
+                g::send::<REPO, B_FILE, FileUpdate<B_FILE>>(),
+                g::seq(
+                    g::send::<REVIEW_B, B_REVIEW_FILE, FileReviewResult<TARGET_B>>(),
+                    g::send::<REPO, REVIEW_OWNER_B, RejectedLoanB>(),
+                ),
+            ),
         ),
-    )
-}
-fn feature_b() -> impl Projectable {
-    let rejected = g::seq(outcome_b::<RejectedB>(), attempt_b());
-    let approved = g::route(
-        outcome_b::<ApprovedB>(),
-        g::seq(rejected.roll(), outcome_b::<ApprovedB>()),
-    )
-    .resolve::<DECIDE_B>();
+    );
+    let rejected = g::seq(rejected, attempt_b());
+    let approved = g::seq(
+        g::send::<REVIEW_OWNER_B, REPO, ApprovedLoanB>(),
+        g::seq(
+            g::send::<REVIEW_OWNER_B, REPO, ApprovedB>(),
+            g::seq(
+                g::send::<REPO, B_FILE, FileUpdate<B_FILE>>(),
+                g::send::<REVIEW_B, B_REVIEW_FILE, FileReviewResult<TARGET_B>>(),
+            ),
+        ),
+    );
+    let approved = g::route(approved, g::seq(rejected.roll(), approved)).resolve::<DECIDE_B>();
     g::seq(
         g::seq(attempt_b(), approved),
         g::seq(
@@ -176,7 +202,7 @@ pub fn source() -> impl Projectable {
     );
     let task = g::seq(
         g::par(feature_a(), feature_b()),
-        g::send::<REVIEW_A, REPO, RepoExit>(),
+        g::send::<REVIEW_OWNER_A, REPO, RepoExit>(),
     );
     let metadata = g::par(
         g::par(
@@ -225,7 +251,9 @@ pub struct Programs {
     pub repo_owner: RoleProgram<REPO_OWNER>,
     pub repo: RoleProgram<REPO>,
     pub repo_init: RoleProgram<REPO_INIT>,
+    pub review_owner_a: RoleProgram<REVIEW_OWNER_A>,
     pub review_a: RoleProgram<REVIEW_A>,
+    pub review_owner_b: RoleProgram<REVIEW_OWNER_B>,
     pub review_b: RoleProgram<REVIEW_B>,
     pub a_io: RoleProgram<A_IO>,
     pub b_io: RoleProgram<B_IO>,
@@ -245,12 +273,14 @@ pub struct Programs {
 impl Programs {
     pub(crate) fn observation(&self) -> serde_json::Value {
         use crate::imp::projection::rows;
-        let roles = serde_json::json!({"REPO_OWNER":REPO_OWNER,"REPO":REPO,"REPO_INIT":REPO_INIT,"REVIEW_A":REVIEW_A,"REVIEW_B":REVIEW_B,"A_IO":A_IO,"B_IO":B_IO,"REVIEW_IO":REVIEW_IO,"A_FILE":A_FILE,"B_FILE":B_FILE,"A_REVIEW_FILE":A_REVIEW_FILE,"B_REVIEW_FILE":B_REVIEW_FILE,"A_VM":A_VM,"B_VM":B_VM,"REVIEW_VM":REVIEW_VM,"A_DATA":A_DATA,"B_DATA":B_DATA,"A_REVIEW_DATA":A_REVIEW_DATA,"B_REVIEW_DATA":B_REVIEW_DATA});
+        let roles = serde_json::json!({"REVIEW_OWNER_A":REVIEW_OWNER_A,"REVIEW_OWNER_B":REVIEW_OWNER_B,"REPO_OWNER":REPO_OWNER,"REPO":REPO,"REPO_INIT":REPO_INIT,"REVIEW_A":REVIEW_A,"REVIEW_B":REVIEW_B,"A_IO":A_IO,"B_IO":B_IO,"REVIEW_IO":REVIEW_IO,"A_FILE":A_FILE,"B_FILE":B_FILE,"A_REVIEW_FILE":A_REVIEW_FILE,"B_REVIEW_FILE":B_REVIEW_FILE,"A_VM":A_VM,"B_VM":B_VM,"REVIEW_VM":REVIEW_VM,"A_DATA":A_DATA,"B_DATA":B_DATA,"A_REVIEW_DATA":A_REVIEW_DATA,"B_REVIEW_DATA":B_REVIEW_DATA});
         let programs = [
             rows(&self.repo_owner),
             rows(&self.repo),
             rows(&self.repo_init),
+            rows(&self.review_owner_a),
             rows(&self.review_a),
+            rows(&self.review_owner_b),
             rows(&self.review_b),
             rows(&self.a_io),
             rows(&self.b_io),
@@ -276,7 +306,9 @@ pub fn programs() -> Programs {
         repo_owner: project(&p),
         repo: project(&p),
         repo_init: project(&p),
+        review_owner_a: project(&p),
         review_a: project(&p),
+        review_owner_b: project(&p),
         review_b: project(&p),
         a_io: project(&p),
         b_io: project(&p),

@@ -4,7 +4,10 @@ ChoreoFix tests whether a global choreography can be the sole source of authorit
 for agents that share resources. Each agent chooses commands in its own
 [hibana-wash](https://github.com/hibanaworks/hibana-wash) shell. WASI file
 operations on ChoreoFS drive the projected [Hibana](https://github.com/hibanaworks/hibana)
-endpoints, and a shared effect requires the corresponding endpoint. We check the
+endpoints. In the review task (6E), submitting a simulator effect consumes the
+typed request received through the endpoint. The [6E qualification](analysis/review-receipts.md) records 34 scripted Wasm
+trials and one three-agent live run on the same binary. Other families still
+entrust the simulator call and its arguments to the resource receiver. We check the
 protocol execution with EPF, match admitted requests to actual simulator effects,
 and score the business outcome. Whether this design preserves the original
 choices or makes a workflow cheaper to change is an empirical question.
@@ -19,7 +22,7 @@ choices or makes a workflow cheaper to change is an empirical question.
 | Which choices have been checked? | Wasm guests completed all 90 upstream 9E sequences of thoughts and meals, plus one in which B and C ate between A's three thoughts. In 9M and 9H, each seat ate first while the others stayed idle. For every first seat, the remaining diners completed in both directions around the table (24 Wasm trials). Five live diners started in B, A, C, E, D order and seven in E, D, B, G, C, A, F order. Peak overlap was two and three meals, respectively. In 1E all six commit orders ran through wash. [Reproduction and limits](analysis/arbitration.md) |
 | Which participant orders changed? | On the revised globals, real Wasm guests demonstrated that any of seven developers can commit first in 1H, either author can be reviewed before the other starts research in 3E, and either approved feature can finish CI before the other starts work in 6M. In 6H all six merge orders passed with deployment in A, B, C order. Three live agents completed revised 3E. A live 6H trial merged C first, then timed out while CI waited for A. [Runs and audit evidence](analysis/arbitration.md#rechecking-the-four-participant-order-constraints) |
 
-[Paper draft](paper/choreofix.tex) · [Per-task evidence](benchmark/ports) ·
+[Paper draft](paper/choreofix.tex) · [Pilot inventory](analysis/README.md) · [Task-specific qualification notes](benchmark/ports) ·
 [Work plan and run history](plan.md) · [CI workflow](.github/workflows/quality.yml)
 
 ## Experiment
@@ -86,7 +89,10 @@ hibana-wash submodule. The host runner currently uses macOS's event queue.
 Keep this checkout beside `hibana`, `hibana-epf` and
 `hibana-wasip1-runtime`. Their path dependencies select the current working
 sources, with one core shared by the application, runner and effect-boundary
-checks. Do not replace them with an older Git pin while development continues.
+checks. To reproduce CI, use the core, WASI runtime and EPF revisions selected
+in the [quality workflow](.github/workflows/quality.yml). Use the
+`.github/runtime-revision` file in that exact core checkout for hibana-runtime.
+The wash submodule records its own revision.
 The Rust [input tool](tools/inputs) restores and verifies
 the two unchanged upstream source archives. Python dependencies in
 `requirements.lock` support those upstream simulators and comparison clients.

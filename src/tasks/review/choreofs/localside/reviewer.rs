@@ -3,94 +3,92 @@ use super::super::{
     super::imp::{ReviewInput, decide},
     global::*,
 };
-use crate::shell::{
-    ShellError, ShellResult,
-    imp::{review_reply::ReviewReply, service::Domain},
-};
+use crate::shell::imp::service::ReceivedEffects;
+use crate::shell::{ShellError, ShellResult, imp::review_reply::ReviewReply};
 use hibana::{Endpoint, runtime::resolver::DecisionArm};
 
 #[hibana_runtime::scope]
-pub async fn run_a<D: Domain>(
-    task: &mut Endpoint<REVIEW_A>,
-    (domain, actual): (&D, &ReviewInput),
+pub async fn run_a<'run>(
+    owner: &mut Endpoint<'run, REVIEW_OWNER_A>,
+    mut task: Endpoint<'run, REVIEW_A>,
+    (effects, actual): (&impl ReceivedEffects, &ReviewInput),
 ) -> ShellResult<()> {
     loop {
-        let (ready, arguments) = async {
+        let result = async {
             let [mut implementation, mut request] = task.par()?;
-            async { Ok(implementation.recv::<Ready<TARGET_A>>().await?.to_vec()) };
-            async { Ok(request.recv::<FileReview<TARGET_A>>().await?.into_value()) };
+            let (ready, arguments) = async {
+                async { Ok(implementation.recv::<Ready<TARGET_A>>().await?.to_vec()) };
+                async { Ok(request.recv::<FileReview<TARGET_A>>().await?) };
+            }
+            .await?;
+            let implemented: serde_json::Value =
+                serde_json::from_slice(&ready).map_err(|e| ShellError::message(e.to_string()))?;
+            if implemented["success"] != true {
+                return Err(ShellError::message(
+                    "review lacks a successful implementation",
+                ));
+            }
+            effects.apply(arguments).await
         }
         .await?;
-        let implemented: serde_json::Value =
-            serde_json::from_slice(&ready).map_err(|e| ShellError::message(e.to_string()))?;
-        if implemented["success"] != true {
-            return Err(ShellError::message(
-                "review lacks a successful implementation",
-            ));
-        }
-        let result = domain
-            .execute("REVIEWER", "code_review", arguments)
-            .await
-            .map_err(ShellError::message)?;
         let bytes = serde_json::to_vec(&result).map_err(|e| ShellError::message(e.to_string()))?;
         actual.record(result);
         match decide(actual).map_err(|_| ShellError::message("review outcome lacks success"))? {
             DecisionArm::Left => {
                 let reply = ReviewReply::<true>::from_bytes(&bytes)?;
-                task.send::<ApprovedA>(&reply).await?;
-                task.send::<FileReviewResult<TARGET_A>>(&bytes.as_slice())
-                    .await?;
-                task.send::<RepoExit>(&0).await?;
+                owner.send::<ApprovedLoanA>(task).await?;
+                owner.send::<ApprovedA>(&reply).await?;
+                owner.send::<RepoExit>(&0).await?;
                 return Ok(());
             }
             DecisionArm::Right => {
                 let reply = ReviewReply::<false>::from_bytes(&bytes)?;
-                task.send::<RejectedA>(&reply).await?;
-                task.send::<FileReviewResult<TARGET_A>>(&bytes.as_slice())
-                    .await?;
+                owner.send::<RejectedLoanA>(task).await?;
+                owner.send::<RejectedA>(&reply).await?;
+                task = owner.recv::<RejectedLoanA>().await?;
             }
         }
     }
 }
 
 #[hibana_runtime::scope]
-pub async fn run_b<D: Domain>(
-    task: &mut Endpoint<REVIEW_B>,
-    (domain, actual): (&D, &ReviewInput),
+pub async fn run_b<'run>(
+    owner: &mut Endpoint<'run, REVIEW_OWNER_B>,
+    mut task: Endpoint<'run, REVIEW_B>,
+    (effects, actual): (&impl ReceivedEffects, &ReviewInput),
 ) -> ShellResult<()> {
     loop {
-        let (ready, arguments) = async {
+        let result = async {
             let [mut implementation, mut request] = task.par()?;
-            async { Ok(implementation.recv::<Ready<TARGET_B>>().await?.to_vec()) };
-            async { Ok(request.recv::<FileReview<TARGET_B>>().await?.into_value()) };
+            let (ready, arguments) = async {
+                async { Ok(implementation.recv::<Ready<TARGET_B>>().await?.to_vec()) };
+                async { Ok(request.recv::<FileReview<TARGET_B>>().await?) };
+            }
+            .await?;
+            let implemented: serde_json::Value =
+                serde_json::from_slice(&ready).map_err(|e| ShellError::message(e.to_string()))?;
+            if implemented["success"] != true {
+                return Err(ShellError::message(
+                    "review lacks a successful implementation",
+                ));
+            }
+            effects.apply(arguments).await
         }
         .await?;
-        let implemented: serde_json::Value =
-            serde_json::from_slice(&ready).map_err(|e| ShellError::message(e.to_string()))?;
-        if implemented["success"] != true {
-            return Err(ShellError::message(
-                "review lacks a successful implementation",
-            ));
-        }
-        let result = domain
-            .execute("REVIEWER", "code_review", arguments)
-            .await
-            .map_err(ShellError::message)?;
         let bytes = serde_json::to_vec(&result).map_err(|e| ShellError::message(e.to_string()))?;
         actual.record(result);
         match decide(actual).map_err(|_| ShellError::message("review outcome lacks success"))? {
             DecisionArm::Left => {
                 let reply = ReviewReply::<true>::from_bytes(&bytes)?;
-                task.send::<ApprovedB>(&reply).await?;
-                task.send::<FileReviewResult<TARGET_B>>(&bytes.as_slice())
-                    .await?;
+                owner.send::<ApprovedLoanB>(task).await?;
+                owner.send::<ApprovedB>(&reply).await?;
                 return Ok(());
             }
             DecisionArm::Right => {
                 let reply = ReviewReply::<false>::from_bytes(&bytes)?;
-                task.send::<RejectedB>(&reply).await?;
-                task.send::<FileReviewResult<TARGET_B>>(&bytes.as_slice())
-                    .await?;
+                owner.send::<RejectedLoanB>(task).await?;
+                owner.send::<RejectedB>(&reply).await?;
+                task = owner.recv::<RejectedLoanB>().await?;
             }
         }
     }

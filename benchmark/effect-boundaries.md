@@ -6,12 +6,20 @@ contains request data; opening or writing it alone does not authorize its
 business operation. The task global determines when the corresponding request
 and resource Endpoint can be used.
 
-`Domain::execute` connects an admitted operation to the versioned common task
-simulator in `benchmark/`. The same simulator contract applies to every arm;
-earlier original-simulator evidence is not relabeled as corrected-simulator data.
-It is ordinary host Rust and is not a separate tool exposed to the model. The
-receiver code calling it is part of the adapter trust boundary. Endpoint checks
-do not prevent arbitrary host Rust from calling an external service directly.
+The physical effect is a call to the versioned common task simulator. In 6E,
+the repository or reviewer consumes Hibana's `ReceivedPayload` in `ReceivedEffects::apply`.
+The payload type selects the simulator operation and participant. Its received
+bytes provide the arguments. The receiver can inspect these bytes but cannot
+construct another receipt from them. When the reviewer approves a feature it
+gives its review Endpoint to the repository. Only a rejection returns it for
+another attempt. The simulator reply determines that choice.
+
+Other families still give resource receivers an explicit simulator connection
+with `Domain::execute(agent, tool, arguments)`. Its caller is trusted to match
+these values to the incoming requests, including requests for both resources
+where required. A shared terminal or private-filesystem I/O reference has neither effect interface. EPF and the effect auditor check an individual execution. The
+native integration binds the session, physical resources and simulator process
+for the trial. A received payload alone carries no external trial identifier.
 
 ## Receiver contract
 
@@ -84,8 +92,8 @@ each qualification.
 | 5M | `assess_patient`, `order_tests`, `perform_imaging`, `interpret_imaging`, `diagnose`, `review_prescriptions`, `conduct_case_conference` | [Multi-specialty receivers](../src/tasks/multi_specialty/localside/services.rs): actual panel/image/report artifacts reach the diagnosis and conference receivers. Each scanner request must equal the admitted WASI arguments. The real room request must equal its admission before the one conference effect. Changed patient, modality, attendees and diagnosis inputs are tested against actual receivers; the Domain invocation journal stays empty on rejection. |
 | 5H | Patient assessment/panels/diagnosis, CT/MRI imaging and interpretation, anesthesia, surgery, ICU and prescription review | [Patient](../src/tasks/critical_care/localside/patients.rs), [imaging](../src/tasks/critical_care/localside/imaging.rs) and [care](../src/tasks/critical_care/localside/care.rs) receivers bind actual patient artifacts and admitted arguments to real resource requests. The same OR Endpoint moves from anesthesia to surgery. ICU receives matching requests through both bed and ventilator Endpoints before one effect. Twelve substituted requests are rejected with zero Domain invocations, including both ICU sides, and pass strict-provenance Miri. Eight actual-Wasm conditions and a seven-model pilot pass EPF and the separate effect auditor. |
 | 14E | `run_hplc_analysis`, `run_mass_spec_analysis`, `run_cell_assay` | [Instrument receivers](../src/tasks/drug_discovery/localside/instruments.rs): compare the accepted WASI argument with the actual request received through the instrument Endpoint before the effect; return the actual result. Final documentation also carries the actual decision and completed analysis data. The common simulator checks assigned analyses and physical instrument conflicts without enforcing the ChoreoFix operation order. |
-| 6E | `implement_feature`, `merge_code` | [Repository](../src/tasks/review/choreofs/localside/repo.rs): actual business admission, sole repository Endpoint loan, resource request equality and assigned feature/branch. |
-| 6E | `code_review` | [Reviewer A](../src/tasks/review/choreofs/localside/reviewer_a.rs) and [reviewer B](../src/tasks/review/choreofs/localside/reviewer_b.rs): actual typed review request and assigned target; actual result feeds the resolver. |
+| 6E | `implement_feature`, `merge_code` | [Repository](../src/tasks/review/choreofs/localside/repo.rs): the repository consumes the actual typed file request for the assigned feature or branch. |
+| 6E | `code_review` | [Feature reviewers](../src/tasks/review/choreofs/localside/reviewer.rs): each consumes its typed review request after receiving the successful implementation. Its actual result feeds the resolver. |
 | 6M | `implement_feature`, `write_tests`, `code_review`, `merge_code`, `run_ci_pipeline` | [Repository](../src/tasks/feature_delivery/localside/repository.rs), [review](../src/tasks/feature_delivery/localside/reviews.rs) and [CI](../src/tasks/feature_delivery/localside/ci.rs) receivers match actual requests to the current source, completed review/test receipts and published occurrence. CI receives both actual feature and BUILD_SERVER requests. [6M](ports/6M.md) records recovery, resource boundaries and qualification. |
 | 7E | `write_section`, `update_references`, `review_sections`, `revise_section`, `combine_sections` | [Document receiver](../src/tasks/shared_document/localside/document.rs): actual admitted arguments and delegated document requests; actual review results and current document data accompany revision and final combination. Qualification is bound to the sources recorded in [7E](ports/7E.md). |
 | 10E | `compile_module`, `link_modules` | [Build receiver](../src/tasks/shared_build/localside/resources.rs): both resource requests agree with the admitted compile arguments; linking checks both actual current objects and the requested modules. The shared world independently grades actual input contents. |
@@ -130,10 +138,11 @@ native Endpoint probes can also bypass the intended guest localside and test
 the production receiver directly. Record mutations measure auditor sensitivity
 and are separate from runtime rejection before an effect.
 
-The [repository receiver tests](../src/tasks/review/choreofs/tests.rs) use
-separate runtimes for admission and the actual resource request. They check
-substituted arguments, a wrong target, and an unchanged request whose real
-result returns to the caller. The [CI/CD receiver test](../src/tasks/cicd/choreofs/tests.rs)
+The [6E regression](../src/tasks/review/choreofs/tests.rs) issues a late
+rejection directly through a real Endpoint after approval, on both the direct
+and previously rejected paths. It checks that the late call fails without
+emitting a frame and that the approved feature can still merge.
+The [CI/CD receiver test](../src/tasks/cicd/choreofs/tests.rs)
 substitutes a compile argument after admission through an actual received
 Endpoint. That test exposed a missing receiver check: the old receiver invoked
 the domain with the substituted argument. The corrected receiver rejects it

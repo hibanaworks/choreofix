@@ -1,7 +1,6 @@
 //! The two independent preparations meet when the creator borrows both resources.
 use super::Arguments;
 use crate::shell::global::{Exit, FileExit, Loan, file_metadata, private_io};
-#[cfg(not(test))]
 use hibana::runtime::program::{RoleProgram, project};
 use hibana::{g, runtime::program::Projectable};
 use hibana_wasip1_runtime::{
@@ -487,10 +486,8 @@ pub fn chapter_with_wasm_figure_creator() -> impl Projectable {
     )
 }
 
-#[cfg(not(test))]
 pub const SESSION: u32 = 85;
 
-#[cfg(not(test))]
 fn protocol() -> impl Projectable {
     let chapters = prepare_chapters(g::par(
         figure_chapter::<CREATE_1, INSERT_1>(draft::<WRITER_FILE, DRAFT_1>()),
@@ -555,7 +552,6 @@ fn protocol() -> impl Projectable {
 }
 
 // The same role list constructs every image used by the runtime and its export.
-#[cfg(not(test))]
 macro_rules! programs {
     ($($field:ident : $role:ident),+ $(,)?) => {
         pub(super) struct Programs {
@@ -619,7 +615,6 @@ macro_rules! programs {
     };
 }
 
-#[cfg(not(test))]
 programs! {
     document: DOCUMENT,
     owner: DOCUMENT_OWNER,

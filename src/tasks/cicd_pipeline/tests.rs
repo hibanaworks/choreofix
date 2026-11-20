@@ -116,8 +116,7 @@ async fn one_valid_request_cannot_publish_and_a_substituted_second_is_rejected()
             async {
                 let error = localside::registry_owner(&mut registry_owner, registry, &domain)
                 .await
-                .err()
-                .expect("malformed artifact request must be rejected");
+                .expect_err("malformed artifact request must be rejected");
                 assert!(error.to_string().contains("Codec(Malformed)"), "{error}");
                 Ok::<(), ShellError>(())
             },

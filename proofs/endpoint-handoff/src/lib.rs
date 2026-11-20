@@ -8,7 +8,10 @@ pub mod service;
 #[path = "../../../src/imp/transport.rs"]
 pub(crate) mod transport;
 
+#[path = "../../../src/imp/projection.rs"]
+pub mod projection;
 pub(crate) mod imp {
+    pub(crate) use crate::projection;
     pub(crate) use crate::transport;
 }
 pub mod shell {

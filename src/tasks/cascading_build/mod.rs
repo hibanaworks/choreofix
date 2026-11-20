@@ -18,7 +18,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
     use global::*;
     use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasiGuestStorage};
     let (
-        bus,
+        mut connection,
         mut io,
         [
             a_terminal,
@@ -46,14 +46,12 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             (SessionId::new(SESSION), TESTER_FILE),
         ],
     );
+    let (bus, simulator) = connection.split();
     let result = hibana_runtime::race(
         async {
             let p = programs();
-            bus.observe(p.observation());
-            let capture = |row| {
-                bus.observe(serde_json::json!({"type":"protocol_capture","producer":0,
-                "records":[crate::imp::projection::record(row)]}))
-            };
+            bus.projected(p.observation());
+            let capture = |row| bus.capture(row);
             let input = core::cell::Cell::new(serde_json::Value::Null);
             let mut slab = vec![0; 2 * 1024 * 1024];
             let incoming_capacity = slab.len();
@@ -138,10 +136,11 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                     localside::builder::run(&mut c).await?;
                 };
                 async {
-                    localside::compiler::run(&mut compiler, (core, config, models), &bus).await?;
+                    localside::compiler::run(&mut compiler, (core, config, models), &simulator)
+                        .await?;
                 };
                 async {
-                    localside::testing::run(&mut testing, &bus).await?;
+                    localside::testing::run(&mut testing, &simulator).await?;
                 };
                 async {
                     localside::integrator::run(&mut integrator, &input).await?;
@@ -150,7 +149,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                     localside::tester::run(&mut tester).await?;
                 };
                 async {
-                    private_io::run(&mut a_io, PrivateFs::new(a_terminal, &bus, &BUILDER_FILES))
+                    private_io::run(&mut a_io, PrivateFs::new(a_terminal, bus, &BUILDER_FILES))
                         .await?;
                 };
                 async {
@@ -186,7 +185,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                     root.send::<crate::shell::global::Exit>(&status).await?;
                 };
                 async {
-                    private_io::run(&mut b_io, PrivateFs::new(b_terminal, &bus, &BUILDER_FILES))
+                    private_io::run(&mut b_io, PrivateFs::new(b_terminal, bus, &BUILDER_FILES))
                         .await?;
                 };
                 async {
@@ -222,7 +221,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                     root.send::<crate::shell::global::Exit>(&status).await?;
                 };
                 async {
-                    private_io::run(&mut c_io, PrivateFs::new(c_terminal, &bus, &BUILDER_FILES))
+                    private_io::run(&mut c_io, PrivateFs::new(c_terminal, bus, &BUILDER_FILES))
                         .await?;
                 };
                 async {
@@ -260,7 +259,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 async {
                     private_io::run(
                         &mut integrator_io,
-                        PrivateFs::new(integrator_terminal, &bus, &INTEGRATOR_FILES),
+                        PrivateFs::new(integrator_terminal, bus, &INTEGRATOR_FILES),
                     )
                     .await?;
                 };
@@ -288,7 +287,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 async {
                     private_io::run(
                         &mut tester_io,
-                        PrivateFs::new(tester_terminal, &bus, &TESTER_FILES),
+                        PrivateFs::new(tester_terminal, bus, &TESTER_FILES),
                     )
                     .await?;
                 };
@@ -330,18 +329,15 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 Ok::<(), ShellError>(())
             }
             .await;
-            bus.observe(
-                serde_json::json!({"type":"protocol_checkpoint","producer":0,
-                "session":SESSION,"checkpoint":observations.checkpoint()}),
-            );
+            bus.checkpoint(SESSION, observations.checkpoint());
             result
         },
-        io.run(&bus),
+        io.run(bus),
     )
     .await;
     match &result {
-        Ok(()) => io.emit(&bus, serde_json::json!({"type":"run_result","status":"complete"})).await?,
-        Err(error) => io.emit(&bus, serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
+        Ok(()) => io.emit(bus, serde_json::json!({"type":"run_result","status":"complete"})).await?,
+        Err(error) => io.emit(bus, serde_json::json!({"type":"run_result","status":"failed","error":error.to_string()})).await?,
     }
     result
 }

@@ -1,9 +1,7 @@
 //! 7M's document and figure-store effect boundary.
 pub mod global;
 pub mod localside;
-#[cfg(not(test))]
 mod run;
-#[cfg(not(test))]
 pub use run::{projection, run_stdio};
 
 use crate::{imp::json::decode, shell::ShellResult};

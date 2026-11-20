@@ -1,6 +1,6 @@
 //! Final 15E spot checks on a single aligned reference wafer.
-use crate::imp::json::{decode, encode};
-use crate::shell::{ShellError, ShellResult, global::Loan, imp::service::Domain};
+use choreofix::imp::json::{decode, encode};
+use choreofix::shell::{ShellError, ShellResult, global::Loan, imp::service::Domain};
 use hibana::{
     Endpoint, g,
     runtime::{

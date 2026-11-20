@@ -32,7 +32,7 @@ use std::cell::Cell;
 pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
     let session = SessionId::new(SESSION);
     let (
-        bus,
+        mut connection,
         mut io,
         [
             chem_terminal,
@@ -74,14 +74,13 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
         ]
         .map(|role| (session, role)),
     );
+    let (bus, simulator) = connection.split();
     let participants = async {
         let programs = programs();
-        bus.observe(programs.observation());
+        bus.projected(programs.observation());
         let selection = Cell::new(Value::Null);
         let capture = |event| {
-            bus.observe(json!({"type":"protocol_capture", "producer":0,
-                "records":[crate::imp::projection::record(event)]
-            }));
+            bus.capture(event);
         };
         let mut slab = vec![0; 2 * 1024 * 1024];
         let incoming_capacity = slab.len();
@@ -185,16 +184,16 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 Ok(())
             };
             async {
-                localside::instruments::hplc(&mut hplc_owner, &bus).await?;
+                localside::instruments::hplc(&mut hplc_owner, &simulator).await?;
             };
             async {
-                localside::instruments::mass(&mut mass_owner, &bus).await?;
+                localside::instruments::mass(&mut mass_owner, &simulator).await?;
             };
             async {
-                localside::instruments::cell(&mut cell_owner, &bus).await?;
+                localside::instruments::cell(&mut cell_owner, &simulator).await?;
             };
             async {
-                localside::review_owner::run(&mut review_owner, &bus).await?;
+                localside::review_owner::run(&mut review_owner, &simulator).await?;
             };
 
             async {
@@ -203,7 +202,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut chem_io,
-                    PrivateFs::new(chem_terminal, &bus, &CHEM_FILES),
+                    PrivateFs::new(chem_terminal, bus, &CHEM_FILES),
                 )
                 .await?;
             };
@@ -253,8 +252,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 file_metadata::run(&mut bio_data, bio_file, BIO_FILES).await?;
             };
             async {
-                private_io::run(&mut bio_io, PrivateFs::new(bio_terminal, &bus, &BIO_FILES))
-                    .await?;
+                private_io::run(&mut bio_io, PrivateFs::new(bio_terminal, bus, &BIO_FILES)).await?;
             };
             async {
                 let (file, root) = async {
@@ -310,8 +308,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 file_metadata::run(&mut tox_data, tox_file, TOX_FILES).await?;
             };
             async {
-                private_io::run(&mut tox_io, PrivateFs::new(tox_terminal, &bus, &TOX_FILES))
-                    .await?;
+                private_io::run(&mut tox_io, PrivateFs::new(tox_terminal, bus, &TOX_FILES)).await?;
             };
             async {
                 let (file, root) = async {
@@ -368,7 +365,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             async {
                 private_io::run(
                     &mut lead_io,
-                    PrivateFs::new(lead_terminal, &bus, &LEAD_FILES),
+                    PrivateFs::new(lead_terminal, bus, &LEAD_FILES),
                 )
                 .await?;
             };
@@ -381,7 +378,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 .await?;
                 let ((), (mut file, status)) = async {
                     async {
-                        localside::lead::run(&mut lead, study, (structure, &selection, &bus))
+                        localside::lead::run(&mut lead, study, (structure, &selection, &simulator))
                             .await?;
                     };
                     async {
@@ -440,8 +437,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 file_metadata::run(&mut reg_data, reg_file, REG_FILES).await?;
             };
             async {
-                private_io::run(&mut reg_io, PrivateFs::new(reg_terminal, &bus, &REG_FILES))
-                    .await?;
+                private_io::run(&mut reg_io, PrivateFs::new(reg_terminal, bus, &REG_FILES)).await?;
             };
             async {
                 let (file, root) = async {
@@ -480,16 +476,14 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             Ok(())
         }
         .await;
-        bus.observe(json!({"type":"protocol_checkpoint", "producer":0,
-            "session":SESSION, "checkpoint":observations.checkpoint(),
-        }));
+        bus.checkpoint(SESSION, observations.checkpoint());
         result
     };
-    let result = hibana_runtime::race(participants, io.run(&bus)).await;
+    let result = hibana_runtime::race(participants, io.run(bus)).await;
     let message = match &result {
         Ok(()) => json!({"type":"run_result", "status":"complete"}),
         Err(error) => json!({"type":"run_result", "status":"failed", "error":error.to_string()}),
     };
-    io.emit(&bus, message).await?;
+    io.emit(bus, message).await?;
     result
 }
