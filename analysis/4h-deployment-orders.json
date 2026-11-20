@@ -1,0 +1,329 @@
+{
+  "scope": "neutral simulator only; prepared positive candidates with completed schemas; all interleavings preserving each service stage before its own registration; no failures injected",
+  "revision": "b3540b87df2bdad503270d8a1de5f5668c51d500",
+  "inputs": {
+    "benchmark/environments/4H/sim.py": "1db148f780a01e21b33463ccd267b0427d4103438ed21b9f26fba9a152b85cf6",
+    "benchmark/tools/sim_base.py": "6d1c284508764015b03194002040bd3bbeee8abb09617ebcee15613355088b84",
+    "benchmark/tests/test_microservice_migration.py": "649843a13a5541b215f149db4ae774114a999fe102f6050647361c7c3fd384b2"
+  },
+  "model_calls": 0,
+  "wasm_runs": 0,
+  "scored_comparison_runs": 0,
+  "graphs_considered": 64,
+  "acyclic_graphs": 25,
+  "schedules_per_acyclic_graph": 90,
+  "graphs": [
+    {
+      "dependencies": {
+        "microservice_a": [],
+        "microservice_b": [],
+        "microservice_c": []
+      },
+      "clean_completions": 90,
+      "schedules_with_violations": 0
+    },
+    {
+      "dependencies": {
+        "microservice_a": [
+          "microservice_b"
+        ],
+        "microservice_b": [],
+        "microservice_c": []
+      },
+      "clean_completions": 45,
+      "schedules_with_violations": 45
+    },
+    {
+      "dependencies": {
+        "microservice_a": [
+          "microservice_c"
+        ],
+        "microservice_b": [],
+        "microservice_c": []
+      },
+      "clean_completions": 45,
+      "schedules_with_violations": 45
+    },
+    {
+      "dependencies": {
+        "microservice_a": [
+          "microservice_b",
+          "microservice_c"
+        ],
+        "microservice_b": [],
+        "microservice_c": []
+      },
+      "clean_completions": 30,
+      "schedules_with_violations": 60
+    },
+    {
+      "dependencies": {
+        "microservice_a": [],
+        "microservice_b": [
+          "microservice_a"
+        ],
+        "microservice_c": []
+      },
+      "clean_completions": 45,
+      "schedules_with_violations": 45
+    },
+    {
+      "dependencies": {
+        "microservice_a": [
+          "microservice_c"
+        ],
+        "microservice_b": [
+          "microservice_a"
+        ],
+        "microservice_c": []
+      },
+      "clean_completions": 15,
+      "schedules_with_violations": 75
+    },
+    {
+      "dependencies": {
+        "microservice_a": [],
+        "microservice_b": [
+          "microservice_c"
+        ],
+        "microservice_c": []
+      },
+      "clean_completions": 45,
+      "schedules_with_violations": 45
+    },
+    {
+      "dependencies": {
+        "microservice_a": [
+          "microservice_b"
+        ],
+        "microservice_b": [
+          "microservice_c"
+        ],
+        "microservice_c": []
+      },
+      "clean_completions": 15,
+      "schedules_with_violations": 75
+    },
+    {
+      "dependencies": {
+        "microservice_a": [
+          "microservice_c"
+        ],
+        "microservice_b": [
+          "microservice_c"
+        ],
+        "microservice_c": []
+      },
+      "clean_completions": 30,
+      "schedules_with_violations": 60
+    },
+    {
+      "dependencies": {
+        "microservice_a": [
+          "microservice_b",
+          "microservice_c"
+        ],
+        "microservice_b": [
+          "microservice_c"
+        ],
+        "microservice_c": []
+      },
+      "clean_completions": 15,
+      "schedules_with_violations": 75
+    },
+    {
+      "dependencies": {
+        "microservice_a": [],
+        "microservice_b": [
+          "microservice_a",
+          "microservice_c"
+        ],
+        "microservice_c": []
+      },
+      "clean_completions": 30,
+      "schedules_with_violations": 60
+    },
+    {
+      "dependencies": {
+        "microservice_a": [
+          "microservice_c"
+        ],
+        "microservice_b": [
+          "microservice_a",
+          "microservice_c"
+        ],
+        "microservice_c": []
+      },
+      "clean_completions": 15,
+      "schedules_with_violations": 75
+    },
+    {
+      "dependencies": {
+        "microservice_a": [],
+        "microservice_b": [],
+        "microservice_c": [
+          "microservice_a"
+        ]
+      },
+      "clean_completions": 45,
+      "schedules_with_violations": 45
+    },
+    {
+      "dependencies": {
+        "microservice_a": [
+          "microservice_b"
+        ],
+        "microservice_b": [],
+        "microservice_c": [
+          "microservice_a"
+        ]
+      },
+      "clean_completions": 15,
+      "schedules_with_violations": 75
+    },
+    {
+      "dependencies": {
+        "microservice_a": [],
+        "microservice_b": [
+          "microservice_a"
+        ],
+        "microservice_c": [
+          "microservice_a"
+        ]
+      },
+      "clean_completions": 30,
+      "schedules_with_violations": 60
+    },
+    {
+      "dependencies": {
+        "microservice_a": [],
+        "microservice_b": [
+          "microservice_c"
+        ],
+        "microservice_c": [
+          "microservice_a"
+        ]
+      },
+      "clean_completions": 15,
+      "schedules_with_violations": 75
+    },
+    {
+      "dependencies": {
+        "microservice_a": [],
+        "microservice_b": [
+          "microservice_a",
+          "microservice_c"
+        ],
+        "microservice_c": [
+          "microservice_a"
+        ]
+      },
+      "clean_completions": 15,
+      "schedules_with_violations": 75
+    },
+    {
+      "dependencies": {
+        "microservice_a": [],
+        "microservice_b": [],
+        "microservice_c": [
+          "microservice_b"
+        ]
+      },
+      "clean_completions": 45,
+      "schedules_with_violations": 45
+    },
+    {
+      "dependencies": {
+        "microservice_a": [
+          "microservice_b"
+        ],
+        "microservice_b": [],
+        "microservice_c": [
+          "microservice_b"
+        ]
+      },
+      "clean_completions": 30,
+      "schedules_with_violations": 60
+    },
+    {
+      "dependencies": {
+        "microservice_a": [
+          "microservice_c"
+        ],
+        "microservice_b": [],
+        "microservice_c": [
+          "microservice_b"
+        ]
+      },
+      "clean_completions": 15,
+      "schedules_with_violations": 75
+    },
+    {
+      "dependencies": {
+        "microservice_a": [
+          "microservice_b",
+          "microservice_c"
+        ],
+        "microservice_b": [],
+        "microservice_c": [
+          "microservice_b"
+        ]
+      },
+      "clean_completions": 15,
+      "schedules_with_violations": 75
+    },
+    {
+      "dependencies": {
+        "microservice_a": [],
+        "microservice_b": [
+          "microservice_a"
+        ],
+        "microservice_c": [
+          "microservice_b"
+        ]
+      },
+      "clean_completions": 15,
+      "schedules_with_violations": 75
+    },
+    {
+      "dependencies": {
+        "microservice_a": [],
+        "microservice_b": [],
+        "microservice_c": [
+          "microservice_a",
+          "microservice_b"
+        ]
+      },
+      "clean_completions": 30,
+      "schedules_with_violations": 60
+    },
+    {
+      "dependencies": {
+        "microservice_a": [
+          "microservice_b"
+        ],
+        "microservice_b": [],
+        "microservice_c": [
+          "microservice_a",
+          "microservice_b"
+        ]
+      },
+      "clean_completions": 15,
+      "schedules_with_violations": 75
+    },
+    {
+      "dependencies": {
+        "microservice_a": [],
+        "microservice_b": [
+          "microservice_a"
+        ],
+        "microservice_c": [
+          "microservice_a",
+          "microservice_b"
+        ]
+      },
+      "clean_completions": 15,
+      "schedules_with_violations": 75
+    }
+  ]
+}

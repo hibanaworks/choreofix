@@ -200,9 +200,13 @@ The boundary assumes the supplied tool interface is the only path to the
 protected effects. Model roles cannot call native tools or choose another
 participant's identity. In 6E, 16E, and the 7H implementation, each simulator
 call consumes a typed Hibana receive. Its type determines the participant and
-operation, and its bytes determine the arguments. Other task receivers still
-supply the operation and arguments to a privileged simulator connection. Their
-implementation is part of the trusted boundary.
+operation, and its bytes determine the arguments. In 10M a compilation consumes
+two requests, one from each required resource endpoint. The compiler compares
+both with the submitted build arguments before making one simulator call.
+Some ports still select an operation and supply its arguments to a privileged
+simulator connection. For example, the 8E backend reads the submitted file
+contents and supplies the operation name at the call site. Those receivers
+remain part of the trusted boundary.
 All trials trust the runtime, codecs, transport, executor and simulator integration. The simulator
 independently records actual domain effects and resource violations.
 

@@ -235,7 +235,7 @@ Can DevOps register A while B and C still await deployment? We tested the common
 
 A barrier requiring all deployments to finish before any registration would lose 432 of the 720 legal pairs. This count follows from the ordering constraints. Each fixed deployment order admits 15 interleavings with the registrations. Only six put all three registrations last. For example, with no declared dependencies, deploying and registering A before deploying B is a valid completion prefix. In a graph where B depends on A, B may deploy once A has deployed, even if A has yet to register.
 
-These measurements exercise the scoring environment. The seven-guest Wasm experiments above cover preparation and schema migration. The [per-graph measurements and simulator input hashes](../output/verification/4h-deploy-register-orders-7knyo3us/summary.json) identify the exact evaluation inputs. The summary's SHA-256 is `bdec659bc61b38a1907a6e864d448f61c21ff9f166ae02618c991b1625b0af9f`.
+These measurements exercise the scoring environment. The seven-guest Wasm experiments above cover preparation and schema migration. The [per-graph measurements and simulator input hashes](4h-deployment-orders.json) identify the exact evaluation inputs. The summary's SHA-256 is `bdec659bc61b38a1907a6e864d448f61c21ff9f166ae02618c991b1625b0af9f`.
 
 To reproduce the seven-guest preparation test from the repository root, build the `microservice_migration` family with the runner's `--build-wasi` option. Set `CHOREOFIX_MICROSERVICE_MIGRATION_WASI_BINARY` to the built executable and `CHOREOFIX_EVIDENCE_ROOT` to a fresh directory. Run the following under the repository's resource guard.
 
