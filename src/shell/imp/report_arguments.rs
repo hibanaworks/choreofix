@@ -5,8 +5,8 @@ use serde_json::Value;
 
 /// Exact bytes admitted by the guest's ChoreoFS close, including optional data.
 #[derive(Debug)]
-pub struct ReportArguments<const OPERATION: u8>(Vec<u8>);
-impl<const OPERATION: u8> ReportArguments<OPERATION> {
+pub struct ReportArguments<const OPERATION: u8, const EFFECT: bool = false>(Vec<u8>);
+impl<const OPERATION: u8, const EFFECT: bool> ReportArguments<OPERATION, EFFECT> {
     const KEY: &'static str = match OPERATION {
         1 => "topic",
         2..=5 => "section_name",
@@ -17,12 +17,12 @@ impl<const OPERATION: u8> ReportArguments<OPERATION> {
         17 => "review",
         18 => "review_id",
         19 | 20 => "topic",
-        21..=28 => "section_name",
+        21..=28 | 30 | 31 => "section_name",
         29 => "sections",
         _ => panic!("unknown report operation"),
     };
     pub fn from_bytes(bytes: &[u8]) -> ShellResult<Self> {
-        Self::validate_payload(Payload::new(bytes))
+        Self::validate(Payload::new(bytes))
             .map_err(|_| ShellError::message("invalid report arguments"))?;
         Ok(Self(bytes.to_vec()))
     }
@@ -32,19 +32,7 @@ impl<const OPERATION: u8> ReportArguments<OPERATION> {
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
-}
-impl<const OPERATION: u8> WireEncode for ReportArguments<OPERATION> {
-    fn encode_into(&self, out: &mut [u8]) -> Result<usize, CodecError> {
-        out.get_mut(..self.0.len())
-            .ok_or(CodecError::Truncated)?
-            .copy_from_slice(&self.0);
-        Ok(self.0.len())
-    }
-}
-impl<const OPERATION: u8> WirePayload for ReportArguments<OPERATION> {
-    const SCHEMA_ID: u32 = 0xac03_0000 | OPERATION as u32;
-    type Decoded<'a> = Self;
-    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+    fn validate(input: Payload<'_>) -> Result<(), CodecError> {
         let value: Value =
             serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
         let object = value.as_object().ok_or(CodecError::Malformed)?;
@@ -62,7 +50,7 @@ impl<const OPERATION: u8> WirePayload for ReportArguments<OPERATION> {
         }
         let optional = match OPERATION {
             2 | 8 | 9 | 21 | 22 => Some("content_notes"),
-            3 | 14 | 23 | 24 => Some("feedback"),
+            3 | 14 | 23 | 24 | 30 | 31 => Some("feedback"),
             _ => None,
         };
         if !object.get(Self::KEY).is_some_and(Value::is_string)
@@ -81,7 +69,7 @@ impl<const OPERATION: u8> WirePayload for ReportArguments<OPERATION> {
             _ => None,
         };
         if chapter.is_some_and(|name| value[Self::KEY] != name)
-            || (OPERATION == 14
+            || (matches!(OPERATION, 14 | 30 | 31)
                 && !matches!(value[Self::KEY].as_str(), Some("CHAPTER_1" | "CHAPTER_2")))
         {
             return Err(CodecError::Malformed);
@@ -125,9 +113,62 @@ impl<const OPERATION: u8> WirePayload for ReportArguments<OPERATION> {
         }
         Ok(())
     }
+}
+impl<const OPERATION: u8> From<ReportArguments<OPERATION>> for ReportArguments<OPERATION, true> {
+    fn from(admitted: ReportArguments<OPERATION>) -> Self {
+        Self(admitted.0)
+    }
+}
+
+impl<const OPERATION: u8, const EFFECT: bool> WireEncode for ReportArguments<OPERATION, EFFECT> {
+    fn encode_into(&self, out: &mut [u8]) -> Result<usize, CodecError> {
+        out.get_mut(..self.0.len())
+            .ok_or(CodecError::Truncated)?
+            .copy_from_slice(&self.0);
+        Ok(self.0.len())
+    }
+}
+impl<const OPERATION: u8> WirePayload for ReportArguments<OPERATION> {
+    const SCHEMA_ID: u32 = 0xac03_0000 | OPERATION as u32;
+    type Decoded<'a> = Self;
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        Self::validate(input)
+    }
     fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
         Self(input.as_bytes().to_vec())
     }
+}
+
+// Only a committed receive of an effect request exposes a consumable receipt.
+impl<const OPERATION: u8> WirePayload for ReportArguments<OPERATION, true> {
+    const SCHEMA_ID: u32 = 0xac03_0100 | OPERATION as u32;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        Self::validate(input)
+    }
+    fn decode_validated_payload<'a>(received: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
+        received
+    }
+}
+
+macro_rules! document_effects {
+    ($($operation:literal => ($agent:literal, $tool:literal)),+ $(,)?) => {
+        $(impl super::service::SimulatorOperation for ReportArguments<$operation, true> {
+            const RPC: (&'static str, &'static str) = ($agent, $tool);
+        })+
+    };
+}
+
+document_effects! {
+    8 => ("WRITER_A", "write_section"),
+    9 => ("WRITER_B", "write_section"),
+    10 => ("WRITER_A", "update_references"),
+    11 => ("WRITER_B", "update_references"),
+    12 => ("EDITOR", "review_sections"),
+    13 => ("EDITOR", "review_sections"),
+    30 => ("WRITER_A", "revise_section"),
+    31 => ("WRITER_B", "revise_section"),
+    6 => ("EDITOR", "combine_sections"),
 }
 
 #[cfg(test)]

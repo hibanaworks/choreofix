@@ -1,14 +1,14 @@
 //! The data owner receives admitted arguments and actual resource requests.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{Endpoint, g::Message};
 use serde_json::json;
 
 #[hibana_runtime::scope]
-pub async fn run<'r, D: Domain>(
+pub async fn run<'r>(
     endpoint: &mut Endpoint<'r, DOCUMENT_SERVICE>,
     document: Endpoint<'r, DOCUMENT>,
-    domain: &D,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<Endpoint<'r, DOCUMENT>> {
     let (sections, references_a, references_b) = async {
         let [mut writing, mut references_a, mut references_b] = endpoint.par()?;
@@ -33,12 +33,10 @@ pub async fn run<'r, D: Domain>(
                             if imp::chapter(&admitted)? != CHAPTER_A {
                                 return Err(ShellError::message("initial chapter A differs"));
                             }
-                            let arguments = writing.recv::<WriteOnDocument>().await?.into_value();
+                            let request = writing.recv::<WriteOnDocumentA>().await?;
+                            let arguments = imp::decode(request.as_bytes())?;
                             imp::same(&admitted, &arguments)?;
-                            let result_a = domain
-                                .execute("WRITER_A", "write_section", arguments.clone())
-                                .await
-                                .map_err(ShellError::message)?;
+                            let result_a = effects.apply(request).await?;
                             let material_a = imp::material(
                                 &result_a,
                                 &arguments,
@@ -57,13 +55,10 @@ pub async fn run<'r, D: Domain>(
                                 if imp::chapter(&admitted)? != CHAPTER_B {
                                     return Err(ShellError::message("initial chapter B differs"));
                                 }
-                                let arguments =
-                                    continuation.recv::<WriteOnDocument>().await?.into_value();
+                                let request = continuation.recv::<WriteOnDocumentB>().await?;
+                                let arguments = imp::decode(request.as_bytes())?;
                                 imp::same(&admitted, &arguments)?;
-                                let result = domain
-                                    .execute("WRITER_B", "write_section", arguments.clone())
-                                    .await
-                                    .map_err(ShellError::message)?;
+                                let result = effects.apply(request).await?;
                                 let material = imp::material(
                                     &result,
                                     &arguments,
@@ -85,12 +80,10 @@ pub async fn run<'r, D: Domain>(
                             if imp::chapter(&admitted)? != CHAPTER_B {
                                 return Err(ShellError::message("initial chapter B differs"));
                             }
-                            let arguments = writing.recv::<WriteOnDocument>().await?.into_value();
+                            let request = writing.recv::<WriteOnDocumentB>().await?;
+                            let arguments = imp::decode(request.as_bytes())?;
                             imp::same(&admitted, &arguments)?;
-                            let result_b = domain
-                                .execute("WRITER_B", "write_section", arguments.clone())
-                                .await
-                                .map_err(ShellError::message)?;
+                            let result_b = effects.apply(request).await?;
                             let material_b = imp::material(
                                 &result_b,
                                 &arguments,
@@ -109,13 +102,10 @@ pub async fn run<'r, D: Domain>(
                                 if imp::chapter(&admitted)? != CHAPTER_A {
                                     return Err(ShellError::message("initial chapter A differs"));
                                 }
-                                let arguments =
-                                    continuation.recv::<WriteOnDocument>().await?.into_value();
+                                let request = continuation.recv::<WriteOnDocumentA>().await?;
+                                let arguments = imp::decode(request.as_bytes())?;
                                 imp::same(&admitted, &arguments)?;
-                                let result = domain
-                                    .execute("WRITER_A", "write_section", arguments.clone())
-                                    .await
-                                    .map_err(ShellError::message)?;
+                                let result = effects.apply(request).await?;
                                 let material = imp::material(
                                     &result,
                                     &arguments,
@@ -137,14 +127,12 @@ pub async fn run<'r, D: Domain>(
             .map(|(_, sections)| sections)
         };
         async {
-            let arguments = references_a.recv::<ReferencesA>().await?.into_value();
+            let request = references_a.recv::<ReferencesA>().await?;
+            let arguments = imp::decode(request.as_bytes())?;
             if imp::chapter(&arguments)? != CHAPTER_A {
                 return Err(ShellError::message("references A differ"));
             }
-            let result = domain
-                .execute("WRITER_A", "update_references", arguments.clone())
-                .await
-                .map_err(ShellError::message)?;
+            let result = effects.apply(request).await?;
             let material = imp::material(&result, &arguments, ("WRITER_A", "update_references"))?;
             let bytes = imp::encode(&result)?;
             references_a.send::<ReferencedA>(&bytes.as_slice()).await?;
@@ -154,14 +142,12 @@ pub async fn run<'r, D: Domain>(
             Ok(material)
         };
         async {
-            let arguments = references_b.recv::<ReferencesB>().await?.into_value();
+            let request = references_b.recv::<ReferencesB>().await?;
+            let arguments = imp::decode(request.as_bytes())?;
             if imp::chapter(&arguments)? != CHAPTER_B {
                 return Err(ShellError::message("references B differ"));
             }
-            let result = domain
-                .execute("WRITER_B", "update_references", arguments.clone())
-                .await
-                .map_err(ShellError::message)?;
+            let result = effects.apply(request).await?;
             let material = imp::material(&result, &arguments, ("WRITER_B", "update_references"))?;
             let bytes = imp::encode(&result)?;
             references_b.send::<ReferencedB>(&bytes.as_slice()).await?;
@@ -179,14 +165,12 @@ pub async fn run<'r, D: Domain>(
         let (a, b) = async {
             let [mut a, mut b] = endpoint.par()?;
             async {
-                let arguments = a.recv::<ReviewA>().await?.into_value();
+                let request = a.recv::<ReviewA>().await?;
+                let arguments = imp::decode(request.as_bytes())?;
                 if imp::chapter(&arguments)? != CHAPTER_A {
                     return Err(ShellError::message("review A changed scope"));
                 }
-                let result = domain
-                    .execute("EDITOR", "review_sections", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(request).await?;
                 imp::reviewed(&result, &snapshot, CHAPTER_A)?;
                 let bytes = imp::encode(&result)?;
                 async {
@@ -203,14 +187,12 @@ pub async fn run<'r, D: Domain>(
                 Ok(result)
             };
             async {
-                let arguments = b.recv::<ReviewB>().await?.into_value();
+                let request = b.recv::<ReviewB>().await?;
+                let arguments = imp::decode(request.as_bytes())?;
                 if imp::chapter(&arguments)? != CHAPTER_B {
                     return Err(ShellError::message("review B changed scope"));
                 }
-                let result = domain
-                    .execute("EDITOR", "review_sections", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(request).await?;
                 imp::reviewed(&result, &snapshot, CHAPTER_B)?;
                 let bytes = imp::encode(&result)?;
                 async {
@@ -229,7 +211,7 @@ pub async fn run<'r, D: Domain>(
         }
         .await?;
         let branch = endpoint.offer().await?;
-        let (admitted, agent) = match branch.label() {
+        let (arguments, result, agent) = match branch.label() {
             FinalApprovedA::LOGICAL_LABEL => {
                 imp::same(&imp::decode(branch.recv::<FinalApprovedA>().await?)?, &a)?;
                 imp::same(&imp::decode(endpoint.recv::<FinalApprovedB>().await?)?, &b)?;
@@ -237,19 +219,21 @@ pub async fn run<'r, D: Domain>(
             }
             ReconsiderA::LOGICAL_LABEL => {
                 imp::same(&branch.recv::<ReconsiderA>().await?.into_value(), &a)?;
-                {
-                    let admitted = endpoint.recv::<ReviseA>().await?;
-                    endpoint.send::<RevisionArgumentsA>(&admitted).await?;
-                    (admitted.into_value(), "WRITER_A")
-                }
+                let admitted = endpoint.recv::<ReviseA>().await?;
+                endpoint.send::<RevisionArgumentsA>(&admitted).await?;
+                let request = endpoint.recv::<ReviseOnDocumentA>().await?;
+                let arguments = imp::decode(request.as_bytes())?;
+                imp::same(&admitted.into_value(), &arguments)?;
+                (arguments, effects.apply(request).await?, "WRITER_A")
             }
             ReconsiderB::LOGICAL_LABEL => {
                 imp::same(&branch.recv::<ReconsiderB>().await?.into_value(), &b)?;
-                {
-                    let admitted = endpoint.recv::<ReviseB>().await?;
-                    endpoint.send::<RevisionArgumentsB>(&admitted).await?;
-                    (admitted.into_value(), "WRITER_B")
-                }
+                let admitted = endpoint.recv::<ReviseB>().await?;
+                endpoint.send::<RevisionArgumentsB>(&admitted).await?;
+                let request = endpoint.recv::<ReviseOnDocumentB>().await?;
+                let arguments = imp::decode(request.as_bytes())?;
+                imp::same(&admitted.into_value(), &arguments)?;
+                (arguments, effects.apply(request).await?, "WRITER_B")
             }
             _ => {
                 return Err(ShellError::message(
@@ -257,26 +241,18 @@ pub async fn run<'r, D: Domain>(
                 ));
             }
         };
-        let section = imp::chapter(&admitted)?.to_owned();
-        let arguments = endpoint.recv::<ReviseOnDocument>().await?.into_value();
-        imp::same(&admitted, &arguments)?;
-        let result = domain
-            .execute(agent, "revise_section", arguments.clone())
-            .await
-            .map_err(ShellError::message)?;
-        snapshot["sections"][&section] =
+        let section = imp::chapter(&arguments)?;
+        snapshot["sections"][section] =
             imp::material(&result, &arguments, (agent, "revise_section"))?;
         let bytes = imp::encode(&result)?;
         endpoint.send::<Revised>(&bytes.as_slice()).await?;
         endpoint.send::<UpdatedDocument>(&bytes.as_slice()).await?;
     };
     let admitted = endpoint.recv::<Combine>().await?.into_value();
-    let arguments = endpoint.recv::<CombineOnDocument>().await?.into_value();
+    let request = endpoint.recv::<CombineOnDocument>().await?;
+    let arguments = imp::decode(request.as_bytes())?;
     imp::combine_inputs(&admitted, &arguments, (&snapshot, &reviews))?;
-    let result = domain
-        .execute("EDITOR", "combine_sections", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let result = effects.apply(request).await?;
     imp::combined(&result, &snapshot, &reviews)?;
     let bytes = imp::encode(&result)?;
     endpoint.send::<Combined>(&bytes.as_slice()).await?;

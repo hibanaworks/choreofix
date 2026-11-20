@@ -1,6 +1,6 @@
 //! The worker uses the real document; shell requests arrive as typed arguments.
-use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::report_arguments::ReportArguments};
+use super::super::global::*;
+use crate::shell::{ShellError, ShellResult};
 use hibana::{Endpoint, g::Message};
 
 #[hibana_runtime::scope]
@@ -16,13 +16,13 @@ pub async fn run<const ROLE: u8>(endpoint: &mut Endpoint<ROLE>) -> ShellResult<(
         }
         _ => return Err(ShellError::message("expected the actual initial document")),
     };
-    let value = if ROLE == WRITER_A {
-        endpoint.recv::<WriteArgumentsA>().await?.into_value()
+    if ROLE == WRITER_A {
+        let input = endpoint.recv::<WriteArgumentsA>().await?;
+        document.send::<WriteOnDocumentA>(&input.into()).await?;
     } else {
-        endpoint.recv::<WriteArgumentsB>().await?.into_value()
-    };
-    let arguments = ReportArguments::<2>::from_bytes(&imp::encode(&value)?)?;
-    document.send::<WriteOnDocument>(&arguments).await?;
+        let input = endpoint.recv::<WriteArgumentsB>().await?;
+        document.send::<WriteOnDocumentB>(&input.into()).await?;
+    }
     let result = document.recv::<Written>().await?.to_vec();
     async {
         let [mut response, mut handoff] = endpoint.par()?;
@@ -47,9 +47,8 @@ pub async fn run<const ROLE: u8>(endpoint: &mut Endpoint<ROLE>) -> ShellResult<(
                 let review = branch.recv::<RevisionReviewA>().await?;
                 endpoint.send::<FeedbackA>(&review.as_bytes()).await?;
                 let mut document = endpoint.recv::<RevisionDocument>().await?;
-                let value = endpoint.recv::<RevisionArgumentsA>().await?.into_value();
-                let arguments = ReportArguments::<3>::from_bytes(&imp::encode(&value)?)?;
-                document.send::<ReviseOnDocument>(&arguments).await?;
+                let input = endpoint.recv::<RevisionArgumentsA>().await?;
+                document.send::<ReviseOnDocumentA>(&input.into()).await?;
                 let result = document.recv::<Revised>().await?.to_vec();
                 async {
                     let [mut response, mut handoff] = endpoint.par()?;
@@ -67,9 +66,8 @@ pub async fn run<const ROLE: u8>(endpoint: &mut Endpoint<ROLE>) -> ShellResult<(
                 let review = branch.recv::<RevisionReviewB>().await?;
                 endpoint.send::<FeedbackB>(&review.as_bytes()).await?;
                 let mut document = endpoint.recv::<RevisionDocument>().await?;
-                let value = endpoint.recv::<RevisionArgumentsB>().await?.into_value();
-                let arguments = ReportArguments::<3>::from_bytes(&imp::encode(&value)?)?;
-                document.send::<ReviseOnDocument>(&arguments).await?;
+                let input = endpoint.recv::<RevisionArgumentsB>().await?;
+                document.send::<ReviseOnDocumentB>(&input.into()).await?;
                 let result = document.recv::<Revised>().await?.to_vec();
                 async {
                     let [mut response, mut handoff] = endpoint.par()?;
@@ -94,7 +92,9 @@ pub async fn run<const ROLE: u8>(endpoint: &mut Endpoint<ROLE>) -> ShellResult<(
             FrozenDocument::LOGICAL_LABEL if ROLE == WRITER_A => {
                 let mut document = branch.recv::<FrozenDocument>().await?;
                 let arguments = endpoint.recv::<CombineForward>().await?;
-                document.send::<CombineOnDocument>(&arguments).await?;
+                document
+                    .send::<CombineOnDocument>(&arguments.into())
+                    .await?;
                 let result = document.recv::<Combined>().await?.to_vec();
                 async {
                     let [mut editor, mut result_file, mut returned] = endpoint.par()?;

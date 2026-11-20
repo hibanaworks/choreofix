@@ -3,16 +3,22 @@ use super::{global::*, localside};
 use crate::shell::global::{FileExit, Loan};
 use crate::shell::{
     ShellError, ShellResult,
-    imp::{bus::Bus, service::Domain},
+    imp::{
+        bus::Bus,
+        service::{ReceivedEffects, SimulatorOperation},
+    },
 };
 use hibana::runtime::{SessionKitStorage, ids::SessionId};
 use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasiGuestStorage};
 use serde_json::Value;
 
 struct NoEffect;
-impl Domain for NoEffect {
-    async fn execute(&self, _: &'static str, _: &'static str, _: Value) -> Result<Value, String> {
-        panic!("choosing custody must not execute a document effect");
+impl ReceivedEffects for NoEffect {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        _: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+        async { panic!("choosing custody must not execute a document effect") }
     }
 }
 

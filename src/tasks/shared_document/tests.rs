@@ -26,17 +26,21 @@ fn writer_selection_preserves_the_actual_wire_bytes() {
 
 // Actual attempted effect arguments only; this journal grants no operation.
 struct EffectRequests(std::cell::Cell<Vec<Value>>);
-impl crate::shell::imp::service::Domain for EffectRequests {
-    async fn execute(
-        &self,
-        agent: &'static str,
-        tool: &'static str,
-        arguments: Value,
-    ) -> Result<Value, String> {
-        let mut calls = self.0.take();
-        calls.push(json!({"agent":agent,"tool":tool,"arguments":arguments}));
-        self.0.set(calls);
-        Err("a rejected document request reached the effect".into())
+impl crate::shell::imp::service::ReceivedEffects for EffectRequests {
+    fn apply<'io, P: crate::shell::imp::service::SimulatorOperation>(
+        &'io self,
+        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = crate::shell::ShellResult<Value>> + use<'io, P> {
+        let args = imp::decode(received.as_bytes());
+        async move {
+            let (agent, tool) = P::RPC;
+            let mut calls = self.0.take();
+            calls.push(json!({"agent":agent,"tool":tool,"arguments":args?}));
+            self.0.set(calls);
+            Err(crate::shell::ShellError::message(
+                "a rejected document request reached the effect",
+            ))
+        }
     }
 }
 
@@ -278,9 +282,8 @@ async fn the_real_document_receiver_rejects_substituted_arguments_and_wrong_init
                 CHAPTER_A
             };
             let admitted = json!({"section_name":if wrong_chapter {other} else {assigned},"content_notes":"actual admitted notes"});
-            let substituted = ReportArguments::<2>::from_bytes(&imp::encode(
-                &json!({"section_name":assigned,"content_notes":"substituted notes"}),
-            )?)?;
+            let substituted =
+                imp::encode(&json!({"section_name":assigned,"content_notes":"substituted notes"}))?;
             let effects = EffectRequests(std::cell::Cell::new(Vec::new()));
             let result = hibana_runtime::race(async {
                 let _document = localside::document::run(&mut service,document,&effects).await?;
@@ -306,7 +309,11 @@ async fn the_real_document_receiver_rejects_substituted_arguments_and_wrong_init
                         b_file.send::<WriteB>(&ReportArguments::<9>::from_bytes(&bytes)?).await?;
                         b.recv::<WriteArgumentsB>().await?;
                     }
-                    document.send::<WriteOnDocument>(&substituted).await?;
+                    if assigned == CHAPTER_A {
+                        document.send::<WriteOnDocumentA>(&ReportArguments::from_bytes(&substituted)?).await?;
+                    } else {
+                        document.send::<WriteOnDocumentB>(&ReportArguments::from_bytes(&substituted)?).await?;
+                    }
                     document.recv::<Written>().await?;
                 }
                 Err::<(),_>(ShellError::message("forged request unexpectedly returned"))
@@ -335,21 +342,17 @@ async fn the_frozen_document_cannot_reopen_editing_before_or_after_publication_r
     use std::time::Duration;
 
     let p = programs();
-    let chapter_a = ReportArguments::<2>::from_bytes(br#"{"section_name":"CHAPTER_1"}"#)?;
-    let chapter_b = ReportArguments::<2>::from_bytes(br#"{"section_name":"CHAPTER_2"}"#)?;
-    let references_a = ReportArguments::<10>::from_bytes(br#"{"section_name":"CHAPTER_1"}"#)?;
-    let references_b = ReportArguments::<11>::from_bytes(br#"{"section_name":"CHAPTER_2"}"#)?;
-    let review_a = ReportArguments::<12>::from_bytes(br#"{"section_name":"CHAPTER_1"}"#)?;
-    let review_b = ReportArguments::<13>::from_bytes(br#"{"section_name":"CHAPTER_2"}"#)?;
-    let revision = ReportArguments::<3>::from_bytes(
-        br#"{"section_name":"CHAPTER_2","feedback":"actual fixture rejection"}"#,
-    )?;
+    let chapter_a = ReportArguments::<8, true>::from_bytes(br#"{"section_name":"CHAPTER_1"}"#)?;
+    let chapter_b = ReportArguments::<9, true>::from_bytes(br#"{"section_name":"CHAPTER_2"}"#)?;
+    let references_a = ReportArguments::<10, true>::from_bytes(br#"{"section_name":"CHAPTER_1"}"#)?;
+    let references_b = ReportArguments::<11, true>::from_bytes(br#"{"section_name":"CHAPTER_2"}"#)?;
+    let review_a = ReportArguments::<12, true>::from_bytes(br#"{"section_name":"CHAPTER_1"}"#)?;
+    let review_b = ReportArguments::<13, true>::from_bytes(br#"{"section_name":"CHAPTER_2"}"#)?;
+    let revision = br#"{"section_name":"CHAPTER_2","feedback":"actual fixture rejection"}"#;
     let combine = ReportArguments::<6>::from_bytes(br#"{"sections":"CHAPTER_1,CHAPTER_2"}"#)?;
     let initial_a = ReportArguments::<8>::from_bytes(br#"{"section_name":"CHAPTER_1"}"#)?;
     let initial_b = ReportArguments::<9>::from_bytes(br#"{"section_name":"CHAPTER_2"}"#)?;
-    let revision_input = ReportArguments::<14>::from_bytes(
-        br#"{"section_name":"CHAPTER_2","feedback":"actual fixture rejection"}"#,
-    )?;
+    let revision_input = br#"{"section_name":"CHAPTER_2","feedback":"actual fixture rejection"}"#;
     let combine_input =
         ReportArguments::<16>::from_bytes(br#"{"sections":"CHAPTER_1,CHAPTER_2"}"#)?;
     let positive_bytes = br#"{"success":true}"#.as_slice();
@@ -442,8 +445,8 @@ async fn the_frozen_document_cannot_reopen_editing_before_or_after_publication_r
             let admitted = service.recv::<WriteA>().await?;
             service.send::<WriteArgumentsA>(&admitted).await?;
             a.recv::<WriteArgumentsA>().await?;
-            document.send::<WriteOnDocument>(&chapter_a).await?;
-            service.recv::<WriteOnDocument>().await?;
+            document.send::<WriteOnDocumentA>(&chapter_a).await?;
+            service.recv::<WriteOnDocumentA>().await?;
             service.send::<Written>(&material).await?;
             document.recv::<Written>().await?;
             a.send::<WriteResultA>(&material).await?;
@@ -456,8 +459,8 @@ async fn the_frozen_document_cannot_reopen_editing_before_or_after_publication_r
             let admitted = service.recv::<WriteB>().await?;
             service.send::<WriteArgumentsB>(&admitted).await?;
             b.recv::<WriteArgumentsB>().await?;
-            document.send::<WriteOnDocument>(&chapter_b).await?;
-            service.recv::<WriteOnDocument>().await?;
+            document.send::<WriteOnDocumentB>(&chapter_b).await?;
+            service.recv::<WriteOnDocumentB>().await?;
             service.send::<Written>(&material).await?;
             document.recv::<Written>().await?;
             b.send::<WriteResultB>(&material).await?;
@@ -515,12 +518,16 @@ async fn the_frozen_document_cannot_reopen_editing_before_or_after_publication_r
                     b_file.recv::<FeedbackB>().await?;
                     editor.send::<RevisionDocument>(document).await?;
                     let mut document = a.recv::<RevisionDocument>().await?;
-                    a_file.send::<ReviseA>(&revision_input).await?;
+                    a_file
+                        .send::<ReviseA>(&ReportArguments::from_bytes(revision_input)?)
+                        .await?;
                     let admitted = service.recv::<ReviseA>().await?;
                     service.send::<RevisionArgumentsA>(&admitted).await?;
                     a.recv::<RevisionArgumentsA>().await?;
-                    document.send::<ReviseOnDocument>(&revision).await?;
-                    service.recv::<ReviseOnDocument>().await?;
+                    document
+                        .send::<ReviseOnDocumentA>(&ReportArguments::from_bytes(revision)?)
+                        .await?;
+                    service.recv::<ReviseOnDocumentA>().await?;
                     service.send::<Revised>(&material).await?;
                     document.recv::<Revised>().await?;
                     a.send::<RevisionResultA>(&material).await?;
@@ -547,12 +554,16 @@ async fn the_frozen_document_cannot_reopen_editing_before_or_after_publication_r
                     a_file.recv::<FeedbackA>().await?;
                     editor.send::<RevisionDocument>(document).await?;
                     let mut document = b.recv::<RevisionDocument>().await?;
-                    b_file.send::<ReviseB>(&revision_input).await?;
+                    b_file
+                        .send::<ReviseB>(&ReportArguments::from_bytes(revision_input)?)
+                        .await?;
                     let admitted = service.recv::<ReviseB>().await?;
                     service.send::<RevisionArgumentsB>(&admitted).await?;
                     b.recv::<RevisionArgumentsB>().await?;
-                    document.send::<ReviseOnDocument>(&revision).await?;
-                    service.recv::<ReviseOnDocument>().await?;
+                    document
+                        .send::<ReviseOnDocumentB>(&ReportArguments::from_bytes(revision)?)
+                        .await?;
+                    service.recv::<ReviseOnDocumentB>().await?;
                     service.send::<Revised>(&material).await?;
                     document.recv::<Revised>().await?;
                     b.send::<RevisionResultB>(&material).await?;
@@ -580,7 +591,9 @@ async fn the_frozen_document_cannot_reopen_editing_before_or_after_publication_r
                 service.recv::<Combine>().await?;
                 editor.send::<CombineForward>(&combine).await?;
                 a.recv::<CombineForward>().await?;
-                document.send::<CombineOnDocument>(&combine).await?;
+                document
+                    .send::<CombineOnDocument>(&ReportArguments::from_bytes(combine.as_bytes())?)
+                    .await?;
                 service.recv::<CombineOnDocument>().await?;
                 service.send::<Combined>(&material).await?;
                 document.recv::<Combined>().await?;
@@ -589,11 +602,13 @@ async fn the_frozen_document_cannot_reopen_editing_before_or_after_publication_r
             eprintln!(
                 "editing probe: failed_visits={failed_visits} after_reply={after_reply} operation={operation}"
             );
+            let late_revision = ReportArguments::from_bytes(revision)?;
+            let late_input = ReportArguments::from_bytes(revision_input)?;
             let completion = hibana_runtime::race(
                 async {
                     Ok::<_, std::io::Error>(match operation {
-                        "resource" => document.send::<ReviseOnDocument>(&revision).await,
-                        "writer" => a_file.send::<ReviseA>(&revision_input).await,
+                        "resource" => document.send::<ReviseOnDocumentA>(&late_revision).await,
+                        "writer" => a_file.send::<ReviseA>(&late_input).await,
                         "return" => a.send::<RevisionDocument>(document).await,
                         _ => unreachable!("undeclared adversarial test operation"),
                     })

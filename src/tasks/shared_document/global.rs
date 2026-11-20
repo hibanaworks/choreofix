@@ -76,28 +76,32 @@ pub type InitialDocumentB<'r> = g::Msg<2, Endpoint<'r, DOCUMENT>>;
 pub type RevisionDocument<'r> = g::Msg<3, Endpoint<'r, DOCUMENT>>;
 pub type WriteA = g::Msg<4, ReportArguments<8>>;
 pub type WriteB = g::Msg<5, ReportArguments<9>>;
-pub type WriteOnDocument = g::Msg<6, ReportArguments<2>>;
+const WRITE_ON_DOCUMENT: u8 = 6;
+pub type WriteOnDocumentA = g::Msg<WRITE_ON_DOCUMENT, ReportArguments<8, true>>;
+pub type WriteOnDocumentB = g::Msg<WRITE_ON_DOCUMENT, ReportArguments<9, true>>;
 pub type Written<'a> = g::Msg<7, &'a [u8]>;
-pub type ReferencesA = g::Msg<8, ReportArguments<10>>;
-pub type ReferencesB = g::Msg<9, ReportArguments<11>>;
+pub type ReferencesA = g::Msg<8, ReportArguments<10, true>>;
+pub type ReferencesB = g::Msg<9, ReportArguments<11, true>>;
 pub type ReferencedA<'a> = g::Msg<10, &'a [u8]>;
 pub type ReferencedB<'a> = g::Msg<11, &'a [u8]>;
 pub type MaterialA<'a> = g::Msg<12, &'a [u8]>;
 pub type MaterialB<'a> = g::Msg<13, &'a [u8]>;
 pub type ReferenceMaterialA<'a> = g::Msg<14, &'a [u8]>;
 pub type ReferenceMaterialB<'a> = g::Msg<15, &'a [u8]>;
-pub type ReviewA = g::Msg<16, ReportArguments<12>>;
-pub type ReviewB = g::Msg<17, ReportArguments<13>>;
+pub type ReviewA = g::Msg<16, ReportArguments<12, true>>;
+pub type ReviewB = g::Msg<17, ReportArguments<13, true>>;
 pub type ReviewedA<'a> = g::Msg<18, &'a [u8]>;
 pub type ReviewedB<'a> = g::Msg<19, &'a [u8]>;
 pub type RevisionReviewA = g::Msg<21, ReportArguments<17>>;
 pub type RevisionReviewB = g::Msg<23, ReportArguments<17>>;
-pub type ReviseA = g::Msg<24, ReportArguments<14>>;
-pub type ReviseB = g::Msg<25, ReportArguments<14>>;
-pub type ReviseOnDocument = g::Msg<26, ReportArguments<3>>;
+pub type ReviseA = g::Msg<24, ReportArguments<30>>;
+pub type ReviseB = g::Msg<25, ReportArguments<31>>;
+const REVISE_ON_DOCUMENT: u8 = 26;
+pub type ReviseOnDocumentA = g::Msg<REVISE_ON_DOCUMENT, ReportArguments<30, true>>;
+pub type ReviseOnDocumentB = g::Msg<REVISE_ON_DOCUMENT, ReportArguments<31, true>>;
 pub type Revised<'a> = g::Msg<27, &'a [u8]>;
 pub type Combine = g::Msg<28, ReportArguments<6>>;
-pub type CombineOnDocument = g::Msg<29, ReportArguments<6>>;
+pub type CombineOnDocument = g::Msg<29, ReportArguments<6, true>>;
 pub type Combined<'a> = g::Msg<30, &'a [u8]>;
 pub type FinishedB<'a> = g::Msg<32, &'a [u8]>;
 pub type DocumentReturn<'r> = g::Msg<33, Endpoint<'r, DOCUMENT>>;
@@ -115,8 +119,8 @@ pub type WriteArgumentsA = g::Msg<48, ReportArguments<8>>;
 pub type WriteArgumentsB = g::Msg<49, ReportArguments<9>>;
 pub type WriteResultA<'a> = g::Msg<50, &'a [u8]>;
 pub type WriteResultB<'a> = g::Msg<51, &'a [u8]>;
-pub type RevisionArgumentsA = g::Msg<52, ReportArguments<14>>;
-pub type RevisionArgumentsB = g::Msg<53, ReportArguments<14>>;
+pub type RevisionArgumentsA = g::Msg<52, ReportArguments<30>>;
+pub type RevisionArgumentsB = g::Msg<53, ReportArguments<31>>;
 pub type RevisionResultA<'a> = g::Msg<54, &'a [u8]>;
 pub type RevisionResultB<'a> = g::Msg<55, &'a [u8]>;
 pub type FeedbackA<'a> = g::Msg<56, &'a [u8]>;
@@ -136,7 +140,7 @@ fn write_a(next: impl Projectable + Copy) -> impl Projectable + Copy {
         g::seq(
             g::send::<DOCUMENT_SERVICE, WRITER_A, WriteArgumentsA>(),
             g::seq(
-                g::send::<DOCUMENT, DOCUMENT_SERVICE, WriteOnDocument>(),
+                g::send::<DOCUMENT, DOCUMENT_SERVICE, WriteOnDocumentA>(),
                 g::seq(
                     g::send::<DOCUMENT_SERVICE, DOCUMENT, Written>(),
                     g::par(g::send::<WRITER_A, A_FILE, WriteResultA>(), next),
@@ -151,7 +155,7 @@ fn write_b(next: impl Projectable + Copy) -> impl Projectable + Copy {
         g::seq(
             g::send::<DOCUMENT_SERVICE, WRITER_B, WriteArgumentsB>(),
             g::seq(
-                g::send::<DOCUMENT, DOCUMENT_SERVICE, WriteOnDocument>(),
+                g::send::<DOCUMENT, DOCUMENT_SERVICE, WriteOnDocumentB>(),
                 g::seq(
                     g::send::<DOCUMENT_SERVICE, DOCUMENT, Written>(),
                     g::par(g::send::<WRITER_B, B_FILE, WriteResultB>(), next),
@@ -255,7 +259,7 @@ fn revision_a() -> impl Projectable {
                     g::seq(
                         g::send::<DOCUMENT_SERVICE, WRITER_A, RevisionArgumentsA>(),
                         g::seq(
-                            g::send::<DOCUMENT, DOCUMENT_SERVICE, ReviseOnDocument>(),
+                            g::send::<DOCUMENT, DOCUMENT_SERVICE, ReviseOnDocumentA>(),
                             g::seq(
                                 g::send::<DOCUMENT_SERVICE, DOCUMENT, Revised>(),
                                 g::par(
@@ -300,7 +304,7 @@ fn revision_b() -> impl Projectable {
                     g::seq(
                         g::send::<DOCUMENT_SERVICE, WRITER_B, RevisionArgumentsB>(),
                         g::seq(
-                            g::send::<DOCUMENT, DOCUMENT_SERVICE, ReviseOnDocument>(),
+                            g::send::<DOCUMENT, DOCUMENT_SERVICE, ReviseOnDocumentB>(),
                             g::seq(
                                 g::send::<DOCUMENT_SERVICE, DOCUMENT, Revised>(),
                                 g::par(
@@ -469,7 +473,7 @@ impl Programs {
             ("RevisionDocument", RevisionDocument::LOGICAL_LABEL),
             ("WriteA", WriteA::LOGICAL_LABEL),
             ("WriteB", WriteB::LOGICAL_LABEL),
-            ("WriteOnDocument", WriteOnDocument::LOGICAL_LABEL),
+            ("WriteOnDocument", WRITE_ON_DOCUMENT),
             ("Written", Written::LOGICAL_LABEL),
             ("ReferencesA", ReferencesA::LOGICAL_LABEL),
             ("ReferencesB", ReferencesB::LOGICAL_LABEL),
@@ -491,7 +495,7 @@ impl Programs {
             ("RevisionReviewBForA", RevisionReviewBForA::LOGICAL_LABEL),
             ("ReviseA", ReviseA::LOGICAL_LABEL),
             ("ReviseB", ReviseB::LOGICAL_LABEL),
-            ("ReviseOnDocument", ReviseOnDocument::LOGICAL_LABEL),
+            ("ReviseOnDocument", REVISE_ON_DOCUMENT),
             ("Revised", Revised::LOGICAL_LABEL),
             ("Combine", Combine::LOGICAL_LABEL),
             ("CombineOnDocument", CombineOnDocument::LOGICAL_LABEL),
