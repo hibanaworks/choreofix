@@ -112,7 +112,7 @@ pub async fn run<'run>(
                     }
                 };
                 let arguments = admitted;
-                operation.send::<BackendIntent>(&arguments).await?;
+                operation.send::<BackendIntent>(&arguments.intent()).await?;
                 let mut repository = operation.recv::<Loan<REPO>>().await?;
                 repository.send::<ImplementBackend>(&arguments).await?;
                 let response = repository.recv::<BackendImplemented>().await?.to_vec();

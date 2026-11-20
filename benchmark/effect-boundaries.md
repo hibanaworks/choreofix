@@ -20,6 +20,14 @@ document owner compares the figure store's confirmation with the original
 lookup before consuming the confirmation to insert the figure. The two final
 15E chamber checks also use received requests.
 
+In 1E/1M/1H a commit consumes the two module requests. In 2E/2M/2H a write
+consumes the two section requests. The receiver checks the submitted arguments
+against the resource requests. The simulator call consumes both receives and
+checks that their arguments agree before sending the request. The same
+two-receive boundary applies to the integration test in 4E and the oven and
+stove operations that require both in 12E. Operations requiring one resource,
+including the 8M API operations, consume its received request directly.
+
 The other task receivers using `Domain::execute(agent, tool, arguments)` still
 select the operation and arguments in native code. The experiment trusts their
 implementation to match the received request and satisfy any additional resource

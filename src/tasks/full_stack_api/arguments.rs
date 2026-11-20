@@ -1,3 +1,4 @@
+use crate::shell::imp::service::SimulatorOperation;
 use hibana::runtime::wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload};
 use serde_json::Value;
 
@@ -14,12 +15,6 @@ pub const SCHEMA_REQUEST: u8 = 9;
 /// The argument bytes of an admitted operation, including an optional HTTP method.
 pub struct Arguments<const OPERATION: u8>(Vec<u8>);
 
-impl<const OPERATION: u8> Arguments<OPERATION> {
-    pub fn into_value(self) -> Value {
-        serde_json::from_slice(&self.0).expect("validated API arguments")
-    }
-}
-
 impl<const OPERATION: u8> WireEncode for Arguments<OPERATION> {
     fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
         output
@@ -32,7 +27,7 @@ impl<const OPERATION: u8> WireEncode for Arguments<OPERATION> {
 
 impl<const OPERATION: u8> WirePayload for Arguments<OPERATION> {
     const SCHEMA_ID: u32 = 0xac08_4d00 | OPERATION as u32;
-    type Decoded<'a> = Self;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
 
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
         let value: Value =
@@ -92,7 +87,35 @@ impl<const OPERATION: u8> WirePayload for Arguments<OPERATION> {
         Ok(())
     }
 
-    fn decode_validated_payload(input: ReceivedPayload<'_, Self>) -> Self {
-        Self(input.as_bytes().to_vec())
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
+        input
     }
+}
+
+impl SimulatorOperation for Arguments<MIGRATION> {
+    const RPC: (&'static str, &'static str) = ("DB_ADMIN", "migrate_schema");
+}
+
+impl SimulatorOperation for Arguments<DEFINITION> {
+    const RPC: (&'static str, &'static str) = ("BACKEND_DEV", "define_api");
+}
+
+impl SimulatorOperation for Arguments<IMPLEMENTATION> {
+    const RPC: (&'static str, &'static str) = ("BACKEND_DEV", "implement_backend");
+}
+
+impl SimulatorOperation for Arguments<FRONTEND> {
+    const RPC: (&'static str, &'static str) = ("FRONTEND_DEV", "implement_frontend");
+}
+
+impl SimulatorOperation for Arguments<BACKEND_REVIEW> {
+    const RPC: (&'static str, &'static str) = ("REVIEWER", "code_review");
+}
+
+impl SimulatorOperation for Arguments<FRONTEND_REVIEW> {
+    const RPC: (&'static str, &'static str) = ("REVIEWER", "code_review");
+}
+
+impl SimulatorOperation for Arguments<INTEGRATION> {
+    const RPC: (&'static str, &'static str) = ("TESTER", "run_integration_tests");
 }

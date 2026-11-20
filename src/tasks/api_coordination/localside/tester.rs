@@ -108,7 +108,7 @@ pub async fn run<'run>(
                     }
                 };
                 let arguments = admitted;
-                operation.send::<TestIntent>(&arguments).await?;
+                operation.send::<TestIntent>(&arguments.intent()).await?;
                 let (mut repository, mut environment) = async {
                     let [mut r, mut e] = operation.par()?;
                     async { r.recv::<Loan<REPO>>().await };

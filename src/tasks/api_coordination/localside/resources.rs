@@ -1,6 +1,6 @@
 //! Resource owners apply only the exact request received from the operation file.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::PairedEffects};
 use hibana::Endpoint;
 
 #[hibana_runtime::scope]
@@ -17,7 +17,7 @@ pub async fn repository<'run>(
             Endpoint<'run, TESTER_CLOSE>,
         ),
     ),
-    domain: &impl Domain,
+    effects: &impl PairedEffects,
 ) -> ShellResult<()> {
     let (define, backend, frontend, agreement, tester) = controls;
     async {
@@ -44,18 +44,15 @@ pub async fn repository<'run>(
         let operation = endpoint.offer().await?;
         match operation.label() {
             20 => {
-                let admitted = operation.recv::<DefineIntent>().await?.into_value();
+                let admitted = operation.recv::<DefineIntent>().await?;
                 endpoint.send::<Loan<REPO>>(repo).await?;
-                let actual = endpoint.recv::<DefineApi>().await?.into_value();
-                if actual != admitted {
+                let actual = endpoint.recv::<DefineApi>().await?;
+                if crate::imp::json::decode(actual.as_bytes())? != admitted {
                     return Err(ShellError::message(
                         "API request differs from the admitted file",
                     ));
                 }
-                let result = domain
-                    .execute("BACKEND_DEV", "define_api", actual)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(actual).await?;
                 let bytes =
                     serde_json::to_vec(&result).map_err(|e| ShellError::message(e.to_string()))?;
                 let api = result;
@@ -78,18 +75,15 @@ pub async fn repository<'run>(
                             .send::<AgreementAccepted>(&bytes.as_slice())
                             .await?;
                         let backend = {
-                            let admitted = endpoint.recv::<BackendIntent>().await?.into_value();
+                            let admitted = endpoint.recv::<BackendIntent>().await?;
                             endpoint.send::<Loan<REPO>>(repo).await?;
-                            let actual = endpoint.recv::<ImplementBackend>().await?.into_value();
-                            if actual != admitted {
+                            let actual = endpoint.recv::<ImplementBackend>().await?;
+                            if crate::imp::json::decode(actual.as_bytes())? != admitted {
                                 return Err(ShellError::message(
                                     "backend request differs from the admitted file",
                                 ));
                             }
-                            let result = domain
-                                .execute("BACKEND_DEV", "implement_feature", actual)
-                                .await
-                                .map_err(ShellError::message)?;
+                            let result = effects.apply(actual).await?;
                             let bytes = serde_json::to_vec(&result)
                                 .map_err(|e| ShellError::message(e.to_string()))?;
                             endpoint
@@ -100,18 +94,15 @@ pub async fn repository<'run>(
                             result
                         };
                         let frontend = {
-                            let admitted = endpoint.recv::<FrontendIntent>().await?.into_value();
+                            let admitted = endpoint.recv::<FrontendIntent>().await?;
                             endpoint.send::<Loan<REPO>>(repo).await?;
-                            let actual = endpoint.recv::<ImplementFrontend>().await?.into_value();
-                            if actual != admitted {
+                            let actual = endpoint.recv::<ImplementFrontend>().await?;
+                            if crate::imp::json::decode(actual.as_bytes())? != admitted {
                                 return Err(ShellError::message(
                                     "frontend request differs from the admitted file",
                                 ));
                             }
-                            let result = domain
-                                .execute("FRONTEND_DEV", "implement_feature", actual)
-                                .await
-                                .map_err(ShellError::message)?;
+                            let result = effects.apply(actual).await?;
                             let bytes = serde_json::to_vec(&result)
                                 .map_err(|e| ShellError::message(e.to_string()))?;
                             endpoint
@@ -136,18 +127,15 @@ pub async fn repository<'run>(
                             .send::<AgreementAccepted>(&bytes.as_slice())
                             .await?;
                         let frontend = {
-                            let admitted = endpoint.recv::<FrontendIntent>().await?.into_value();
+                            let admitted = endpoint.recv::<FrontendIntent>().await?;
                             endpoint.send::<Loan<REPO>>(repo).await?;
-                            let actual = endpoint.recv::<ImplementFrontend>().await?.into_value();
-                            if actual != admitted {
+                            let actual = endpoint.recv::<ImplementFrontend>().await?;
+                            if crate::imp::json::decode(actual.as_bytes())? != admitted {
                                 return Err(ShellError::message(
                                     "frontend request differs from the admitted file",
                                 ));
                             }
-                            let result = domain
-                                .execute("FRONTEND_DEV", "implement_feature", actual)
-                                .await
-                                .map_err(ShellError::message)?;
+                            let result = effects.apply(actual).await?;
                             let bytes = serde_json::to_vec(&result)
                                 .map_err(|e| ShellError::message(e.to_string()))?;
                             endpoint
@@ -158,18 +146,15 @@ pub async fn repository<'run>(
                             result
                         };
                         let backend = {
-                            let admitted = endpoint.recv::<BackendIntent>().await?.into_value();
+                            let admitted = endpoint.recv::<BackendIntent>().await?;
                             endpoint.send::<Loan<REPO>>(repo).await?;
-                            let actual = endpoint.recv::<ImplementBackend>().await?.into_value();
-                            if actual != admitted {
+                            let actual = endpoint.recv::<ImplementBackend>().await?;
+                            if crate::imp::json::decode(actual.as_bytes())? != admitted {
                                 return Err(ShellError::message(
                                     "backend request differs from the admitted file",
                                 ));
                             }
-                            let result = domain
-                                .execute("BACKEND_DEV", "implement_feature", actual)
-                                .await
-                                .map_err(ShellError::message)?;
+                            let result = effects.apply(actual).await?;
                             let bytes = serde_json::to_vec(&result)
                                 .map_err(|e| ShellError::message(e.to_string()))?;
                             endpoint
@@ -191,7 +176,7 @@ pub async fn repository<'run>(
                 endpoint.send::<Ready>(&bytes.as_slice()).await?;
             }
             26 => {
-                let admitted = operation.recv::<TestIntent>().await?.into_value();
+                let admitted = operation.recv::<TestIntent>().await?;
                 async {
                     let [mut r, mut e] = endpoint.par()?;
                     async {
@@ -203,25 +188,20 @@ pub async fn repository<'run>(
                     Ok(())
                 }
                 .await?;
-                let (from_repository, from_environment) = async {
+                let result = {
                     let [mut r, mut e] = endpoint.par()?;
-                    async { r.recv::<ReadForTests>().await };
-                    async { e.recv::<RunTests>().await };
-                }
-                .await?;
-                if from_repository.into_value() != admitted
-                    || from_environment.into_value() != admitted
-                {
-                    return Err(ShellError::message(
-                        "test resource requests differ from the admitted file",
-                    ));
-                }
-                // Both exclusive resources remain with this request until the
-                // actual test and its replies finish. Editing cannot race it.
-                let result = domain
-                    .execute("TESTER", "run_tests", admitted)
-                    .await
-                    .map_err(ShellError::message)?;
+                    let (repository, environment) = async {
+                        async { r.recv::<ReadForTests>().await };
+                        async { e.recv::<RunTests>().await };
+                    }
+                    .await?;
+                    if crate::imp::json::decode(repository.as_bytes())? != admitted {
+                        return Err(ShellError::message(
+                            "test resource request differs from the admitted file",
+                        ));
+                    }
+                    effects.apply_pair(repository, environment).await?
+                };
                 let bytes =
                     serde_json::to_vec(&result).map_err(|e| ShellError::message(e.to_string()))?;
                 async {

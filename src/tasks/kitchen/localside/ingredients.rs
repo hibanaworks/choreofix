@@ -1,16 +1,17 @@
 //! Receive the actual operation-file request and return the real effect.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::Endpoint;
 #[hibana_runtime::scope]
-pub async fn run(endpoint: &mut Endpoint<INGREDIENTS>, domain: &impl Domain) -> ShellResult<()> {
+pub async fn run(
+    endpoint: &mut Endpoint<INGREDIENTS>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()> {
     let [mut a, mut b, mut c] = endpoint.par()?;
     async {
-        let arguments = a.recv::<PrepareSauce>().await?.value();
-        let result = domain
-            .execute("CHEF_A", "prepare_ingredient", arguments.clone())
-            .await
-            .map_err(ShellError::message)?;
+        let received = a.recv::<PrepareSauce>().await?;
+        let arguments = imp::decode(received.as_bytes())?;
+        let result = effects.apply(received).await?;
         imp::completed("prepare_ingredient", "CHEF_A", &arguments, &result)?;
         let bytes = imp::encode(&result)?;
         async {
@@ -26,11 +27,9 @@ pub async fn run(endpoint: &mut Endpoint<INGREDIENTS>, domain: &impl Domain) -> 
         .await?;
     };
     async {
-        let arguments = b.recv::<PrepareGarnish>().await?.value();
-        let result = domain
-            .execute("CHEF_B", "prepare_ingredient", arguments.clone())
-            .await
-            .map_err(ShellError::message)?;
+        let received = b.recv::<PrepareGarnish>().await?;
+        let arguments = imp::decode(received.as_bytes())?;
+        let result = effects.apply(received).await?;
         imp::completed("prepare_ingredient", "CHEF_B", &arguments, &result)?;
         let bytes = imp::encode(&result)?;
         async {
@@ -46,11 +45,9 @@ pub async fn run(endpoint: &mut Endpoint<INGREDIENTS>, domain: &impl Domain) -> 
         .await?;
     };
     async {
-        let arguments = c.recv::<PrepareGlaze>().await?.value();
-        let result = domain
-            .execute("CHEF_C", "prepare_ingredient", arguments.clone())
-            .await
-            .map_err(ShellError::message)?;
+        let received = c.recv::<PrepareGlaze>().await?;
+        let arguments = imp::decode(received.as_bytes())?;
+        let result = effects.apply(received).await?;
         imp::completed("prepare_ingredient", "CHEF_C", &arguments, &result)?;
         let bytes = imp::encode(&result)?;
         async {

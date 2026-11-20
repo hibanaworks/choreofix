@@ -1,18 +1,22 @@
 //! Actual task arguments and original result bytes, without fd or workflow state.
 use super::input::assignment;
-use crate::shell::{ShellError, ShellResult};
+use crate::shell::{ShellError, ShellResult, imp::service::SimulatorOperation};
 use hibana::runtime::wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload};
 use serde_json::Value;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Arguments<const ROLE: u8, const OPERATION: u8>(Vec<u8>);
-impl<const ROLE: u8, const OPERATION: u8> Arguments<ROLE, OPERATION> {
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
-    pub fn into_value(self) -> Value {
-        serde_json::from_slice(&self.0).expect("validated codebase arguments")
-    }
+impl<const ROLE: u8> SimulatorOperation for Arguments<ROLE, 0> {
+    const RPC: (&'static str, &'static str) = (assignment(ROLE).agent, "design_feature");
+}
+impl<const ROLE: u8> SimulatorOperation for Arguments<ROLE, 1> {
+    const RPC: (&'static str, &'static str) = (assignment(ROLE).agent, "implement_code");
+}
+impl<const ROLE: u8> SimulatorOperation<2> for Arguments<ROLE, 2> {
+    const RPC: (&'static str, &'static str) = (assignment(ROLE).agent, "commit_changes");
+}
+impl<const ROLE: u8> SimulatorOperation for Arguments<ROLE, 3> {
+    const RPC: (&'static str, &'static str) = (assignment(ROLE).agent, "run_local_tests");
 }
 impl<const ROLE: u8, const OPERATION: u8> WireEncode for Arguments<ROLE, OPERATION> {
     fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
@@ -25,7 +29,7 @@ impl<const ROLE: u8, const OPERATION: u8> WireEncode for Arguments<ROLE, OPERATI
 }
 impl<const ROLE: u8, const OPERATION: u8> WirePayload for Arguments<ROLE, OPERATION> {
     const SCHEMA_ID: u32 = 0x4342_0000 | ((ROLE as u32) << 8) | OPERATION as u32;
-    type Decoded<'a> = Self;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
         let value: Value =
             serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
@@ -55,47 +59,37 @@ impl<const ROLE: u8, const OPERATION: u8> WirePayload for Arguments<ROLE, OPERAT
         }
         Ok(())
     }
-    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
-        Self(input.as_bytes().to_vec())
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
+        input
     }
 }
 
-/// The two-module request keeps the original argument bytes.
-#[derive(Debug, PartialEq, Eq)]
-pub struct ModuleArguments(Vec<u8>);
-impl ModuleArguments {
-    pub fn from_bytes(bytes: &[u8]) -> ShellResult<Self> {
-        Self::validate_payload(Payload::new(bytes))
-            .map_err(|_| ShellError::message("invalid module arguments"))?;
-        Ok(Self(bytes.to_vec()))
-    }
-    pub fn into_value(self) -> Value {
-        serde_json::from_slice(&self.0).expect("validated module arguments")
+/// A commit submission can be forwarded to the repository or a module owner.
+/// Only the request received from a module can be spent on the physical commit.
+#[derive(Debug)]
+pub struct CommitSubmission<const ROLE: u8> {
+    pub arguments: Arguments<ROLE, 2>,
+}
+impl<const ROLE: u8> CommitSubmission<ROLE> {
+    pub fn value(&self) -> Value {
+        serde_json::from_slice(&self.arguments.0).expect("validated commit submission")
     }
 }
-impl WireEncode for ModuleArguments {
+impl<const ROLE: u8> WireEncode for CommitSubmission<ROLE> {
     fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
-        output
-            .get_mut(..self.0.len())
-            .ok_or(CodecError::Truncated)?
-            .copy_from_slice(&self.0);
-        Ok(self.0.len())
+        self.arguments.encode_into(output)
     }
 }
-impl WirePayload for ModuleArguments {
-    const SCHEMA_ID: u32 = 0x4342_ff02;
+impl<const ROLE: u8> WirePayload for CommitSubmission<ROLE> {
+    const SCHEMA_ID: u32 = 0x4343_0002 | ((ROLE as u32) << 8);
     type Decoded<'a> = Self;
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
-        let value: Value =
-            serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
-        if value.as_object().is_none_or(|object| object.len() != 1) || !value["modules"].is_string()
-        {
-            return Err(CodecError::Malformed);
-        }
-        Ok(())
+        Arguments::<ROLE, 2>::validate_payload(input)
     }
     fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
-        Self(input.as_bytes().to_vec())
+        Self {
+            arguments: Arguments(input.as_bytes().to_vec()),
+        }
     }
 }
 
@@ -121,6 +115,52 @@ mod tests {
     use crate::imp::transport::InMemoryTransport;
     use hibana::runtime::{SessionKitStorage, ids::SessionId, transport::EndpointBinding};
     use std::time::Duration;
+
+    #[hibana_runtime::main]
+    #[test]
+    async fn different_module_requests_cannot_issue_a_simulator_call() -> ShellResult<()> {
+        use crate::shell::imp::{bus::Bus, service::PairedEffects};
+        use hibana::{g, runtime::program::project};
+        type First = ModuleRequest<40, A>;
+        type Second = ModuleRequest<41, A>;
+        let global = g::par(g::send::<40, A, First>(), g::send::<41, A, Second>());
+        let receiver_program = project::<A>(&global);
+        let first_program = project::<40>(&global);
+        let second_program = project::<41>(&global);
+        let (mut connection, _, _) = Bus::open([], []);
+        let (bus, simulator) = connection.split();
+        let mut slab = [0; 32768];
+        let mut storage = SessionKitStorage::uninit();
+        let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
+        let id = SessionId::new(1);
+        let mut first = rv.enter(id, &first_program)?;
+        let mut second = rv.enter(id, &second_program)?;
+        let mut receiver = rv.enter(id, &receiver_program)?;
+        first
+            .send::<First>(&Arguments(
+                br#"{"modules":"AUTH_MODULE,DATABASE_MODULE"}"#.to_vec(),
+            ))
+            .await?;
+        second
+            .send::<Second>(&Arguments(
+                br#"{"modules":"DATABASE_MODULE,AUTH_MODULE"}"#.to_vec(),
+            ))
+            .await?;
+        let [mut a, mut b] = receiver.par()?;
+        let left = a.recv::<First>().await?;
+        let right = b.recv::<Second>().await?;
+        let error = hibana_runtime::race(
+            simulator.apply_pair(left, right),
+            hibana_runtime::host::deadline(Duration::from_secs(2)),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "resource requests have different arguments"
+        );
+        Ok(())
+    }
 
     #[hibana_runtime::main]
     #[test]
@@ -156,7 +196,9 @@ mod tests {
         c_data.send::<Loan<C_FILE>>(file_c).await?;
         let _file_c = c_vm.recv::<Loan<C_FILE>>().await?;
 
-        let early = Arguments::<A, 2>(br#"{"modules":"AUTH_MODULE,DATABASE_MODULE"}"#.to_vec());
+        let early = CommitSubmission {
+            arguments: Arguments::<A, 2>(br#"{"modules":"AUTH_MODULE,DATABASE_MODULE"}"#.to_vec()),
+        };
         let denied = hibana_runtime::race(
             async { Ok::<_, ShellError>(file.send::<Submitted<A>>(&early).await) },
             hibana_runtime::host::deadline(Duration::from_secs(2)),
@@ -169,7 +211,8 @@ mod tests {
         let design = Arguments::<A, 0>(br#"{"feature_name":"user_authentication"}"#.to_vec());
         file.send::<DesignRequest<A>>(&design).await?;
         assert_eq!(
-            owner.recv::<DesignRequest<A>>().await?.into_value(),
+            serde_json::from_slice::<Value>(owner.recv::<DesignRequest<A>>().await?.as_bytes())
+                .unwrap(),
             serde_json::json!({"feature_name":"user_authentication"})
         );
         Ok(())

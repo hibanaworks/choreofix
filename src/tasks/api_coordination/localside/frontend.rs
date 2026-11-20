@@ -112,7 +112,9 @@ pub async fn run<'run>(
                     }
                 };
                 let arguments = admitted;
-                operation.send::<FrontendIntent>(&arguments).await?;
+                operation
+                    .send::<FrontendIntent>(&arguments.intent())
+                    .await?;
                 let mut repository = operation.recv::<Loan<REPO>>().await?;
                 repository.send::<ImplementFrontend>(&arguments).await?;
                 let response = repository.recv::<FrontendImplemented>().await?.to_vec();

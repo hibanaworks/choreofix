@@ -1,5 +1,5 @@
 //! Original task inputs and wire bytes, without workflow or permission state.
-use crate::shell::{ShellError, ShellResult};
+use crate::shell::{ShellError, ShellResult, imp::service::SimulatorOperation};
 use hibana::runtime::wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload};
 use serde_json::Value;
 
@@ -115,13 +115,17 @@ pub const fn assignment(role: u8) -> Assignment {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Arguments<const ROLE: u8, const OPERATION: u8>(Vec<u8>);
-impl<const ROLE: u8, const OPERATION: u8> Arguments<ROLE, OPERATION> {
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
-    pub fn into_value(self) -> Value {
-        serde_json::from_slice(&self.0).expect("validated writing arguments")
-    }
+impl<const ROLE: u8> SimulatorOperation for Arguments<ROLE, 0> {
+    const RPC: (&'static str, &'static str) = (assignment(ROLE).agent, "read_literature");
+}
+impl<const ROLE: u8> SimulatorOperation for Arguments<ROLE, 1> {
+    const RPC: (&'static str, &'static str) = (assignment(ROLE).agent, "draft_content");
+}
+impl<const ROLE: u8> SimulatorOperation<2> for Arguments<ROLE, 2> {
+    const RPC: (&'static str, &'static str) = (assignment(ROLE).agent, "write_to_document");
+}
+impl<const ROLE: u8> SimulatorOperation for Arguments<ROLE, 3> {
+    const RPC: (&'static str, &'static str) = (assignment(ROLE).agent, "review_own_work");
 }
 impl<const ROLE: u8, const OPERATION: u8> WireEncode for Arguments<ROLE, OPERATION> {
     fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
@@ -134,7 +138,7 @@ impl<const ROLE: u8, const OPERATION: u8> WireEncode for Arguments<ROLE, OPERATI
 }
 impl<const ROLE: u8, const OPERATION: u8> WirePayload for Arguments<ROLE, OPERATION> {
     const SCHEMA_ID: u32 = 0x5752_0000 | ((ROLE as u32) << 8) | OPERATION as u32;
-    type Decoded<'a> = Self;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
         let value: Value =
             serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
@@ -168,48 +172,37 @@ impl<const ROLE: u8, const OPERATION: u8> WirePayload for Arguments<ROLE, OPERAT
         }
         Ok(())
     }
-    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
-        Self(input.as_bytes().to_vec())
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
+        input
     }
 }
 
-/// The two-section request keeps the original argument bytes.
-#[derive(Debug, PartialEq, Eq)]
-pub struct WriteArguments(Vec<u8>);
-impl WriteArguments {
-    pub fn from_bytes(bytes: &[u8]) -> ShellResult<Self> {
-        Self::validate_payload(Payload::new(bytes))
-            .map_err(|_| ShellError::message("invalid section arguments"))?;
-        Ok(Self(bytes.to_vec()))
-    }
-    pub fn into_value(self) -> Value {
-        serde_json::from_slice(&self.0).expect("validated section arguments")
+/// A writing submission can be forwarded to the repository or a module owner.
+/// Only the request received from a section can be spent on the document write.
+#[derive(Debug)]
+pub struct WriteSubmission<const ROLE: u8> {
+    pub arguments: Arguments<ROLE, 2>,
+}
+impl<const ROLE: u8> WriteSubmission<ROLE> {
+    pub fn value(&self) -> Value {
+        serde_json::from_slice(&self.arguments.0).expect("validated writing submission")
     }
 }
-impl WireEncode for WriteArguments {
+impl<const ROLE: u8> WireEncode for WriteSubmission<ROLE> {
     fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
-        output
-            .get_mut(..self.0.len())
-            .ok_or(CodecError::Truncated)?
-            .copy_from_slice(&self.0);
-        Ok(self.0.len())
+        self.arguments.encode_into(output)
     }
 }
-impl WirePayload for WriteArguments {
-    const SCHEMA_ID: u32 = 0x5752_ff02;
+impl<const ROLE: u8> WirePayload for WriteSubmission<ROLE> {
+    const SCHEMA_ID: u32 = 0x5753_0002 | ((ROLE as u32) << 8);
     type Decoded<'a> = Self;
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
-        let value: Value =
-            serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
-        if value.as_object().is_none_or(|object| object.len() != 1)
-            || !value["sections"].is_string()
-        {
-            return Err(CodecError::Malformed);
-        }
-        Ok(())
+        Arguments::<ROLE, 2>::validate_payload(input)
     }
     fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
-        Self(input.as_bytes().to_vec())
+        Self {
+            arguments: Arguments(input.as_bytes().to_vec()),
+        }
     }
 }
 

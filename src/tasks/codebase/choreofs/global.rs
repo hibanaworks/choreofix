@@ -1,5 +1,5 @@
 //! Direct file requests, actual module Endpoints and original effect results.
-use super::wire::{Arguments, ModuleArguments};
+use super::wire::{Arguments, CommitSubmission};
 use crate::shell::global::FileExit;
 pub use crate::shell::global::Loan;
 use hibana::{
@@ -10,13 +10,13 @@ use hibana::{
 pub const SESSION: u32 = 20;
 pub type DesignRequest<const ROLE: u8> = g::Msg<1, Arguments<ROLE, 0>>;
 pub type ImplementRequest<const ROLE: u8> = g::Msg<2, Arguments<ROLE, 1>>;
-pub type CommitRequest<const ROLE: u8> = g::Msg<3, Arguments<ROLE, 2>>;
+pub type CommitRequest<const ROLE: u8> = g::Msg<3, CommitSubmission<ROLE>>;
 pub type TestRequest<const ROLE: u8> = g::Msg<4, Arguments<ROLE, 3>>;
 pub type DesignCompleted<'a> = g::Msg<5, &'a [u8]>;
 pub type ImplementCompleted<'a> = g::Msg<6, &'a [u8]>;
 pub type CommitCompleted<'a> = g::Msg<7, &'a [u8]>;
 pub type TestCompleted<'a> = g::Msg<8, &'a [u8]>;
-pub type ModuleRequest<const RESOURCE: u8> = g::Msg<RESOURCE, ModuleArguments>;
+pub type ModuleRequest<const RESOURCE: u8, const DEV: u8> = g::Msg<RESOURCE, Arguments<DEV, 2>>;
 pub type ModuleCompleted<'a, const RESOURCE: u8> = g::Msg<RESOURCE, &'a [u8]>;
 
 const fn object(
@@ -72,8 +72,8 @@ fn commit<const OWNER: u8, const FIRST: u8, const SECOND: u8>(
             g::par(first_loan, second_loan),
             g::seq(
                 g::par(
-                    g::send::<FIRST, OWNER, ModuleRequest<FIRST>>(),
-                    g::send::<SECOND, OWNER, ModuleRequest<SECOND>>(),
+                    g::send::<FIRST, OWNER, ModuleRequest<FIRST, OWNER>>(),
+                    g::send::<SECOND, OWNER, ModuleRequest<SECOND, OWNER>>(),
                 ),
                 g::seq(
                     g::par(
@@ -93,7 +93,7 @@ fn test<const OWNER: u8, const FILE: u8>() -> impl Projectable {
     )
 }
 
-pub type Submitted<const ROLE: u8> = g::Msg<ROLE, Arguments<ROLE, 2>>;
+pub type Submitted<const ROLE: u8> = g::Msg<ROLE, CommitSubmission<ROLE>>;
 pub mod roles1e {
     pub const A: u8 = 0;
     pub const A_FILE: u8 = 80;
@@ -295,14 +295,14 @@ impl Programs1E {
         serde_json::json!({"type":"compiled_projection","format_version":1,"task":"1E","session":SESSION,"submissions":REQUESTS,"repository":REPOSITORY,"participants":{"DEVELOPER_A":{"role":A,"file":A_FILE,"vm":A_VM,"io":A_IO,"data":A_DATA,"resources":[AUTH_RESOURCE,DATABASE_RESOURCE]},"DEVELOPER_B":{"role":B,"file":B_FILE,"vm":B_VM,"io":B_IO,"data":B_DATA,"resources":[API_RESOURCE,DATABASE_RESOURCE]},"DEVELOPER_C":{"role":C,"file":C_FILE,"vm":C_VM,"io":C_IO,"data":C_DATA,"resources":[API_RESOURCE,AUTH_RESOURCE]}},"resources":{"AUTH_MODULE":{"role":AUTH_RESOURCE,"service":REPOSITORY},"DATABASE_MODULE":{"role":DATABASE_RESOURCE,"service":REPOSITORY},"API_MODULE":{"role":API_RESOURCE,"service":REPOSITORY}},"labels":{"design":1,"implement":2,"commit":3,"test":4,"designed":5,"implemented":6,"committed":7,"tested":8},"programs":[rows(&self.a),rows(&self.a_file),rows(&self.a_vm),rows(&self.a_io),rows(&self.a_data),rows(&self.b),rows(&self.b_file),rows(&self.b_vm),rows(&self.b_io),rows(&self.b_data),rows(&self.c),rows(&self.c_file),rows(&self.c_vm),rows(&self.c_io),rows(&self.c_data),rows(&self.requests),rows(&self.repository),rows(&self.auth_resource),rows(&self.database_resource),rows(&self.api_resource)]})
     }
 }
-pub type ModuleClaim<const LABEL: u8, const DEV: u8> = g::Msg<LABEL, Arguments<DEV, 2>>;
+pub type ModuleClaim<const LABEL: u8, const DEV: u8> = g::Msg<LABEL, CommitSubmission<DEV>>;
 
 // One physical module can serve either of its two developers first.
 fn module_use<const DEV: u8, const OWNER: u8, const RESOURCE: u8>() -> impl Projectable + Copy {
     g::seq(
         g::send::<OWNER, DEV, Loan<RESOURCE>>(),
         g::seq(
-            g::send::<RESOURCE, DEV, ModuleRequest<RESOURCE>>(),
+            g::send::<RESOURCE, DEV, ModuleRequest<RESOURCE, DEV>>(),
             g::seq(
                 g::send::<DEV, RESOURCE, ModuleCompleted<RESOURCE>>(),
                 g::send::<DEV, OWNER, Loan<RESOURCE>>(),
@@ -974,7 +974,7 @@ pub fn project_1h() -> Programs1H {
             g::seq(
                 g::send::<ANALYTICS, E, ModuleLoan<E, ANALYTICS_RESOURCE>>(),
                 g::seq(
-                    g::send::<ANALYTICS_RESOURCE, E, ModuleRequest<ANALYTICS_RESOURCE>>(),
+                    g::send::<ANALYTICS_RESOURCE, E, ModuleRequest<ANALYTICS_RESOURCE, E>>(),
                     g::seq(
                         g::send::<E, ANALYTICS_RESOURCE, ModuleCompleted<ANALYTICS_RESOURCE>>(),
                         g::send::<E, ANALYTICS, Loan<ANALYTICS_RESOURCE>>(),
@@ -990,7 +990,7 @@ pub fn project_1h() -> Programs1H {
             g::seq(
                 g::send::<ANALYTICS, F, ModuleLoan<F, ANALYTICS_RESOURCE>>(),
                 g::seq(
-                    g::send::<ANALYTICS_RESOURCE, F, ModuleRequest<ANALYTICS_RESOURCE>>(),
+                    g::send::<ANALYTICS_RESOURCE, F, ModuleRequest<ANALYTICS_RESOURCE, F>>(),
                     g::seq(
                         g::send::<F, ANALYTICS_RESOURCE, ModuleCompleted<ANALYTICS_RESOURCE>>(),
                         g::send::<F, ANALYTICS, Loan<ANALYTICS_RESOURCE>>(),
@@ -1006,7 +1006,7 @@ pub fn project_1h() -> Programs1H {
     let api_b = g::seq(
         g::send::<API, B, ModuleLoan<B, API_RESOURCE>>(),
         g::seq(
-            g::send::<API_RESOURCE, B, ModuleRequest<API_RESOURCE>>(),
+            g::send::<API_RESOURCE, B, ModuleRequest<API_RESOURCE, B>>(),
             g::seq(
                 g::send::<B, API_RESOURCE, ModuleCompleted<API_RESOURCE>>(),
                 g::send::<B, API, Loan<API_RESOURCE>>(),
@@ -1016,7 +1016,7 @@ pub fn project_1h() -> Programs1H {
     let api_c = g::seq(
         g::send::<API, C, ModuleLoan<C, API_RESOURCE>>(),
         g::seq(
-            g::send::<API_RESOURCE, C, ModuleRequest<API_RESOURCE>>(),
+            g::send::<API_RESOURCE, C, ModuleRequest<API_RESOURCE, C>>(),
             g::seq(
                 g::send::<C, API_RESOURCE, ModuleCompleted<API_RESOURCE>>(),
                 g::send::<C, API, Loan<API_RESOURCE>>(),
@@ -1034,7 +1034,7 @@ pub fn project_1h() -> Programs1H {
             g::seq(
                 g::send::<AUTH, G, ModuleLoan<G, AUTH_RESOURCE>>(),
                 g::seq(
-                    g::send::<AUTH_RESOURCE, G, ModuleRequest<AUTH_RESOURCE>>(),
+                    g::send::<AUTH_RESOURCE, G, ModuleRequest<AUTH_RESOURCE, G>>(),
                     g::seq(
                         g::send::<G, AUTH_RESOURCE, ModuleCompleted<AUTH_RESOURCE>>(),
                         g::send::<G, AUTH, Loan<AUTH_RESOURCE>>(),
@@ -1046,7 +1046,7 @@ pub fn project_1h() -> Programs1H {
     let auth_a = g::seq(
         g::send::<AUTH, A, ModuleLoan<A, AUTH_RESOURCE>>(),
         g::seq(
-            g::send::<AUTH_RESOURCE, A, ModuleRequest<AUTH_RESOURCE>>(),
+            g::send::<AUTH_RESOURCE, A, ModuleRequest<AUTH_RESOURCE, A>>(),
             g::seq(
                 g::send::<A, AUTH_RESOURCE, ModuleCompleted<AUTH_RESOURCE>>(),
                 g::send::<A, AUTH, Loan<AUTH_RESOURCE>>(),
@@ -1064,7 +1064,7 @@ pub fn project_1h() -> Programs1H {
             g::seq(
                 g::send::<DATABASE, A, ModuleLoan<A, DATABASE_RESOURCE>>(),
                 g::seq(
-                    g::send::<DATABASE_RESOURCE, A, ModuleRequest<DATABASE_RESOURCE>>(),
+                    g::send::<DATABASE_RESOURCE, A, ModuleRequest<DATABASE_RESOURCE, A>>(),
                     g::seq(
                         g::send::<A, DATABASE_RESOURCE, ModuleCompleted<DATABASE_RESOURCE>>(),
                         g::send::<A, DATABASE, Loan<DATABASE_RESOURCE>>(),
@@ -1080,7 +1080,7 @@ pub fn project_1h() -> Programs1H {
             g::seq(
                 g::send::<DATABASE, B, ModuleLoan<B, DATABASE_RESOURCE>>(),
                 g::seq(
-                    g::send::<DATABASE_RESOURCE, B, ModuleRequest<DATABASE_RESOURCE>>(),
+                    g::send::<DATABASE_RESOURCE, B, ModuleRequest<DATABASE_RESOURCE, B>>(),
                     g::seq(
                         g::send::<B, DATABASE_RESOURCE, ModuleCompleted<DATABASE_RESOURCE>>(),
                         g::send::<B, DATABASE, Loan<DATABASE_RESOURCE>>(),
@@ -1096,7 +1096,7 @@ pub fn project_1h() -> Programs1H {
     let notify_d = g::seq(
         g::send::<NOTIFY, D, ModuleLoan<D, NOTIFY_RESOURCE>>(),
         g::seq(
-            g::send::<NOTIFY_RESOURCE, D, ModuleRequest<NOTIFY_RESOURCE>>(),
+            g::send::<NOTIFY_RESOURCE, D, ModuleRequest<NOTIFY_RESOURCE, D>>(),
             g::seq(
                 g::send::<D, NOTIFY_RESOURCE, ModuleCompleted<NOTIFY_RESOURCE>>(),
                 g::send::<D, NOTIFY, Loan<NOTIFY_RESOURCE>>(),
@@ -1106,7 +1106,7 @@ pub fn project_1h() -> Programs1H {
     let notify_e = g::seq(
         g::send::<NOTIFY, E, ModuleLoan<E, NOTIFY_RESOURCE>>(),
         g::seq(
-            g::send::<NOTIFY_RESOURCE, E, ModuleRequest<NOTIFY_RESOURCE>>(),
+            g::send::<NOTIFY_RESOURCE, E, ModuleRequest<NOTIFY_RESOURCE, E>>(),
             g::seq(
                 g::send::<E, NOTIFY_RESOURCE, ModuleCompleted<NOTIFY_RESOURCE>>(),
                 g::send::<E, NOTIFY, Loan<NOTIFY_RESOURCE>>(),
@@ -1124,7 +1124,7 @@ pub fn project_1h() -> Programs1H {
             g::seq(
                 g::send::<PAYMENT, C, ModuleLoan<C, PAYMENT_RESOURCE>>(),
                 g::seq(
-                    g::send::<PAYMENT_RESOURCE, C, ModuleRequest<PAYMENT_RESOURCE>>(),
+                    g::send::<PAYMENT_RESOURCE, C, ModuleRequest<PAYMENT_RESOURCE, C>>(),
                     g::seq(
                         g::send::<C, PAYMENT_RESOURCE, ModuleCompleted<PAYMENT_RESOURCE>>(),
                         g::send::<C, PAYMENT, Loan<PAYMENT_RESOURCE>>(),
@@ -1140,7 +1140,7 @@ pub fn project_1h() -> Programs1H {
             g::seq(
                 g::send::<PAYMENT, D, ModuleLoan<D, PAYMENT_RESOURCE>>(),
                 g::seq(
-                    g::send::<PAYMENT_RESOURCE, D, ModuleRequest<PAYMENT_RESOURCE>>(),
+                    g::send::<PAYMENT_RESOURCE, D, ModuleRequest<PAYMENT_RESOURCE, D>>(),
                     g::seq(
                         g::send::<D, PAYMENT_RESOURCE, ModuleCompleted<PAYMENT_RESOURCE>>(),
                         g::send::<D, PAYMENT, Loan<PAYMENT_RESOURCE>>(),
@@ -1156,7 +1156,7 @@ pub fn project_1h() -> Programs1H {
     let search_f = g::seq(
         g::send::<SEARCH, F, ModuleLoan<F, SEARCH_RESOURCE>>(),
         g::seq(
-            g::send::<SEARCH_RESOURCE, F, ModuleRequest<SEARCH_RESOURCE>>(),
+            g::send::<SEARCH_RESOURCE, F, ModuleRequest<SEARCH_RESOURCE, F>>(),
             g::seq(
                 g::send::<F, SEARCH_RESOURCE, ModuleCompleted<SEARCH_RESOURCE>>(),
                 g::send::<F, SEARCH, Loan<SEARCH_RESOURCE>>(),
@@ -1166,7 +1166,7 @@ pub fn project_1h() -> Programs1H {
     let search_g = g::seq(
         g::send::<SEARCH, G, ModuleLoan<G, SEARCH_RESOURCE>>(),
         g::seq(
-            g::send::<SEARCH_RESOURCE, G, ModuleRequest<SEARCH_RESOURCE>>(),
+            g::send::<SEARCH_RESOURCE, G, ModuleRequest<SEARCH_RESOURCE, G>>(),
             g::seq(
                 g::send::<G, SEARCH_RESOURCE, ModuleCompleted<SEARCH_RESOURCE>>(),
                 g::send::<G, SEARCH, Loan<SEARCH_RESOURCE>>(),

@@ -1,5 +1,5 @@
 //! Exact recipe inputs and actual results; no protocol decisions or progress data.
-use crate::shell::{ShellError, ShellResult};
+use crate::shell::{ShellError, ShellResult, imp::service::SimulatorOperation};
 use hibana::runtime::wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload};
 use serde_json::{Value, json};
 pub const CHEFS: [&str; 3] = ["CHEF_A", "CHEF_B", "CHEF_C"];
@@ -17,7 +17,7 @@ pub fn expected(index: u8) -> Option<Value> {
     }
 }
 #[derive(Debug)]
-pub struct Arguments<const INDEX: u8>(Vec<u8>);
+pub struct Arguments<const INDEX: u8, const SUBMISSION: bool = false>(Vec<u8>);
 impl<const INDEX: u8> Arguments<INDEX> {
     #[cfg(test)]
     pub fn from_bytes(bytes: &[u8]) -> ShellResult<Self> {
@@ -29,7 +29,7 @@ impl<const INDEX: u8> Arguments<INDEX> {
         serde_json::from_slice(&self.0).expect("validated recipe request")
     }
 }
-impl<const INDEX: u8> WireEncode for Arguments<INDEX> {
+impl<const INDEX: u8, const SUBMISSION: bool> WireEncode for Arguments<INDEX, SUBMISSION> {
     fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
         output
             .get_mut(..self.0.len())
@@ -40,7 +40,7 @@ impl<const INDEX: u8> WireEncode for Arguments<INDEX> {
 }
 impl<const INDEX: u8> WirePayload for Arguments<INDEX> {
     const SCHEMA_ID: u32 = 0xac12_0000 | INDEX as u32;
-    type Decoded<'a> = Self;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
         let value: Value =
             serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
@@ -49,10 +49,49 @@ impl<const INDEX: u8> WirePayload for Arguments<INDEX> {
         }
         Ok(())
     }
-    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
-        Self(input.as_bytes().to_vec())
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
+        input
     }
 }
+// The initial file receive provides data for the equipment requests.
+impl<const INDEX: u8> WirePayload for Arguments<INDEX, true> {
+    const SCHEMA_ID: u32 = 0xac12_0100 | INDEX as u32;
+    type Decoded<'a> = Arguments<INDEX>;
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        Arguments::<INDEX>::validate_payload(input)
+    }
+    fn decode_validated_payload(input: ReceivedPayload<'_, Self>) -> Arguments<INDEX> {
+        Arguments(input.as_bytes().to_vec())
+    }
+}
+impl SimulatorOperation<2> for Arguments<0> {
+    const RPC: (&'static str, &'static str) = (CHEFS[0], "prepare_base_dish");
+}
+impl SimulatorOperation<2> for Arguments<1> {
+    const RPC: (&'static str, &'static str) = (CHEFS[1], "prepare_base_dish");
+}
+impl SimulatorOperation for Arguments<2> {
+    const RPC: (&'static str, &'static str) = (CHEFS[2], "prepare_base_dish");
+}
+impl SimulatorOperation for Arguments<3> {
+    const RPC: (&'static str, &'static str) = (CHEFS[0], "prepare_ingredient");
+}
+impl SimulatorOperation for Arguments<4> {
+    const RPC: (&'static str, &'static str) = (CHEFS[1], "prepare_ingredient");
+}
+impl SimulatorOperation for Arguments<5> {
+    const RPC: (&'static str, &'static str) = (CHEFS[2], "prepare_ingredient");
+}
+impl SimulatorOperation for Arguments<6> {
+    const RPC: (&'static str, &'static str) = (CHEFS[0], "combine_dish");
+}
+impl SimulatorOperation for Arguments<7> {
+    const RPC: (&'static str, &'static str) = (CHEFS[1], "combine_dish");
+}
+impl SimulatorOperation for Arguments<8> {
+    const RPC: (&'static str, &'static str) = (CHEFS[2], "combine_dish");
+}
+
 pub fn encode(value: &Value) -> ShellResult<Vec<u8>> {
     serde_json::to_vec(value).map_err(|e| ShellError::message(e.to_string()))
 }

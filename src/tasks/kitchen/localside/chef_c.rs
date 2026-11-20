@@ -1,9 +1,9 @@
 //! Actual base request, equipment ownership and incoming completed ingredient.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::Endpoint;
 #[hibana_runtime::scope]
-pub async fn run(endpoint: &mut Endpoint<C>, domain: &impl Domain) -> ShellResult<()> {
+pub async fn run(endpoint: &mut Endpoint<C>, effects: &impl ReceivedEffects) -> ShellResult<()> {
     let [mut base, mut incoming] = endpoint.par()?;
     async {
         let admitted = base.recv::<BaseIntentC>().await?;
@@ -16,15 +16,12 @@ pub async fn run(endpoint: &mut Endpoint<C>, domain: &impl Domain) -> ShellResul
         }
         .await?;
         let arguments = admitted.value();
-        if actual.value() != arguments {
+        if imp::decode(actual.as_bytes())? != arguments {
             return Err(ShellError::message(
                 "oven request differs from admitted base input",
             ));
         }
-        let result = domain
-            .execute("CHEF_C", "prepare_base_dish", arguments.clone())
-            .await
-            .map_err(ShellError::message)?;
+        let result = effects.apply(actual).await?;
         imp::completed("prepare_base_dish", "CHEF_C", &arguments, &result)?;
         let bytes = imp::encode(&result)?;
         async {

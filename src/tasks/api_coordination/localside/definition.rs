@@ -112,7 +112,7 @@ pub async fn run<'run>(
                     }
                 };
                 let arguments = admitted;
-                operation.send::<DefineIntent>(&arguments).await?;
+                operation.send::<DefineIntent>(&arguments.intent()).await?;
                 let mut repository = operation.recv::<Loan<REPO>>().await?;
                 repository.send::<DefineApi>(&arguments).await?;
                 let response = repository.recv::<ApiDefined>().await?.to_vec();

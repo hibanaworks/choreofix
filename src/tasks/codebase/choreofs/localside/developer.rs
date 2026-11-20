@@ -1,19 +1,16 @@
 //! Actual requests, both owned module views, effects and original results.
 use super::super::{global::*, input, wire};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::PairedEffects};
 use hibana::Endpoint;
 
 #[hibana_runtime::scope]
 pub async fn run<'run, const ROLE: u8, const FIRST: u8, const SECOND: u8>(
     endpoint: &mut Endpoint<'run, ROLE>,
-    domain: &impl Domain,
+    effects: &impl PairedEffects,
 ) -> ShellResult<()> {
     let input = input::assignment(ROLE);
-    let arguments = endpoint.recv::<DesignRequest<ROLE>>().await?.into_value();
-    let designed = domain
-        .execute(input.agent, "design_feature", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let arguments = endpoint.recv::<DesignRequest<ROLE>>().await?;
+    let designed = effects.apply(arguments).await?;
     wire::result(&designed, "design_feature", input.agent)?;
     if designed["success"] != true || !designed["data"]["artifact"]["id"].is_string() {
         return Err(ShellError::message(
@@ -23,14 +20,8 @@ pub async fn run<'run, const ROLE: u8, const FIRST: u8, const SECOND: u8>(
     let bytes = wire::encode(&designed)?;
     endpoint.send::<DesignCompleted>(&bytes.as_slice()).await?;
 
-    let arguments = endpoint
-        .recv::<ImplementRequest<ROLE>>()
-        .await?
-        .into_value();
-    let implemented = domain
-        .execute(input.agent, "implement_code", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let arguments = endpoint.recv::<ImplementRequest<ROLE>>().await?;
+    let implemented = effects.apply(arguments).await?;
     wire::result(&implemented, "implement_code", input.agent)?;
     if implemented["success"] != true
         || implemented["data"]["artifact"]["design"] != designed["data"]["artifact"]
@@ -45,39 +36,42 @@ pub async fn run<'run, const ROLE: u8, const FIRST: u8, const SECOND: u8>(
         .await?;
 
     let admitted = endpoint.recv::<CommitRequest<ROLE>>().await?;
-    let arguments = wire::ModuleArguments::from_bytes(admitted.as_bytes())?;
+    let arguments = &admitted.arguments;
     let (mut first, mut second) = async {
         let [mut a, mut b] = endpoint.par()?;
         async { a.recv::<Loan<FIRST>>().await };
         async { b.recv::<Loan<SECOND>>().await };
     }
     .await?;
-    let (request_a, request_b) = async {
+    let committed = {
         let [mut a, mut b] = endpoint.par()?;
-        async {
+        let (request_a, request_b) = async {
             async {
-                first.send::<ModuleRequest<FIRST>>(&arguments).await?;
+                async {
+                    first.send::<ModuleRequest<FIRST, ROLE>>(arguments).await?;
+                };
+                Ok(a.recv::<ModuleRequest<FIRST, ROLE>>().await?)
             };
-            Ok(a.recv::<ModuleRequest<FIRST>>().await?)
-        };
-        async {
             async {
-                second.send::<ModuleRequest<SECOND>>(&arguments).await?;
+                async {
+                    second
+                        .send::<ModuleRequest<SECOND, ROLE>>(arguments)
+                        .await?;
+                };
+                Ok(b.recv::<ModuleRequest<SECOND, ROLE>>().await?)
             };
-            Ok(b.recv::<ModuleRequest<SECOND>>().await?)
-        };
-    }
-    .await?;
-    let admitted = admitted.into_value();
-    if request_a != request_b || request_a.into_value() != admitted {
-        return Err(ShellError::message(
-            "module requests differ from the actual file request",
-        ));
-    }
-    let committed = domain
-        .execute(input.agent, "commit_changes", admitted)
-        .await
-        .map_err(ShellError::message)?;
+        }
+        .await?;
+        let admitted = admitted.value();
+        if request_a.as_bytes() != request_b.as_bytes()
+            || crate::imp::json::decode(request_a.as_bytes())? != admitted
+        {
+            return Err(ShellError::message(
+                "module requests differ from the actual file request",
+            ));
+        }
+        effects.apply_pair(request_a, request_b).await?
+    };
     wire::result(&committed, "commit_changes", input.agent)?;
     if committed["success"] != true
         || committed["data"]["artifact"]["source"] != implemented["data"]["artifact"]
@@ -125,11 +119,8 @@ pub async fn run<'run, const ROLE: u8, const FIRST: u8, const SECOND: u8>(
     .await?;
     endpoint.send::<CommitCompleted>(&bytes.as_slice()).await?;
 
-    let arguments = endpoint.recv::<TestRequest<ROLE>>().await?.into_value();
-    let tested = domain
-        .execute(input.agent, "run_local_tests", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let arguments = endpoint.recv::<TestRequest<ROLE>>().await?;
+    let tested = effects.apply(arguments).await?;
     wire::result(&tested, "run_local_tests", input.agent)?;
     if tested["data"]["input_snapshot"] != committed["data"]["artifact"] {
         return Err(ShellError::message(

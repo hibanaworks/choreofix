@@ -4,21 +4,21 @@ use crate::{
     shell::{
         ShellError, ShellResult,
         global::Loan,
-        imp::{review_reply::ReviewReply, service::Domain},
+        imp::{review_reply::ReviewReply, service::ReceivedEffects},
     },
 };
 use hibana::{Endpoint, g::Message};
 use serde_json::{Value, json};
 
 #[hibana_runtime::scope]
-pub async fn migrate(db: &mut Endpoint<DB_SERVICE>, domain: &impl Domain) -> ShellResult<()> {
+pub async fn migrate(
+    db: &mut Endpoint<DB_SERVICE>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()> {
     let mut resource = db.recv::<Loan<DATABASE>>().await?;
     loop {
-        let arguments = resource.recv::<MigrateSchema>().await?.into_value();
-        let result = domain
-            .execute("DB_ADMIN", "migrate_schema", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let arguments = resource.recv::<MigrateSchema>().await?;
+        let result = effects.apply(arguments).await?;
         let bytes = encode(&result)?;
         async {
             let [mut file, mut recipient] = resource.par()?;
@@ -62,14 +62,14 @@ pub async fn migrate(db: &mut Endpoint<DB_SERVICE>, domain: &impl Domain) -> She
 }
 
 #[hibana_runtime::scope]
-pub async fn define(api: &mut Endpoint<API_SERVICE>, domain: &impl Domain) -> ShellResult<()> {
+pub async fn define(
+    api: &mut Endpoint<API_SERVICE>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()> {
     let mut resource = api.recv::<Loan<API_GATEWAY>>().await?;
     loop {
-        let arguments = resource.recv::<DefineApi>().await?.into_value();
-        let result = domain
-            .execute("BACKEND_DEV", "define_api", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let arguments = resource.recv::<DefineApi>().await?;
+        let result = effects.apply(arguments).await?;
         let bytes = encode(&result)?;
         async {
             let [mut file, mut recipient] = resource.par()?;
@@ -106,14 +106,14 @@ pub async fn define(api: &mut Endpoint<API_SERVICE>, domain: &impl Domain) -> Sh
 #[hibana_runtime::scope]
 pub async fn implement(
     backend: &mut Endpoint<BACKEND_SERVICE>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     let mut schema = backend.recv::<SchemaReady>().await?.to_vec();
     backend.send::<SchemaReady>(&schema.as_slice()).await?;
     let branch = backend.offer().await?;
     let first = match branch.label() {
         NeedSchema::LOGICAL_LABEL => {
-            let request = branch.recv::<NeedSchema>().await?.into_value();
+            let request = decode(branch.recv::<NeedSchema>().await?.as_bytes())?;
             let migration = decode(&schema)?;
             let bytes = encode(&json!({
                 "schema": migration["data"]["revision"],
@@ -123,19 +123,16 @@ pub async fn implement(
             backend.send::<RequestMigration>(&bytes.as_slice()).await?;
             schema = backend.recv::<SchemaReady>().await?.to_vec();
             backend.send::<SchemaReady>(&schema.as_slice()).await?;
-            backend.recv::<ImplementBackend>().await?.into_value()
+            backend.recv::<ImplementBackend>().await?
         }
-        ImplementBackend::LOGICAL_LABEL => branch.recv::<ImplementBackend>().await?.into_value(),
+        ImplementBackend::LOGICAL_LABEL => branch.recv::<ImplementBackend>().await?,
         label => {
             return Err(ShellError::message(format!(
                 "unexpected initial implementation choice {label}"
             )));
         }
     };
-    let result = domain
-        .execute("BACKEND_DEV", "implement_backend", first)
-        .await
-        .map_err(ShellError::message)?;
+    let result = effects.apply(first).await?;
     if result["data"]["inputs"]["schema"] != decode(&schema)?["data"]["revision"] {
         return Err(ShellError::message(
             "backend used a different schema revision",
@@ -186,14 +183,8 @@ pub async fn implement(
                                 notice.send::<SchemaReady>(&schema.as_slice()).await?;
                             };
                             async {
-                                let arguments = implementation
-                                    .recv::<ImplementBackend>()
-                                    .await?
-                                    .into_value();
-                                let result = domain
-                                    .execute("BACKEND_DEV", "implement_backend", arguments)
-                                    .await
-                                    .map_err(ShellError::message)?;
+                                let arguments = implementation.recv::<ImplementBackend>().await?;
+                                let result = effects.apply(arguments).await?;
                                 if result["data"]["inputs"]["schema"] != expected_schema {
                                     return Err(ShellError::message(
                                         "backend used a different schema revision",
@@ -225,11 +216,8 @@ pub async fn implement(
                     }
                 }
             }
-            let arguments = backend.recv::<ImplementBackend>().await?.into_value();
-            let result = domain
-                .execute("BACKEND_DEV", "implement_backend", arguments)
-                .await
-                .map_err(ShellError::message)?;
+            let arguments = backend.recv::<ImplementBackend>().await?;
+            let result = effects.apply(arguments).await?;
             if result["data"]["inputs"]["schema"] != revision {
                 return Err(ShellError::message(
                     "backend used a different schema revision",
@@ -249,7 +237,7 @@ pub async fn implement(
 #[hibana_runtime::scope]
 pub async fn review(
     reviewer: &mut Endpoint<REVIEW_SERVICE>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     let (mut contract, mut backend) = async {
         let [mut code, mut spec] = reviewer.par()?;
@@ -276,11 +264,8 @@ pub async fn review(
             }
             let bytes = encode(&subject)?;
             reviewer.send::<BackendCandidate>(&bytes.as_slice()).await?;
-            let arguments = reviewer.recv::<ReviewBackend>().await?.into_value();
-            let result = domain
-                .execute("REVIEWER", "code_review", arguments)
-                .await
-                .map_err(ShellError::message)?;
+            let arguments = reviewer.recv::<ReviewBackend>().await?;
+            let result = effects.apply(arguments).await?;
             if result["data"]["inputs"] != subject {
                 return Err(ShellError::message("review used a different backend"));
             }
@@ -342,11 +327,8 @@ pub async fn review(
                     }
                     let bytes = encode(&subject)?;
                     reviewer.send::<UiCandidate>(&bytes.as_slice()).await?;
-                    let arguments = reviewer.recv::<ReviewFrontend>().await?.into_value();
-                    let reviewed = domain
-                        .execute("REVIEWER", "code_review", arguments)
-                        .await
-                        .map_err(ShellError::message)?;
+                    let arguments = reviewer.recv::<ReviewFrontend>().await?;
+                    let reviewed = effects.apply(arguments).await?;
                     if reviewed["data"]["inputs"] != subject {
                         return Err(ShellError::message("review used a different frontend"));
                     }
@@ -398,7 +380,7 @@ pub async fn review(
                 .send::<Outcome<REVIEW_FILE>>(&actual.as_slice())
                 .await?;
 
-            let repair = reviewer.recv::<RepairDecision>().await?.into_value();
+            let repair = decode(reviewer.recv::<RepairDecision>().await?.as_bytes())?;
             let reply = ReviewReply::from_bytes(&actual)?;
             let notice = encode(&json!({"repair": repair, "test": failure}))?;
             let component = repair["component"].as_str();
@@ -540,7 +522,7 @@ pub async fn review(
 #[hibana_runtime::scope]
 pub async fn frontend(
     frontend: &mut Endpoint<FRONTEND_SERVICE>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     let mut approval = frontend.recv::<BackendApproval>().await?.to_vec();
     'interface: loop {
@@ -553,11 +535,8 @@ pub async fn frontend(
         frontend.send::<UiInputs>(&approval.as_slice()).await?;
 
         loop {
-            let arguments = frontend.recv::<ImplementFrontend>().await?.into_value();
-            let result = domain
-                .execute("FRONTEND_DEV", "implement_frontend", arguments)
-                .await
-                .map_err(ShellError::message)?;
+            let arguments = frontend.recv::<ImplementFrontend>().await?;
+            let result = effects.apply(arguments).await?;
             if result["data"]["inputs"] != expected {
                 return Err(ShellError::message(
                     "frontend used a different approved backend",
@@ -627,16 +606,16 @@ pub async fn frontend(
 }
 
 #[hibana_runtime::scope]
-pub async fn test(tester: &mut Endpoint<TEST_SERVICE>, domain: &impl Domain) -> ShellResult<()> {
+pub async fn test(
+    tester: &mut Endpoint<TEST_SERVICE>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()> {
     let mut environment = tester.recv::<Loan<TEST_ENV>>().await?;
     loop {
         let expected = environment.recv::<TestInputs>().await?.to_vec();
         environment.send::<TestInputs>(&expected.as_slice()).await?;
-        let arguments = environment.recv::<RunIntegration>().await?.into_value();
-        let result = domain
-            .execute("TESTER", "run_integration_tests", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let arguments = environment.recv::<RunIntegration>().await?;
+        let result = effects.apply(arguments).await?;
         if result["data"]["inputs"] != decode(&expected)? {
             return Err(ShellError::message(
                 "integration ran against different approved inputs",

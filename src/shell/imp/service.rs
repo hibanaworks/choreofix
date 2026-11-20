@@ -4,7 +4,9 @@ use serde_json::Value;
 use std::cell::Cell;
 
 /// The physical simulator operation named by this projected wire payload.
-pub trait SimulatorOperation: hibana::runtime::wire::WirePayload {
+pub trait SimulatorOperation<const RECEIPTS: usize = 1>:
+    hibana::runtime::wire::WirePayload
+{
     const RPC: (&'static str, &'static str);
 }
 
@@ -28,6 +30,31 @@ pub trait ReceivedEffects {
     fn apply<P: SimulatorOperation>(
         &self,
         received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>>;
+}
+
+/// An operation on two resources consumes two actual receives of the same request.
+///
+/// ```compile_fail
+/// use choreofix::shell::imp::service::{PairedEffects, SimulatorOperation};
+/// use hibana::runtime::wire::ReceivedPayload;
+/// fn only_one<P: SimulatorOperation<2>>(io: &impl PairedEffects, one: ReceivedPayload<'_, P>) {
+///     let _ = io.apply(one);
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use choreofix::shell::imp::service::{PairedEffects, SimulatorOperation};
+/// use hibana::runtime::wire::ReceivedPayload;
+/// fn reuse<P: SimulatorOperation<2>>(io: &impl PairedEffects, one: ReceivedPayload<'_, P>) {
+///     let _ = io.apply_pair(one, one);
+/// }
+/// ```
+pub trait PairedEffects: ReceivedEffects {
+    fn apply_pair<P: SimulatorOperation<2>>(
+        &self,
+        first: hibana::runtime::wire::ReceivedPayload<'_, P>,
+        second: hibana::runtime::wire::ReceivedPayload<'_, P>,
     ) -> impl Future<Output = ShellResult<Value>>;
 }
 

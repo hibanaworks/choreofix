@@ -17,7 +17,7 @@ use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasi
 #[hibana_runtime::scope]
 async fn run_2e_guests(
     module: &[u8],
-    (bus, simulator): (&Bus, &impl crate::shell::imp::service::Domain),
+    (bus, simulator): (&Bus, &impl crate::shell::imp::service::PairedEffects),
     terminals: [Terminal; 3],
 ) -> ShellResult<()> {
     use global::roles2e::*;
@@ -286,7 +286,7 @@ async fn run_2e_guests(
 #[hibana_runtime::scope]
 async fn run_2m_guests(
     module: &[u8],
-    (bus, simulator): (&Bus, &impl crate::shell::imp::service::Domain),
+    (bus, simulator): (&Bus, &impl crate::shell::imp::service::PairedEffects),
     terminals: [Terminal; 5],
 ) -> ShellResult<()> {
     use global::roles2m::*;
@@ -752,7 +752,7 @@ async fn run_2m_guests(
 #[hibana_runtime::scope]
 async fn run_2h_guests(
     module: &[u8],
-    (bus, simulator): (&Bus, &impl crate::shell::imp::service::Domain),
+    (bus, simulator): (&Bus, &impl crate::shell::imp::service::PairedEffects),
     terminals: [Terminal; 7],
 ) -> ShellResult<()> {
     use global::roles2h::*;

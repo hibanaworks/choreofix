@@ -1,5 +1,5 @@
 //! Direct file requests, actual section Endpoints and original effect results.
-use super::imp::{Arguments, WriteArguments};
+use super::imp::{Arguments, WriteSubmission};
 use crate::shell::global::FileExit;
 pub use crate::shell::global::Loan;
 use hibana::{
@@ -10,13 +10,13 @@ use hibana::{
 pub const SESSION: u32 = 18;
 pub type ReadRequest<const ROLE: u8> = g::Msg<1, Arguments<ROLE, 0>>;
 pub type DraftRequest<const ROLE: u8> = g::Msg<2, Arguments<ROLE, 1>>;
-pub type WriteRequest<const ROLE: u8> = g::Msg<3, Arguments<ROLE, 2>>;
+pub type WriteRequest<const ROLE: u8> = g::Msg<3, WriteSubmission<ROLE>>;
 pub type ReviewRequest<const ROLE: u8> = g::Msg<4, Arguments<ROLE, 3>>;
 pub type ReadResult<'a> = g::Msg<5, &'a [u8]>;
 pub type DraftResult<'a> = g::Msg<6, &'a [u8]>;
 pub type WriteResult<'a> = g::Msg<7, &'a [u8]>;
 pub type ReviewResult<'a> = g::Msg<8, &'a [u8]>;
-pub type SectionRequest<const RESOURCE: u8> = g::Msg<RESOURCE, WriteArguments>;
+pub type SectionRequest<const RESOURCE: u8, const DEV: u8> = g::Msg<RESOURCE, Arguments<DEV, 2>>;
 pub type SectionWritten<'a, const RESOURCE: u8> = g::Msg<RESOURCE, &'a [u8]>;
 
 const fn object(
@@ -72,8 +72,8 @@ fn writing<const OWNER: u8, const FIRST: u8, const SECOND: u8>(
             g::par(first_loan, second_loan),
             g::seq(
                 g::par(
-                    g::send::<FIRST, OWNER, SectionRequest<FIRST>>(),
-                    g::send::<SECOND, OWNER, SectionRequest<SECOND>>(),
+                    g::send::<FIRST, OWNER, SectionRequest<FIRST, OWNER>>(),
+                    g::send::<SECOND, OWNER, SectionRequest<SECOND, OWNER>>(),
                 ),
                 g::seq(
                     g::par(
@@ -93,7 +93,7 @@ fn review<const OWNER: u8, const FILE: u8>() -> impl Projectable {
     )
 }
 
-pub type Submitted<const ROLE: u8> = g::Msg<ROLE, Arguments<ROLE, 2>>;
+pub type Submitted<const ROLE: u8> = g::Msg<ROLE, WriteSubmission<ROLE>>;
 
 pub mod roles2e {
     pub const A: u8 = 0;
@@ -294,14 +294,14 @@ impl Programs2E {
     }
 }
 
-pub type SectionClaim<const LABEL: u8, const DEV: u8> = g::Msg<LABEL, Arguments<DEV, 2>>;
+pub type SectionClaim<const LABEL: u8, const DEV: u8> = g::Msg<LABEL, WriteSubmission<DEV>>;
 
 // One physical section can serve either of its two writers first.
 fn section_use<const DEV: u8, const OWNER: u8, const RESOURCE: u8>() -> impl Projectable + Copy {
     g::seq(
         g::send::<OWNER, DEV, Loan<RESOURCE>>(),
         g::seq(
-            g::send::<RESOURCE, DEV, SectionRequest<RESOURCE>>(),
+            g::send::<RESOURCE, DEV, SectionRequest<RESOURCE, DEV>>(),
             g::seq(
                 g::send::<DEV, RESOURCE, SectionWritten<RESOURCE>>(),
                 g::send::<DEV, OWNER, Loan<RESOURCE>>(),

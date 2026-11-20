@@ -1,9 +1,9 @@
 //! Actual base request, equipment ownership and incoming completed ingredient.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::PairedEffects};
 use hibana::Endpoint;
 #[hibana_runtime::scope]
-pub async fn run(endpoint: &mut Endpoint<B>, domain: &impl Domain) -> ShellResult<()> {
+pub async fn run(endpoint: &mut Endpoint<B>, effects: &impl PairedEffects) -> ShellResult<()> {
     let [mut base, mut incoming] = endpoint.par()?;
     async {
         let admitted = base.recv::<BaseIntentB>().await?;
@@ -13,34 +13,33 @@ pub async fn run(endpoint: &mut Endpoint<B>, domain: &impl Domain) -> ShellResul
             async { Ok::<_, ShellError>(s.recv::<StoveLoanB>().await?) };
         }
         .await?;
-        let (left, right) = async {
-            let [mut o, mut s] = base.par()?;
-            async {
-                async {
-                    oven.send::<OvenRequestB>(&admitted).await?;
-                };
-                Ok::<_, ShellError>(o.recv::<OvenRequestB>().await?)
-            };
-
-            async {
-                async {
-                    stove.send::<StoveRequestB>(&admitted).await?;
-                };
-                Ok::<_, ShellError>(s.recv::<StoveRequestB>().await?)
-            };
-        }
-        .await?;
-
         let arguments = admitted.value();
-        if left.value() != arguments || right.value() != arguments {
-            return Err(ShellError::message(
-                "equipment request differs from admitted base input",
-            ));
-        }
-        let result = domain
-            .execute("CHEF_B", "prepare_base_dish", arguments.clone())
-            .await
-            .map_err(ShellError::message)?;
+        let result = {
+            let [mut o, mut s] = base.par()?;
+            let (left, right) = async {
+                async {
+                    async {
+                        oven.send::<OvenRequestB>(&admitted).await?;
+                    };
+                    Ok::<_, ShellError>(o.recv::<OvenRequestB>().await?)
+                };
+
+                async {
+                    async {
+                        stove.send::<StoveRequestB>(&admitted).await?;
+                    };
+                    Ok::<_, ShellError>(s.recv::<StoveRequestB>().await?)
+                };
+            }
+            .await?;
+
+            if imp::decode(left.as_bytes())? != arguments {
+                return Err(ShellError::message(
+                    "equipment request differs from admitted base input",
+                ));
+            }
+            effects.apply_pair(left, right).await?
+        };
         imp::completed("prepare_base_dish", "CHEF_B", &arguments, &result)?;
         let bytes = imp::encode(&result)?;
         async {

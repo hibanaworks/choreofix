@@ -1,6 +1,6 @@
 //! The external connection owns terminal output and simulator RPC correlation.
 use crate::{
-    shell::imp::service::{Domain, ReceivedEffects, SimulatorOperation},
+    shell::imp::service::{Domain, PairedEffects, ReceivedEffects, SimulatorOperation},
     shell::{ShellError, ShellResult},
 };
 use hibana::runtime::{ids::SessionId, transport::EndpointBinding};
@@ -452,6 +452,28 @@ impl ReceivedEffects for Simulator<'_> {
     ) -> ShellResult<Value> {
         let arguments = serde_json::from_slice(received.as_bytes())
             .map_err(|e| ShellError::message(format!("simulator request JSON: {e}")))?;
+        let (agent, tool) = P::RPC;
+        self.0
+            .rpc(agent, tool, arguments)
+            .await
+            .map_err(ShellError::message)
+    }
+}
+
+impl PairedEffects for Simulator<'_> {
+    async fn apply_pair<P: SimulatorOperation<2>>(
+        &self,
+        first: hibana::runtime::wire::ReceivedPayload<'_, P>,
+        second: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> ShellResult<Value> {
+        let arguments = crate::imp::json::decode(first.as_bytes())?;
+        if first.as_bytes() != second.as_bytes()
+            && crate::imp::json::decode(second.as_bytes())? != arguments
+        {
+            return Err(ShellError::message(
+                "resource requests have different arguments",
+            ));
+        }
         let (agent, tool) = P::RPC;
         self.0
             .rpc(agent, tool, arguments)
