@@ -1,0 +1,135 @@
+{
+  "task": "15E",
+  "scope": "One scripted integration engineer uses wash and a transferred reference-wafer Endpoint for the two final spot checks. The preceding 17 effects are issued directly to the same simulator.",
+  "model_calls": 0,
+  "scored_benchmark": false,
+  "runtime_sha256": "1a28ae007a73f31a454e81bdf742b74ec8a1b54b7f4087196f7984529170a425",
+  "runtime_source_manifest_sha256": "f5aef6ed7632aeb65cfa31c1f08cc56d2b94515c3d24536cdfee2af4b6be0b00",
+  "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+  "cases": [
+    {
+      "order": [
+        "film_integrity_check",
+        "etch_uniformity_check"
+      ],
+      "journal_sha256": "e58e8ca72ef0ae16bc27d764ea9e9102f8434c9ed8232a7b6cc08dbf6c482644",
+      "epf_records": 763,
+      "completed_effects": 19,
+      "early_reads_rejected": 2,
+      "wrong_arguments_rejected": 2,
+      "spot_checks": [
+        {
+          "tool": "run_deposition",
+          "arguments": {
+            "process": "film_integrity_check"
+          },
+          "score_receipt": 18,
+          "alignment_inputs": [
+            16,
+            17
+          ],
+          "request": {
+            "frame_id": 55,
+            "source_event": 1,
+            "receive_ordinal": 307,
+            "receive_journal_row": 423
+          },
+          "reply": {
+            "frame_id": 61,
+            "source_event": 2,
+            "receive_ordinal": 341,
+            "receive_journal_row": 467
+          }
+        },
+        {
+          "tool": "run_etch_process",
+          "arguments": {
+            "process": "etch_uniformity_check"
+          },
+          "score_receipt": 19,
+          "alignment_inputs": [
+            16,
+            17
+          ],
+          "request": {
+            "frame_id": 117,
+            "source_event": 3,
+            "receive_ordinal": 645,
+            "receive_journal_row": 833
+          },
+          "reply": {
+            "frame_id": 124,
+            "source_event": 4,
+            "receive_ordinal": 679,
+            "receive_journal_row": 877
+          }
+        }
+      ],
+      "simulator_complete": true,
+      "violations": []
+    },
+    {
+      "order": [
+        "etch_uniformity_check",
+        "film_integrity_check"
+      ],
+      "journal_sha256": "8b9495c9666a8cd8220c66923622f888be6db2d52dbb3cc21c382cdfd9437b32",
+      "epf_records": 763,
+      "completed_effects": 19,
+      "early_reads_rejected": 2,
+      "wrong_arguments_rejected": 2,
+      "spot_checks": [
+        {
+          "tool": "run_etch_process",
+          "arguments": {
+            "process": "etch_uniformity_check"
+          },
+          "score_receipt": 18,
+          "alignment_inputs": [
+            16,
+            17
+          ],
+          "request": {
+            "frame_id": 55,
+            "source_event": 5,
+            "receive_ordinal": 307,
+            "receive_journal_row": 423
+          },
+          "reply": {
+            "frame_id": 61,
+            "source_event": 6,
+            "receive_ordinal": 341,
+            "receive_journal_row": 467
+          }
+        },
+        {
+          "tool": "run_deposition",
+          "arguments": {
+            "process": "film_integrity_check"
+          },
+          "score_receipt": 19,
+          "alignment_inputs": [
+            16,
+            17
+          ],
+          "request": {
+            "frame_id": 117,
+            "source_event": 7,
+            "receive_ordinal": 645,
+            "receive_journal_row": 833
+          },
+          "reply": {
+            "frame_id": 124,
+            "source_event": 8,
+            "receive_ordinal": 679,
+            "receive_journal_row": 877
+          }
+        }
+      ],
+      "simulator_complete": true,
+      "violations": []
+    }
+  ],
+  "raw_directory": "output/verification/wafer-wash-15e-20261120.9DyM23/wasm-final",
+  "harness_sha256": "a5afd652d70c9f4b03e83afb10bf41e75d4d2afbceaf26284221b71bf386e683"
+}

@@ -859,6 +859,137 @@ async fn wafer_measurements_can_be_repeated_while_other_materials_are_unstarted(
     Ok(())
 }
 
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires the built wafer runtime and wash guest"]
+async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()> {
+    use crate::{
+        evidence::{archive_build_receipt, digest},
+        process, projection,
+    };
+    use std::path::PathBuf;
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()?;
+    std::env::set_current_dir(&root)?;
+    let output =
+        PathBuf::from(std::env::var_os("CHOREOFIX_EVIDENCE_ROOT").ok_or("wafer evidence root")?);
+    let binary =
+        PathBuf::from(std::env::var_os("CHOREOFIX_WAFER_WASI_BINARY").ok_or("wafer runtime")?)
+            .canonicalize()?;
+    let receipt = PathBuf::from(
+        std::env::var_os("CHOREOFIX_WAFER_BUILD_RECEIPT").ok_or("wafer build receipt")?,
+    );
+    let wash = root.join("vendor/hibana-wash/target/wasm32-wasip1/release/hibana-wash.wasm");
+    fs::create_dir(&output)?;
+    archive_build_receipt(&binary, &receipt, &output)?;
+    let film = ("run_deposition", "film_integrity_check");
+    let etch = ("run_etch_process", "etch_uniformity_check");
+    for (case, order) in [("film-first", [film, etch]), ("etch-first", [etch, film])] {
+        let directory = output.join(case);
+        fs::create_dir(&directory)?;
+        let journal = directory.join("events.jsonl");
+        let artifact = projection::archive(&binary, &directory, "15E")?;
+        let trace = Trace::create(&journal)?;
+        let (world, fixture) = Simulator::new("15E", 0, 0.0, trace.clone(), &[])?;
+        let receipts = prepare_wafers(&world, &fixture).await?;
+        let (guest, runtime) = process::guest(&binary, &wash, &[], &directory, trace, world)?;
+        let ((), outcome) = hibana_runtime::race(
+            async {
+                async {
+                    let agent = "INTEGRATION_ENGINEER";
+                    for (tool, operation) in order {
+                        let path = format!("/service/{tool}");
+                        let early = guest
+                            .command(agent, format!("dd if={path} iflag=nonblock"))
+                            .await?;
+                        let stdout = early["stdout"].as_str().ok_or("early instrument read")?;
+                        assert!(
+                            stdout.contains("Permission denied")
+                                || stdout.contains("Resource temporarily unavailable"),
+                            "{early}"
+                        );
+                        let wrong = if tool == film.0 { etch.1 } else { film.1 };
+                        let refused = guest
+                            .command(
+                                agent,
+                                format!("echo '{{\"process\":\"{wrong}\"}}' > {path}"),
+                            )
+                            .await?;
+                        assert!(
+                            refused["stdout"]
+                                .as_str()
+                                .is_some_and(|s| s.contains("Invalid argument")),
+                            "{refused}"
+                        );
+                        let reply = guest
+                            .command(
+                                agent,
+                                format!(
+                                    "echo '{{\"process\":\"{operation}\"}}' > {path}; cat {path}"
+                                ),
+                            )
+                            .await?;
+                        let stdout = reply["stdout"].as_str().ok_or("missing shell output")?;
+                        let json = &stdout[stdout
+                            .find('{')
+                            .ok_or_else(|| format!("missing {tool} result: {reply}"))?..];
+                        let result = serde_json::Deserializer::from_str(json)
+                            .into_iter::<Value>()
+                            .next()
+                            .ok_or("empty result")??;
+                        assert_eq!(result["tool_name"], tool);
+                        assert_eq!(result["success"], true);
+                        assert_eq!(result["data"]["process"], operation);
+                        assert_eq!(
+                            result["data"]["inputs"],
+                            json!([receipts[15], receipts[16]])
+                        );
+                    }
+                    assert_eq!(
+                        guest.command(agent, "exit 0".into()).await?["exit_status"],
+                        0
+                    );
+                    Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+                };
+                async { runtime.await };
+            },
+            hibana_runtime::host::deadline(std::time::Duration::from_secs(30)),
+        )
+        .await?;
+        save(&directory.join("runtime-result.json"), &outcome)?;
+        assert_eq!(outcome["runtime_exit_code"], 0);
+        assert_eq!(
+            outcome["protocol"],
+            json!({"type":"run_result","status":"complete","scope":"aligned_wafer_spot_checks"})
+        );
+        assert_eq!(outcome["backend_errors"], json!([]));
+        assert!(outcome["error"].is_null());
+        assert_eq!(
+            outcome["score"]["events"].as_array().unwrap().len(),
+            receipts.len() + 2
+        );
+        assert_eq!(outcome["score"]["complete"], true);
+        assert_eq!(outcome["score"]["violations"], json!([]));
+        let rows = fs::read_to_string(&journal)?
+            .lines()
+            .map(serde_json::from_str)
+            .collect::<std::result::Result<Vec<Value>, _>>()?;
+        projection::frames(&artifact, &rows)?;
+        let epf = projection::check_dynamic(&artifact, &rows)?;
+        check_spot_check_effects(&epf, &rows, &outcome["score"], order[0] == etch)?;
+        save(
+            &directory.join("result.json"),
+            &json!({"task":"15E","order":order,"wasm_participants":1,
+            "model_calls":0,"scored_benchmark":false,"upstream_simulator_calls":receipts.len(),
+                "shell_effects":2,"early_reads":2,"rejected_wrong_operations":2,"score":outcome["score"],"epf":epf,
+            "events_sha256":digest(&journal)?,"runtime_binary_sha256":digest(&binary)?,
+            "wash_sha256":digest(&wash)?,"build_receipt_sha256":digest(&output.join("build-receipt.json"))?}),
+        )?;
+    }
+    Ok(())
+}
+
 impl choreofix::shell::imp::service::ReceivedEffects for Simulator {
     fn apply<'io, P: choreofix::shell::imp::service::SimulatorOperation>(
         &'io self,
@@ -878,38 +1009,7 @@ impl choreofix::shell::imp::service::ReceivedEffects for Simulator {
     }
 }
 
-#[hibana_runtime::scope]
-async fn wafer_trial(etch_first: bool) -> Result<()> {
-    use self::spot_checks::*;
-    use choreofix::{
-        imp::projection::{record, rows},
-        shell::{global::Loan, imp::bus::Bus},
-    };
-    use hibana::runtime::{
-        SessionKitStorage,
-        ids::SessionId,
-        program::{RoleProgram, project},
-    };
-    std::env::set_current_dir(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .canonicalize()?,
-    )?;
-    let evidence = std::env::var_os("CHOREOFIX_EVIDENCE_ROOT");
-    let parent = evidence
-        .as_ref()
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    let directory = parent.join(format!(
-        "wafer-15e-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_nanos()
-    ));
-    fs::create_dir(&directory)?;
-    let journal = directory.join("events.jsonl");
-    let trace = Trace::create(&journal)?;
-    let (world, fixture) = Simulator::new("15E", 0, 0.0, trace.clone(), &[])?;
+async fn prepare_wafers(world: &Simulator, fixture: &Value) -> Result<Vec<u64>> {
     let actors = fixture["fixtures"].as_array().ok_or("wafer participants")?;
     assert_eq!(actors.len(), 6);
     for actor in actors {
@@ -970,9 +1070,146 @@ async fn wafer_trial(etch_first: bool) -> Result<()> {
         }
     }
     assert_eq!(receipts.iter().collect::<BTreeSet<_>>().len(), steps.len());
+    Ok(receipts)
+}
+
+fn check_spot_check_effects(
+    epf: &Value,
+    journal_rows: &[Value],
+    score: &Value,
+    etch_first: bool,
+) -> Result<()> {
+    use self::spot_checks::{DEPOSITION_CHAMBER, ETCH_CHAMBER, WAFER};
+    let calls = epf["sessions"][0]["acceptances"]
+        .as_array()
+        .ok_or("EPF source occurrences")?;
+    let paths = [
+        ("run_deposition", DEPOSITION_CHAMBER),
+        ("run_etch_process", ETCH_CHAMBER),
+    ];
+    let mut previous_reply = None;
+    for (name, chamber) in if etch_first {
+        [paths[1], paths[0]]
+    } else {
+        paths
+    } {
+        let accepted = |from: u8, to: u8| -> Result<&Value> {
+            let mut matches = calls
+                .iter()
+                .filter(|c| c["send_view"] == from && c["receive_commit"]["view"] == to);
+            let call = matches.next().ok_or("missing instrument delivery")?;
+            assert!(matches.next().is_none(), "duplicate instrument delivery");
+            Ok(call)
+        };
+        let request = accepted(WAFER, chamber)?;
+        let reply = accepted(chamber, WAFER)?;
+        let frame = |call: &Value| -> Result<(usize, Value)> {
+            let (index, row) = journal_rows
+                .iter()
+                .enumerate()
+                .find(|(_, row)| {
+                    let message = &row["message"];
+                    row["direction"] == "runtime"
+                        && message["type"] == "protocol_frame"
+                        && message["action"] == "send"
+                        && message["frame_id"] == call["frame_id"]
+                })
+                .ok_or("missing accepted frame")?;
+            let bytes: Vec<u8> = serde_json::from_value(row["message"]["payload"].clone())?;
+            Ok((index, serde_json::from_slice(&bytes)?))
+        };
+        let (request_sent, submitted) = frame(request)?;
+        let (reply_sent, returned) = frame(reply)?;
+        if let Some(previous) = previous_reply {
+            assert!(
+                previous < request_sent,
+                "the next check used the wafer before receiving its result"
+            );
+        }
+        previous_reply = Some(
+            reply["receive_commit"]["journal_row"]
+                .as_u64()
+                .ok_or("wafer reply row")? as usize,
+        );
+        let effects: Vec<_> = journal_rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| {
+                let m = &row["message"];
+                m["agent"] == "INTEGRATION_ENGINEER"
+                    && m["tool"] == name
+                    && (row["direction"] == "domain_start" || row["direction"] == "domain_end")
+            })
+            .collect();
+        let [(start, invoked), (end, finished)] = effects[..] else {
+            panic!("two effect boundaries required for {name}");
+        };
+        assert_eq!(invoked["direction"], "domain_start");
+        assert_eq!(finished["direction"], "domain_end");
+        assert!(
+            request["receive_commit"]["journal_row"].as_u64().unwrap() < start as u64
+                && start < end
+                && end < reply_sent
+        );
+        assert_eq!(submitted, invoked["message"]["arguments"]);
+        assert_eq!(returned, finished["message"]["result"]);
+        assert_eq!(invoked["message"]["id"], finished["message"]["id"]);
+        let mut scored = score["events"]
+            .as_array()
+            .ok_or("missing scored wafer events")?
+            .iter()
+            .filter(|e| e["agent"] == "INTEGRATION_ENGINEER" && e["tool"] == name);
+        let effect = scored.next().ok_or("missing scored spot check")?;
+        assert!(scored.next().is_none(), "extra scored spot check");
+        assert_eq!(effect["args"], submitted);
+        assert_eq!(effect["result"], returned["data"]);
+        assert_eq!(effect["success"], true);
+    }
+    Ok(())
+}
+
+#[hibana_runtime::scope]
+async fn wafer_trial(etch_first: bool) -> Result<()> {
+    use self::spot_checks::*;
+    use choreofix::{
+        imp::projection::{record, rows},
+        shell::{global::Loan, imp::bus::Bus},
+    };
+    use hibana::runtime::{
+        SessionKitStorage,
+        ids::SessionId,
+        program::{RoleProgram, project},
+    };
+    std::env::set_current_dir(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()?,
+    )?;
+    let evidence = std::env::var_os("CHOREOFIX_EVIDENCE_ROOT");
+    let parent = evidence
+        .as_ref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let directory = parent.join(format!(
+        "wafer-15e-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+    ));
+    fs::create_dir(&directory)?;
+    let journal = directory.join("events.jsonl");
+    let trace = Trace::create(&journal)?;
+    let (world, fixture) = Simulator::new("15E", 0, 0.0, trace.clone(), &[])?;
+    let receipts = prepare_wafers(&world, &fixture).await?;
     let session = SessionId::new(150);
     let (bus, _, _) = Bus::open([], [(session, WAFER)]);
-    let source = source();
+    let source = hibana::g::seq(
+        hibana::g::send::<ALIGNER, ENGINEER, Loan<WAFER>>(),
+        hibana::g::seq(
+            checks(),
+            hibana::g::send::<ENGINEER, ALIGNER, Loan<WAFER>>(),
+        ),
+    );
     let pa: RoleProgram<ALIGNER> = project(&source);
     let pi: RoleProgram<ENGINEER> = project(&source);
     let pw: RoleProgram<WAFER> = project(&source);
@@ -1020,9 +1257,10 @@ async fn wafer_trial(etch_first: bool) -> Result<()> {
         };
         async {
             let mut wafer = engineer.recv::<Loan<WAFER>>().await.unwrap();
-            let film = SpotCheck::from_bytes(br#"{"process":"film_integrity_check"}"#).unwrap();
+            let film =
+                SpotCheck::try_from(br#"{"process":"film_integrity_check"}"#.as_slice()).unwrap();
             let uniformity =
-                SpotCheck::from_bytes(br#"{"process":"etch_uniformity_check"}"#).unwrap();
+                SpotCheck::try_from(br#"{"process":"etch_uniformity_check"}"#.as_slice()).unwrap();
             let mut replies = Vec::new();
             for check_etch in [etch_first, !etch_first] {
                 let bytes = if check_etch {
@@ -1070,71 +1308,15 @@ async fn wafer_trial(etch_first: bool) -> Result<()> {
         .map(serde_json::from_str)
         .collect::<std::result::Result<Vec<Value>, _>>()?;
     let epf = crate::projection::check_dynamic(&artifact, &journal_rows)?;
-    let calls = epf["sessions"][0]["acceptances"]
-        .as_array()
-        .ok_or("EPF source occurrences")?;
-    assert_eq!(calls.len(), 6, "loan, two requests and responses, return");
-    for (order, name, chamber) in [
-        (
-            if etch_first { 1 } else { 0 },
-            "run_deposition",
-            DEPOSITION_CHAMBER,
-        ),
-        (
-            if etch_first { 0 } else { 1 },
-            "run_etch_process",
-            ETCH_CHAMBER,
-        ),
-    ] {
-        let request = &calls[1 + 2 * order];
-        let reply = &calls[2 + 2 * order];
-        assert_eq!(request["send_view"], WAFER);
-        assert_eq!(request["receive_commit"]["view"], chamber);
-        assert_eq!(reply["send_view"], chamber);
-        assert_eq!(reply["receive_commit"]["view"], WAFER);
-        let frame = |call: &Value| -> Result<(usize, Value)> {
-            let (index, row) = journal_rows
-                .iter()
-                .enumerate()
-                .find(|(_, row)| {
-                    let message = &row["message"];
-                    row["direction"] == "runtime"
-                        && message["type"] == "protocol_frame"
-                        && message["action"] == "send"
-                        && message["frame_id"] == call["frame_id"]
-                })
-                .ok_or("missing accepted frame")?;
-            let bytes: Vec<u8> = serde_json::from_value(row["message"]["payload"].clone())?;
-            Ok((index, serde_json::from_slice(&bytes)?))
-        };
-        let (_, submitted) = frame(request)?;
-        let (reply_sent, returned) = frame(reply)?;
-        let effects: Vec<_> = journal_rows
-            .iter()
-            .enumerate()
-            .filter(|(_, row)| {
-                row["message"]["id"] == name
-                    && (row["direction"] == "domain_start" || row["direction"] == "domain_end")
-            })
-            .collect();
-        let [(start, invoked), (end, finished)] = effects[..] else {
-            panic!("two effect boundaries required for {name}");
-        };
-        assert_eq!(invoked["direction"], "domain_start");
-        assert_eq!(finished["direction"], "domain_end");
-        assert!(
-            request["receive_commit"]["journal_row"].as_u64().unwrap() < start as u64
-                && start < end
-                && end < reply_sent
-        );
-        assert_eq!(submitted, invoked["message"]["arguments"]);
-        assert_eq!(returned, finished["message"]["result"]);
-    }
-
+    assert_eq!(
+        epf["sessions"][0]["acceptances"].as_array().unwrap().len(),
+        6
+    );
     let score = world.call(json!({"type":"score"})).await?;
+    check_spot_check_effects(&epf, &journal_rows, &score, etch_first)?;
     assert_eq!(
         score["events"].as_array().ok_or("wafer effects")?.len(),
-        steps.len() + 2
+        receipts.len() + 2
     );
     assert_eq!(score["complete"], true);
     assert_eq!(score["violations"], json!([]));

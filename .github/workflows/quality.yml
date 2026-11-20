@@ -113,6 +113,11 @@ jobs:
           bash "$HIBANA_RESOURCE_GUARD" bash -euo pipefail <<'CHECKS'
           cargo +stable build --locked --manifest-path tools/runner/Cargo.toml
           tools/runner/target/debug/choreofix-experiments --qualify-wasi "$PWD/output/wasi-boundary"
+          tools/runner/target/debug/choreofix-experiments --build-wasi "$PWD/output/wasi-boundary/wafer-build" wafer
+          CHOREOFIX_WAFER_WASI_BINARY="$PWD/target/debug/wafer-wasi" \
+            CHOREOFIX_WAFER_BUILD_RECEIPT="$PWD/output/wasi-boundary/wafer-build/wafer-build-receipt.json" \
+            CHOREOFIX_EVIDENCE_ROOT="$PWD/output/wasi-boundary/wafer-spot-checks" \
+            cargo +stable test --locked --manifest-path tools/runner/Cargo.toml oracle::tests::wash_uses_the_same_reference_wafer_for_both_spot_checks -- --ignored --exact
           cargo +stable test --locked --manifest-path tools/runner/Cargo.toml oracle::tests::original_tool_exception_reaches_rust_without_effects_or_a_hung_reply -- --ignored --test-threads=1 --nocapture
           cargo +stable test --locked --manifest-path tools/runner/Cargo.toml oracle::tests::codebase_simulator_allows_independent_work_and_reports_shared_module_overlap -- --ignored --test-threads=1 --nocapture
           cargo +stable run --locked --manifest-path tools/inputs/Cargo.toml -- verify

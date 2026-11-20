@@ -2,7 +2,6 @@
 use choreofix::imp::json::encode;
 use choreofix::shell::{
     ShellResult,
-    global::Loan,
     imp::service::{ReceivedEffects, SimulatorOperation},
 };
 use hibana::{
@@ -25,7 +24,7 @@ pub type FilmResult<'a> = g::Msg<21, &'a [u8]>;
 pub type Uniformity = g::Msg<22, SpotCheck<ETCH_CHAMBER>>;
 pub type UniformityResult<'a> = g::Msg<23, &'a [u8]>;
 
-pub fn source() -> impl Projectable {
+pub fn checks() -> impl Projectable {
     let film = g::seq(
         g::send::<WAFER, DEPOSITION_CHAMBER, Film>(),
         g::send::<DEPOSITION_CHAMBER, WAFER, FilmResult>(),
@@ -34,20 +33,16 @@ pub fn source() -> impl Projectable {
         g::send::<WAFER, ETCH_CHAMBER, Uniformity>(),
         g::send::<ETCH_CHAMBER, WAFER, UniformityResult>(),
     );
-    g::seq(
-        g::send::<ALIGNER, ENGINEER, Loan<WAFER>>(),
-        g::seq(
-            g::route(g::seq(film, etch), g::seq(etch, film)),
-            g::send::<ENGINEER, ALIGNER, Loan<WAFER>>(),
-        ),
-    )
+    g::route(g::seq(film, etch), g::seq(etch, film))
 }
 
 // The ChoreoFS codec preserves the actual file arguments sent to the instrument.
 pub struct SpotCheck<const CHAMBER: u8>(Vec<u8>);
 
-impl<const CHAMBER: u8> SpotCheck<CHAMBER> {
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, CodecError> {
+impl<const CHAMBER: u8> TryFrom<&[u8]> for SpotCheck<CHAMBER> {
+    type Error = CodecError;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, CodecError> {
         Self::validate_payload(Payload::new(bytes))?;
         Ok(Self(bytes.to_vec()))
     }

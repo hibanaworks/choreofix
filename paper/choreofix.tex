@@ -587,6 +587,17 @@ and 7,884 records accepted by EPF. This case was selected after observing the
 live failure. The two records are identified in
 \path{analysis/7m-fact-recheck.json}.
 
+Task 15E isolates a shared physical input. One wash guest received the aligned
+reference-wafer Endpoint and used it at two instruments. We exercised both
+orders. At each instrument an early read and a request naming the other
+instrument's process returned shell errors; the guest could then submit a
+valid request. In both runs the two instrument replies matched the scored
+results and named the same wafer alignment receipts. Each run yielded 763
+EPF records. The fixture supplied the preceding 17 effects directly to the
+common simulator, so this evidence covers the two final checks by one
+scripted guest. The per-occurrence measurements are in
+\path{analysis/15e-wafer-spot-checks.json}.
+
 \subsection{Live-agent evidence across 36 tasks}
 The 19 November inventory includes one audited execution for each of the
 43 qualified task--depth conditions across 29 families. We matched each raw
