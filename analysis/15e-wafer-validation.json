@@ -1,0 +1,112 @@
+{
+  "task": "15E",
+  "scope": "Five scripted wash participants exercise process validation, delivery of its result, overlay alignment, spot checks and lot disposition. Fabrication and upstream metrology, plus the two post-validation instrument checks, use simulator fixtures. Six-participant live qualification is open.",
+  "scored_benchmark": false,
+  "model_calls": 0,
+  "wasm_participants": 5,
+  "raw_archive": "output/verification/wafer-control-15e-20261121.kChelP",
+  "source_manifest_sha256": "4a13531709adbf7b4ed027d4857650e156eabe8ad12b9b3dd99c3e46b3327ddc",
+  "runtime_sha256": "0e60e8bcc7434bc80558218592e87678bc6581a541127fc6800737dd6236231f",
+  "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+  "test_binary_sha256": "e1efe18fdf719eea56f701defdd11f1bbc89ae4fd9cb0c9303c5c15b03325043",
+  "build_receipt_sha256": "75985c54b00f8f1575552f18180bd44941b384d2c04623ba43730dd0980a0b09",
+  "cases": [
+    {
+      "case": "dep-litho-etch",
+      "shell_effects": 5,
+      "fixture_prefix_calls": 12,
+      "fixture_post_validation_calls": 2,
+      "validation_attempts": [
+        true
+      ],
+      "confirmations": 4,
+      "capture_records": 3175,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "events_sha256": "79aaf6151ea240d90ae546752ba631a5489944ae07a9a7b192ab24c70adb14f5",
+      "results_sha256": "ed75785ec0c4b3daea6442b78bb847157f5ff4f3b900a66d07be777fe5fd0507"
+    },
+    {
+      "case": "etch-dep-litho",
+      "shell_effects": 5,
+      "fixture_prefix_calls": 12,
+      "fixture_post_validation_calls": 2,
+      "validation_attempts": [
+        true
+      ],
+      "confirmations": 4,
+      "capture_records": 3175,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "events_sha256": "249f34af69abccc1dc8408bd48b46c328ad4049ae57af2d43f6061e6de11d89b",
+      "results_sha256": "6fcc7e67784cfa7d677cdec270362c890c09d7ab67e976136c38d38524e51c54"
+    },
+    {
+      "case": "etch-first",
+      "shell_effects": 5,
+      "fixture_prefix_calls": 12,
+      "fixture_post_validation_calls": 2,
+      "validation_attempts": [
+        true
+      ],
+      "confirmations": 4,
+      "capture_records": 3175,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "events_sha256": "aecf785f621f87a5bcab809c9ddfc9d7cd9cad05185fafc3036c28e0663766ad",
+      "results_sha256": "29cbbad155def03de163665590aecf0c15bc83bd60f0b4d0debc475ebf26e2a7"
+    },
+    {
+      "case": "film-first",
+      "shell_effects": 5,
+      "fixture_prefix_calls": 12,
+      "fixture_post_validation_calls": 2,
+      "validation_attempts": [
+        true
+      ],
+      "confirmations": 4,
+      "capture_records": 3175,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "events_sha256": "0776bc951a5aea4ca589e8e021a2c59ea79398c77f11329b235c4fdcb78785bb",
+      "results_sha256": "ba7b092b1a87ecc4aeb8f27847029b269639c268cf3996624d9cc424a2353467"
+    },
+    {
+      "case": "litho-etch-dep",
+      "shell_effects": 6,
+      "fixture_prefix_calls": 15,
+      "fixture_post_validation_calls": 2,
+      "validation_attempts": [
+        false,
+        true
+      ],
+      "confirmations": 4,
+      "capture_records": 3407,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "events_sha256": "9c08d18129227955f59092b675f774d6dbf8fbc00760ba671f1e4e73aa6482dc",
+      "results_sha256": "907372600e80a151e4f1f3339415742691c745595e78f83107ee94417ad980d8"
+    },
+    {
+      "case": "overlay-retry",
+      "shell_effects": 6,
+      "fixture_prefix_calls": 13,
+      "fixture_post_validation_calls": 4,
+      "validation_attempts": [
+        true
+      ],
+      "confirmations": 4,
+      "capture_records": 3418,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "events_sha256": "406786fe15af4d03f34ac478959febc3afeac56f48510e108b9e95136f9a03eb",
+      "results_sha256": "54f470618d07409b76cf703d74d21d7b21da9c0e439c92d0cf1c4800026b8dfc"
+    }
+  ]
+}

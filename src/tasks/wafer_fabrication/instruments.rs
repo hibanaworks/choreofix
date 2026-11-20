@@ -22,6 +22,7 @@ pub const ETCH_CHAMBER: u8 = 4;
 pub const STEPPER: u8 = 6;
 pub const METROLOGY: u8 = 7;
 pub const STAGE: u8 = 8;
+pub const MONITOR: u8 = 21;
 
 pub type Film = g::Msg<20, InstrumentRequest<DEPOSITION_CHAMBER>>;
 pub type FilmResult<'a> = g::Msg<21, &'a [u8]>;
@@ -32,6 +33,10 @@ pub type Mount = g::Msg<24, InstrumentRequest<STEPPER>>;
 pub type Mounted<'a> = g::Msg<25, &'a [u8]>;
 pub type Measure = g::Msg<26, InstrumentRequest<METROLOGY>>;
 pub type Measured<'a> = g::Msg<27, &'a [u8]>;
+pub type CrossReference = g::Msg<30, InstrumentRequest<MONITOR>>;
+pub type CrossReferenceResult<'a> = g::Msg<31, &'a [u8]>;
+pub type CrossReferencePassed<'a> = g::Msg<32, ReviewReply<'a, true>>;
+pub type CrossReferenceFailed<'a> = g::Msg<33, ReviewReply<'a, false>>;
 pub type OverlayPassed<'a> = g::Msg<28, ReviewReply<'a, true>>;
 pub type OverlayFailed<'a> = g::Msg<29, ReviewReply<'a, false>>;
 
@@ -80,6 +85,7 @@ impl<const CHAMBER: u8> WirePayload for InstrumentRequest<CHAMBER> {
             DEPOSITION_CHAMBER => ("process", "film_integrity_check"),
             ETCH_CHAMBER => ("process", "etch_uniformity_check"),
             STEPPER => ("process", "overlay_alignment"),
+            MONITOR => ("check_type", "cross_reference"),
             METROLOGY => ("measurement", "overlay_alignment"),
             _ => return Err(CodecError::Malformed),
         };
@@ -108,6 +114,10 @@ impl SimulatorOperation for InstrumentRequest<DEPOSITION_CHAMBER> {
 
 impl SimulatorOperation for InstrumentRequest<ETCH_CHAMBER> {
     const RPC: (&'static str, &'static str) = ("INTEGRATION_ENGINEER", "run_etch_process");
+}
+
+impl SimulatorOperation for InstrumentRequest<MONITOR> {
+    const RPC: (&'static str, &'static str) = ("PROCESS_CONTROLLER", "check_monitoring");
 }
 
 impl SimulatorOperation for InstrumentRequest<STEPPER> {
