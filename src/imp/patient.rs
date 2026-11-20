@@ -1,13 +1,7 @@
 //! Patient argument/result data only; no Endpoint operations or progress.
-use crate::imp::json::decode;
 use crate::shell::{ShellError, ShellResult};
 use serde_json::Value;
 
-pub fn arguments(bytes: &[u8]) -> ShellResult<Value> {
-    let arguments = decode(bytes)?;
-    patient(&arguments)?;
-    Ok(arguments)
-}
 pub fn patient(arguments: &Value) -> ShellResult<()> {
     if !arguments.is_object() || arguments["patient_id"] != "patient_1" {
         return Err(ShellError::message("expected the assigned patient"));

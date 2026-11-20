@@ -22,8 +22,20 @@ fn staged_integration_whole_source_static_contract() {
 fn staged_integration_source_projects_all_resource_file_and_wasm_views() {
     let observed = staged_integration::global::programs().observation();
     let programs = observed["programs"].as_array().unwrap();
-    assert_eq!(programs.len(), 46);
-    assert_eq!(programs.len(), observed["roles"].as_object().unwrap().len());
+    let roles = observed["roles"].as_object().unwrap();
+    assert_eq!(
+        roles["MERGE_REQUESTS"],
+        staged_integration::global::MERGE_REQUESTS
+    );
+    assert_eq!(roles.len(), 47);
+    let mut expected: Vec<_> = roles.values().map(|role| role.as_u64().unwrap()).collect();
+    let mut actual: Vec<_> = programs
+        .iter()
+        .map(|p| p["role"].as_u64().unwrap())
+        .collect();
+    expected.sort_unstable();
+    actual.sort_unstable();
+    assert_eq!(actual, expected);
     let count = programs[0]["rows"][0][3].as_u64().unwrap() >> 16;
     println!(
         "staged integration source: views={} events={count}",

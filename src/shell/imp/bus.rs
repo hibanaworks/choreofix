@@ -468,10 +468,12 @@ impl PairedEffects for Simulator<'_> {
         first: hibana::runtime::wire::ReceivedPayload<'_, P>,
         second: hibana::runtime::wire::ReceivedPayload<'_, P>,
     ) -> ShellResult<Value> {
-        let arguments = crate::imp::json::decode(first.as_bytes())?;
-        if first.as_bytes() != second.as_bytes()
-            && crate::imp::json::decode(second.as_bytes())? != arguments
-        {
+        let decode = |bytes: &[u8]| {
+            serde_json::from_slice::<Value>(bytes)
+                .map_err(|error| ShellError::message(error.to_string()))
+        };
+        let arguments = decode(first.as_bytes())?;
+        if first.as_bytes() != second.as_bytes() && decode(second.as_bytes())? != arguments {
             return Err(ShellError::message(
                 "resource requests have different arguments",
             ));

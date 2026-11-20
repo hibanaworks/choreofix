@@ -1,7 +1,8 @@
 //! Typed shell arguments for every assigned 6H effect.
 #[path = "../../../src/tasks/staged_integration/arguments.rs"]
 mod arguments;
-use arguments::{Arguments, FEATURES, SUITES};
+use arguments::{Arguments, EffectRequest, FEATURES, SUITES};
+use choreofix::shell;
 use hibana::runtime::wire::{Payload, WireEncode, WirePayload};
 use serde_json::json;
 
@@ -27,6 +28,10 @@ fn check<const OP: u8>() {
     assert_eq!(arguments.encode_into(&mut buffer).unwrap(), bytes.len());
     assert_eq!(buffer, bytes);
     assert_eq!(arguments.into_value()[key], expected);
+    let request = EffectRequest(Arguments::<OP>::try_from(bytes.as_slice()).unwrap());
+    assert_eq!(request.encode_into(&mut buffer).unwrap(), bytes.len());
+    assert_eq!(buffer, bytes);
+    assert!(EffectRequest::<OP>::validate_payload(Payload::new(&buffer)).is_ok());
     for invalid in [
         json!({}),
         json!({key:12}),

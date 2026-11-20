@@ -18,7 +18,7 @@ impl ReceivedEffects for ReviewEffects {
         &'io self,
         received: hibana::runtime::wire::ReceivedPayload<'_, P>,
     ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
-        let arguments = crate::imp::json::decode(received.as_bytes());
+        let arguments = super::super::imp::decode(received.as_bytes());
         async move {
             let arguments = arguments?;
             let (agent, tool) = P::RPC;

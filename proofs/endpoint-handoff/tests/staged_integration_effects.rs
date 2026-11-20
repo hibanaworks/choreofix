@@ -23,9 +23,16 @@ use serde_json::{Value, json};
 use shell::{
     ShellError, ShellResult,
     global::Loan,
-    imp::{bus::Bus, service::Domain},
+    imp::{
+        bus::Bus,
+        service::{ReceivedEffects, SimulatorOperation},
+    },
 };
-use staged_integration::{arguments::Arguments, global::*, imp as data};
+use staged_integration::{
+    arguments::{Arguments, EffectRequest},
+    global::*,
+    imp as data,
+};
 use std::{collections::VecDeque, time::Duration};
 
 struct StagingEffects {
@@ -33,29 +40,32 @@ struct StagingEffects {
     calls: Cell<Vec<Value>>,
     validations: Cell<VecDeque<bool>>,
 }
-impl Domain for StagingEffects {
-    async fn execute(
-        &self,
-        agent: &'static str,
-        tool: &'static str,
-        arguments: Value,
-    ) -> Result<Value, String> {
-        let mut result = match tool {
-            "deploy_service" => &self.results[0],
-            "validate_staging" => &self.results[1],
-            "rollback_service" => &self.results[2],
-            _ => return Err("unknown fixture effect".into()),
+impl ReceivedEffects for StagingEffects {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+        let arguments = data::decode(received.as_bytes());
+        async move {
+            let arguments = arguments?;
+            let (agent, tool) = P::RPC;
+            let mut result = match tool {
+                "deploy_service" => &self.results[0],
+                "validate_staging" => &self.results[1],
+                "rollback_service" => &self.results[2],
+                _ => return Err(ShellError::message("unknown fixture effect")),
+            }
+            .clone();
+            if tool == "validate_staging" {
+                let mut validations = self.validations.take();
+                result["success"] = json!(validations.pop_front().expect("unexpected validation"));
+                self.validations.set(validations);
+            }
+            let mut calls = self.calls.take();
+            calls.push(json!({"agent":agent,"tool":tool,"arguments":arguments}));
+            self.calls.set(calls);
+            Ok(result)
         }
-        .clone();
-        if tool == "validate_staging" {
-            let mut validations = self.validations.take();
-            result["success"] = json!(validations.pop_front().expect("unexpected validation"));
-            self.validations.set(validations);
-        }
-        let mut calls = self.calls.take();
-        calls.push(json!({"agent":agent,"tool":tool,"arguments":arguments}));
-        self.calls.set(calls);
-        Ok(result)
     }
 }
 
@@ -218,21 +228,27 @@ async fn component(inputs: &Value, effects: &StagingEffects) -> ShellResult<()> 
                         let received = data::decode(file.recv::<FileStagingReadyA>().await?)?;
                         assert_eq!(&received, inputs);
                         let request = br#"{"service":"user_authentication"}"#.as_slice();
-                        file.send::<DeployRequestA>(&Arguments::<5>::try_from(request)?)
-                            .await?;
+                        file.send::<DeployRequestA>(&EffectRequest(Arguments::<5>::try_from(
+                            request,
+                        )?))
+                        .await?;
                         assert_eq!(
                             data::decode(file.recv::<DeployedA>().await?)?,
                             effects.results[0]
                         );
-                        file.send::<ValidateRequestA>(&Arguments::<6>::try_from(request)?)
-                            .await?;
+                        file.send::<ValidateRequestA>(&EffectRequest(Arguments::<6>::try_from(
+                            request,
+                        )?))
+                        .await?;
                         let validation = data::decode(file.recv::<FileStageResultA>().await?)?;
                         if validation["success"] == true {
                             assert_eq!(validation, effects.results[1]);
                             break;
                         }
-                        file.send::<RollbackRequestA>(&Arguments::<7>::try_from(request)?)
-                            .await?;
+                        file.send::<RollbackRequestA>(&EffectRequest(Arguments::<7>::try_from(
+                            request,
+                        )?))
+                        .await?;
                         assert_eq!(
                             data::decode(file.recv::<RolledBackA>().await?)?,
                             effects.results[2]
