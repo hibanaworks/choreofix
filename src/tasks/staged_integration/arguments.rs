@@ -1,4 +1,5 @@
 //! Canonical JSON bytes for one assigned operation; no progress or permission state.
+use crate::shell::imp::service::SimulatorOperation;
 use hibana::runtime::wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload};
 use serde_json::Value;
 
@@ -82,4 +83,38 @@ impl<const OPERATION: u8> WirePayload for Arguments<OPERATION> {
     fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
         Self(input.as_bytes().to_vec())
     }
+}
+
+/// The request consumed by the physical receiver. Forwarding and stage checks carry Arguments.
+pub struct EffectRequest<const OPERATION: u8>(pub Arguments<OPERATION>);
+
+impl<const OPERATION: u8> WireEncode for EffectRequest<OPERATION> {
+    fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
+        self.0.encode_into(output)
+    }
+}
+impl<const OPERATION: u8> WirePayload for EffectRequest<OPERATION> {
+    const SCHEMA_ID: u32 = 0xac06_3100 | OPERATION as u32;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        Arguments::<OPERATION>::validate_payload(input)
+    }
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
+        input
+    }
+}
+impl<const OPERATION: u8> SimulatorOperation for EffectRequest<OPERATION> {
+    const RPC: (&'static str, &'static str) = {
+        let developer = ["DEVELOPER_A", "DEVELOPER_B", "DEVELOPER_C"][(OPERATION / 8) as usize];
+        match OPERATION % 8 {
+            0 => (developer, "implement_feature"),
+            1 => ("TEST_WRITER", "write_tests"),
+            2 => ("REVIEWER", "code_review"),
+            3 => (developer, "merge_code"),
+            4 => ("CI_RUNNER", "run_tests"),
+            5 => ("RELEASE_MANAGER", "deploy_service"),
+            6 => ("RELEASE_MANAGER", "validate_staging"),
+            _ => ("RELEASE_MANAGER", "rollback_service"),
+        }
+    };
 }

@@ -1,5 +1,5 @@
 //! Actual operation files, independent clinical work and affine patient-result custody.
-use super::imp::Arguments;
+use super::imp::{Arguments, Submission};
 pub use crate::shell::global::{FileExit, Loan};
 use hibana::{
     Endpoint, g,
@@ -53,7 +53,7 @@ pub type GeneralTests = g::Msg<3, Arguments<1>>;
 pub type GeneralTestResults<'a> = g::Msg<4, &'a [u8]>;
 pub type CardiacTests = g::Msg<5, Arguments<3>>;
 pub type CardiacTestResults<'a> = g::Msg<6, &'a [u8]>;
-pub type ImagingIntent = g::Msg<7, Arguments<2>>;
+pub type ImagingIntent = g::Msg<7, Submission<2>>;
 pub type CtLoan<'r> = g::Msg<8, Endpoint<'r, CT_SCANNER>>;
 pub type ImagingRequest = g::Msg<9, Arguments<2>>;
 pub type ImagingResult<'a> = g::Msg<10, &'a [u8]>;
@@ -78,18 +78,18 @@ pub type CardiacTestsPartial<'a> = g::Msg<30, &'a [u8]>;
 pub type CardiacPanelCompleted<'r> = g::Msg<31, Endpoint<'r, CARDIAC_PANEL>>;
 pub type CardiacTestsComplete<'a> = g::Msg<32, &'a [u8]>;
 pub type FileAssessmentResult<'a> = g::Msg<33, &'a [u8]>;
-pub type GeneralFileRequest = g::Msg<34, Arguments<1>>;
-pub type GeneralAdmitted = g::Msg<35, Arguments<1>>;
+pub type GeneralFileRequest = g::Msg<34, Submission<1>>;
+pub type GeneralAdmitted = g::Msg<35, Submission<1>>;
 pub type FileGeneralResult<'a> = g::Msg<36, &'a [u8]>;
-pub type ImagingAdmitted = g::Msg<37, Arguments<2>>;
+pub type ImagingAdmitted = g::Msg<37, Submission<2>>;
 pub type FileImagingResult<'a> = g::Msg<38, &'a [u8]>;
 pub type FileReferral<'a> = g::Msg<39, &'a [u8]>;
 pub type FileFindings<'a> = g::Msg<40, &'a [u8]>;
 pub type FileDiagnosisResult<'a> = g::Msg<41, &'a [u8]>;
 pub type FileReviewResult<'a> = g::Msg<42, &'a [u8]>;
 pub type Summary<'a> = g::Msg<43, &'a [u8]>;
-pub type CardiacFileRequest = g::Msg<44, Arguments<3>>;
-pub type CardiacAdmitted = g::Msg<45, Arguments<3>>;
+pub type CardiacFileRequest = g::Msg<44, Submission<3>>;
+pub type CardiacAdmitted = g::Msg<45, Submission<3>>;
 pub type FileCardiacResult<'a> = g::Msg<46, &'a [u8]>;
 pub type GeneralCompletedData<'a> = g::Msg<48, &'a [u8]>;
 pub type CardiacCompletedData<'a> = g::Msg<49, &'a [u8]>;

@@ -28,6 +28,13 @@ two-receive boundary applies to the integration test in 4E and the oven and
 stove operations that require both in 12E. Operations requiring one resource,
 including the 8M API operations, consume its received request directly.
 
+In 5E the panel and scanner submissions carry the arguments to their resource
+Endpoints. The simulator consumes the request received from the panel or
+scanner. In 6H the staging receiver consumes the deployment request, sends
+the stage check and compares the reply with the requested service and previous
+validations. The pending simulator call owns its arguments and sends them only
+when awaited after those checks. Dropping it before then issues no RPC.
+
 The other task receivers using `Domain::execute(agent, tool, arguments)` still
 select the operation and arguments in native code. The experiment trusts their
 implementation to match the received request and satisfy any additional resource

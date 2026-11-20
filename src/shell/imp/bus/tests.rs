@@ -62,12 +62,59 @@ async fn observations_deliver_transport_evidence_without_waiting_for_an_rpc() ->
     Ok(())
 }
 
+#[hibana_runtime::main]
 #[test]
-fn an_unpolled_effect_creates_no_rpc_or_correlation() {
+async fn an_unpolled_effect_releases_the_endpoint_without_issuing_an_rpc() -> ShellResult<()> {
+    use hibana::{
+        g,
+        runtime::{
+            SessionKitStorage,
+            ids::SessionId,
+            program::project,
+            wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload},
+        },
+    };
+
+    struct Input;
+    impl WireEncode for Input {
+        fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
+            b'7'.encode_into(output)
+        }
+    }
+    impl WirePayload for Input {
+        const SCHEMA_ID: u32 = 0x0f10_0001;
+        type Decoded<'a> = ReceivedPayload<'a, Self>;
+        fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+            u8::validate_payload(input)
+        }
+        fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
+            input
+        }
+    }
+    impl SimulatorOperation for Input {
+        const RPC: (&'static str, &'static str) = ("A", "inspect");
+    }
+
+    type Request = g::Msg<1, Input>;
+    type Check = g::Msg<2, bool>;
+    let source = g::seq(g::send::<1, 2, Request>(), g::send::<1, 2, Check>());
+    let sender_program = project::<1>(&source);
+    let receiver_program = project::<2>(&source);
     let (mut connection, _, _) = Bus::open([], []);
     let (bus, simulator) = connection.split();
-    drop(simulator.execute("A", "inspect", json!({"target":7})));
+    let mut slab = [0; 16384];
+    let mut storage = SessionKitStorage::uninit();
+    let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
+    let session = SessionId::new(17);
+    let mut sender = rv.enter(session, &sender_program)?;
+    let mut receiver = rv.enter(session, &receiver_program)?;
+    sender.send::<Request>(&Input).await?;
+    sender.send::<Check>(&false).await?;
+    let effect = simulator.apply(receiver.recv::<Request>().await?);
+    assert!(!receiver.recv::<Check>().await?);
+    drop(effect);
     assert!(bus.connection(|c| c.outgoing.is_empty() && c.responses.is_empty() && c.sequence == 0));
+    Ok(())
 }
 
 #[hibana_runtime::main]

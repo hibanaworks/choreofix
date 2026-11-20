@@ -445,18 +445,20 @@ impl Domain for Simulator<'_> {
     }
 }
 
-impl ReceivedEffects for Simulator<'_> {
-    async fn apply<P: SimulatorOperation>(
-        &self,
+impl<'bus> ReceivedEffects for Simulator<'bus> {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
         received: hibana::runtime::wire::ReceivedPayload<'_, P>,
-    ) -> ShellResult<Value> {
+    ) -> impl Future<Output = ShellResult<Value>> + use<'bus, 'io, P> {
+        let bus: &'io Bus = self.0;
         let arguments = serde_json::from_slice(received.as_bytes())
-            .map_err(|e| ShellError::message(format!("simulator request JSON: {e}")))?;
-        let (agent, tool) = P::RPC;
-        self.0
-            .rpc(agent, tool, arguments)
-            .await
-            .map_err(ShellError::message)
+            .map_err(|e| ShellError::message(format!("simulator request JSON: {e}")));
+        async move {
+            let (agent, tool) = P::RPC;
+            bus.rpc(agent, tool, arguments?)
+                .await
+                .map_err(ShellError::message)
+        }
     }
 }
 

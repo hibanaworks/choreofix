@@ -1,12 +1,15 @@
 //! The physical repository owns candidates, tests, reviews and publications.
-use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use super::super::{arguments::EffectRequest, global::*, imp};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use crate::shell::{global::Loan, imp::review_reply::ReviewReply};
 use hibana::{Endpoint, g::Message};
 use serde_json::{Value, json};
 
 #[hibana_runtime::scope]
-pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> ShellResult<()> {
+pub async fn run<D: ReceivedEffects>(
+    owner: &mut Endpoint<REPO_OWNER>,
+    effects: &D,
+) -> ShellResult<()> {
     let mut repository = owner.recv::<RepoLoan>().await?;
     let mut requests = owner.recv::<Loan<MERGE_REQUESTS>>().await?;
     async {
@@ -15,7 +18,7 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
             match request.label() {
                 MergeRequestA::LOGICAL_LABEL => {
                     let value = request.recv::<MergeRequestA>().await?;
-                    owner.send::<AdmitA>(&value).await?;
+                    owner.send::<AdmitA>(&EffectRequest(value)).await?;
                     loop {
                         let verdict = owner.offer().await?;
                         match verdict.label() {
@@ -26,7 +29,7 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                             PublicationFailedA::LOGICAL_LABEL => {
                                 verdict.recv::<PublicationFailedA>().await?;
                                 let repaired = requests.recv::<MergeRequestA>().await?;
-                                owner.send::<AdmitA>(&repaired).await?;
+                                owner.send::<AdmitA>(&EffectRequest(repaired)).await?;
                             }
                             label => {
                                 return Err(ShellError::message(format!(
@@ -43,7 +46,7 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                 }
                 MergeRequestB::LOGICAL_LABEL => {
                     let value = request.recv::<MergeRequestB>().await?;
-                    owner.send::<AdmitB>(&value).await?;
+                    owner.send::<AdmitB>(&EffectRequest(value)).await?;
                     loop {
                         let verdict = owner.offer().await?;
                         match verdict.label() {
@@ -54,7 +57,7 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                             PublicationFailedB::LOGICAL_LABEL => {
                                 verdict.recv::<PublicationFailedB>().await?;
                                 let repaired = requests.recv::<MergeRequestB>().await?;
-                                owner.send::<AdmitB>(&repaired).await?;
+                                owner.send::<AdmitB>(&EffectRequest(repaired)).await?;
                             }
                             label => {
                                 return Err(ShellError::message(format!(
@@ -71,7 +74,7 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                 }
                 MergeRequestC::LOGICAL_LABEL => {
                     let value = request.recv::<MergeRequestC>().await?;
-                    owner.send::<AdmitC>(&value).await?;
+                    owner.send::<AdmitC>(&EffectRequest(value)).await?;
                     loop {
                         let verdict = owner.offer().await?;
                         match verdict.label() {
@@ -82,7 +85,7 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                             PublicationFailedC::LOGICAL_LABEL => {
                                 verdict.recv::<PublicationFailedC>().await?;
                                 let repaired = requests.recv::<MergeRequestC>().await?;
-                                owner.send::<AdmitC>(&repaired).await?;
+                                owner.send::<AdmitC>(&EffectRequest(repaired)).await?;
                             }
                             label => {
                                 return Err(ShellError::message(format!(
@@ -123,11 +126,8 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
         let branch = repository.offer().await?;
         match branch.label() {
             ImplementA::LOGICAL_LABEL => {
-                let arguments = branch.recv::<ImplementA>().await?.into_value();
-                let value = domain
-                    .execute("DEVELOPER_A", "implement_feature", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let request = branch.recv::<ImplementA>().await?;
+                let value = effects.apply(request).await?;
                 imp::candidate(&value, 0)?;
                 let bytes = imp::encode(&value)?;
                 candidates[0] = value;
@@ -212,12 +212,10 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                     .await?;
             }
             AdmitA::LOGICAL_LABEL => {
-                let arguments = branch.recv::<AdmitA>().await?.into_value();
+                let request = branch.recv::<AdmitA>().await?;
+                let arguments = imp::decode(request.as_bytes())?;
                 imp::merge_inputs(&arguments, (0, &candidates[0], &tests[0], &reviews[0]))?;
-                let value = domain
-                    .execute("DEVELOPER_A", "merge_code", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let value = effects.apply(request).await?;
                 imp::merge_result(
                     &value,
                     (0, &candidates[0], &tests[0], &reviews[0]),
@@ -329,11 +327,8 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                 repository.send::<StageUpdateA>(&bytes.as_slice()).await?;
             }
             ImplementB::LOGICAL_LABEL => {
-                let arguments = branch.recv::<ImplementB>().await?.into_value();
-                let value = domain
-                    .execute("DEVELOPER_B", "implement_feature", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let request = branch.recv::<ImplementB>().await?;
+                let value = effects.apply(request).await?;
                 imp::candidate(&value, 1)?;
                 let bytes = imp::encode(&value)?;
                 candidates[1] = value;
@@ -418,12 +413,10 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                     .await?;
             }
             AdmitB::LOGICAL_LABEL => {
-                let arguments = branch.recv::<AdmitB>().await?.into_value();
+                let request = branch.recv::<AdmitB>().await?;
+                let arguments = imp::decode(request.as_bytes())?;
                 imp::merge_inputs(&arguments, (1, &candidates[1], &tests[1], &reviews[1]))?;
-                let value = domain
-                    .execute("DEVELOPER_B", "merge_code", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let value = effects.apply(request).await?;
                 imp::merge_result(
                     &value,
                     (1, &candidates[1], &tests[1], &reviews[1]),
@@ -535,11 +528,8 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                 repository.send::<StageUpdateB>(&bytes.as_slice()).await?;
             }
             ImplementC::LOGICAL_LABEL => {
-                let arguments = branch.recv::<ImplementC>().await?.into_value();
-                let value = domain
-                    .execute("DEVELOPER_C", "implement_feature", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let request = branch.recv::<ImplementC>().await?;
+                let value = effects.apply(request).await?;
                 imp::candidate(&value, 2)?;
                 let bytes = imp::encode(&value)?;
                 candidates[2] = value;
@@ -624,12 +614,10 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                     .await?;
             }
             AdmitC::LOGICAL_LABEL => {
-                let arguments = branch.recv::<AdmitC>().await?.into_value();
+                let request = branch.recv::<AdmitC>().await?;
+                let arguments = imp::decode(request.as_bytes())?;
                 imp::merge_inputs(&arguments, (2, &candidates[2], &tests[2], &reviews[2]))?;
-                let value = domain
-                    .execute("DEVELOPER_C", "merge_code", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let value = effects.apply(request).await?;
                 imp::merge_result(
                     &value,
                     (2, &candidates[2], &tests[2], &reviews[2]),

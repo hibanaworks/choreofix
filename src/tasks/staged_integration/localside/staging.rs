@@ -1,17 +1,22 @@
 //! Each feature's staging participant owns the same resource until its positive result.
-use super::super::{actual_outcome, arguments::FEATURES, global::*, imp};
+use super::super::{
+    actual_outcome,
+    arguments::{Arguments, FEATURES},
+    global::*,
+    imp,
+};
 use crate::shell::{
     ShellError, ShellResult,
-    imp::{review_reply::ReviewReply, service::Domain},
+    imp::{review_reply::ReviewReply, service::ReceivedEffects},
 };
 use core::cell::Cell;
 use hibana::{Endpoint, runtime::resolver::DecisionArm};
 use serde_json::{Value, json};
 
 #[hibana_runtime::scope]
-pub async fn run_a<D: Domain>(
+pub async fn run_a<D: ReceivedEffects>(
     owner: &mut Endpoint<STAGE_OWNER>,
-    (domain, actual): (&D, &Cell<Option<Value>>),
+    (effects, actual): (&D, &Cell<Option<Value>>),
 ) -> ShellResult<()> {
     let mut environment = owner.recv::<StageLoan>().await?;
     let mut validations = [Value::Null, Value::Null, Value::Null];
@@ -23,24 +28,21 @@ pub async fn run_a<D: Domain>(
             .send::<FileStagingReadyA>(&bytes.as_slice())
             .await?;
         let request = environment.recv::<DeployRequestA>().await?;
-        environment.send::<CheckStageA>(&request).await?;
-        let arguments = request.into_value();
+        let checked = Arguments::<5>::try_from(request.as_bytes())?;
+        let deployment = effects.apply(request);
+        environment.send::<CheckStageA>(&checked).await?;
+        let arguments = checked.into_value();
         let inputs = imp::decode(environment.recv::<StageInputsA>().await?)?;
         imp::deploy_input(&arguments, &inputs, (0, &validations))?;
-        let deployment = domain
-            .execute("RELEASE_MANAGER", "deploy_service", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let deployment = deployment.await?;
         imp::deployed(&deployment, &inputs, (0, &validations))?;
         let bytes = imp::encode(&deployment)?;
         environment.send::<InstalledA>(&bytes.as_slice()).await?;
         environment.send::<DeployedA>(&bytes.as_slice()).await?;
-        let arguments = environment.recv::<ValidateRequestA>().await?.into_value();
+        let request = environment.recv::<ValidateRequestA>().await?;
+        let arguments = imp::decode(request.as_bytes())?;
         imp::assigned(&arguments, "service", FEATURES[0])?;
-        let validation = domain
-            .execute("RELEASE_MANAGER", "validate_staging", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let validation = effects.apply(request).await?;
         imp::validated(&validation, &deployment, 0)?;
         let bytes = imp::encode(&validation)?;
         actual.set(Some(validation.clone()));
@@ -68,12 +70,10 @@ pub async fn run_a<D: Domain>(
                 environment
                     .send::<FileStageResultA>(&bytes.as_slice())
                     .await?;
-                let arguments = environment.recv::<RollbackRequestA>().await?.into_value();
+                let request = environment.recv::<RollbackRequestA>().await?;
+                let arguments = imp::decode(request.as_bytes())?;
                 imp::rollback_input(&arguments, &deployment, &validation, 0)?;
-                let rollback = domain
-                    .execute("RELEASE_MANAGER", "rollback_service", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let rollback = effects.apply(request).await?;
                 imp::rolled_back(&rollback, &deployment, &validation, 0)?;
                 let bytes = imp::encode(&rollback)?;
                 environment.send::<RolledBackA>(&bytes.as_slice()).await?;
@@ -86,9 +86,9 @@ pub async fn run_a<D: Domain>(
 }
 
 #[hibana_runtime::scope]
-pub async fn run_b<D: Domain>(
+pub async fn run_b<D: ReceivedEffects>(
     owner: &mut Endpoint<STAGE_OWNER_B>,
-    (domain, actual): (&D, &Cell<Option<Value>>),
+    (effects, actual): (&D, &Cell<Option<Value>>),
 ) -> ShellResult<()> {
     let history = imp::decode(owner.recv::<StageHistory>().await?)?;
     let mut validations: [Value; 3] =
@@ -102,24 +102,21 @@ pub async fn run_b<D: Domain>(
             .send::<FileStagingReadyB>(&bytes.as_slice())
             .await?;
         let request = environment.recv::<DeployRequestB>().await?;
-        environment.send::<CheckStageB>(&request).await?;
-        let arguments = request.into_value();
+        let checked = Arguments::<13>::try_from(request.as_bytes())?;
+        let deployment = effects.apply(request);
+        environment.send::<CheckStageB>(&checked).await?;
+        let arguments = checked.into_value();
         let inputs = imp::decode(environment.recv::<StageInputsB>().await?)?;
         imp::deploy_input(&arguments, &inputs, (1, &validations))?;
-        let deployment = domain
-            .execute("RELEASE_MANAGER", "deploy_service", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let deployment = deployment.await?;
         imp::deployed(&deployment, &inputs, (1, &validations))?;
         let bytes = imp::encode(&deployment)?;
         environment.send::<InstalledB>(&bytes.as_slice()).await?;
         environment.send::<DeployedB>(&bytes.as_slice()).await?;
-        let arguments = environment.recv::<ValidateRequestB>().await?.into_value();
+        let request = environment.recv::<ValidateRequestB>().await?;
+        let arguments = imp::decode(request.as_bytes())?;
         imp::assigned(&arguments, "service", FEATURES[1])?;
-        let validation = domain
-            .execute("RELEASE_MANAGER", "validate_staging", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let validation = effects.apply(request).await?;
         imp::validated(&validation, &deployment, 1)?;
         let bytes = imp::encode(&validation)?;
         actual.set(Some(validation.clone()));
@@ -147,12 +144,10 @@ pub async fn run_b<D: Domain>(
                 environment
                     .send::<FileStageResultB>(&bytes.as_slice())
                     .await?;
-                let arguments = environment.recv::<RollbackRequestB>().await?.into_value();
+                let request = environment.recv::<RollbackRequestB>().await?;
+                let arguments = imp::decode(request.as_bytes())?;
                 imp::rollback_input(&arguments, &deployment, &validation, 1)?;
-                let rollback = domain
-                    .execute("RELEASE_MANAGER", "rollback_service", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let rollback = effects.apply(request).await?;
                 imp::rolled_back(&rollback, &deployment, &validation, 1)?;
                 let bytes = imp::encode(&rollback)?;
                 environment.send::<RolledBackB>(&bytes.as_slice()).await?;
@@ -165,9 +160,9 @@ pub async fn run_b<D: Domain>(
 }
 
 #[hibana_runtime::scope]
-pub async fn run_c<D: Domain>(
+pub async fn run_c<D: ReceivedEffects>(
     owner: &mut Endpoint<STAGE_OWNER_C>,
-    (domain, actual): (&D, &Cell<Option<Value>>),
+    (effects, actual): (&D, &Cell<Option<Value>>),
 ) -> ShellResult<()> {
     let history = imp::decode(owner.recv::<StageHistory>().await?)?;
     let validations: [Value; 3] =
@@ -181,24 +176,21 @@ pub async fn run_c<D: Domain>(
             .send::<FileStagingReadyC>(&bytes.as_slice())
             .await?;
         let request = environment.recv::<DeployRequestC>().await?;
-        environment.send::<CheckStageC>(&request).await?;
-        let arguments = request.into_value();
+        let checked = Arguments::<21>::try_from(request.as_bytes())?;
+        let deployment = effects.apply(request);
+        environment.send::<CheckStageC>(&checked).await?;
+        let arguments = checked.into_value();
         let inputs = imp::decode(environment.recv::<StageInputsC>().await?)?;
         imp::deploy_input(&arguments, &inputs, (2, &validations))?;
-        let deployment = domain
-            .execute("RELEASE_MANAGER", "deploy_service", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let deployment = deployment.await?;
         imp::deployed(&deployment, &inputs, (2, &validations))?;
         let bytes = imp::encode(&deployment)?;
         environment.send::<InstalledC>(&bytes.as_slice()).await?;
         environment.send::<DeployedC>(&bytes.as_slice()).await?;
-        let arguments = environment.recv::<ValidateRequestC>().await?.into_value();
+        let request = environment.recv::<ValidateRequestC>().await?;
+        let arguments = imp::decode(request.as_bytes())?;
         imp::assigned(&arguments, "service", FEATURES[2])?;
-        let validation = domain
-            .execute("RELEASE_MANAGER", "validate_staging", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let validation = effects.apply(request).await?;
         imp::validated(&validation, &deployment, 2)?;
         let bytes = imp::encode(&validation)?;
         actual.set(Some(validation.clone()));
@@ -226,12 +218,10 @@ pub async fn run_c<D: Domain>(
                 environment
                     .send::<FileStageResultC>(&bytes.as_slice())
                     .await?;
-                let arguments = environment.recv::<RollbackRequestC>().await?.into_value();
+                let request = environment.recv::<RollbackRequestC>().await?;
+                let arguments = imp::decode(request.as_bytes())?;
                 imp::rollback_input(&arguments, &deployment, &validation, 2)?;
-                let rollback = domain
-                    .execute("RELEASE_MANAGER", "rollback_service", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let rollback = effects.apply(request).await?;
                 imp::rolled_back(&rollback, &deployment, &validation, 2)?;
                 let bytes = imp::encode(&rollback)?;
                 environment.send::<RolledBackC>(&bytes.as_slice()).await?;

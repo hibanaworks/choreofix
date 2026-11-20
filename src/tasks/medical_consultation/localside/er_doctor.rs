@@ -20,7 +20,7 @@ pub async fn run(endpoint: &mut Endpoint<ER_DOCTOR>) -> ShellResult<()> {
                     loop {
                         let mut panel = tests.recv::<GeneralPanelLoan>().await?;
                         let arguments = tests.recv::<GeneralAdmitted>().await?;
-                        panel.send::<GeneralTests>(&arguments).await?;
+                        panel.send::<GeneralTests>(&arguments.0).await?;
                         let result = json::decode(panel.recv::<GeneralTestResults>().await?)?;
                         patient::actual_result(&result)?;
                         tests.send::<GeneralPanelReturn>(panel).await?;
@@ -51,7 +51,7 @@ pub async fn run(endpoint: &mut Endpoint<ER_DOCTOR>) -> ShellResult<()> {
                 async {
                     let arguments = scan.recv::<ImagingAdmitted>().await?;
                     let mut ct = scan.recv::<CtLoan>().await?;
-                    ct.send::<ImagingRequest>(&arguments).await?;
+                    ct.send::<ImagingRequest>(&arguments.0).await?;
                     let image = json::decode(ct.recv::<ImagingResult>().await?)?;
                     patient::actual_result(&image)?;
                     scan.send::<CtLoan>(ct).await?;

@@ -2,15 +2,15 @@
 use super::super::{actual_outcome, global::*, imp};
 use crate::shell::{
     ShellError, ShellResult,
-    imp::{review_reply::ReviewReply, service::Domain},
+    imp::{review_reply::ReviewReply, service::ReceivedEffects},
 };
 use core::cell::Cell;
 use hibana::{Endpoint, g::Message, runtime::resolver::DecisionArm};
 use serde_json::Value;
 #[hibana_runtime::scope]
-pub async fn run<D: Domain>(
+pub async fn run<D: ReceivedEffects>(
     owner: &mut Endpoint<CI_OWNER>,
-    (domain, actual): (&D, &Cell<Option<Value>>),
+    (effects, actual): (&D, &Cell<Option<Value>>),
 ) -> ShellResult<()> {
     let mut build = owner.recv::<BuildLoan>().await?;
     let mut checked = [Value::Null, Value::Null, Value::Null];
@@ -30,11 +30,8 @@ pub async fn run<D: Domain>(
                 imp::ci_inputs(publication, &tests, 0)?;
                 let bytes = imp::encode(publication)?;
                 build.send::<FilePublicationA>(&bytes.as_slice()).await?;
-                let arguments = build.recv::<CiRequestA>().await?.into_value();
-                let value = domain
-                    .execute("CI_RUNNER", "run_tests", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let request = build.recv::<CiRequestA>().await?;
+                let value = effects.apply(request).await?;
                 imp::ci_result(&value, publication, &tests, 0)?;
                 actual.set(Some(value.clone()));
                 let bytes = imp::encode(&value)?;
@@ -91,11 +88,8 @@ pub async fn run<D: Domain>(
                 imp::ci_inputs(publication, &tests, 1)?;
                 let bytes = imp::encode(publication)?;
                 build.send::<FilePublicationB>(&bytes.as_slice()).await?;
-                let arguments = build.recv::<CiRequestB>().await?.into_value();
-                let value = domain
-                    .execute("CI_RUNNER", "run_tests", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let request = build.recv::<CiRequestB>().await?;
+                let value = effects.apply(request).await?;
                 imp::ci_result(&value, publication, &tests, 1)?;
                 actual.set(Some(value.clone()));
                 let bytes = imp::encode(&value)?;
@@ -152,11 +146,8 @@ pub async fn run<D: Domain>(
                 imp::ci_inputs(publication, &tests, 2)?;
                 let bytes = imp::encode(publication)?;
                 build.send::<FilePublicationC>(&bytes.as_slice()).await?;
-                let arguments = build.recv::<CiRequestC>().await?.into_value();
-                let value = domain
-                    .execute("CI_RUNNER", "run_tests", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let request = build.recv::<CiRequestC>().await?;
+                let value = effects.apply(request).await?;
                 imp::ci_result(&value, publication, &tests, 2)?;
                 actual.set(Some(value.clone()));
                 let bytes = imp::encode(&value)?;

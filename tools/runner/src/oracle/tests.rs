@@ -860,18 +860,21 @@ async fn wafer_measurements_can_be_repeated_while_other_materials_are_unstarted(
 }
 
 impl choreofix::shell::imp::service::ReceivedEffects for Simulator {
-    async fn apply<P: choreofix::shell::imp::service::SimulatorOperation>(
-        &self,
+    fn apply<'io, P: choreofix::shell::imp::service::SimulatorOperation>(
+        &'io self,
         received: hibana::runtime::wire::ReceivedPayload<'_, P>,
-    ) -> choreofix::shell::ShellResult<Value> {
+    ) -> impl Future<Output = choreofix::shell::ShellResult<Value>> + use<'io, P> {
         let (agent, tool) = P::RPC;
-        let arguments = choreofix::imp::json::decode(received.as_bytes())?;
-        let reply = self
-            .call(json!({"type":"execute","id":tool,"agent":agent,"tool":tool,
+        let arguments = choreofix::imp::json::decode(received.as_bytes());
+        async move {
+            let arguments = arguments?;
+            let reply = self
+                .call(json!({"type":"execute","id":tool,"agent":agent,"tool":tool,
             "arguments":arguments}))
-            .await
-            .map_err(|e| choreofix::shell::ShellError::message(e.to_string()))?;
-        Ok(reply["result"].clone())
+                .await
+                .map_err(|e| choreofix::shell::ShellError::message(e.to_string()))?;
+            Ok(reply["result"].clone())
+        }
     }
 }
 

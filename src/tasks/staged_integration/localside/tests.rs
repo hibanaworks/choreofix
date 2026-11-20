@@ -1,10 +1,13 @@
 //! One physical test environment; requests use its actual Endpoint.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{Endpoint, g::Message};
 use serde_json::Value;
 #[hibana_runtime::scope]
-pub async fn run<D: Domain>(owner: &mut Endpoint<TEST_OWNER>, domain: &D) -> ShellResult<()> {
+pub async fn run<D: ReceivedEffects>(
+    owner: &mut Endpoint<TEST_OWNER>,
+    effects: &D,
+) -> ShellResult<()> {
     let mut environment = owner.recv::<TestLoan>().await?;
     let mut candidates = [Value::Null, Value::Null, Value::Null];
     loop {
@@ -16,12 +19,9 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<TEST_OWNER>, domain: &D) -> She
                 candidates[0] = value;
             }
             TestRequestA::LOGICAL_LABEL => {
-                let arguments = branch.recv::<TestRequestA>().await?.into_value();
+                let request = branch.recv::<TestRequestA>().await?;
                 imp::candidate(&candidates[0], 0)?;
-                let value = domain
-                    .execute("TEST_WRITER", "write_tests", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let value = effects.apply(request).await?;
                 imp::tested(&value, &candidates[0], 0)?;
                 let bytes = imp::encode(&value)?;
                 environment.send::<TestedA>(&bytes.as_slice()).await?;
@@ -45,12 +45,9 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<TEST_OWNER>, domain: &D) -> She
                 candidates[1] = value;
             }
             TestRequestB::LOGICAL_LABEL => {
-                let arguments = branch.recv::<TestRequestB>().await?.into_value();
+                let request = branch.recv::<TestRequestB>().await?;
                 imp::candidate(&candidates[1], 1)?;
-                let value = domain
-                    .execute("TEST_WRITER", "write_tests", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let value = effects.apply(request).await?;
                 imp::tested(&value, &candidates[1], 1)?;
                 let bytes = imp::encode(&value)?;
                 environment.send::<TestedB>(&bytes.as_slice()).await?;
@@ -74,12 +71,9 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<TEST_OWNER>, domain: &D) -> She
                 candidates[2] = value;
             }
             TestRequestC::LOGICAL_LABEL => {
-                let arguments = branch.recv::<TestRequestC>().await?.into_value();
+                let request = branch.recv::<TestRequestC>().await?;
                 imp::candidate(&candidates[2], 2)?;
-                let value = domain
-                    .execute("TEST_WRITER", "write_tests", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let value = effects.apply(request).await?;
                 imp::tested(&value, &candidates[2], 2)?;
                 let bytes = imp::encode(&value)?;
                 environment.send::<TestedC>(&bytes.as_slice()).await?;

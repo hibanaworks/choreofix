@@ -2,25 +2,22 @@
 use super::super::{actual_outcome, global::*, imp};
 use crate::shell::{
     ShellError, ShellResult,
-    imp::{review_reply::ReviewReply, service::Domain},
+    imp::{review_reply::ReviewReply, service::ReceivedEffects},
 };
 use core::cell::Cell;
 use hibana::{Endpoint, runtime::resolver::DecisionArm};
 use serde_json::Value;
 
 #[hibana_runtime::scope]
-pub async fn feature_a<D: Domain>(
+pub async fn feature_a<D: ReceivedEffects>(
     task: &mut Endpoint<REVIEW_A>,
-    (domain, actual): (&D, &Cell<Option<Value>>),
+    (effects, actual): (&D, &Cell<Option<Value>>),
 ) -> ShellResult<()> {
     loop {
         let inputs = imp::decode(task.recv::<ReviewCandidateA>().await?)?;
         imp::review_inputs(&inputs, 0)?;
-        let arguments = task.recv::<ReviewRequestA>().await?.into_value();
-        let value = domain
-            .execute("REVIEWER", "code_review", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let request = task.recv::<ReviewRequestA>().await?;
+        let value = effects.apply(request).await?;
         imp::reviewed(&value, &inputs["candidate"], 0)?;
         if imp::receipt(&value)? <= imp::receipt(&inputs["tests"])? {
             return Err(ShellError::message("review preceded its actual tests"));
@@ -50,11 +47,8 @@ pub async fn feature_a<D: Domain>(
         loop {
             let inputs = imp::decode(task.recv::<ReviewCandidateA>().await?)?;
             imp::review_inputs(&inputs, 0)?;
-            let arguments = task.recv::<ReviewRequestA>().await?.into_value();
-            let value = domain
-                .execute("REVIEWER", "code_review", arguments)
-                .await
-                .map_err(ShellError::message)?;
+            let request = task.recv::<ReviewRequestA>().await?;
+            let value = effects.apply(request).await?;
             imp::reviewed(&value, &inputs["candidate"], 0)?;
             if imp::receipt(&value)? <= imp::receipt(&inputs["tests"])? {
                 return Err(ShellError::message("review preceded its actual tests"));
@@ -87,11 +81,8 @@ pub async fn feature_a<D: Domain>(
         loop {
             let inputs = imp::decode(task.recv::<ReviewCandidateA>().await?)?;
             imp::review_inputs(&inputs, 0)?;
-            let arguments = task.recv::<ReviewRequestA>().await?.into_value();
-            let value = domain
-                .execute("REVIEWER", "code_review", arguments)
-                .await
-                .map_err(ShellError::message)?;
+            let request = task.recv::<ReviewRequestA>().await?;
+            let value = effects.apply(request).await?;
             imp::reviewed(&value, &inputs["candidate"], 0)?;
             if imp::receipt(&value)? <= imp::receipt(&inputs["tests"])? {
                 return Err(ShellError::message("review preceded its actual tests"));
@@ -123,11 +114,8 @@ pub async fn feature_a<D: Domain>(
             loop {
                 let inputs = imp::decode(task.recv::<ReviewCandidateA>().await?)?;
                 imp::review_inputs(&inputs, 0)?;
-                let arguments = task.recv::<ReviewRequestA>().await?.into_value();
-                let value = domain
-                    .execute("REVIEWER", "code_review", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let request = task.recv::<ReviewRequestA>().await?;
+                let value = effects.apply(request).await?;
                 imp::reviewed(&value, &inputs["candidate"], 0)?;
                 if imp::receipt(&value)? <= imp::receipt(&inputs["tests"])? {
                     return Err(ShellError::message("review preceded its actual tests"));
@@ -159,18 +147,15 @@ pub async fn feature_a<D: Domain>(
 }
 
 #[hibana_runtime::scope]
-pub async fn feature_b<D: Domain>(
+pub async fn feature_b<D: ReceivedEffects>(
     task: &mut Endpoint<REVIEW_B>,
-    (domain, actual): (&D, &Cell<Option<Value>>),
+    (effects, actual): (&D, &Cell<Option<Value>>),
 ) -> ShellResult<()> {
     loop {
         let inputs = imp::decode(task.recv::<ReviewCandidateB>().await?)?;
         imp::review_inputs(&inputs, 1)?;
-        let arguments = task.recv::<ReviewRequestB>().await?.into_value();
-        let value = domain
-            .execute("REVIEWER", "code_review", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let request = task.recv::<ReviewRequestB>().await?;
+        let value = effects.apply(request).await?;
         imp::reviewed(&value, &inputs["candidate"], 1)?;
         if imp::receipt(&value)? <= imp::receipt(&inputs["tests"])? {
             return Err(ShellError::message("review preceded its actual tests"));
@@ -200,11 +185,8 @@ pub async fn feature_b<D: Domain>(
         loop {
             let inputs = imp::decode(task.recv::<ReviewCandidateB>().await?)?;
             imp::review_inputs(&inputs, 1)?;
-            let arguments = task.recv::<ReviewRequestB>().await?.into_value();
-            let value = domain
-                .execute("REVIEWER", "code_review", arguments)
-                .await
-                .map_err(ShellError::message)?;
+            let request = task.recv::<ReviewRequestB>().await?;
+            let value = effects.apply(request).await?;
             imp::reviewed(&value, &inputs["candidate"], 1)?;
             if imp::receipt(&value)? <= imp::receipt(&inputs["tests"])? {
                 return Err(ShellError::message("review preceded its actual tests"));
@@ -237,11 +219,8 @@ pub async fn feature_b<D: Domain>(
         loop {
             let inputs = imp::decode(task.recv::<ReviewCandidateB>().await?)?;
             imp::review_inputs(&inputs, 1)?;
-            let arguments = task.recv::<ReviewRequestB>().await?.into_value();
-            let value = domain
-                .execute("REVIEWER", "code_review", arguments)
-                .await
-                .map_err(ShellError::message)?;
+            let request = task.recv::<ReviewRequestB>().await?;
+            let value = effects.apply(request).await?;
             imp::reviewed(&value, &inputs["candidate"], 1)?;
             if imp::receipt(&value)? <= imp::receipt(&inputs["tests"])? {
                 return Err(ShellError::message("review preceded its actual tests"));
@@ -273,11 +252,8 @@ pub async fn feature_b<D: Domain>(
             loop {
                 let inputs = imp::decode(task.recv::<ReviewCandidateB>().await?)?;
                 imp::review_inputs(&inputs, 1)?;
-                let arguments = task.recv::<ReviewRequestB>().await?.into_value();
-                let value = domain
-                    .execute("REVIEWER", "code_review", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let request = task.recv::<ReviewRequestB>().await?;
+                let value = effects.apply(request).await?;
                 imp::reviewed(&value, &inputs["candidate"], 1)?;
                 if imp::receipt(&value)? <= imp::receipt(&inputs["tests"])? {
                     return Err(ShellError::message("review preceded its actual tests"));
@@ -309,18 +285,15 @@ pub async fn feature_b<D: Domain>(
 }
 
 #[hibana_runtime::scope]
-pub async fn feature_c<D: Domain>(
+pub async fn feature_c<D: ReceivedEffects>(
     task: &mut Endpoint<REVIEW_C>,
-    (domain, actual): (&D, &Cell<Option<Value>>),
+    (effects, actual): (&D, &Cell<Option<Value>>),
 ) -> ShellResult<()> {
     loop {
         let inputs = imp::decode(task.recv::<ReviewCandidateC>().await?)?;
         imp::review_inputs(&inputs, 2)?;
-        let arguments = task.recv::<ReviewRequestC>().await?.into_value();
-        let value = domain
-            .execute("REVIEWER", "code_review", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let request = task.recv::<ReviewRequestC>().await?;
+        let value = effects.apply(request).await?;
         imp::reviewed(&value, &inputs["candidate"], 2)?;
         if imp::receipt(&value)? <= imp::receipt(&inputs["tests"])? {
             return Err(ShellError::message("review preceded its actual tests"));
@@ -350,11 +323,8 @@ pub async fn feature_c<D: Domain>(
         loop {
             let inputs = imp::decode(task.recv::<ReviewCandidateC>().await?)?;
             imp::review_inputs(&inputs, 2)?;
-            let arguments = task.recv::<ReviewRequestC>().await?.into_value();
-            let value = domain
-                .execute("REVIEWER", "code_review", arguments)
-                .await
-                .map_err(ShellError::message)?;
+            let request = task.recv::<ReviewRequestC>().await?;
+            let value = effects.apply(request).await?;
             imp::reviewed(&value, &inputs["candidate"], 2)?;
             if imp::receipt(&value)? <= imp::receipt(&inputs["tests"])? {
                 return Err(ShellError::message("review preceded its actual tests"));
@@ -387,11 +357,8 @@ pub async fn feature_c<D: Domain>(
         loop {
             let inputs = imp::decode(task.recv::<ReviewCandidateC>().await?)?;
             imp::review_inputs(&inputs, 2)?;
-            let arguments = task.recv::<ReviewRequestC>().await?.into_value();
-            let value = domain
-                .execute("REVIEWER", "code_review", arguments)
-                .await
-                .map_err(ShellError::message)?;
+            let request = task.recv::<ReviewRequestC>().await?;
+            let value = effects.apply(request).await?;
             imp::reviewed(&value, &inputs["candidate"], 2)?;
             if imp::receipt(&value)? <= imp::receipt(&inputs["tests"])? {
                 return Err(ShellError::message("review preceded its actual tests"));
@@ -423,11 +390,8 @@ pub async fn feature_c<D: Domain>(
             loop {
                 let inputs = imp::decode(task.recv::<ReviewCandidateC>().await?)?;
                 imp::review_inputs(&inputs, 2)?;
-                let arguments = task.recv::<ReviewRequestC>().await?.into_value();
-                let value = domain
-                    .execute("REVIEWER", "code_review", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let request = task.recv::<ReviewRequestC>().await?;
+                let value = effects.apply(request).await?;
                 imp::reviewed(&value, &inputs["candidate"], 2)?;
                 if imp::receipt(&value)? <= imp::receipt(&inputs["tests"])? {
                     return Err(ShellError::message("review preceded its actual tests"));

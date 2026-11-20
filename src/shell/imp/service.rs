@@ -27,10 +27,11 @@ pub trait SimulatorOperation<const RECEIPTS: usize = 1>:
 /// }
 /// ```
 pub trait ReceivedEffects {
-    fn apply<P: SimulatorOperation>(
-        &self,
+    /// Consumes the receive now. The simulator request is sent when the returned future is polled.
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
         received: hibana::runtime::wire::ReceivedPayload<'_, P>,
-    ) -> impl Future<Output = ShellResult<Value>>;
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, Self, P>;
 }
 
 /// An operation on two resources consumes two actual receives of the same request.

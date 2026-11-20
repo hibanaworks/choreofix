@@ -1,7 +1,10 @@
 use super::*;
 use crate::shell::{
     ShellResult,
-    imp::{bus::Bus, service::Domain},
+    imp::{
+        bus::Bus,
+        service::{ReceivedEffects, SimulatorOperation},
+    },
 };
 use core::cell::Cell;
 use hibana::runtime::{SessionKitStorage, ids::SessionId, resolver::ResolverRef};
@@ -10,19 +13,22 @@ use std::{collections::VecDeque, time::Duration};
 
 // A finite sequence of actual effect results, not a participant progress cursor.
 struct ReviewEffects(Cell<VecDeque<Value>>);
-impl Domain for ReviewEffects {
-    async fn execute(
-        &self,
-        agent: &'static str,
-        tool: &'static str,
-        arguments: Value,
-    ) -> Result<Value, String> {
-        assert_eq!((agent, tool), ("REVIEWER", "code_review"));
-        assert_eq!(arguments, json!({"pr_id":"user_authentication"}));
-        let mut replies = self.0.take();
-        let reply = replies.pop_front().expect("unrequested extra review");
-        self.0.set(replies);
-        Ok(reply)
+impl ReceivedEffects for ReviewEffects {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+        let arguments = crate::imp::json::decode(received.as_bytes());
+        async move {
+            let arguments = arguments?;
+            let (agent, tool) = P::RPC;
+            assert_eq!((agent, tool), ("REVIEWER", "code_review"));
+            assert_eq!(arguments, json!({"pr_id":"user_authentication"}));
+            let mut replies = self.0.take();
+            let reply = replies.pop_front().expect("unrequested extra review");
+            self.0.set(replies);
+            Ok(reply)
+        }
     }
 }
 
@@ -155,9 +161,9 @@ async fn actual_review_results_leave_rejection_roll_for_approval() -> ShellResul
                 }
             };
             async {
-                let request = Arguments::<0>::try_from(
+                let request = EffectRequest(Arguments::<0>::try_from(
                     b"{\"feature_name\":\"user_authentication\"}".as_slice(),
-                )?;
+                )?);
                 for (candidate, _, expected) in &material {
                     a.send::<ImplementA>(&request).await?;
                     assert_eq!(imp::decode(a.recv::<ImplementationA>().await?)?, *candidate);
@@ -177,8 +183,9 @@ async fn actual_review_results_leave_rejection_roll_for_approval() -> ShellResul
                 }
             };
             async {
-                let request =
-                    Arguments::<1>::try_from(b"{\"target\":\"user_authentication\"}".as_slice())?;
+                let request = EffectRequest(Arguments::<1>::try_from(
+                    b"{\"target\":\"user_authentication\"}".as_slice(),
+                )?);
                 for (candidate, tests, expected) in &material {
                     assert_eq!(
                         imp::decode(test_file.recv::<FileTestCandidateA>().await?)?,
@@ -193,8 +200,9 @@ async fn actual_review_results_leave_rejection_roll_for_approval() -> ShellResul
                 }
             };
             async {
-                let request =
-                    Arguments::<2>::try_from(b"{\"pr_id\":\"user_authentication\"}".as_slice())?;
+                let request = EffectRequest(Arguments::<2>::try_from(
+                    b"{\"pr_id\":\"user_authentication\"}".as_slice(),
+                )?);
                 for (candidate, tests, expected) in &material {
                     assert_eq!(
                         imp::decode(review_file.recv::<FileReviewCandidateA>().await?)?,

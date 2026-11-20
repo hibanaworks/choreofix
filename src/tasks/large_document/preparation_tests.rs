@@ -18,165 +18,170 @@ use std::{cell::Cell, time::Duration};
 struct Journal(Cell<Vec<Value>>);
 
 impl ReceivedEffects for Journal {
-    async fn apply<P: SimulatorOperation>(
-        &self,
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
         request: hibana::runtime::wire::ReceivedPayload<'_, P>,
-    ) -> ShellResult<Value> {
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
         let (agent, tool) = P::RPC;
-        let args = decode(request.as_bytes())?;
-        let mut entries = self.0.take();
-        let section = &args["section_name"];
-        if tool == "review_sections" {
-            let checked = entries
-                .iter()
-                .find(|entry| {
-                    entry["tool_name"] == "fact_check" && entry["data"]["section"] == *section
-                })
-                .ok_or_else(|| {
-                    shell::ShellError::message("review requires an actual fact check")
-                })?;
-            let approved = true;
-            let result = json!({"success":approved,"tool_name":tool,"data":{
-                "scope":section,"agent":agent,"review_id":format!("review:{}", entries.len() + 1),
-                "status":if approved { "reviewed" } else { "needs_revision" },"input_snapshot":checked["data"]["input_snapshot"],
-                "fact_receipts":{(section.as_str().unwrap()):checked["data"]["check_id"]}
-            }});
-            entries.push(result.clone());
-            self.0.set(entries);
-            return Ok(result);
-        }
-        if tool == "fact_check" {
-            let chapters: &[&str] = match section.as_str() {
-                Some("CHAPTERS_1_2") => &CHAPTERS[..2],
-                Some("CHAPTER_3") => &CHAPTERS[2..3],
-                Some("CHAPTER_4") => &CHAPTERS[3..],
-                _ => return Err(shell::ShellError::message("unknown fact-check scope")),
-            };
-            let mut snapshot = json!({"sections":{},"references":{},"figures":{}});
-            for entry in &entries {
-                let Some(chapter) = entry["data"]["section"].as_str() else {
-                    continue;
-                };
-                if !chapters.contains(&chapter) {
-                    continue;
-                }
-                let category = match entry["tool_name"].as_str() {
-                    Some("write_section" | "revise_section") => "sections",
-                    Some("update_references") => "references",
-                    Some("insert_figure") => "figures",
-                    _ => continue,
-                };
-                snapshot[category][chapter] = entry["data"]["artifact"].clone();
-            }
-            let result = json!({"success":true,"tool_name":tool,"data":{
-                "section":section,"agent":agent,"check_id":format!("fact:{}", entries.len() + 1),
-                "input_snapshot":snapshot
-            }});
-            entries.push(result.clone());
-            self.0.set(entries);
-            return Ok(result);
-        }
-        if matches!(tool, "make_editorial_decision" | "combine_sections") {
-            let mut snapshot = json!({"sections":{},"figures":{},"references":{}});
-            let mut facts = serde_json::Map::new();
-            let mut reviews = serde_json::Map::new();
-            for scope in FACT_SCOPES {
-                let review = entries
+        let args = decode(request.as_bytes());
+        async move {
+            let args = args?;
+            let mut entries = self.0.take();
+            let section = &args["section_name"];
+            if tool == "review_sections" {
+                let checked = entries
                     .iter()
-                    .rev()
                     .find(|entry| {
-                        entry["tool_name"] == "review_sections" && entry["data"]["scope"] == scope
+                        entry["tool_name"] == "fact_check" && entry["data"]["section"] == *section
                     })
-                    .ok_or_else(|| shell::ShellError::message("missing publication review"))?;
-                let data = &review["data"];
-                for category in ["sections", "figures", "references"] {
-                    for (chapter, artifact) in data["input_snapshot"][category]
-                        .as_object()
-                        .ok_or_else(|| shell::ShellError::message("fixture snapshot"))?
-                    {
-                        snapshot[category][chapter] = artifact.clone();
-                    }
-                }
-                facts.insert(scope.to_owned(), data["fact_receipts"][scope].clone());
-                reviews.insert(scope.to_owned(), data["review_id"].clone());
+                    .ok_or_else(|| {
+                        shell::ShellError::message("review requires an actual fact check")
+                    })?;
+                let approved = true;
+                let result = json!({"success":approved,"tool_name":tool,"data":{
+                    "scope":section,"agent":agent,"review_id":format!("review:{}", entries.len() + 1),
+                    "status":if approved { "reviewed" } else { "needs_revision" },"input_snapshot":checked["data"]["input_snapshot"],
+                    "fact_receipts":{(section.as_str().unwrap()):checked["data"]["check_id"]}
+                }});
+                entries.push(result.clone());
+                self.0.set(entries);
+                return Ok(result);
             }
-            let result = if tool == "make_editorial_decision" {
-                json!({"success":true,"tool_name":tool,"data":{"agent":agent,"decision_type":"final",
+            if tool == "fact_check" {
+                let chapters: &[&str] = match section.as_str() {
+                    Some("CHAPTERS_1_2") => &CHAPTERS[..2],
+                    Some("CHAPTER_3") => &CHAPTERS[2..3],
+                    Some("CHAPTER_4") => &CHAPTERS[3..],
+                    _ => return Err(shell::ShellError::message("unknown fact-check scope")),
+                };
+                let mut snapshot = json!({"sections":{},"references":{},"figures":{}});
+                for entry in &entries {
+                    let Some(chapter) = entry["data"]["section"].as_str() else {
+                        continue;
+                    };
+                    if !chapters.contains(&chapter) {
+                        continue;
+                    }
+                    let category = match entry["tool_name"].as_str() {
+                        Some("write_section" | "revise_section") => "sections",
+                        Some("update_references") => "references",
+                        Some("insert_figure") => "figures",
+                        _ => continue,
+                    };
+                    snapshot[category][chapter] = entry["data"]["artifact"].clone();
+                }
+                let result = json!({"success":true,"tool_name":tool,"data":{
+                    "section":section,"agent":agent,"check_id":format!("fact:{}", entries.len() + 1),
+                    "input_snapshot":snapshot
+                }});
+                entries.push(result.clone());
+                self.0.set(entries);
+                return Ok(result);
+            }
+            if matches!(tool, "make_editorial_decision" | "combine_sections") {
+                let mut snapshot = json!({"sections":{},"figures":{},"references":{}});
+                let mut facts = serde_json::Map::new();
+                let mut reviews = serde_json::Map::new();
+                for scope in FACT_SCOPES {
+                    let review = entries
+                        .iter()
+                        .rev()
+                        .find(|entry| {
+                            entry["tool_name"] == "review_sections"
+                                && entry["data"]["scope"] == scope
+                        })
+                        .ok_or_else(|| shell::ShellError::message("missing publication review"))?;
+                    let data = &review["data"];
+                    for category in ["sections", "figures", "references"] {
+                        for (chapter, artifact) in data["input_snapshot"][category]
+                            .as_object()
+                            .ok_or_else(|| shell::ShellError::message("fixture snapshot"))?
+                        {
+                            snapshot[category][chapter] = artifact.clone();
+                        }
+                    }
+                    facts.insert(scope.to_owned(), data["fact_receipts"][scope].clone());
+                    reviews.insert(scope.to_owned(), data["review_id"].clone());
+                }
+                let result = if tool == "make_editorial_decision" {
+                    json!({"success":true,"tool_name":tool,"data":{"agent":agent,"decision_type":"final",
                     "decision_id":"fixture-decision","review_summary":args["review_summary"],
                     "review_receipts":reviews,"input_snapshot":snapshot}})
-            } else {
-                json!({"success":true,"tool_name":tool,"data":{"agent":agent,"status":"combined",
+                } else {
+                    json!({"success":true,"tool_name":tool,"data":{"agent":agent,"status":"combined",
                     "artifact_id":"fixture-publication","sections":CHAPTERS,"editorial_receipts":{"final":"fixture-decision"},
                     "review_receipts":reviews,"fact_receipts":facts,"input_snapshot":snapshot}})
-            };
-            entries.push(result.clone());
-            self.0.set(entries);
-            return Ok(result);
-        }
-        let mut artifact = json!({
-            "id": format!("{tool}:{}", entries.len() + 1),
-            "content": args["content_notes"].as_str().or(args["description"].as_str()).unwrap_or("Current references"),
-        });
-        if matches!(tool, "write_section" | "revise_section")
-            && (section == "CHAPTER_1" || section == "CHAPTER_2")
-        {
-            let inputs: serde_json::Map<String, Value> = entries
-                .iter()
-                .filter_map(|entry| {
-                    let chapter = entry["data"]["section"].as_str()?;
-                    (entry["tool_name"] == "write_section"
-                        && matches!(chapter, "CHAPTER_3" | "CHAPTER_4"))
-                    .then(|| (chapter.to_owned(), entry["data"]["artifact"].clone()))
-                })
-                .collect();
-            artifact["input_sections"] = Value::Object(inputs);
-            if tool == "revise_section" {
-                let prior = entries
+                };
+                entries.push(result.clone());
+                self.0.set(entries);
+                return Ok(result);
+            }
+            let mut artifact = json!({
+                "id": format!("{tool}:{}", entries.len() + 1),
+                "content": args["content_notes"].as_str().or(args["description"].as_str()).unwrap_or("Current references"),
+            });
+            if matches!(tool, "write_section" | "revise_section")
+                && (section == "CHAPTER_1" || section == "CHAPTER_2")
+            {
+                let inputs: serde_json::Map<String, Value> = entries
+                    .iter()
+                    .filter_map(|entry| {
+                        let chapter = entry["data"]["section"].as_str()?;
+                        (entry["tool_name"] == "write_section"
+                            && matches!(chapter, "CHAPTER_3" | "CHAPTER_4"))
+                        .then(|| (chapter.to_owned(), entry["data"]["artifact"].clone()))
+                    })
+                    .collect();
+                artifact["input_sections"] = Value::Object(inputs);
+                if tool == "revise_section" {
+                    let prior = entries
+                        .iter()
+                        .find(|entry| {
+                            entry["tool_name"] == "write_section"
+                                && entry["data"]["section"] == *section
+                        })
+                        .ok_or_else(|| shell::ShellError::message("missing draft to revise"))?;
+                    artifact["content"] = json!(format!(
+                        "{}\n{}",
+                        prior["data"]["artifact"]["content"].as_str().unwrap(),
+                        args["feedback"]
+                            .as_str()
+                            .unwrap_or("Cross-chapter consistency revision")
+                    ));
+                }
+            }
+            if tool == "update_references" && section == "CHAPTER_3" {
+                let evaluation = entries
                     .iter()
                     .find(|entry| {
                         entry["tool_name"] == "write_section"
-                            && entry["data"]["section"] == *section
+                            && entry["data"]["section"] == "CHAPTER_4"
                     })
-                    .ok_or_else(|| shell::ShellError::message("missing draft to revise"))?;
-                artifact["content"] = json!(format!(
-                    "{}\n{}",
-                    prior["data"]["artifact"]["content"].as_str().unwrap(),
-                    args["feedback"]
-                        .as_str()
-                        .unwrap_or("Cross-chapter consistency revision")
-                ));
+                    .ok_or_else(|| {
+                        shell::ShellError::message("Chapter 3 referenced an incomplete evaluation")
+                    })?;
+                artifact["input_sections"] = json!({"CHAPTER_4":evaluation["data"]["artifact"]});
             }
+            if tool == "insert_figure" {
+                let figure = entries
+                    .iter()
+                    .find(|entry| {
+                        entry["tool_name"] == "create_figure"
+                            && entry["data"]["figure_id"] == args["figure_id"]
+                    })
+                    .ok_or_else(|| shell::ShellError::message("insertion has no creation"))?;
+                artifact = figure["data"]["artifact"].clone();
+            }
+            let mut result = json!({"success":true,"tool_name":tool,"data":{
+                "agent":agent,"section":section,"artifact":artifact
+            }});
+            if matches!(tool, "insert_figure" | "create_figure") {
+                result["data"]["figure_id"] = artifact["id"].clone();
+            }
+            entries.push(result.clone());
+            self.0.set(entries);
+            Ok(result)
         }
-        if tool == "update_references" && section == "CHAPTER_3" {
-            let evaluation = entries
-                .iter()
-                .find(|entry| {
-                    entry["tool_name"] == "write_section" && entry["data"]["section"] == "CHAPTER_4"
-                })
-                .ok_or_else(|| {
-                    shell::ShellError::message("Chapter 3 referenced an incomplete evaluation")
-                })?;
-            artifact["input_sections"] = json!({"CHAPTER_4":evaluation["data"]["artifact"]});
-        }
-        if tool == "insert_figure" {
-            let figure = entries
-                .iter()
-                .find(|entry| {
-                    entry["tool_name"] == "create_figure"
-                        && entry["data"]["figure_id"] == args["figure_id"]
-                })
-                .ok_or_else(|| shell::ShellError::message("insertion has no creation"))?;
-            artifact = figure["data"]["artifact"].clone();
-        }
-        let mut result = json!({"success":true,"tool_name":tool,"data":{
-            "agent":agent,"section":section,"artifact":artifact
-        }});
-        if matches!(tool, "insert_figure" | "create_figure") {
-            result["data"]["figure_id"] = artifact["id"].clone();
-        }
-        entries.push(result.clone());
-        self.0.set(entries);
-        Ok(result)
     }
 }
 

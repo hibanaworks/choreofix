@@ -22,16 +22,18 @@ use std::{cell::Cell, time::Duration};
 #[derive(Default)]
 struct Journal(Cell<Vec<Value>>);
 impl ReceivedEffects for Journal {
-    async fn apply<P: SimulatorOperation>(
-        &self,
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
         received: ReceivedPayload<'_, P>,
-    ) -> ShellResult<Value> {
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
         let (agent, tool) = P::RPC;
         let arguments: Value = serde_json::from_slice(received.as_bytes()).unwrap();
-        let mut rows = self.0.take();
-        rows.push(json!({"agent":agent,"tool":tool,"arguments":arguments}));
-        self.0.set(rows);
-        Ok(json!({"success":true}))
+        async move {
+            let mut rows = self.0.take();
+            rows.push(json!({"agent":agent,"tool":tool,"arguments":arguments}));
+            self.0.set(rows);
+            Ok(json!({"success":true}))
+        }
     }
 }
 // An adversarial sender can claim the source schema. The receiving Endpoint,
