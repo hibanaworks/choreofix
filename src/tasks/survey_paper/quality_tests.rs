@@ -79,12 +79,11 @@ impl ReceivedEffects for World {
                     let section = section.unwrap();
                     let index = SECTIONS.iter().position(|&name| name == section).unwrap();
                     assert_eq!(agent, AUTHORS[index]);
-                    let content =
-                        match tool {
-                            "write_section" => args["content_notes"].as_str().unwrap().to_owned(),
-                            "update_references" => format!("Bibliography for {section}"),
-                            _ => {
-                                format!(
+                    let content = match tool {
+                        "write_section" => args["content_notes"].as_str().unwrap().to_owned(),
+                        "update_references" => format!("Bibliography for {section}"),
+                        _ => {
+                            format!(
                                     "{}\n{}",
                                     artifact(
                                         &effects,
@@ -95,8 +94,8 @@ impl ReceivedEffects for World {
                                         .unwrap(),
                                     args["feedback"].as_str().unwrap()
                                 )
-                            }
-                        };
+                        }
+                    };
                     let mut artifact = json!({"id":id,"content":content,"research_inputs":{TOPICS[index]:sources[TOPICS[index]]}});
                     if tool == "revise_section" {
                         artifact["feedback"] = args["feedback"].clone();
