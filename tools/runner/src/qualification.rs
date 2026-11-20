@@ -925,7 +925,7 @@ pub fn run(output: &Path, filter: Option<&str>) -> Result<Value> {
             && completed != 4
         {
             return Err(
-                "staged integration must execute concurrent, paced, reverse-merge and failed-result recovery trials".into(),
+                "staged integration requires its concurrent, paced, all-merge-orders and recovery tests".into(),
             );
         }
         if family == "kitchen" && completed != KITCHEN_CASES as u64 {

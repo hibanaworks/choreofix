@@ -15,6 +15,11 @@ const FEATURES: [&str; 3] = [
     "payment_processing",
     "notification_system",
 ];
+const SUITES: [&str; 3] = [
+    "full_suite_after_auth",
+    "full_suite_after_payment",
+    "full_suite_after_notification",
+];
 fn response(reply: &Value) -> Result<Value> {
     let stdout = reply["stdout"].as_str().ok_or("guest stdout")?;
     let at = stdout
@@ -44,15 +49,25 @@ async fn each_release_can_finish_before_the_next_developer_starts() -> Result<()
 #[hibana_runtime::main]
 #[test]
 #[ignore = "requires the current 6H executable, wash and common simulator"]
-async fn reverse_merge_order_preserves_required_deployment_order() -> Result<()> {
-    clean_publication(Schedule::MergeInReverse).await
+async fn every_merge_order_preserves_required_deployment_order() -> Result<()> {
+    for order in [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ] {
+        clean_publication(Schedule::MergeBeforeStaging(order)).await?;
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Schedule {
     Concurrent,
     StageEach,
-    MergeInReverse,
+    MergeBeforeStaging([usize; 3]),
 }
 
 #[hibana_runtime::scope]
@@ -82,7 +97,11 @@ async fn clean_publication(schedule: Schedule) -> Result<()> {
     crate::projection::archive(&binary, &directory, "6H")?;
     save(
         &directory.join("case.json"),
-        &json!({"task":"6H","depth":0,"model_calls":0,"scored_benchmark":false,"developer_starts":match schedule {Schedule::Concurrent=>"concurrent",Schedule::StageEach=>"after preceding staging validation",Schedule::MergeInReverse=>"all reviewed, then C, B, A integrate before staging"},
+        &json!({"task":"6H","depth":0,"model_calls":0,"scored_benchmark":false,"developer_starts":match schedule {
+            Schedule::Concurrent => json!("concurrent"),
+            Schedule::StageEach => json!("after preceding staging validation"),
+            Schedule::MergeBeforeStaging(order) => json!({"all_approved_before_merge_order":order.map(|index| FEATURES[index])}),
+        },
         "build":receipt,"simulator_contract":choreofix_inputs::SIMULATOR_CONTRACT,"delay_multiplier":0.01,
         "runtime_binary_sha256":digest(&binary)?,"guest_wasm_sha256":digest(module)?,
         "compiled_projection_sha256":digest(&directory.join("projection.json"))?,
@@ -205,7 +224,7 @@ async fn clean_publication(schedule: Schedule) -> Result<()> {
             Result::Ok(())
         };
         async {
-            for (feature,suite) in FEATURES.into_iter().zip(["full_suite_after_auth","full_suite_after_payment","full_suite_after_notification"]) {
+            for (feature,suite) in FEATURES.into_iter().zip(SUITES) {
                 let publication=guest.command("CI_RUNNER",format!("cat /service/publication/{feature}")).await?;
                 assert_eq!(response(&publication)?["success"],true,"{publication}");
                 let ci=guest.command("CI_RUNNER",format!("echo '{}' > /service/run_tests/{feature}; cat /service/run_tests/{feature}",json!({"suite":suite}))).await?;
@@ -265,7 +284,7 @@ async fn clean_publication(schedule: Schedule) -> Result<()> {
             assert_eq!(chunk[6]["args"]["service"], feature);
         }
         boundary["developer_starts"] = json!("after preceding staging validation");
-    } else if schedule == Schedule::MergeInReverse {
+    } else if let Schedule::MergeBeforeStaging(order) = schedule {
         let events = result["score"]["events"]
             .as_array()
             .ok_or("simulator events")?;
@@ -275,7 +294,7 @@ async fn clean_publication(schedule: Schedule) -> Result<()> {
                 .filter(|event| event["tool"] == tool)
                 .map(|event| {
                     if event["success"] != true {
-                        return Err("operation in reverse-order fixture failed".into());
+                        return Err("a scheduled operation failed".into());
                     }
                     event["args"][field]
                         .as_str()
@@ -285,7 +304,11 @@ async fn clean_publication(schedule: Schedule) -> Result<()> {
         };
         assert_eq!(
             actual("merge_code", "branch")?,
-            [FEATURES[2], FEATURES[1], FEATURES[0]]
+            order.map(|index| FEATURES[index])
+        );
+        assert_eq!(
+            actual("run_tests", "suite")?,
+            order.map(|index| SUITES[index])
         );
         assert_eq!(actual("deploy_service", "service")?, FEATURES);
         assert_eq!(actual("validate_staging", "service")?, FEATURES);
@@ -299,6 +322,7 @@ async fn clean_publication(schedule: Schedule) -> Result<()> {
             .ok_or("missing deployment")?;
         assert!(last_ci < first_deploy);
         boundary["merge_order"] = json!(actual("merge_code", "branch")?);
+        boundary["ci_order"] = json!(actual("run_tests", "suite")?);
         boundary["deployment_order"] = json!(actual("deploy_service", "service")?);
     } else {
         boundary["late_edit_rejected"] = json!(true);
@@ -330,11 +354,6 @@ async fn staged_one_at_a_time(guest: &process::Guest, schedule: Schedule) -> Res
         Ok(())
     };
     let developers = ["DEVELOPER_A", "DEVELOPER_B", "DEVELOPER_C"];
-    let suites = [
-        "full_suite_after_auth",
-        "full_suite_after_payment",
-        "full_suite_after_notification",
-    ];
     let stage = async |feature: &str| -> Result<()> {
         assert_eq!(
             read("RELEASE_MANAGER", format!("release/{feature}")).await?["ci"]["success"],
@@ -402,13 +421,18 @@ async fn staged_one_at_a_time(guest: &process::Guest, schedule: Schedule) -> Res
         Ok(())
     };
     let integrate = async |index: usize| -> Result<()> {
-        let (feature, developer, suite) = (FEATURES[index], developers[index], suites[index]);
+        let (feature, developer, suite) = (FEATURES[index], developers[index], SUITES[index]);
         call(developer, "merge_code".into(), json!({"branch":feature})).await?;
-        if schedule == Schedule::MergeInReverse && index == 2 {
+        if let Schedule::MergeBeforeStaging(order) = schedule
+            && index == order[0]
+        {
             let unavailable = guest
                 .command(
                     "CI_RUNNER",
-                    "dd if=/service/publication/user_authentication iflag=nonblock".into(),
+                    format!(
+                        "dd if=/service/publication/{} iflag=nonblock",
+                        FEATURES[order[1]]
+                    ),
                 )
                 .await?;
             let output = unavailable["stdout"].as_str().ok_or("CI probe output")?;
@@ -435,11 +459,11 @@ async fn staged_one_at_a_time(guest: &process::Guest, schedule: Schedule) -> Res
         }
         Ok(())
     };
-    if schedule == Schedule::MergeInReverse {
+    if let Schedule::MergeBeforeStaging(order) = schedule {
         for index in 0..FEATURES.len() {
             prepare(index).await?;
         }
-        for index in (0..FEATURES.len()).rev() {
+        for index in order {
             integrate(index).await?;
         }
         for feature in FEATURES {
@@ -644,9 +668,7 @@ async fn seven_actual_wasm_guests_repair_review_ci_and_staging_failures() -> Res
             Result::Ok(())
         };
         async {
-            for (target,suite) in FEATURES.into_iter().zip([
-                "full_suite_after_auth","full_suite_after_payment","full_suite_after_notification"
-            ]) {
+            for (target,suite) in FEATURES.into_iter().zip(SUITES) {
                 loop {
                     let value = guest.command("CI_RUNNER",format!("cat /service/publication/{target}")).await?;
                     assert_eq!(response(&value)?["success"],true,"{value}");

@@ -32,11 +32,12 @@ tokens; it was the 25th source-bound task. Common-environment-v24 exposes curren
 code identities in refactor responses for every method without changing scoring
 or permitted calls. See [the current port](../../benchmark/ports/4M.md).
 
-The common WASI qualification declares both 6H seven-guest tests under
-`staged_integration_boundary::`: the depth-0 baseline and depth-2 recovery.
-The latter requires two review rejections, two CI failures and two staging
-failures/rollbacks before completion, for 53 actual effects. Both use actual
-Wasm with no model calls. `wasi-v92` passes both after the staging-owner
+The 6H Wasm qualification runs seven guests per trial. The
+`staged_integration_boundary::` tests exercise concurrent work, one deployment
+before the next developer starts, the six possible merge orders with A–B–C
+deployment, and depth-2 recovery. Recovery requires two review rejections,
+two CI failures and two staging failures/rollbacks, for 53 actual effects.
+These tests use no model calls. The earlier `wasi-v92` baseline and recovery trials passed after the staging-owner
 handoff: 15,587 / 32,522 complete EPF records, effect/world audit passed,
 zero violations. Both share runtime SHA-256
 `c17c574596ea3f48d01e84b3ca2ca6fd8ba52162c16f9a730cc70e3bacf2cbe2`.
