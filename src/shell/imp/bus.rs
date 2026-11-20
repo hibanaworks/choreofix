@@ -434,6 +434,18 @@ impl Terminal {
 /// The simulator connection held by the native resource receivers of a trial.
 pub struct Simulator<'bus>(&'bus Bus);
 
+fn rpc_arguments<const N: usize, P: SimulatorOperation<N>>(
+    mut request: Value,
+) -> ShellResult<Value> {
+    match P::ARGUMENT_FIELD {
+        None => Ok(request),
+        Some(field) => request
+            .as_object_mut()
+            .and_then(|object| object.remove(field))
+            .ok_or_else(|| ShellError::message(format!("received request lacks {field}"))),
+    }
+}
+
 impl Domain for Simulator<'_> {
     fn execute(
         &self,
@@ -455,7 +467,7 @@ impl<'bus> ReceivedEffects for Simulator<'bus> {
             .map_err(|e| ShellError::message(format!("simulator request JSON: {e}")));
         async move {
             let (agent, tool) = P::RPC;
-            bus.rpc(agent, tool, arguments?)
+            bus.rpc(agent, tool, rpc_arguments::<1, P>(arguments?)?)
                 .await
                 .map_err(ShellError::message)
         }
@@ -480,7 +492,7 @@ impl PairedEffects for Simulator<'_> {
         }
         let (agent, tool) = P::RPC;
         self.0
-            .rpc(agent, tool, arguments)
+            .rpc(agent, tool, rpc_arguments::<2, P>(arguments)?)
             .await
             .map_err(ShellError::message)
     }

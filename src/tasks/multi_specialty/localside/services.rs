@@ -1,22 +1,19 @@
 //! Direct request receives, affine resource custody and actual clinical effects.
 use super::super::global::*;
 use crate::imp::{json, patient};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::Endpoint;
 use serde_json::{Value, json};
 use std::cell::Cell;
 
 #[hibana_runtime::scope]
-pub async fn general<'r, D: Domain>(
+pub async fn general<'r, D: ReceivedEffects>(
     endpoint: &mut Endpoint<'r, GENERAL_SERVICE>,
     (mut panel, actual): (Endpoint<'r, GENERAL_PANEL>, &Cell<Value>),
-    domain: &D,
+    effects: &D,
 ) -> ShellResult<()> {
-    let arguments = endpoint.recv::<AssessmentRequest>().await?.into_value();
-    let assessment = domain
-        .execute("ER_DOCTOR", "assess_patient", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let request = endpoint.recv::<AssessmentRequest>().await?;
+    let assessment = effects.apply(request).await?;
     patient::actual_result(&assessment)?;
     let bytes = json::encode(&assessment)?;
     async {
@@ -36,13 +33,11 @@ pub async fn general<'r, D: Domain>(
         endpoint.send::<PanelLoan<GENERAL_PANEL>>(panel).await?;
         let admitted = endpoint.recv::<GeneralFileRequest>().await?;
         endpoint.send::<GeneralAdmitted>(&admitted).await?;
-        let arguments = endpoint.recv::<TestRequest<1>>().await?.into_value();
+        let request = endpoint.recv::<TestRequest<1>>().await?;
+        let arguments = json::decode(request.as_bytes())?;
         json::same(&arguments, &admitted.into_value())?;
         patient::tests(&arguments, &["vitals", "basic_labs"])?;
-        let result = domain
-            .execute("ER_DOCTOR", "order_tests", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let result = effects.apply(request).await?;
         patient::actual_result(&result)?;
         json::same(
             &result["data"]["inputs"]["assessment"],
@@ -110,10 +105,10 @@ pub async fn general<'r, D: Domain>(
 }
 
 #[hibana_runtime::scope]
-pub async fn cardiac<'r, D: Domain>(
+pub async fn cardiac<'r, D: ReceivedEffects>(
     endpoint: &mut Endpoint<'r, CARDIAC_SERVICE>,
     (mut panel, actual): (Endpoint<'r, CARDIAC_PANEL>, &Cell<Value>),
-    domain: &D,
+    effects: &D,
 ) -> ShellResult<()> {
     let assessment = json::decode(endpoint.recv::<ReferralForOwner>().await?)?;
     patient::actual_result(&assessment)?;
@@ -121,13 +116,11 @@ pub async fn cardiac<'r, D: Domain>(
         endpoint.send::<PanelLoan<CARDIAC_PANEL>>(panel).await?;
         let admitted = endpoint.recv::<CardiacFileRequest>().await?;
         endpoint.send::<CardiacAdmitted>(&admitted).await?;
-        let arguments = endpoint.recv::<TestRequest<2>>().await?.into_value();
+        let request = endpoint.recv::<TestRequest<2>>().await?;
+        let arguments = json::decode(request.as_bytes())?;
         json::same(&arguments, &admitted.into_value())?;
         patient::tests(&arguments, &["ecg", "cardiac_enzymes"])?;
-        let result = domain
-            .execute("CARDIOLOGIST", "order_tests", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let result = effects.apply(request).await?;
         patient::actual_result(&result)?;
         json::same(
             &result["data"]["inputs"]["assessment"],
@@ -183,11 +176,8 @@ pub async fn cardiac<'r, D: Domain>(
             return Err(ShellError::message("report has another modality"));
         }
     }
-    let arguments = endpoint.recv::<CardDiagnosisRequest>().await?.into_value();
-    let result = domain
-        .execute("CARDIOLOGIST", "diagnose", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let request = endpoint.recv::<CardDiagnosisRequest>().await?;
+    let result = effects.apply(request).await?;
     patient::actual_result(&result)?;
     for test in &["ecg", "cardiac_enzymes"] {
         json::same(
@@ -232,10 +222,10 @@ pub async fn cardiac<'r, D: Domain>(
 }
 
 #[hibana_runtime::scope]
-pub async fn neurology<'r, D: Domain>(
+pub async fn neurology<'r, D: ReceivedEffects>(
     endpoint: &mut Endpoint<'r, NEURO_SERVICE>,
     (mut panel, actual): (Endpoint<'r, NEURO_PANEL>, &Cell<Value>),
-    domain: &D,
+    effects: &D,
 ) -> ShellResult<()> {
     let assessment = json::decode(endpoint.recv::<ReferralForOwner>().await?)?;
     patient::actual_result(&assessment)?;
@@ -243,13 +233,11 @@ pub async fn neurology<'r, D: Domain>(
         endpoint.send::<PanelLoan<NEURO_PANEL>>(panel).await?;
         let admitted = endpoint.recv::<NeuroFileRequest>().await?;
         endpoint.send::<NeuroAdmitted>(&admitted).await?;
-        let arguments = endpoint.recv::<TestRequest<3>>().await?.into_value();
+        let request = endpoint.recv::<TestRequest<3>>().await?;
+        let arguments = json::decode(request.as_bytes())?;
         json::same(&arguments, &admitted.into_value())?;
         patient::tests(&arguments, &["neuro_exam", "nerve_conduction"])?;
-        let result = domain
-            .execute("NEUROLOGIST", "order_tests", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let result = effects.apply(request).await?;
         patient::actual_result(&result)?;
         json::same(
             &result["data"]["inputs"]["assessment"],
@@ -302,11 +290,8 @@ pub async fn neurology<'r, D: Domain>(
             return Err(ShellError::message("report has another modality"));
         }
     }
-    let arguments = endpoint.recv::<NeuroDiagnosisRequest>().await?.into_value();
-    let result = domain
-        .execute("NEUROLOGIST", "diagnose", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let request = endpoint.recv::<NeuroDiagnosisRequest>().await?;
+    let result = effects.apply(request).await?;
     patient::actual_result(&result)?;
     for test in &["neuro_exam", "nerve_conduction"] {
         json::same(
@@ -351,22 +336,20 @@ pub async fn neurology<'r, D: Domain>(
 }
 
 #[hibana_runtime::scope]
-pub async fn ct<'r, D: Domain>(
+pub async fn ct<'r, D: ReceivedEffects>(
     endpoint: &mut Endpoint<'r, CT_SERVICE>,
     mut instrument: Endpoint<'r, CT_SCANNER>,
-    domain: &D,
+    effects: &D,
 ) -> ShellResult<()> {
     let assessment = json::decode(endpoint.recv::<CtOrderForOwner>().await?)?;
     patient::actual_result(&assessment)?;
     let admitted = endpoint.recv::<CtPerformIntent>().await?;
     endpoint.send::<CtPerformAdmitted>(&admitted).await?;
     endpoint.send::<CtLoan>(instrument).await?;
-    let arguments = endpoint.recv::<CtPerformRequest>().await?.into_value();
+    let request = endpoint.recv::<CtPerformRequest>().await?;
+    let arguments = json::decode(request.as_bytes())?;
     json::same(&arguments, &admitted.into_value())?;
-    let image = domain
-        .execute("RADIOLOGIST", "perform_imaging", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let image = effects.apply(request).await?;
     patient::actual_result(&image)?;
     json::same(
         &image["data"]["inputs"]["assessment"],
@@ -388,12 +371,10 @@ pub async fn ct<'r, D: Domain>(
     let admitted = endpoint.recv::<CtInterpretIntent>().await?;
     endpoint.send::<CtInterpretAdmitted>(&admitted).await?;
     endpoint.send::<CtLoan>(instrument).await?;
-    let arguments = endpoint.recv::<CtInterpretRequest>().await?.into_value();
+    let request = endpoint.recv::<CtInterpretRequest>().await?;
+    let arguments = json::decode(request.as_bytes())?;
     json::same(&arguments, &admitted.into_value())?;
-    let report = domain
-        .execute("RADIOLOGIST", "interpret_imaging", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let report = effects.apply(request).await?;
     patient::actual_result(&report)?;
     json::same(
         &report["data"]["inputs"]["image"],
@@ -452,22 +433,20 @@ pub async fn ct<'r, D: Domain>(
 }
 
 #[hibana_runtime::scope]
-pub async fn mri<'r, D: Domain>(
+pub async fn mri<'r, D: ReceivedEffects>(
     endpoint: &mut Endpoint<'r, MRI_SERVICE>,
     mut instrument: Endpoint<'r, MRI>,
-    domain: &D,
+    effects: &D,
 ) -> ShellResult<()> {
     let assessment = json::decode(endpoint.recv::<MriOrderForOwner>().await?)?;
     patient::actual_result(&assessment)?;
     let admitted = endpoint.recv::<MriPerformIntent>().await?;
     endpoint.send::<MriPerformAdmitted>(&admitted).await?;
     endpoint.send::<MriLoan>(instrument).await?;
-    let arguments = endpoint.recv::<MriPerformRequest>().await?.into_value();
+    let request = endpoint.recv::<MriPerformRequest>().await?;
+    let arguments = json::decode(request.as_bytes())?;
     json::same(&arguments, &admitted.into_value())?;
-    let image = domain
-        .execute("RADIOLOGIST", "perform_imaging", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let image = effects.apply(request).await?;
     patient::actual_result(&image)?;
     json::same(
         &image["data"]["inputs"]["assessment"],
@@ -491,12 +470,10 @@ pub async fn mri<'r, D: Domain>(
     let admitted = endpoint.recv::<MriInterpretIntent>().await?;
     endpoint.send::<MriInterpretAdmitted>(&admitted).await?;
     endpoint.send::<MriLoan>(instrument).await?;
-    let arguments = endpoint.recv::<MriInterpretRequest>().await?.into_value();
+    let request = endpoint.recv::<MriInterpretRequest>().await?;
+    let arguments = json::decode(request.as_bytes())?;
     json::same(&arguments, &admitted.into_value())?;
-    let report = domain
-        .execute("RADIOLOGIST", "interpret_imaging", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let report = effects.apply(request).await?;
     patient::actual_result(&report)?;
     json::same(
         &report["data"]["inputs"]["image"],
@@ -555,15 +532,12 @@ pub async fn mri<'r, D: Domain>(
 }
 
 #[hibana_runtime::scope]
-pub async fn pharmacy<D: Domain>(
+pub async fn pharmacy<D: ReceivedEffects>(
     endpoint: &mut Endpoint<PHARMACY_SERVICE>,
-    domain: &D,
+    effects: &D,
 ) -> ShellResult<()> {
-    let arguments = endpoint.recv::<ReviewRequest>().await?.into_value();
-    let result = domain
-        .execute("PHARMACIST", "review_prescriptions", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let request = endpoint.recv::<ReviewRequest>().await?;
+    let result = effects.apply(request).await?;
     patient::actual_result(&result)?;
     let bytes = json::encode(&result)?;
     async {
@@ -589,10 +563,10 @@ pub async fn pharmacy<D: Domain>(
 }
 
 #[hibana_runtime::scope]
-pub async fn conference<'r, D: Domain>(
+pub async fn conference<'r, D: ReceivedEffects>(
     endpoint: &mut Endpoint<'r, CONFERENCE_SERVICE>,
     room: Endpoint<'r, CONSULTATION_ROOM>,
-    domain: &D,
+    effects: &D,
 ) -> ShellResult<()> {
     let (
         (
@@ -717,17 +691,11 @@ pub async fn conference<'r, D: Domain>(
     let admitted = endpoint.recv::<ConferenceIntent>().await?;
     endpoint.send::<ConferenceAdmitted>(&admitted).await?;
     endpoint.send::<RoomLoan>(room).await?;
-    let request = endpoint.recv::<RoomRequest>().await?.into_value();
+    let received = endpoint.recv::<RoomRequest>().await?;
+    let request = json::decode(received.as_bytes())?;
     json::same(&request["case"], &case)?;
     json::same(&request["arguments"], &admitted.into_value())?;
-    let result = domain
-        .execute(
-            "ER_DOCTOR",
-            "conduct_case_conference",
-            request["arguments"].clone(),
-        )
-        .await
-        .map_err(ShellError::message)?;
+    let result = effects.apply(received).await?;
     patient::actual_result(&result)?;
     json::same(
         &result["data"]["inputs"]["diagnosis:CARDIOLOGIST"],

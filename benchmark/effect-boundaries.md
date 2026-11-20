@@ -30,7 +30,10 @@ including the 8M API operations, consume its received request directly.
 
 In 5E the panel and scanner submissions carry the arguments to their resource
 Endpoints. The simulator consumes the request received from the panel or
-scanner. In 5H the ICU receiver checks requests from the bed and ventilator
+scanner. In 5M the conference receiver checks the case in the room request
+against the collected findings and the arguments against the file submission.
+The simulator consumes that same room receive and passes its arguments member
+to the conference operation. In 5H the ICU receiver checks requests from the bed and ventilator
 against the admitted patient data. One ICU effect consumes both receives.
 In 6H the staging receiver consumes the deployment request, sends
 the stage check and compares the reply with the requested service and previous

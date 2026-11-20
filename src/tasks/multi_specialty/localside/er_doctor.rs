@@ -17,7 +17,7 @@ pub async fn run(endpoint: &mut Endpoint<ER_DOCTOR>) -> ShellResult<()> {
                     let tests = loop {
                         let mut panel = own.recv::<PanelLoan<GENERAL_PANEL>>().await?;
                         let arguments = own.recv::<GeneralAdmitted>().await?;
-                        panel.send::<TestRequest<1>>(&arguments).await?;
+                        panel.send::<TestRequest<1>>(&arguments.into()).await?;
                         let attempt = json::decode(panel.recv::<TestResult>().await?)?;
                         patient::actual_result(&attempt)?;
                         own.send::<PanelReturn<GENERAL_PANEL>>(panel).await?;

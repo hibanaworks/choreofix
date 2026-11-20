@@ -1,11 +1,14 @@
 //! The actual patient request bytes; validation contains no protocol progress.
 use crate::imp::patient;
-use crate::shell::{ShellError, ShellResult};
+use crate::shell::{ShellError, ShellResult, imp::service::SimulatorOperation};
 use hibana::runtime::wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload};
 use serde_json::Value;
 
+pub const REQUEST_SCHEMA: u32 = 0xac05_1100;
+pub const SUBMISSION_SCHEMA: u32 = 0xac05_1000;
+
 #[derive(Debug)]
-pub struct Arguments<const OPERATION: u8>(Vec<u8>);
+pub struct Arguments<const OPERATION: u8, const SCHEMA: u32 = REQUEST_SCHEMA>(Vec<u8>);
 
 impl<const OPERATION: u8> Arguments<OPERATION> {
     #[cfg(test)]
@@ -22,13 +25,15 @@ impl<const OPERATION: u8> Arguments<OPERATION> {
             .map_err(|_| ShellError::message("request differs from this patient operation"))?;
         Ok(Self(bytes))
     }
+}
 
+impl<const OPERATION: u8> Arguments<OPERATION, SUBMISSION_SCHEMA> {
     pub fn into_value(self) -> Value {
         serde_json::from_slice(&self.0).expect("validated patient request")
     }
 }
 
-impl<const OPERATION: u8> WireEncode for Arguments<OPERATION> {
+impl<const OPERATION: u8, const SCHEMA: u32> WireEncode for Arguments<OPERATION, SCHEMA> {
     fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
         output
             .get_mut(..self.0.len())
@@ -39,8 +44,8 @@ impl<const OPERATION: u8> WireEncode for Arguments<OPERATION> {
 }
 
 impl<const OPERATION: u8> WirePayload for Arguments<OPERATION> {
-    const SCHEMA_ID: u32 = 0xac05_1000 | OPERATION as u32;
-    type Decoded<'a> = Self;
+    const SCHEMA_ID: u32 = REQUEST_SCHEMA | OPERATION as u32;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
 
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
         let arguments: Value =
@@ -80,7 +85,73 @@ impl<const OPERATION: u8> WirePayload for Arguments<OPERATION> {
         }
     }
 
-    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
+    fn decode_validated_payload(input: ReceivedPayload<'_, Self>) -> Self::Decoded<'_> {
+        input
+    }
+}
+
+impl<const OPERATION: u8> WirePayload for Arguments<OPERATION, SUBMISSION_SCHEMA> {
+    const SCHEMA_ID: u32 = SUBMISSION_SCHEMA | OPERATION as u32;
+    type Decoded<'a> = Self;
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        Arguments::<OPERATION>::validate_payload(input)
+    }
+    fn decode_validated_payload(input: ReceivedPayload<'_, Self>) -> Self {
         Self(input.as_bytes().to_vec())
     }
+}
+
+impl<const OPERATION: u8> From<Arguments<OPERATION, SUBMISSION_SCHEMA>> for Arguments<OPERATION> {
+    fn from(submission: Arguments<OPERATION, SUBMISSION_SCHEMA>) -> Self {
+        Self(submission.0)
+    }
+}
+
+impl SimulatorOperation for Arguments<0> {
+    const RPC: (&'static str, &'static str) = ("ER_DOCTOR", "assess_patient");
+}
+
+impl SimulatorOperation for Arguments<1> {
+    const RPC: (&'static str, &'static str) = ("ER_DOCTOR", "order_tests");
+}
+
+impl SimulatorOperation for Arguments<2> {
+    const RPC: (&'static str, &'static str) = ("CARDIOLOGIST", "order_tests");
+}
+
+impl SimulatorOperation for Arguments<3> {
+    const RPC: (&'static str, &'static str) = ("NEUROLOGIST", "order_tests");
+}
+
+impl SimulatorOperation for Arguments<4> {
+    const RPC: (&'static str, &'static str) = ("RADIOLOGIST", "perform_imaging");
+}
+
+impl SimulatorOperation for Arguments<5> {
+    const RPC: (&'static str, &'static str) = ("RADIOLOGIST", "interpret_imaging");
+}
+
+impl SimulatorOperation for Arguments<6> {
+    const RPC: (&'static str, &'static str) = ("RADIOLOGIST", "perform_imaging");
+}
+
+impl SimulatorOperation for Arguments<7> {
+    const RPC: (&'static str, &'static str) = ("RADIOLOGIST", "interpret_imaging");
+}
+
+impl SimulatorOperation for Arguments<8> {
+    const RPC: (&'static str, &'static str) = ("CARDIOLOGIST", "diagnose");
+}
+
+impl SimulatorOperation for Arguments<9> {
+    const RPC: (&'static str, &'static str) = ("NEUROLOGIST", "diagnose");
+}
+
+impl SimulatorOperation for Arguments<10> {
+    const RPC: (&'static str, &'static str) = ("PHARMACIST", "review_prescriptions");
+}
+
+impl SimulatorOperation for Arguments<12> {
+    const RPC: (&'static str, &'static str) = ("ER_DOCTOR", "conduct_case_conference");
+    const ARGUMENT_FIELD: Option<&'static str> = Some("arguments");
 }

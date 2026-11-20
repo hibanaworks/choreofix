@@ -8,6 +8,8 @@ pub trait SimulatorOperation<const RECEIPTS: usize = 1>:
     hibana::runtime::wire::WirePayload
 {
     const RPC: (&'static str, &'static str);
+    /// JSON member containing the simulator arguments when the wire request also carries evidence.
+    const ARGUMENT_FIELD: Option<&'static str> = None;
 }
 
 /// Effect I/O available to receivers whose message type fixes the operation.

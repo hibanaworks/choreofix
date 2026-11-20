@@ -12,13 +12,17 @@ pub async fn run(endpoint: &mut Endpoint<RADIOLOGIST>) -> ShellResult<()> {
             patient::actual_result(&assessment)?;
             let arguments = ct.recv::<CtPerformAdmitted>().await?;
             let mut instrument = ct.recv::<CtLoan>().await?;
-            instrument.send::<CtPerformRequest>(&arguments).await?;
+            instrument
+                .send::<CtPerformRequest>(&arguments.into())
+                .await?;
             let image = json::decode(instrument.recv::<CtImageResult>().await?)?;
             patient::actual_result(&image)?;
             ct.send::<CtLoan>(instrument).await?;
             let arguments = ct.recv::<CtInterpretAdmitted>().await?;
             let mut instrument = ct.recv::<CtLoan>().await?;
-            instrument.send::<CtInterpretRequest>(&arguments).await?;
+            instrument
+                .send::<CtInterpretRequest>(&arguments.into())
+                .await?;
             let report = json::decode(instrument.recv::<CtReportResult>().await?)?;
             patient::actual_result(&report)?;
             json::same(
@@ -32,13 +36,17 @@ pub async fn run(endpoint: &mut Endpoint<RADIOLOGIST>) -> ShellResult<()> {
             patient::actual_result(&assessment)?;
             let arguments = mri.recv::<MriPerformAdmitted>().await?;
             let mut instrument = mri.recv::<MriLoan>().await?;
-            instrument.send::<MriPerformRequest>(&arguments).await?;
+            instrument
+                .send::<MriPerformRequest>(&arguments.into())
+                .await?;
             let image = json::decode(instrument.recv::<MriImageResult>().await?)?;
             patient::actual_result(&image)?;
             mri.send::<MriLoan>(instrument).await?;
             let arguments = mri.recv::<MriInterpretAdmitted>().await?;
             let mut instrument = mri.recv::<MriLoan>().await?;
-            instrument.send::<MriInterpretRequest>(&arguments).await?;
+            instrument
+                .send::<MriInterpretRequest>(&arguments.into())
+                .await?;
             let report = json::decode(instrument.recv::<MriReportResult>().await?)?;
             patient::actual_result(&report)?;
             json::same(

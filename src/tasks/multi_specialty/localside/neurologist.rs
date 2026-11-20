@@ -32,7 +32,7 @@ pub async fn run(endpoint: &mut Endpoint<NEUROLOGIST>) -> ShellResult<()> {
     let tests = loop {
         let mut panel = endpoint.recv::<PanelLoan<NEURO_PANEL>>().await?;
         let arguments = endpoint.recv::<NeuroAdmitted>().await?;
-        panel.send::<TestRequest<3>>(&arguments).await?;
+        panel.send::<TestRequest<3>>(&arguments.into()).await?;
         let attempt = json::decode(panel.recv::<TestResult>().await?)?;
         patient::actual_result(&attempt)?;
         endpoint.send::<PanelReturn<NEURO_PANEL>>(panel).await?;

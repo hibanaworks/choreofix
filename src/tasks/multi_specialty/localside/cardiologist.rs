@@ -32,7 +32,7 @@ pub async fn run(endpoint: &mut Endpoint<CARDIOLOGIST>) -> ShellResult<()> {
     let tests = loop {
         let mut panel = endpoint.recv::<PanelLoan<CARDIAC_PANEL>>().await?;
         let arguments = endpoint.recv::<CardiacAdmitted>().await?;
-        panel.send::<TestRequest<2>>(&arguments).await?;
+        panel.send::<TestRequest<2>>(&arguments.into()).await?;
         let attempt = json::decode(panel.recv::<TestResult>().await?)?;
         patient::actual_result(&attempt)?;
         endpoint.send::<PanelReturn<CARDIAC_PANEL>>(panel).await?;
