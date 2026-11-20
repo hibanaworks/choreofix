@@ -341,8 +341,10 @@ varied the review of the repair. For each position the reviewer approved the
 first revision in one run and requested two further changes in another.
 The six runs yielded twelve new review decisions. In each case the
 reviewer received the service Endpoint, reviewed the fresh revision, and
-returned the same decision to the reviewer and developer shells. These
-runs ended before retesting. We assessed deployment and registration
+returned the same decision to the reviewer and developer shells. In all
+four runs where another service still had a test outstanding, one of those
+tests completed between the failed test and the approval of its repair.
+These runs ended before retesting. We assessed deployment and registration
 orders separately in the common simulator. Given reviewed, tested candidates
 and completed schema migrations, 720 of 2,250 graph/order pairs completed
 without a violation across all 25 acyclic three-service dependency graphs.

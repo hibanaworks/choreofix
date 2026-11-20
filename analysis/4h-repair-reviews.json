@@ -26,7 +26,10 @@
       ],
       "effects": 15,
       "epf_records": 5351,
-      "events_sha256": "e8566c738938ed540b4e5833bef6912e8d080ef41f62a45dded730110cfbe667"
+      "events_sha256": "e8566c738938ed540b4e5833bef6912e8d080ef41f62a45dded730110cfbe667",
+      "other_test_receipts_completed_during_recovery": [
+        13
+      ]
     },
     {
       "failed_test_index": 0,
@@ -63,7 +66,11 @@
       ],
       "effects": 19,
       "epf_records": 6359,
-      "events_sha256": "a4ee27cfa7eec85a9950f9c8f883bed9f03217d76d031b73503b2c1acec116ad"
+      "events_sha256": "a4ee27cfa7eec85a9950f9c8f883bed9f03217d76d031b73503b2c1acec116ad",
+      "other_test_receipts_completed_during_recovery": [
+        13,
+        16
+      ]
     },
     {
       "failed_test_index": 1,
@@ -82,7 +89,10 @@
       ],
       "effects": 15,
       "epf_records": 5351,
-      "events_sha256": "865e87a06a9bbae52c31b4d4b7eefb1d98574ceed6c018704b6b36cd8ac67b69"
+      "events_sha256": "865e87a06a9bbae52c31b4d4b7eefb1d98574ceed6c018704b6b36cd8ac67b69",
+      "other_test_receipts_completed_during_recovery": [
+        14
+      ]
     },
     {
       "failed_test_index": 1,
@@ -119,7 +129,10 @@
       ],
       "effects": 19,
       "epf_records": 6359,
-      "events_sha256": "2983a8cf458cad7ba179df6f608e986ae6865ff3b02905ada85a2566485451bc"
+      "events_sha256": "2983a8cf458cad7ba179df6f608e986ae6865ff3b02905ada85a2566485451bc",
+      "other_test_receipts_completed_during_recovery": [
+        14
+      ]
     },
     {
       "failed_test_index": 2,
@@ -138,7 +151,10 @@
       ],
       "effects": 15,
       "epf_records": 5351,
-      "events_sha256": "1a4955b9e11fbfb305aa0f4b4fef03428eae9bc32514d986aa0ae67e6c88a5ce"
+      "events_sha256": "1a4955b9e11fbfb305aa0f4b4fef03428eae9bc32514d986aa0ae67e6c88a5ce",
+      "other_test_receipts_completed_during_recovery": [
+
+      ]
     },
     {
       "failed_test_index": 2,
@@ -175,7 +191,10 @@
       ],
       "effects": 19,
       "epf_records": 6359,
-      "events_sha256": "d17ffd8c98131388b9f16d78bd311a9d4f6f05ea17d8aa1c44797bb36e7b1053"
+      "events_sha256": "d17ffd8c98131388b9f16d78bd311a9d4f6f05ea17d8aa1c44797bb36e7b1053",
+      "other_test_receipts_completed_during_recovery": [
+
+      ]
     }
   ],
   "all_conditions": {
