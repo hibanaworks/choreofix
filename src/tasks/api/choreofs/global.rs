@@ -33,9 +33,6 @@ pub const BACKEND_CLOSE: u8 = 21;
 pub const TESTER_CLOSE: u8 = 22;
 pub const ADMIN_OUTCOME_READ: u8 = 23;
 pub const BACKEND_OUTCOME_READ: u8 = 24;
-pub const CHECK_ADMIN: u16 = 680;
-pub const CHECK_BACKEND: u16 = 681;
-pub const CHECK_TESTER: u16 = 682;
 pub const TEST_RESULT: u16 = 683;
 pub const SERVICE_FD: u8 = 4;
 pub const OUTCOME_FD: u8 = 5;
@@ -76,14 +73,16 @@ pub const OUTCOME_OBJECT: ChoreoFsObject<'static> = ChoreoFsObject::readable(
 );
 
 pub type Loan<'run, const RESOURCE: u8> = g::Msg<10, Endpoint<'run, RESOURCE>>;
-pub type CloseAuthority<'run, const RESOURCE: u8> = g::Msg<165, Endpoint<'run, RESOURCE>>;
 pub type FileExit = g::Msg<241, i32>;
-pub type MigrationIntent = g::Msg<18, super::imp::ApiArguments<{ super::imp::MIGRATE }>>;
-pub type TestIntent = g::Msg<19, super::imp::ApiArguments<{ super::imp::TEST }>>;
+pub type FileApplied = g::Msg<165, ()>;
+pub type AppliedResult<'a> = g::Msg<42, &'a [u8]>;
+pub type MigrationIntent = g::Msg<18, super::imp::ApiArguments<{ super::imp::MIGRATE }, false>>;
+pub type TestIntent = g::Msg<19, super::imp::ApiArguments<{ super::imp::TEST }, false>>;
 pub type MigrationRequest = g::Msg<20, super::imp::ApiArguments<{ super::imp::MIGRATE }>>;
 pub type MigrationCompleted<'a> = g::Msg<21, &'a [u8]>;
 pub type TestRequest = g::Msg<22, super::imp::ApiArguments<{ super::imp::TEST }>>;
 pub type TestCompleted<'a> = g::Msg<23, &'a [u8]>;
+pub type BackendRequest = g::Msg<24, super::imp::ApiArguments<{ super::imp::IMPLEMENT }>>;
 pub type MigrationDone = g::Msg<40, ()>;
 pub type BackendReady = g::Msg<41, ()>;
 pub type PassedAdmin<'a> = g::Msg<50, &'a [u8]>;
@@ -91,7 +90,7 @@ pub type PassedBackend<'a> = g::Msg<51, &'a [u8]>;
 pub type FailedAdmin<'a> = g::Msg<60, &'a [u8]>;
 pub type FailedBackend<'a> = g::Msg<61, &'a [u8]>;
 
-// Repeated syscall fragments; object close is the business operation below.
+// Ordinary descriptor operations stay available while the resource is in use.
 fn file_io<const FILE: u8, const OWNER: u8>() -> impl Projectable {
     let open = g::seq(
         g::send::<FILE, OWNER, protocol::PathOpenReqMsg>(),
@@ -261,95 +260,53 @@ pub fn programs() -> Programs {
             g::send::<TESTER, TESTER_VM, Loan<TESTER_FILE>>(),
         ),
     );
-    let migration_request = g::send::<ADMIN_FILE, ADMIN_CLOSE, protocol::FdCloseObjectReqMsg>();
     let migration = g::seq(
-        migration_request,
-        g::route(
-            g::seq(
-                g::send::<ADMIN_CLOSE, DATABASE, MigrationIntent>(),
-                g::seq(
-                    g::send::<DATABASE_RESOURCE, ADMIN_CLOSE, MigrationRequest>(),
-                    g::seq(
-                        g::send::<DATABASE, ADMIN_CLOSE, Loan<DATABASE_RESOURCE>>(),
-                        g::seq(
-                            g::send::<DATABASE_RESOURCE, DATABASE, MigrationCompleted>(),
-                            g::seq(
-                                g::send::<ADMIN_CLOSE, DATABASE, Loan<DATABASE_RESOURCE>>(),
-                                g::seq(
-                                    g::send::<ADMIN_CLOSE, BACKEND_CLOSE, MigrationDone>(),
-                                    g::seq(
-                                        g::send::<ADMIN_CLOSE, ADMIN_FILE, protocol::FdCloseObjectRetMsg>(),
-                                        g::send::<ADMIN, ADMIN_FILE, CloseAuthority<ADMIN_CLOSE>>(),
-                                    ),
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            g::seq(
-                g::seq(
-                    g::send::<ADMIN_CLOSE, ADMIN_FILE, protocol::FdCloseRejectedRetMsg>(),
-                    migration_request,
-                ).roll(),
-                g::seq(
-                    g::send::<ADMIN_CLOSE, DATABASE, MigrationIntent>(),
-                    g::seq(
-                        g::send::<DATABASE_RESOURCE, ADMIN_CLOSE, MigrationRequest>(),
-                        g::seq(
-                            g::send::<DATABASE, ADMIN_CLOSE, Loan<DATABASE_RESOURCE>>(),
-                            g::seq(
-                                g::send::<DATABASE_RESOURCE, DATABASE, MigrationCompleted>(),
-                                g::seq(
-                                    g::send::<ADMIN_CLOSE, DATABASE, Loan<DATABASE_RESOURCE>>(),
-                                    g::seq(
-                                        g::send::<ADMIN_CLOSE, BACKEND_CLOSE, MigrationDone>(),
-                                        g::seq(
-                                            g::send::<ADMIN_CLOSE, ADMIN_FILE, protocol::FdCloseObjectRetMsg>(),
-                                            g::send::<ADMIN, ADMIN_FILE, CloseAuthority<ADMIN_CLOSE>>(),
-                                        ),
-                                    ),
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-        ).resolve::<CHECK_ADMIN>(),
-    );
-    let backend_request = g::send::<BACKEND_FILE, BACKEND_CLOSE, protocol::FdCloseObjectReqMsg>();
-    let backend_approved = g::seq(
-        g::send::<BACKEND_CLOSE, TESTER_CLOSE, BackendReady>(),
+        g::send::<ADMIN_FILE, ADMIN_CLOSE, MigrationIntent>(),
         g::seq(
-            g::send::<BACKEND_CLOSE, BACKEND_FILE, protocol::FdCloseObjectRetMsg>(),
-            g::send::<BACKEND, BACKEND_FILE, CloseAuthority<BACKEND_CLOSE>>(),
+            g::send::<ADMIN_CLOSE, DATABASE, MigrationIntent>(),
+            g::seq(
+                g::send::<DATABASE_RESOURCE, ADMIN_CLOSE, MigrationRequest>(),
+                g::seq(
+                    g::send::<DATABASE, ADMIN_CLOSE, Loan<DATABASE_RESOURCE>>(),
+                    g::seq(
+                        g::send::<DATABASE_RESOURCE, DATABASE, MigrationCompleted>(),
+                        g::seq(
+                            g::send::<ADMIN_CLOSE, DATABASE, Loan<DATABASE_RESOURCE>>(),
+                            g::par(
+                                g::send::<ADMIN_CLOSE, BACKEND_CLOSE, MigrationDone>(),
+                                g::seq(
+                                    g::send::<ADMIN_CLOSE, ADMIN, AppliedResult>(),
+                                    g::send::<ADMIN, ADMIN_FILE, FileApplied>(),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
         ),
     );
     let backend = g::seq(
-        backend_request,
-        g::route(
-            backend_approved,
+        g::send::<BACKEND_FILE, BACKEND_CLOSE, BackendRequest>(),
+        g::par(
+            g::send::<BACKEND_CLOSE, TESTER_CLOSE, BackendReady>(),
             g::seq(
-                g::seq(
-                    g::send::<BACKEND_CLOSE, BACKEND_FILE, protocol::FdCloseRejectedRetMsg>(),
-                    backend_request,
-                )
-                .roll(),
-                backend_approved,
+                g::send::<BACKEND_CLOSE, BACKEND, AppliedResult>(),
+                g::send::<BACKEND, BACKEND_FILE, FileApplied>(),
             ),
-        )
-        .resolve::<CHECK_BACKEND>(),
+        ),
     );
-    let test_request = g::send::<TESTER_FILE, TESTER_CLOSE, protocol::FdCloseObjectReqMsg>();
     let test_resources = g::seq(
-        g::send::<TESTER_CLOSE, TEST_ENV, TestIntent>(),
+        g::send::<TESTER_FILE, TESTER_CLOSE, TestIntent>(),
         g::seq(
-            g::send::<TEST_RESOURCE, TESTER_CLOSE, TestRequest>(),
+            g::send::<TESTER_CLOSE, TEST_ENV, TestIntent>(),
             g::seq(
-                g::send::<TEST_ENV, TESTER_CLOSE, Loan<TEST_RESOURCE>>(),
+                g::send::<TEST_RESOURCE, TESTER_CLOSE, TestRequest>(),
                 g::seq(
-                    g::send::<TEST_RESOURCE, TEST_ENV, TestCompleted>(),
-                    g::send::<TESTER_CLOSE, TEST_ENV, Loan<TEST_RESOURCE>>(),
+                    g::send::<TEST_ENV, TESTER_CLOSE, Loan<TEST_RESOURCE>>(),
+                    g::seq(
+                        g::send::<TEST_RESOURCE, TEST_ENV, TestCompleted>(),
+                        g::send::<TESTER_CLOSE, TEST_ENV, Loan<TEST_RESOURCE>>(),
+                    ),
                 ),
             ),
         ),
@@ -377,30 +334,15 @@ pub fn programs() -> Programs {
         ),
     )
     .resolve::<TEST_RESULT>();
-    let test_approved = g::seq(
+    let test_admission = g::seq(
         test_resources,
         g::seq(
             outcome,
             g::seq(
-                g::send::<TESTER_CLOSE, TESTER_FILE, protocol::FdCloseObjectRetMsg>(),
-                g::send::<TESTER, TESTER_FILE, CloseAuthority<TESTER_CLOSE>>(),
+                g::send::<TESTER_CLOSE, TESTER, AppliedResult>(),
+                g::send::<TESTER, TESTER_FILE, FileApplied>(),
             ),
         ),
-    );
-    let test_admission = g::seq(
-        test_request,
-        g::route(
-            test_approved,
-            g::seq(
-                g::seq(
-                    g::send::<TESTER_CLOSE, TESTER_FILE, protocol::FdCloseRejectedRetMsg>(),
-                    test_request,
-                )
-                .roll(),
-                test_approved,
-            ),
-        )
-        .resolve::<CHECK_TESTER>(),
     );
     let test = g::seq(
         test_admission,

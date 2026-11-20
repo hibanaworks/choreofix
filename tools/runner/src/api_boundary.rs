@@ -57,6 +57,17 @@ async fn participant(guest: &process::Guest, actor: Value, depth: u8) -> Result<
         .await?;
     let result = response(&result)?;
     assert_eq!(result["success"], agent != "TESTER" || depth == 0);
+    let reread = guest.command(agent, format!("cat /service/{tool}")).await?;
+    assert_eq!(response(&reread)?, result);
+    let duplicate = guest
+        .command(agent, format!("printf '%s' {quoted} > /service/{tool}"))
+        .await?;
+    assert!(
+        duplicate["stdout"]
+            .as_str()
+            .is_some_and(|output| output.contains("Permission denied")),
+        "{duplicate}"
+    );
     let outcome = if agent != "TESTER" {
         let read = guest.command(agent, "cat /service/outcome".into()).await?;
         let first = response(&read)?;
@@ -270,7 +281,7 @@ async fn real_wasi_outcome_metadata_preserves_all_original_results() -> Result<(
         assert_eq!(audit["actual_resource_endpoint_returns"], 2);
         let mutants =
             crate::api_audit::check_mutants(&output.join("events.jsonl"), &output.join("mutants"))?;
-        assert_eq!(mutants["mutants"].as_array().ok_or("mutants")?.len(), 16);
+        assert_eq!(mutants["mutants"].as_array().ok_or("mutants")?.len(), 18);
         save(&output.join("audit.json"), &audit)?;
         let result = json!({"task":"8E","depth":depth,"status":"passed","model_calls":0,
             "scored_benchmark":false,"participants":participants,"runtime":runtime_result,

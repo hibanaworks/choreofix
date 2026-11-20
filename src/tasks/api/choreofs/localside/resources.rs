@@ -1,5 +1,5 @@
 //! The physical resource owner sends the actual request before moving its Endpoint.
-use super::super::global::*;
+use super::super::{global::*, imp::ApiArguments};
 use crate::shell::ShellResult;
 use hibana::Endpoint;
 
@@ -9,7 +9,9 @@ pub(crate) async fn database<'run>(
     mut resource: Endpoint<'run, DATABASE_RESOURCE>,
 ) -> ShellResult<()> {
     let arguments = endpoint.recv::<MigrationIntent>().await?;
-    resource.send::<MigrationRequest>(&arguments).await?;
+    resource
+        .send::<MigrationRequest>(&ApiArguments(arguments.0))
+        .await?;
     endpoint.send::<Loan<DATABASE_RESOURCE>>(resource).await?;
     endpoint.recv::<MigrationCompleted>().await?;
     let _resource = endpoint.recv::<Loan<DATABASE_RESOURCE>>().await?;
@@ -22,7 +24,9 @@ pub(crate) async fn test_environment<'run>(
     mut resource: Endpoint<'run, TEST_RESOURCE>,
 ) -> ShellResult<()> {
     let arguments = endpoint.recv::<TestIntent>().await?;
-    resource.send::<TestRequest>(&arguments).await?;
+    resource
+        .send::<TestRequest>(&ApiArguments(arguments.0))
+        .await?;
     endpoint.send::<Loan<TEST_RESOURCE>>(resource).await?;
     endpoint.recv::<TestCompleted>().await?;
     let _resource = endpoint.recv::<Loan<TEST_RESOURCE>>().await?;

@@ -75,13 +75,13 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
     let mut resource_requests = 0;
     let mut resource_returns = 0;
     let mut result_reads = 0;
-    let mut rejections = 0;
-    for (agent, file_name, controller_name, vm_name, resource) in [
+    for (agent, file_name, controller_name, vm_name, file_label, resource) in [
         (
             "DB_ADMIN",
             "ADMIN_FILE",
             "ADMIN_CLOSE",
             "ADMIN_VM",
+            18,
             Some(("DATABASE", "DATABASE_RESOURCE", 18, 20, 21)),
         ),
         (
@@ -89,6 +89,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
             "BACKEND_FILE",
             "BACKEND_CLOSE",
             "BACKEND_VM",
+            24,
             None,
         ),
         (
@@ -96,6 +97,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
             "TESTER_FILE",
             "TESTER_CLOSE",
             "TESTER_VM",
+            19,
             Some(("TEST_ENV", "TEST_RESOURCE", 19, 22, 23)),
         ),
     ] {
@@ -119,14 +121,6 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
             || result["success"] != (agent != "TESTER" || depth == 0)
         {
             return Err("actual API call differs from the original assignment".into());
-        }
-        let (&authority_id, _) = journal::one(
-            frames
-                .iter()
-                .filter(|(_, frame)| frame.direction(owner, file) && frame.logical_label == 165),
-        )?;
-        if receipts[&authority_id]["receive_commit"]["actor"] != vm {
-            return Err("actual close authority did not reach its guest".into());
         }
         let exit = journal::one(
             frames
@@ -155,8 +149,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                             | protocol::LABEL_WASI_FD_READ
                             | protocol::LABEL_WASI_FD_CLOSE
                     ))
-                    || (frame.direction(file, controller)
-                        && frame.logical_label == protocol::LABEL_WASI_FD_CLOSE_OBJECT)
+                    || (frame.direction(file, controller) && frame.logical_label == file_label)
             })
             .map(|(&id, frame)| (frame.received, id, frame))
             .collect::<Vec<_>>();
@@ -171,12 +164,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                             | protocol::LABEL_WASI_FD_READ_RET
                             | protocol::LABEL_WASI_FD_CLOSE_RET
                     ))
-                    || (frame.direction(controller, file)
-                        && matches!(
-                            frame.logical_label,
-                            protocol::LABEL_WASI_FD_CLOSE_OBJECT_RET
-                                | protocol::LABEL_WASI_FD_CLOSE_REJECTED
-                        ))
+                    || (frame.direction(owner, file) && frame.logical_label == 165)
             })
             .map(|(&id, frame)| (frame.received, id, frame))
             .collect::<Vec<_>>();
@@ -189,8 +177,13 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
         let mut offset = 0usize;
         let mut flags = 0u16;
         for ((_, request_id, request), (_, reply_id, reply)) in requests.into_iter().zip(replies) {
+            let receiver = if request.logical_label == file_label {
+                controller
+            } else {
+                owner
+            };
             if receipts[&request_id]["send_actor"] != vm
-                || receipts[&request_id]["receive_commit"]["actor"] != owner
+                || receipts[&request_id]["receive_commit"]["actor"] != receiver
                 || receipts[&reply_id]["send_actor"] != owner
                 || receipts[&reply_id]["receive_commit"]["actor"] != vm
             {
@@ -262,37 +255,25 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                         return Err("ordinary close fd/result mismatch".into());
                     }
                 }
-                (protocol::LABEL_WASI_FD_CLOSE_OBJECT, protocol::LABEL_WASI_FD_CLOSE_REJECTED) => {
-                    validate::<protocol::FdCloseObjectReq>(request)?;
-                    validate::<protocol::FdCloseRejectedRet>(reply)?;
-                    if request.bytes != [service_fd]
-                        || reply.bytes != [service_fd, 0, 28]
-                        || serde_json::from_slice::<Value>(&bytes)
-                            .is_ok_and(|v| v == original["arguments"])
-                        || request.received()? < call.emitted && call.emitted < reply.received()?
-                    {
-                        return Err(
-                            "rejected close admitted an effect or rejected valid input".into()
-                        );
-                    }
-                    rejections += 1;
-                }
-                (
-                    protocol::LABEL_WASI_FD_CLOSE_OBJECT,
-                    protocol::LABEL_WASI_FD_CLOSE_OBJECT_RET,
-                ) => {
-                    validate::<protocol::FdCloseObjectReq>(request)?;
-                    validate::<protocol::FdClosedRet>(reply)?;
-                    if request.bytes != [service_fd]
-                        || reply.bytes != [service_fd, 0, 0]
-                        || serde_json::from_slice::<Value>(&bytes)? != call.request["arguments"]
+                (label, 165) if label == file_label => {
+                    let (&result_id, published) =
+                        journal::one(frames.iter().filter(|(_, f)| {
+                            f.direction(controller, owner) && f.logical_label == 42
+                        }))?;
+                    if request.bytes != bytes
+                        || request.value()? != call.request["arguments"]
                         || request.received()? >= call.emitted
-                        || result_at >= reply.sent
+                        || !reply.bytes.is_empty()
+                        || published.value()? != *result
+                        || result_at >= published.sent
+                        || published.received()? >= reply.sent
+                        || receipts[&result_id]["send_actor"] != controller
+                        || receipts[&result_id]["receive_commit"]["actor"] != owner
                         || effects
-                            .insert(call_id, (request_id, authority_id))
+                            .insert(call_id, (request_id, result_id, reply_id))
                             .is_some()
                     {
-                        return Err("accepted file bytes, effect or actual reply differ".into());
+                        return Err("submitted file bytes, Endpoint receive, effect or published result differ".into());
                     }
                     closes.insert(request_id);
                     bytes = serde_json::to_vec(result)?;
@@ -321,18 +302,25 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 || reply.value()? != *result
                 || reply.sent <= result_at
                 || receipts[&request_id]["send_actor"] != resource_owner
-                || receipts[&request_id]["receive_commit"]["actor"] != owner
-                || receipts[&reply_id]["send_actor"] != owner
+                || receipts[&request_id]["receive_commit"]["actor"] != controller
+                || receipts[&reply_id]["send_actor"] != controller
                 || receipts[&reply_id]["receive_commit"]["actor"] != resource_owner
             {
                 return Err("physical resource request/effect/result differs".into());
             }
-            journal::one(frames.values().filter(|f| {
+            let loan = journal::one(frames.values().filter(|f| {
+                f.direction(resource_owner, controller)
+                    && f.logical_label == 10
+                    && f.bytes.first().copied().map(u64::from) == Some(resource)
+            }))?;
+            let returned_loan = journal::one(frames.values().filter(|f| {
                 f.direction(controller, resource_owner)
                     && f.logical_label == 10
                     && f.bytes.first().copied().map(u64::from) == Some(resource)
-            }))?
-            .received()?;
+            }))?;
+            if loan.received()? >= call.emitted || returned_loan.received()? <= reply.received()? {
+                return Err("resource loan or return did not bracket its effect and reply".into());
+            }
             resource_requests += 1;
             resource_returns += 1;
         }
@@ -494,7 +482,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
         "domain_calls":journal.calls.len(),"actual_resource_endpoint_requests":resource_requests,
         "actual_resource_endpoint_returns":resource_returns,"complete_result_reads":complete_reads,
         "early_result_reads":early_reads,"observed_operation_result_reads":result_reads,
-        "rejected_object_closes":rejections,"effect_receipts":effects,"violations":0,
+        "effect_receipts":effects,"violations":0,
         "simulator_complete":journal.score["complete"],"expected_terminal_test_failure":depth!=0,
         "dynamic_protocol":dynamic}),
     )
@@ -510,7 +498,9 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     for kind in [
         "wrong_frame_label",
         "wrong_lane",
-        "missing_close",
+        "missing_file_request",
+        "changed_file_bytes",
+        "changed_published_result",
         "altered_frame",
         "forged_arguments",
         "forged_result",
@@ -555,12 +545,17 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 .position(|r| {
                     let m = &r["message"];
                     match kind {
-                        "missing_close" => {
+                        "missing_file_request" | "changed_file_bytes" => {
                             m["type"] == "protocol_frame"
                                 && m["action"] == "send"
-                                && m["source"] == 17
-                                && m["target"] == 20
-                                && m["payload"] == json!([4])
+                                && m["source"] == 18
+                                && m["target"] == 21
+                        }
+                        "changed_published_result" => {
+                            m["type"] == "protocol_frame"
+                                && m["action"] == "send"
+                                && m["source"] == 21
+                                && m["target"] == 1
                         }
                         "altered_frame" => m["type"] == "protocol_frame" && m["action"] == "send",
                         "forged_arguments" => m["type"] == "execute",
@@ -609,7 +604,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 })
                 .ok_or("mutation target")?;
             match kind {
-                "missing_close" | "missing_notification" | "missing_read" | "missing_exit" => {
+                "missing_notification" | "missing_read" | "missing_exit" => {
                     copy.remove(index);
                 }
                 "altered_frame" => copy[index]["message"]["source"] = json!(254),
@@ -623,22 +618,31 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                     copy[index]["message"]["complete"] =
                         json!(!copy[index]["message"]["complete"].as_bool().unwrap())
                 }
-                "missing_loan" | "missing_resource_request" | "missing_resource_return" => {
+                "missing_file_request"
+                | "missing_loan"
+                | "missing_resource_request"
+                | "missing_resource_return" => {
                     let id = copy[index]["message"]["frame_id"].clone();
                     copy.retain(|row| {
                         !(row["message"]["type"] == "protocol_frame"
                             && row["message"]["frame_id"] == id)
                     });
                 }
-                "wrong_loan_resource" | "forged_resource_request" | "forged_resource_result" => {
+                "changed_file_bytes"
+                | "changed_published_result"
+                | "wrong_loan_resource"
+                | "forged_resource_request"
+                | "forged_resource_result" => {
                     let id = copy[index]["message"]["frame_id"].clone();
                     let mut bytes = payload(&copy[index]["message"])?;
                     match kind {
+                        // Equivalent JSON, different bytes from the guest's accepted writes.
+                        "changed_file_bytes" => bytes.push(b' '),
                         "wrong_loan_resource" => bytes[0] = 16,
                         "forged_resource_request" => {
                             bytes = serde_json::to_vec(&json!({"migration_name":"wrong_target"}))?
                         }
-                        "forged_resource_result" => {
+                        "changed_published_result" | "forged_resource_result" => {
                             let mut response: Value = serde_json::from_slice(&bytes)?;
                             response["data"]["forged"] = json!(true);
                             bytes = serde_json::to_vec(&response)?;

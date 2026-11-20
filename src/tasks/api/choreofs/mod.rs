@@ -9,7 +9,6 @@ use crate::{
         imp::{
             bus::{Bus, Terminal},
             private_fs::PrivateFs,
-            service::Validation,
         },
         localside::private_io,
     },
@@ -19,15 +18,12 @@ use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasi
 #[hibana_runtime::scope]
 async fn run_guests(
     module: &[u8],
-    (bus, simulator): (&Bus, &impl crate::shell::imp::service::Domain),
+    (bus, simulator): (&Bus, &impl crate::shell::imp::service::ReceivedEffects),
     terminals: [Terminal; 3],
 ) -> ShellResult<()> {
     use global::*;
     let p = programs();
     bus.projected(p.observation());
-    let ac = Validation::new();
-    let bc = Validation::new();
-    let tc = Validation::new();
     let result = super::imp::TestInput::default();
     let capture = |event| {
         bus.capture(event);
@@ -40,21 +36,6 @@ async fn run_guests(
     let observations = rv.tap();
     let session = SessionId::new(28);
     let result = async {
-        rv.set_resolver(
-            &p.admin_close,
-            ResolverRef::<CHECK_ADMIN>::decision_state(&ac, Validation::decide),
-        )
-        .map_err(|e| ShellError::message(format!("{e:?}")))?;
-        rv.set_resolver(
-            &p.backend_close,
-            ResolverRef::<CHECK_BACKEND>::decision_state(&bc, Validation::decide),
-        )
-        .map_err(|e| ShellError::message(format!("{e:?}")))?;
-        rv.set_resolver(
-            &p.tester_close,
-            ResolverRef::<CHECK_TESTER>::decision_state(&tc, Validation::decide),
-        )
-        .map_err(|e| ShellError::message(format!("{e:?}")))?;
         rv.set_resolver(
             &p.tester_close,
             ResolverRef::<TEST_RESULT>::decision_state(&result, super::imp::decide),
@@ -80,28 +61,32 @@ async fn run_guests(
         let admin_file = rv.enter(session, &p.admin_file)?;
         let backend_file = rv.enter(session, &p.backend_file)?;
         let tester_file = rv.enter(session, &p.tester_file)?;
-        let admin_close = rv.enter(session, &p.admin_close)?;
-        let backend_close = rv.enter(session, &p.backend_close)?;
-        let tester_close = rv.enter(session, &p.tester_close)?;
+        let mut admin_close = rv.enter(session, &p.admin_close)?;
+        let mut backend_close = rv.enter(session, &p.backend_close)?;
+        let mut tester_close = rv.enter(session, &p.tester_close)?;
         let admin_read = rv.enter(session, &p.admin_outcome_read)?;
         let backend_read = rv.enter(session, &p.backend_outcome_read)?;
         let [bterm, aterm, tterm] = terminals;
         async {
-            localside::admin::run(&mut admin, (admin_file, admin_close), (simulator, &ac)).await?;
+            localside::file::run(&mut admin, admin_file, ADMIN_OBJECT).await?;
         };
         async {
-            localside::backend::run(
-                &mut backend,
-                (backend_file, backend_close),
-                (simulator, &bc),
-            )
-            .await?;
+            localside::file::run(&mut backend, backend_file, BACKEND_OBJECT).await?;
+        };
+        async {
+            localside::file::run(&mut tester, tester_file, TESTER_OBJECT).await?;
+        };
+        async {
+            localside::admin::run(&mut admin_close, simulator).await?;
+        };
+        async {
+            localside::backend::run(&mut backend_close, simulator).await?;
         };
         async {
             localside::tester::run(
-                &mut tester,
-                (tester_file, tester_close, admin_read, backend_read),
-                (simulator, &tc, &result),
+                &mut tester_close,
+                (admin_read, backend_read),
+                (simulator, &result),
             )
             .await?;
         };
@@ -125,10 +110,12 @@ async fn run_guests(
                 async { outcome.recv::<Loan<ADMIN_OUTCOME_FILE>>().await };
             }
             .await?;
+            let mut submitted = vec![0; crate::shell::GUEST_MEMORY_BYTES];
             let files = ChoreoFsFiles::new(endpoint)
                 .file(
                     ChoreoFsFile::new(ADMIN_OBJECT, service)
-                        .close_with::<CloseAuthority<ADMIN_CLOSE>>(),
+                        .write_as::<MigrationIntent>(&mut submitted)
+                        .close_with::<FileApplied>(),
                 )?
                 .file(ChoreoFsFile::new(OUTCOME_OBJECT, outcome))?;
             let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
@@ -168,10 +155,12 @@ async fn run_guests(
                 async { outcome.recv::<Loan<BACKEND_OUTCOME_FILE>>().await };
             }
             .await?;
+            let mut submitted = vec![0; crate::shell::GUEST_MEMORY_BYTES];
             let files = ChoreoFsFiles::new(endpoint)
                 .file(
                     ChoreoFsFile::new(BACKEND_OBJECT, service)
-                        .close_with::<CloseAuthority<BACKEND_CLOSE>>(),
+                        .write_as::<BackendRequest>(&mut submitted)
+                        .close_with::<FileApplied>(),
                 )?
                 .file(ChoreoFsFile::new(OUTCOME_OBJECT, outcome))?;
             let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
@@ -206,9 +195,11 @@ async fn run_guests(
         async {
             let mut endpoint = tester_vm;
             let service = endpoint.recv::<Loan<TESTER_FILE>>().await?;
+            let mut submitted = vec![0; crate::shell::GUEST_MEMORY_BYTES];
             let files = ChoreoFsFiles::new(endpoint).file(
                 ChoreoFsFile::new(TESTER_OBJECT, service)
-                    .close_with::<CloseAuthority<TESTER_CLOSE>>(),
+                    .write_as::<TestIntent>(&mut submitted)
+                    .close_with::<FileApplied>(),
             )?;
             let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
             let mut storage = HibanaWasiGuestStorage::uninit();
@@ -242,9 +233,6 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             (session, global::TESTER_FILE),
             (session, global::ADMIN_OUTCOME_FILE),
             (session, global::BACKEND_OUTCOME_FILE),
-            (session, global::ADMIN_CLOSE),
-            (session, global::BACKEND_CLOSE),
-            (session, global::TESTER_CLOSE),
             (session, global::ADMIN_OUTCOME_READ),
             (session, global::BACKEND_OUTCOME_READ),
         ],
