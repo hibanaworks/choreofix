@@ -1,14 +1,24 @@
 //! Canonical bytes for one operation on one assigned development target.
+use crate::shell::imp::service::SimulatorOperation;
 use hibana::runtime::wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload};
 use serde_json::Value;
 
-pub struct Arguments<const OPERATION: u8>(Vec<u8>);
-impl<const OPERATION: u8> Arguments<OPERATION> {
-    pub fn into_value(self) -> Value {
-        serde_json::from_slice(&self.0).expect("validated feature-delivery arguments")
-    }
+pub struct Arguments<const OPERATION: u8, const SUBMISSION: bool = false>(Vec<u8>);
+
+impl<const OPERATION: u8> SimulatorOperation for Arguments<OPERATION> {
+    const RPC: (&'static str, &'static str) = match OPERATION {
+        0 => ("DEVELOPER_A", "implement_feature"),
+        1 => ("DEVELOPER_B", "implement_feature"),
+        2 => ("DEVELOPER_A", "merge_code"),
+        3 => ("DEVELOPER_B", "merge_code"),
+        4 | 5 => ("REVIEWER", "code_review"),
+        6 | 7 => ("TEST_WRITER", "write_tests"),
+        8 | 9 => ("CI_RUNNER", "run_tests"),
+        _ => panic!("unknown feature delivery operation"),
+    };
 }
-impl<const OPERATION: u8> WireEncode for Arguments<OPERATION> {
+
+impl<const OPERATION: u8, const SUBMISSION: bool> WireEncode for Arguments<OPERATION, SUBMISSION> {
     fn encode_into(&self, out: &mut [u8]) -> Result<usize, CodecError> {
         out.get_mut(..self.0.len())
             .ok_or(CodecError::Truncated)?
@@ -16,9 +26,10 @@ impl<const OPERATION: u8> WireEncode for Arguments<OPERATION> {
         Ok(self.0.len())
     }
 }
+
 impl<const OPERATION: u8> WirePayload for Arguments<OPERATION> {
     const SCHEMA_ID: u32 = 0xac06_2000 | OPERATION as u32;
-    type Decoded<'a> = Self;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
         let value: Value =
             serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
@@ -48,8 +59,23 @@ impl<const OPERATION: u8> WirePayload for Arguments<OPERATION> {
         }
         Ok(())
     }
-    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
-        Self(input.as_bytes().to_vec())
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
+        input
+    }
+}
+
+// A submitted merge can be forwarded to the repository. Only the receipt
+// obtained at the repository has a simulator operation.
+impl<const OPERATION: u8> WirePayload for Arguments<OPERATION, true> {
+    const SCHEMA_ID: u32 = 0xac06_2100 | OPERATION as u32;
+    type Decoded<'a> = Arguments<OPERATION>;
+
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        Arguments::<OPERATION>::validate_payload(input)
+    }
+
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
+        Arguments(input.as_bytes().to_vec())
     }
 }
 

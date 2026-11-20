@@ -1,11 +1,14 @@
 //! The sole test environment owns candidate bytes and executes actual test requests.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{Endpoint, g::Message};
 use serde_json::Value;
 
 #[hibana_runtime::scope]
-pub async fn run<D: Domain>(owner: &mut Endpoint<TEST_OWNER>, domain: &D) -> ShellResult<()> {
+pub async fn run(
+    owner: &mut Endpoint<TEST_OWNER>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()> {
     let mut environment = owner.recv::<TestLoan>().await?;
     let mut candidates = [Value::Null, Value::Null];
     loop {
@@ -17,12 +20,9 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<TEST_OWNER>, domain: &D) -> She
                 candidates[0] = result;
             }
             TestRequestA::LOGICAL_LABEL => {
-                let arguments = branch.recv::<TestRequestA>().await?.into_value();
+                let arguments = branch.recv::<TestRequestA>().await?;
                 imp::candidate(&candidates[0], FEATURE_A)?;
-                let result = domain
-                    .execute("TEST_WRITER", "write_tests", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(arguments).await?;
                 imp::tested(&result, &candidates[0], FEATURE_A)?;
                 let bytes = imp::encode(&result)?;
                 environment.send::<TestedA>(&bytes.as_slice()).await?;
@@ -38,12 +38,9 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<TEST_OWNER>, domain: &D) -> She
                 candidates[1] = result;
             }
             TestRequestB::LOGICAL_LABEL => {
-                let arguments = branch.recv::<TestRequestB>().await?.into_value();
+                let arguments = branch.recv::<TestRequestB>().await?;
                 imp::candidate(&candidates[1], FEATURE_B)?;
-                let result = domain
-                    .execute("TEST_WRITER", "write_tests", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(arguments).await?;
                 imp::tested(&result, &candidates[1], FEATURE_B)?;
                 let bytes = imp::encode(&result)?;
                 environment.send::<TestedB>(&bytes.as_slice()).await?;

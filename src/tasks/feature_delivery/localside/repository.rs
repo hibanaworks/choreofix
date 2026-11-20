@@ -1,11 +1,14 @@
 //! One affine repository view owns actual candidates, approvals and publications.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{Endpoint, g::Message};
 use serde_json::Value;
 
 #[hibana_runtime::scope]
-pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> ShellResult<()> {
+pub async fn run(
+    owner: &mut Endpoint<REPO_OWNER>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()> {
     let mut repository = owner.recv::<RepoLoan>().await?;
     let mut submissions = owner
         .recv::<crate::shell::global::Loan<MERGE_REQUESTS>>()
@@ -80,11 +83,8 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
         let branch = repository.offer().await?;
         match branch.label() {
             ImplementA::LOGICAL_LABEL => {
-                let arguments = branch.recv::<ImplementA>().await?.into_value();
-                let result = domain
-                    .execute("DEVELOPER_A", "implement_feature", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let arguments = branch.recv::<ImplementA>().await?;
+                let result = effects.apply(arguments).await?;
                 imp::candidate(&result, FEATURE_A)?;
                 let bytes = imp::encode(&result)?;
                 candidates[0] = result;
@@ -139,12 +139,12 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                 tests[0] = result;
             }
             InitialMergeA::LOGICAL_LABEL => {
-                let arguments = branch.recv::<InitialMergeA>().await?.into_value();
-                imp::merge_inputs(&arguments, (FEATURE_A, &candidates[0], &reviews[0]))?;
-                let result = domain
-                    .execute("DEVELOPER_A", "merge_code", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let arguments = branch.recv::<InitialMergeA>().await?;
+                imp::merge_inputs(
+                    &imp::decode(arguments.as_bytes())?,
+                    (FEATURE_A, &candidates[0], &reviews[0]),
+                )?;
+                let result = effects.apply(arguments).await?;
                 imp::merge_result(&result, (FEATURE_A, &candidates[0], &reviews[0]), &prior_ci)?;
                 let bytes = imp::encode(&result)?;
                 repository.send::<MergedA>(&bytes.as_slice()).await?;
@@ -181,11 +181,8 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                     .await?;
             }
             ImplementB::LOGICAL_LABEL => {
-                let arguments = branch.recv::<ImplementB>().await?.into_value();
-                let result = domain
-                    .execute("DEVELOPER_B", "implement_feature", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let arguments = branch.recv::<ImplementB>().await?;
+                let result = effects.apply(arguments).await?;
                 imp::candidate(&result, FEATURE_B)?;
                 let bytes = imp::encode(&result)?;
                 candidates[1] = result;
@@ -240,12 +237,12 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<REPO_OWNER>, domain: &D) -> She
                 tests[1] = result;
             }
             InitialMergeB::LOGICAL_LABEL => {
-                let arguments = branch.recv::<InitialMergeB>().await?.into_value();
-                imp::merge_inputs(&arguments, (FEATURE_B, &candidates[1], &reviews[1]))?;
-                let result = domain
-                    .execute("DEVELOPER_B", "merge_code", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let arguments = branch.recv::<InitialMergeB>().await?;
+                imp::merge_inputs(
+                    &imp::decode(arguments.as_bytes())?,
+                    (FEATURE_B, &candidates[1], &reviews[1]),
+                )?;
+                let result = effects.apply(arguments).await?;
                 imp::merge_result(&result, (FEATURE_B, &candidates[1], &reviews[1]), &prior_ci)?;
                 let bytes = imp::encode(&result)?;
                 repository.send::<MergedB>(&bytes.as_slice()).await?;

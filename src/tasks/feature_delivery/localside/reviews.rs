@@ -2,16 +2,20 @@
 use super::super::{actual_outcome, global::*, imp};
 use crate::shell::{
     ShellError, ShellResult,
-    imp::{review_reply::ReviewReply, service::Domain},
+    imp::{review_reply::ReviewReply, service::ReceivedEffects},
 };
 use core::cell::Cell;
 use hibana::{Endpoint, runtime::resolver::DecisionArm};
 use serde_json::Value;
 
 #[hibana_runtime::scope]
-pub async fn initial<D: Domain>(
+pub async fn initial(
     owner: &mut Endpoint<REVIEW_INITIAL>,
-    (domain, actual_a, actual_b): (&D, &Cell<Option<Value>>, &Cell<Option<Value>>),
+    (effects, actual_a, actual_b): (
+        &impl ReceivedEffects,
+        &Cell<Option<Value>>,
+        &Cell<Option<Value>>,
+    ),
 ) -> ShellResult<()> {
     let mut a = owner.recv::<crate::shell::global::Loan<REVIEW_A>>().await?;
     let mut b = owner.recv::<crate::shell::global::Loan<REVIEW_B>>().await?;
@@ -20,11 +24,8 @@ pub async fn initial<D: Domain>(
         loop {
             let candidate = imp::decode(a.recv::<ReadyReviewA>().await?)?;
             imp::candidate(&candidate, FEATURE_A)?;
-            let arguments = a.recv::<ReviewRequestA>().await?.into_value();
-            let result = domain
-                .execute("REVIEWER", "code_review", arguments)
-                .await
-                .map_err(ShellError::message)?;
+            let arguments = a.recv::<ReviewRequestA>().await?;
+            let result = effects.apply(arguments).await?;
             imp::reviewed(&result, &candidate, FEATURE_A)?;
             let bytes = imp::encode(&result)?;
             actual_a.set(Some(result));
@@ -49,11 +50,8 @@ pub async fn initial<D: Domain>(
         loop {
             let candidate = imp::decode(b.recv::<ReadyReviewB>().await?)?;
             imp::candidate(&candidate, FEATURE_B)?;
-            let arguments = b.recv::<ReviewRequestB>().await?.into_value();
-            let result = domain
-                .execute("REVIEWER", "code_review", arguments)
-                .await
-                .map_err(ShellError::message)?;
+            let arguments = b.recv::<ReviewRequestB>().await?;
+            let result = effects.apply(arguments).await?;
             imp::reviewed(&result, &candidate, FEATURE_B)?;
             let bytes = imp::encode(&result)?;
             actual_b.set(Some(result));
@@ -78,9 +76,9 @@ pub async fn initial<D: Domain>(
 }
 
 #[hibana_runtime::scope]
-pub async fn feature_a<D: Domain>(
+pub async fn feature_a(
     owner: &mut Endpoint<REVIEW_REPAIR_A>,
-    (domain, actual): (&D, &Cell<Option<Value>>),
+    (effects, actual): (&impl ReceivedEffects, &Cell<Option<Value>>),
 ) -> ShellResult<()> {
     let approved = owner.recv::<ApprovedA>().await?.to_vec();
     let mut task = owner.recv::<crate::shell::global::Loan<REVIEW_A>>().await?;
@@ -118,11 +116,8 @@ pub async fn feature_a<D: Domain>(
                 loop {
                     let candidate = imp::decode(task.recv::<ReadyReviewA>().await?)?;
                     imp::candidate(&candidate, FEATURE_A)?;
-                    let arguments = task.recv::<ReviewRequestA>().await?.into_value();
-                    let result = domain
-                        .execute("REVIEWER", "code_review", arguments)
-                        .await
-                        .map_err(ShellError::message)?;
+                    let arguments = task.recv::<ReviewRequestA>().await?;
+                    let result = effects.apply(arguments).await?;
                     imp::reviewed(&result, &candidate, FEATURE_A)?;
                     let bytes = imp::encode(&result)?;
                     actual.set(Some(result));
@@ -152,9 +147,9 @@ pub async fn feature_a<D: Domain>(
 }
 
 #[hibana_runtime::scope]
-pub async fn feature_b<D: Domain>(
+pub async fn feature_b(
     owner: &mut Endpoint<REVIEW_REPAIR_B>,
-    (domain, actual): (&D, &Cell<Option<Value>>),
+    (effects, actual): (&impl ReceivedEffects, &Cell<Option<Value>>),
 ) -> ShellResult<()> {
     let approved = owner.recv::<ApprovedB>().await?.to_vec();
     let mut task = owner.recv::<crate::shell::global::Loan<REVIEW_B>>().await?;
@@ -192,11 +187,8 @@ pub async fn feature_b<D: Domain>(
                 loop {
                     let candidate = imp::decode(task.recv::<ReadyReviewB>().await?)?;
                     imp::candidate(&candidate, FEATURE_B)?;
-                    let arguments = task.recv::<ReviewRequestB>().await?.into_value();
-                    let result = domain
-                        .execute("REVIEWER", "code_review", arguments)
-                        .await
-                        .map_err(ShellError::message)?;
+                    let arguments = task.recv::<ReviewRequestB>().await?;
+                    let result = effects.apply(arguments).await?;
                     imp::reviewed(&result, &candidate, FEATURE_B)?;
                     let bytes = imp::encode(&result)?;
                     actual.set(Some(result));

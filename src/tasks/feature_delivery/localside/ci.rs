@@ -1,10 +1,13 @@
 //! The CI service receives publications, computes actual results and hands them to review.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{Endpoint, g::Message};
 
 #[hibana_runtime::scope]
-pub async fn run<D: Domain>(build: &mut Endpoint<BUILD_SERVER>, domain: &D) -> ShellResult<()> {
+pub async fn run(
+    build: &mut Endpoint<BUILD_SERVER>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()> {
     loop {
         let branch = build.offer().await?;
         match branch.label() {
@@ -16,11 +19,8 @@ pub async fn run<D: Domain>(build: &mut Endpoint<BUILD_SERVER>, domain: &D) -> S
                 imp::ci_tests(publication, tests)?;
                 let bytes = imp::encode(publication)?;
                 build.send::<FilePublicationA>(&bytes.as_slice()).await?;
-                let arguments = build.recv::<CiRequestA>().await?.into_value();
-                let result = domain
-                    .execute("CI_RUNNER", "run_tests", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let arguments = build.recv::<CiRequestA>().await?;
+                let result = effects.apply(arguments).await?;
                 imp::ci_result(&result, publication, tests)?;
                 let bytes = imp::encode(&result)?;
                 let admitted = match result["success"].as_bool() {
@@ -61,11 +61,8 @@ pub async fn run<D: Domain>(build: &mut Endpoint<BUILD_SERVER>, domain: &D) -> S
                 imp::ci_tests(publication, tests)?;
                 let bytes = imp::encode(publication)?;
                 build.send::<FilePublicationB>(&bytes.as_slice()).await?;
-                let arguments = build.recv::<CiRequestB>().await?.into_value();
-                let result = domain
-                    .execute("CI_RUNNER", "run_tests", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let arguments = build.recv::<CiRequestB>().await?;
+                let result = effects.apply(arguments).await?;
                 imp::ci_result(&result, publication, tests)?;
                 let bytes = imp::encode(&result)?;
                 let admitted = match result["success"].as_bool() {

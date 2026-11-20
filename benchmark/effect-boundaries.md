@@ -7,10 +7,12 @@ business operation. The task global determines when the corresponding request
 and resource Endpoint can be used.
 
 A physical effect updates the versioned common simulator. In 6E (review),
-16E (CI/CD) and 7H (collaborative writing), the resource receiver passes the
+6M (feature delivery), 16E (CI/CD) and 7H (collaborative writing), the resource receiver passes the
 actual Hibana `ReceivedPayload` to `ReceivedEffects::apply`. Its type fixes the
 participant and operation. Its bytes supply the arguments, and passing it
-consumes that receive. In 7H the two figure-lookup messages carry data. The
+consumes that receive. In 6M the submitted merge can be forwarded. Only the
+repository-side request type authorizes the corresponding simulator operation.
+In 7H the two figure-lookup messages carry data. The
 document owner compares the figure store's confirmation with the original
 lookup before consuming the confirmation to insert the figure. The two final
 15E chamber checks also use received requests.
@@ -96,7 +98,7 @@ each qualification.
 | 14E | `run_hplc_analysis`, `run_mass_spec_analysis`, `run_cell_assay` | [Instrument receivers](../src/tasks/drug_discovery/localside/instruments.rs): compare the accepted WASI argument with the actual request received through the instrument Endpoint before the effect; return the actual result. Final documentation also carries the actual decision and completed analysis data. The common simulator checks assigned analyses and physical instrument conflicts without enforcing the ChoreoFix operation order. |
 | 6E | `implement_feature`, `merge_code` | [Repository](../src/tasks/review/choreofs/localside/repo.rs): the repository consumes the actual typed file request for the assigned feature or branch. |
 | 6E | `code_review` | [Feature reviewers](../src/tasks/review/choreofs/localside/reviewer.rs): each consumes its typed review request after receiving the successful implementation. Its actual result feeds the resolver. |
-| 6M | `implement_feature`, `write_tests`, `code_review`, `merge_code`, `run_ci_pipeline` | [Repository](../src/tasks/feature_delivery/localside/repository.rs), [review](../src/tasks/feature_delivery/localside/reviews.rs) and [CI](../src/tasks/feature_delivery/localside/ci.rs) receivers match actual requests to the current source, completed review/test receipts and published occurrence. CI receives both actual feature and BUILD_SERVER requests. [6M](ports/6M.md) records recovery, resource boundaries and qualification. |
+| 6M | `implement_feature`, `write_tests`, `code_review`, `merge_code`, `run_tests` | [Repository](../src/tasks/feature_delivery/localside/repository.rs), [review](../src/tasks/feature_delivery/localside/reviews.rs) and [CI](../src/tasks/feature_delivery/localside/ci.rs) receivers match actual requests to the current source, completed review/test receipts and published occurrence. CI receives both actual feature and BUILD_SERVER requests. [6M](ports/6M.md) records recovery, resource boundaries and qualification. |
 | 7E | `write_section`, `update_references`, `review_sections`, `revise_section`, `combine_sections` | [Document receiver](../src/tasks/shared_document/localside/document.rs): actual admitted arguments and delegated document requests; actual review results and current document data accompany revision and final combination. Qualification is bound to the sources recorded in [7E](ports/7E.md). |
 | 10E | `compile_module`, `link_modules` | [Build receiver](../src/tasks/shared_build/localside/resources.rs): both resource requests agree with the admitted compile arguments; linking checks both actual current objects and the requested modules. The shared world independently grades actual input contents. |
 | 10M | `compile_module`, `run_build_tests`, `link_modules` | [Compiler](../src/tasks/cascading_build/localside/compiler.rs) and [test receiver](../src/tasks/cascading_build/localside/testing.rs): actual admitted arguments, paired resource requests, current objects and completed positive test receipts. Substituted compiler arguments are rejected before any effect in native/Miri. [10M](ports/10M.md) records the source-bound qualification. |

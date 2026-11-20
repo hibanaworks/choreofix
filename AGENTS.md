@@ -711,6 +711,12 @@ not a separate host workflow or authority. Record-mutation rejection only tests 
 test runtime rejection at the effect boundary separately. A local I/O error or
 deadline does not revoke remote ownership or authorize reissuance.
 
+For simulator effects, pass the actual Hibana received payload by value at the
+resource receiver. Its wire type fixes the participant and operation, and its
+bytes supply the arguments. Never add a call site that selects an agent, tool
+and JSON independently. A forwarded intent must still reach the resource
+receiver before it can authorize the effect.
+
 Keep the existing 2,592-run comparison and its 864-run first stage. Additional
 ZipperGen, Concordat, handoff and causal comparisons are planned in `plan.md`,
 not qualified by the existing matrix. Audit native expressiveness before task
