@@ -119,8 +119,8 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
                 )
                 .await?;
             };
-            async { localside::snapshots(&mut a_snapshots, ("WRITER_A", &simulator)).await };
-            async { localside::snapshots(&mut b_snapshots, ("WRITER_B", &simulator)).await };
+            async { localside::snapshots(&mut a_snapshots, &simulator).await };
+            async { localside::snapshots(&mut b_snapshots, &simulator).await };
             let (a, b) = async {
                 let [mut a, mut b] = drafting.par()?;
                 async { a.recv::<Loan<WRITER_FILE>>().await };

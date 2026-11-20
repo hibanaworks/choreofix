@@ -10,7 +10,11 @@ use crate::{
     shell::{
         ShellError, ShellResult,
         global::{Exit, FileExit, Loan, file_metadata, private_io},
-        imp::{bus::Bus, private_fs::PrivateFs, service::Domain},
+        imp::{
+            bus::Bus,
+            private_fs::PrivateFs,
+            service::{ReceivedEffects, SimulatorOperation},
+        },
         localside::file_metadata,
     },
 };
@@ -40,80 +44,84 @@ struct World {
     effects: Cell<Vec<Value>>,
 }
 
-impl Domain for World {
-    async fn execute(
-        &self,
-        agent: &'static str,
-        tool: &'static str,
-        args: Value,
-    ) -> Result<Value, String> {
-        let mut effects = self.effects.take();
-        let mut success = true;
-        let scope = args["section_name"].as_str();
-        let facts = json!({FACT_SCOPES[0]:format!("fact:{}",FACT_SCOPES[0]), FACT_SCOPES[1]:format!("fact:{}",FACT_SCOPES[1])});
-        let data = match tool {
-            "fact_check" => {
-                assert_eq!(agent, "FACT_CHECKER");
-                let scope = scope.unwrap();
-                let keep = if scope == FACT_SCOPES[0] {
-                    &CHAPTERS[..2]
-                } else {
-                    &CHAPTERS[2..]
-                };
-                let mut snapshot = self.snapshot.clone();
-                for category in ["sections", "references", "figures"] {
-                    snapshot[category]
-                        .as_object_mut()
-                        .unwrap()
-                        .retain(|name, _| keep.contains(&name.as_str()));
+impl ReceivedEffects for World {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+        let args = crate::imp::json::decode(received.as_bytes());
+        async move {
+            let args = args?;
+            let (agent, tool) = P::RPC;
+
+            let mut effects = self.effects.take();
+            let mut success = true;
+            let scope = args["section_name"].as_str();
+            let facts = json!({FACT_SCOPES[0]:format!("fact:{}",FACT_SCOPES[0]), FACT_SCOPES[1]:format!("fact:{}",FACT_SCOPES[1])});
+            let data = match tool {
+                "fact_check" => {
+                    assert_eq!(agent, "FACT_CHECKER");
+                    let scope = scope.unwrap();
+                    let keep = if scope == FACT_SCOPES[0] {
+                        &CHAPTERS[..2]
+                    } else {
+                        &CHAPTERS[2..]
+                    };
+                    let mut snapshot = self.snapshot.clone();
+                    for category in ["sections", "references", "figures"] {
+                        snapshot[category]
+                            .as_object_mut()
+                            .unwrap()
+                            .retain(|name, _| keep.contains(&name.as_str()));
+                    }
+                    if self.evidence == Evidence::StaleFacts && scope == FACT_SCOPES[1] {
+                        snapshot["sections"][CHAPTERS[2]]["id"] = json!("draft:3:old");
+                    }
+                    json!({"agent":agent,"section":scope,"check_id":facts[scope], "input_snapshot":snapshot})
                 }
-                if self.evidence == Evidence::StaleFacts && scope == FACT_SCOPES[1] {
-                    snapshot["sections"][CHAPTERS[2]]["id"] = json!("draft:3:old");
+                "review_sections" => {
+                    assert_eq!(agent, "EDITOR");
+                    assert_eq!(
+                        effects
+                            .iter()
+                            .filter(|event| event["tool_name"] == "fact_check")
+                            .count(),
+                        2
+                    );
+                    let scope = scope.unwrap();
+                    let mut snapshot = self.snapshot.clone();
+                    if self.evidence == Evidence::StaleReview && scope == CHAPTERS[1] {
+                        snapshot["sections"][CHAPTERS[2]]["id"] = json!("draft:3:old");
+                    }
+                    success = self.evidence != Evidence::RejectedReview || scope != CHAPTERS[1];
+                    json!({"agent":agent,"scope":scope,"review_id":format!("review:{scope}"), "input_snapshot":snapshot,"fact_receipts":facts})
                 }
-                json!({"agent":agent,"section":scope,"check_id":facts[scope], "input_snapshot":snapshot})
-            }
-            "review_sections" => {
-                assert_eq!(agent, "EDITOR");
-                assert_eq!(
-                    effects
+                "combine_sections" => {
+                    assert_eq!(agent, "EDITOR");
+                    let parts: Vec<_> = sections(args["sections"].as_str().unwrap()).collect();
+                    let reviews: serde_json::Map<_, _> = effects
                         .iter()
-                        .filter(|event| event["tool_name"] == "fact_check")
-                        .count(),
-                    2
-                );
-                let scope = scope.unwrap();
-                let mut snapshot = self.snapshot.clone();
-                if self.evidence == Evidence::StaleReview && scope == CHAPTERS[1] {
-                    snapshot["sections"][CHAPTERS[2]]["id"] = json!("draft:3:old");
-                }
-                success = self.evidence != Evidence::RejectedReview || scope != CHAPTERS[1];
-                json!({"agent":agent,"scope":scope,"review_id":format!("review:{scope}"), "input_snapshot":snapshot,"fact_receipts":facts})
-            }
-            "combine_sections" => {
-                assert_eq!(agent, "EDITOR");
-                let parts: Vec<_> = sections(args["sections"].as_str().unwrap()).collect();
-                let reviews: serde_json::Map<_, _> = effects
-                    .iter()
-                    .filter(|event| event["tool_name"] == "review_sections")
-                    .map(|event| {
-                        assert_eq!(event["success"], true);
-                        assert_eq!(event["data"]["input_snapshot"], self.snapshot);
-                        (
-                            event["data"]["scope"].as_str().unwrap().to_owned(),
-                            event["data"]["review_id"].clone(),
-                        )
-                    })
-                    .collect();
-                assert_eq!(reviews.len(), 3);
-                json!({"agent":agent,"artifact_id":"publication:1", "sections":parts,"input_snapshot":self.snapshot,
+                        .filter(|event| event["tool_name"] == "review_sections")
+                        .map(|event| {
+                            assert_eq!(event["success"], true);
+                            assert_eq!(event["data"]["input_snapshot"], self.snapshot);
+                            (
+                                event["data"]["scope"].as_str().unwrap().to_owned(),
+                                event["data"]["review_id"].clone(),
+                            )
+                        })
+                        .collect();
+                    assert_eq!(reviews.len(), 3);
+                    json!({"agent":agent,"artifact_id":"publication:1", "sections":parts,"input_snapshot":self.snapshot,
                     "fact_receipts":facts,"review_receipts":reviews})
-            }
-            _ => panic!("unexpected publication effect: {tool}"),
-        };
-        let actual = json!({"success":success,"tool_name":tool,"data":data});
-        effects.push(actual.clone());
-        self.effects.set(effects);
-        Ok(actual)
+                }
+                _ => panic!("unexpected publication effect: {tool}"),
+            };
+            let actual = json!({"success":success,"tool_name":tool,"data":data});
+            effects.push(actual.clone());
+            self.effects.set(effects);
+            Ok(actual)
+        }
     }
 }
 

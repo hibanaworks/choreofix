@@ -1,9 +1,14 @@
 //! The actual fact and review receipts gate the document's move to publication.
-use super::super::{CHAPTERS, FACT_SCOPES, global::*, sections};
+use super::super::{Arguments, CHAPTERS, FACT_SCOPES, global::*, sections};
 use crate::{
     imp::json::{decode, encode, same},
-    shell::{ShellError, ShellResult, global::Loan, imp::service::Domain},
+    shell::{
+        ShellError, ShellResult,
+        global::Loan,
+        imp::service::{ReceivedEffects, SimulatorOperation},
+    },
 };
+use hibana::runtime::wire::ReceivedPayload;
 use hibana::{Endpoint, g::Message};
 use serde_json::{Value, json};
 
@@ -70,18 +75,19 @@ fn material_for(snapshot: &Value, chapters: &[&str]) -> Value {
 
 pub async fn facts<const ROLE: u8, const OP: u8>(
     checker: &mut Endpoint<'_, ROLE>,
-    domain: &impl Domain,
-) -> ShellResult<Option<Value>> {
+    effects: &impl ReceivedEffects,
+) -> ShellResult<Option<Value>>
+where
+    Arguments<OP>: for<'a> SimulatorOperation<Decoded<'a> = ReceivedPayload<'a, Arguments<OP>>>,
+{
     let branch = checker.offer().await?;
     if branch.label() == Published::<ROLE>::LOGICAL_LABEL {
         branch.recv::<Published<ROLE>>().await?;
         return Ok(None);
     }
-    let arguments = branch.recv::<QualityRequest<OP>>().await?.value()?;
-    let actual = domain
-        .execute("FACT_CHECKER", "fact_check", arguments.clone())
-        .await
-        .map_err(ShellError::message)?;
+    let received = branch.recv::<QualityRequest<OP>>().await?;
+    let arguments = decode(received.as_bytes())?;
+    let actual = effects.apply(received).await?;
     let data = &actual["data"];
     if actual["tool_name"] != "fact_check"
         || data["agent"] != "FACT_CHECKER"
@@ -96,27 +102,23 @@ pub async fn facts<const ROLE: u8, const OP: u8>(
     Ok(Some(actual))
 }
 
-async fn review_request(domain: &impl Domain, arguments: Value) -> ShellResult<Vec<u8>> {
-    let actual = domain
-        .execute("EDITOR", "review_sections", arguments.clone())
-        .await
-        .map_err(ShellError::message)?;
+fn review_reply(actual: &Value, section: &str) -> ShellResult<Vec<u8>> {
     if actual["tool_name"] != "review_sections"
         || actual["data"]["agent"] != "EDITOR"
-        || actual["data"]["scope"] != arguments["section_name"]
+        || actual["data"]["scope"] != section
         || !actual["success"].is_boolean()
     {
         return Err(ShellError::message(
             "editorial result names a different scope",
         ));
     }
-    encode(&actual)
+    encode(actual)
 }
 
 #[hibana_runtime::scope]
 pub async fn editor(
     editor: &mut Endpoint<EDITOR>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<Option<Value>> {
     let branch = editor.offer().await?;
     match branch.label() {
@@ -137,24 +139,24 @@ pub async fn editor(
     async {
         let [mut a, mut b, mut c] = editor.par()?;
         async {
-            let args = a.recv::<QualityRequest<REVIEW_1>>().await?.value()?;
-            let actual = review_request(domain, args).await?;
+            let received = a.recv::<QualityRequest<REVIEW_1>>().await?;
+            let actual = review_reply(&effects.apply(received).await?, CHAPTERS[0])?;
             a.send::<QualityResult<REVIEW_1>>(&actual.as_slice())
                 .await?;
             a.send::<QualityResult<REVIEW_1>>(&actual.as_slice())
                 .await?;
         };
         async {
-            let args = b.recv::<QualityRequest<REVIEW_2>>().await?.value()?;
-            let actual = review_request(domain, args).await?;
+            let received = b.recv::<QualityRequest<REVIEW_2>>().await?;
+            let actual = review_reply(&effects.apply(received).await?, CHAPTERS[1])?;
             b.send::<QualityResult<REVIEW_2>>(&actual.as_slice())
                 .await?;
             b.send::<QualityResult<REVIEW_2>>(&actual.as_slice())
                 .await?;
         };
         async {
-            let args = c.recv::<QualityRequest<REVIEW_3>>().await?.value()?;
-            let actual = review_request(domain, args).await?;
+            let received = c.recv::<QualityRequest<REVIEW_3>>().await?;
+            let actual = review_reply(&effects.apply(received).await?, CHAPTERS[2])?;
             c.send::<QualityResult<REVIEW_3>>(&actual.as_slice())
                 .await?;
             c.send::<QualityResult<REVIEW_3>>(&actual.as_slice())
@@ -167,7 +169,7 @@ pub async fn editor(
     match branch.label() {
         Loan::<DOCUMENT>::LOGICAL_LABEL => {
             let mut document = branch.recv::<Loan<DOCUMENT>>().await?;
-            let admitted = editor.recv::<AdmittedCombine>().await?;
+            let admitted = Arguments(editor.recv::<AdmittedCombine>().await?.as_bytes().to_vec());
             document.send::<CombineOnDocument>(&admitted).await?;
             editor.send::<Loan<DOCUMENT>>(document).await?;
         }
@@ -187,7 +189,7 @@ pub async fn editor(
 pub async fn reconsider<'r>(
     owner: &mut Endpoint<'r, DOCUMENT_OWNER>,
     mut document: Endpoint<'r, DOCUMENT>,
-    (mut snapshot, domain): (Value, &impl Domain),
+    (mut snapshot, effects): (Value, &impl ReceivedEffects),
 ) -> ShellResult<Value> {
     if !completed_material(&snapshot, &CHAPTERS) {
         return Err(ShellError::message(
@@ -259,17 +261,12 @@ pub async fn reconsider<'r>(
             }
             if review_ids.len() == CHAPTERS.len() {
                 owner.send::<Loan<DOCUMENT>>(document).await?;
-                let admitted = owner.recv::<Combine>().await?;
+                let admitted = Arguments(owner.recv::<Combine>().await?.as_bytes().to_vec());
                 owner.send::<AdmittedCombine>(&admitted).await?;
-                let arguments = admitted.value()?;
-                same(
-                    &owner.recv::<CombineOnDocument>().await?.value()?,
-                    &arguments,
-                )?;
-                let published = domain
-                    .execute("EDITOR", "combine_sections", arguments.clone())
-                    .await
-                    .map_err(ShellError::message)?;
+                let arguments = decode(&admitted.0)?;
+                let received = owner.recv::<CombineOnDocument>().await?;
+                same(&decode(received.as_bytes())?, &arguments)?;
+                let published = effects.apply(received).await?;
                 let data = &published["data"];
                 if published["tool_name"] != "combine_sections"
                     || published["success"] != true
@@ -347,24 +344,28 @@ pub async fn reconsider<'r>(
             .or_else(|| data["section"].as_str())
             .ok_or_else(|| ShellError::message("revision request lacks its scope"))?;
         let bytes = encode(rejection)?;
-        let (writer, arguments) = match scope {
+        let (writer, arguments, revised) = match scope {
             "CHAPTERS_1_2" | "CHAPTER_1" | "CHAPTER_2" => {
                 owner
                     .send::<WriterOutcome<WRITER_FILE>>(&bytes.as_slice())
                     .await?;
-                (
-                    "WRITER_A",
-                    document.recv::<Revise<REVISE_A>>().await?.value()?,
-                )
+                let received = document.recv::<Revise<REVISE_A>>().await?;
+                let arguments = decode(received.as_bytes())?;
+                let chapter = arguments["section_name"].as_str().expect("typed revision");
+                if chapter != scope
+                    && !(scope == "CHAPTERS_1_2" && CHAPTERS[..2].contains(&chapter))
+                {
+                    return Err(ShellError::message("revision targets a different scope"));
+                }
+                ("WRITER_A", arguments, effects.apply(received).await?)
             }
             "CHAPTER_3" => {
                 owner
                     .send::<WriterOutcome<WRITER_B_FILE>>(&bytes.as_slice())
                     .await?;
-                (
-                    "WRITER_B",
-                    document.recv::<Revise<REVISE_B>>().await?.value()?,
-                )
+                let received = document.recv::<Revise<REVISE_B>>().await?;
+                let arguments = decode(received.as_bytes())?;
+                ("WRITER_B", arguments, effects.apply(received).await?)
             }
             _ => {
                 return Err(ShellError::message(
@@ -373,13 +374,6 @@ pub async fn reconsider<'r>(
             }
         };
         let chapter = arguments["section_name"].as_str().expect("typed revision");
-        if chapter != scope && !(scope == "CHAPTERS_1_2" && CHAPTERS[..2].contains(&chapter)) {
-            return Err(ShellError::message("revision targets a different scope"));
-        }
-        let revised = domain
-            .execute(writer, "revise_section", arguments.clone())
-            .await
-            .map_err(ShellError::message)?;
         let data = &revised["data"];
         let written = &data["artifact"];
         if revised["tool_name"] != "revise_section"

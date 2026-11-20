@@ -5,7 +5,7 @@ use crate::{
     shell::{
         GUEST_MEMORY_BYTES, ShellError, ShellResult,
         global::{Exit, FileExit},
-        imp::service::Domain,
+        imp::service::ReceivedEffects,
     },
 };
 use hibana::Endpoint;
@@ -27,7 +27,7 @@ pub async fn writer_a<'r>(
     ] = [(); 6].map(|_| (vec![0; GUEST_MEMORY_BYTES], vec![0; GUEST_MEMORY_BYTES]));
     let mut outcome = vec![0; GUEST_MEMORY_BYTES];
     let file = ChoreoFsFile::new(WRITER_A_OBJECTS[0], file)
-        .write_as::<ReadSection>(&mut read)
+        .write_as::<ReadSection<WRITER_A_SNAPSHOTS>>(&mut read)
         .read_as::<SectionSnapshot>(&mut material)
         .file(WRITER_A_OBJECTS[1])?
         .write_as::<DraftRequest<DRAFT_1>>(&mut a)
@@ -73,7 +73,7 @@ pub async fn writer_b<'r>(
     ] = [(); 4].map(|_| (vec![0; GUEST_MEMORY_BYTES], vec![0; GUEST_MEMORY_BYTES]));
     let mut outcome = vec![0; GUEST_MEMORY_BYTES];
     let file = ChoreoFsFile::new(WRITER_B_OBJECTS[0], file)
-        .write_as::<ReadSection>(&mut read)
+        .write_as::<ReadSection<WRITER_B_SNAPSHOTS>>(&mut read)
         .read_as::<SectionSnapshot>(&mut material)
         .file(WRITER_B_OBJECTS[1])?
         .write_as::<DraftRequest<DRAFT_3>>(&mut c)
@@ -100,16 +100,7 @@ pub async fn writer_b<'r>(
     Ok(())
 }
 
-async fn update(
-    domain: &impl Domain,
-    writer: &'static str,
-    arguments: Value,
-) -> ShellResult<Value> {
-    let section = arguments["section_name"].clone();
-    let result = domain
-        .execute(writer, "update_references", arguments)
-        .await
-        .map_err(ShellError::message)?;
+fn check_references(result: &Value, writer: &str, section: &str) -> ShellResult<()> {
     let data = &result["data"];
     if result["tool_name"] != "update_references"
         || result["success"] != true
@@ -123,42 +114,36 @@ async fn update(
             "reference result differs from its admitted chapter",
         ));
     }
-    Ok(result)
+    Ok(())
 }
 
 #[hibana_runtime::scope]
 pub async fn references(
     endpoint: &mut Endpoint<REFERENCES>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<Value> {
     let (one, two, three) = async {
         let [mut one, mut two, mut three] = endpoint.par()?;
         async {
-            let args = one
-                .recv::<ReferenceRequest<REFERENCES_1>>()
-                .await?
-                .value()?;
-            let actual = update(domain, "WRITER_A", args).await?;
+            let received = one.recv::<ReferenceRequest<REFERENCES_1>>().await?;
+            let actual = effects.apply(received).await?;
+            check_references(&actual, "WRITER_A", CHAPTERS[0])?;
             one.send::<ReferenceResult<REFERENCES_1>>(&encode(&actual)?.as_slice())
                 .await?;
             Ok(actual["data"]["artifact"].clone())
         };
         async {
-            let args = two
-                .recv::<ReferenceRequest<REFERENCES_2>>()
-                .await?
-                .value()?;
-            let actual = update(domain, "WRITER_A", args).await?;
+            let received = two.recv::<ReferenceRequest<REFERENCES_2>>().await?;
+            let actual = effects.apply(received).await?;
+            check_references(&actual, "WRITER_A", CHAPTERS[1])?;
             two.send::<ReferenceResult<REFERENCES_2>>(&encode(&actual)?.as_slice())
                 .await?;
             Ok(actual["data"]["artifact"].clone())
         };
         async {
-            let args = three
-                .recv::<ReferenceRequest<REFERENCES_3>>()
-                .await?
-                .value()?;
-            let actual = update(domain, "WRITER_B", args).await?;
+            let received = three.recv::<ReferenceRequest<REFERENCES_3>>().await?;
+            let actual = effects.apply(received).await?;
+            check_references(&actual, "WRITER_B", CHAPTERS[2])?;
             three
                 .send::<ReferenceResult<REFERENCES_3>>(&encode(&actual)?.as_slice())
                 .await?;

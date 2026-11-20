@@ -167,6 +167,14 @@ the other aggregate report, only one of the five participants finished. Their
 last usage reports sum to 2,185,945 tokens and the final total is unknown.
 Two further attempts have no aggregate report.
 
+On November 20, five scripted wash guests published the 7M document in each
+of six runs on the typed receiver implementation. The effect audit identified
+two distinct source occurrences for each of the 12 figure insertions, one
+from the document and one from the figure store. All six runs passed dynamic
+EPF replay and the common simulator reported completion with zero violations.
+The [per-run measurements](7m-figure-receipts.json) identify the input build,
+the captures and the rejected figure-ID substitution in the depth-2 journal.
+
 For 8M, all four archived model results have matching saved audits, and three
 additional attempts have no aggregate report. The three v26 trials at depths
 0, 1 and 2 account for 36 effects and 5,882,177 inclusive tokens. The fourth

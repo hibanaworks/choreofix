@@ -9,7 +9,11 @@ use crate::{
     shell::{
         GUEST_MEMORY_BYTES, ShellResult,
         global::{Exit, FileExit, Loan, file_metadata, private_io},
-        imp::{bus::Bus, private_fs::PrivateFs, service::Domain},
+        imp::{
+            bus::Bus,
+            private_fs::PrivateFs,
+            service::{ReceivedEffects, SimulatorOperation},
+        },
         localside::file_metadata,
     },
 };
@@ -33,63 +37,67 @@ const WRITER_IO: u8 = 16;
 #[derive(Default)]
 struct DraftWorld(Cell<Vec<Value>>);
 
-impl Domain for DraftWorld {
-    async fn execute(
-        &self,
-        agent: &'static str,
-        tool: &'static str,
-        args: Value,
-    ) -> Result<Value, String> {
-        if tool == "write_section" && agent == "WRITER_B" {
-            // The writer's first effect remains in flight while a reader enters.
-            let mut events = self.0.take();
-            events.push(json!({"start":tool}));
-            self.0.set(events);
-            loop {
-                let events = self.0.take();
-                let observed = events.iter().any(|event| {
-                    event["tool_name"] == "read_section"
-                        && event["data"]["section"] == "CHAPTER_3"
-                        && event["success"] == false
-                });
-                self.0.set(events);
-                if observed {
-                    break;
-                }
-                hibana_runtime::yield_now().await;
-            }
-        }
+impl ReceivedEffects for DraftWorld {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+        let args = crate::imp::json::decode(received.as_bytes());
+        async move {
+            let args = args?;
+            let (agent, tool) = P::RPC;
 
-        let mut events = self.0.take();
-        let section = &args["section_name"];
-        let (status, artifact) = match tool {
-            "write_section" => (
-                "written",
-                json!({"id":if agent == "WRITER_B" { "draft:1" } else { "draft:3" }, "content":args["content_notes"]}),
-            ),
-            "revise_section" => (
-                "revised",
-                json!({"id":"draft:2","content":args["feedback"]}),
-            ),
-            "read_section" => {
-                assert!(matches!(agent, "WRITER_A" | "WRITER_B"));
-                match events.iter().rev().find(|event| {
-                    matches!(
-                        event["tool_name"].as_str(),
-                        Some("write_section" | "revise_section")
-                    ) && &event["data"]["section"] == section
-                }) {
-                    Some(completed) => ("read", completed["data"]["artifact"].clone()),
-                    None => ("missing_material", Value::Null),
+            if tool == "write_section" && agent == "WRITER_B" {
+                // The writer's first effect remains in flight while a reader enters.
+                let mut events = self.0.take();
+                events.push(json!({"start":tool}));
+                self.0.set(events);
+                loop {
+                    let events = self.0.take();
+                    let observed = events.iter().any(|event| {
+                        event["tool_name"] == "read_section"
+                            && event["data"]["section"] == "CHAPTER_3"
+                            && event["success"] == false
+                    });
+                    self.0.set(events);
+                    if observed {
+                        break;
+                    }
+                    hibana_runtime::yield_now().await;
                 }
             }
-            _ => panic!("unexpected fixture effect {tool}"),
-        };
-        let reply = json!({"tool_name":tool,"success": !artifact.is_null(),
+
+            let mut events = self.0.take();
+            let section = &args["section_name"];
+            let (status, artifact) = match tool {
+                "write_section" => (
+                    "written",
+                    json!({"id":if agent == "WRITER_B" { "draft:1" } else { "draft:3" }, "content":args["content_notes"]}),
+                ),
+                "revise_section" => (
+                    "revised",
+                    json!({"id":"draft:2","content":args["feedback"]}),
+                ),
+                "read_section" => {
+                    assert!(matches!(agent, "WRITER_A" | "WRITER_B"));
+                    match events.iter().rev().find(|event| {
+                        matches!(
+                            event["tool_name"].as_str(),
+                            Some("write_section" | "revise_section")
+                        ) && &event["data"]["section"] == section
+                    }) {
+                        Some(completed) => ("read", completed["data"]["artifact"].clone()),
+                        None => ("missing_material", Value::Null),
+                    }
+                }
+                _ => panic!("unexpected fixture effect {tool}"),
+            };
+            let reply = json!({"tool_name":tool,"success": !artifact.is_null(),
             "data":{"section":section,"status":status,"artifact":artifact}});
-        events.push(reply.clone());
-        self.0.set(events);
-        Ok(reply)
+            events.push(reply.clone());
+            self.0.set(events);
+            Ok(reply)
+        }
     }
 }
 
@@ -101,11 +109,11 @@ async fn wasm_reads_do_not_lock_the_document_or_return_unfinished_content() -> S
         g::send::<WRITER_DATA, WRITER_VM, Loan<WRITER_FILE>>(),
         g::par(
             g::seq(
-                write_chapter::<WRITER_B_FILE>(),
+                write_chapter::<WRITER_B_FILE, DRAFT_3>(),
                 // This scenario exercises a draft which uses another writer's revision.
                 g::seq(
                     revise_chapter::<WRITER_B_FILE, REVISE_B>(),
-                    write_chapter::<WRITER_FILE>(),
+                    write_chapter::<WRITER_FILE, DRAFT_1>(),
                 ),
             ),
             g::par(
@@ -159,30 +167,22 @@ async fn wasm_reads_do_not_lock_the_document_or_return_unfinished_content() -> S
     let world = DraftWorld::default();
     let trial = async {
         async {
-            let args = doc.recv::<Write>().await?.value()?;
             let actual = world
-                .execute("WRITER_B", "write_section", args)
-                .await
-                .expect("fixture write");
+                .apply(doc.recv::<DraftRequest<DRAFT_3>>().await?)
+                .await?;
             doc.send::<Written>(&encode(&actual)?.as_slice()).await?;
-            let args = doc.recv::<Revise<REVISE_B>>().await?.value()?;
-            let actual = world
-                .execute("WRITER_B", "revise_section", args)
-                .await
-                .expect("fixture revision");
+            let actual = world.apply(doc.recv::<Revise<REVISE_B>>().await?).await?;
             doc.send::<Revised>(&encode(&actual)?.as_slice()).await?;
-            let args = doc.recv::<Write>().await?.value()?;
             let actual = world
-                .execute("WRITER_A", "write_section", args)
-                .await
-                .expect("fixture cross-reference");
+                .apply(doc.recv::<DraftRequest<DRAFT_1>>().await?)
+                .await?;
             doc.send::<Written>(&encode(&actual)?.as_slice()).await?;
         };
         async {
             let draft = Arguments::new(
                 &json!({"section_name":"CHAPTER_3", "content_notes":"original text"}),
             )?;
-            writer_b.send::<Write>(&draft).await?;
+            writer_b.send::<DraftRequest<DRAFT_3>>(&draft).await?;
             assert_eq!(
                 decode(writer_b.recv::<Written>().await?)?["data"]["artifact"]["id"],
                 "draft:1"
@@ -208,8 +208,8 @@ async fn wasm_reads_do_not_lock_the_document_or_return_unfinished_content() -> S
             );
             writer_b.send::<ReadingFinished>(&0).await?;
         };
-        async { localside::snapshots(&mut a_snapshots, ("WRITER_A", &world)).await };
-        async { localside::snapshots(&mut b_snapshots, ("WRITER_B", &world)).await };
+        async { localside::snapshots(&mut a_snapshots, &world).await };
+        async { localside::snapshots(&mut b_snapshots, &world).await };
         async { file_metadata::run(&mut metadata, file, objects).await };
         async { fixture_io(&mut io, PrivateFs::new(terminal, &bus, &objects)).await };
         async {
@@ -217,10 +217,10 @@ async fn wasm_reads_do_not_lock_the_document_or_return_unfinished_content() -> S
             let [mut request, mut reply, mut draft, mut written] =
                 [(); 4].map(|_| vec![0; GUEST_MEMORY_BYTES]);
             let file = ChoreoFsFile::new(READ_SECTION, file)
-                .write_as::<ReadSection>(&mut request)
+                .write_as::<ReadSection<WRITER_A_SNAPSHOTS>>(&mut request)
                 .read_as::<SectionSnapshot>(&mut reply)
                 .file(WRITE_SECTION)?
-                .write_as::<Write>(&mut draft)
+                .write_as::<DraftRequest<DRAFT_1>>(&mut draft)
                 .read_as::<Written>(&mut written);
             let files = ChoreoFsFiles::new(root).file(file)?;
             let mut memory = vec![0; GUEST_MEMORY_BYTES];

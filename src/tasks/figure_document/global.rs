@@ -42,12 +42,10 @@ pub const WRITER_B_VM: u8 = 30;
 pub const WRITER_A_IO: u8 = 31;
 pub const WRITER_B_IO: u8 = 32;
 
-pub const WRITE: u8 = 1;
 pub const CREATE_1: u8 = 41;
 pub const CREATE_3: u8 = 42;
 pub const INSERT_1: u8 = 39;
 pub const INSERT_3: u8 = 40;
-pub const READ: u8 = 4;
 pub const REVISE_A: u8 = 5;
 pub const REVISE_B: u8 = 38;
 pub const CHECK_12: u8 = 15;
@@ -64,14 +62,12 @@ pub const REFERENCES_2: u8 = 30;
 pub const REFERENCES_3: u8 = 31;
 
 #[cfg(test)]
-pub type Write = g::Msg<1, Arguments<WRITE>>;
-#[cfg(test)]
 pub type Written<'a> = g::Msg<2, &'a [u8]>;
 pub type Create<const OP: u8> = g::Msg<OP, Arguments<OP>>;
 pub type Created<'a, const OP: u8> = g::Msg<OP, &'a [u8]>;
 pub type Insert<const CHAPTER: u8> = g::Msg<CHAPTER, Arguments<CHAPTER>>;
 pub type Inserted<'a, const CHAPTER: u8> = g::Msg<CHAPTER, &'a [u8]>;
-pub type ReadSection = g::Msg<10, Arguments<READ>>;
+pub type ReadSection<const READER: u8> = g::Msg<10, Arguments<READER>>;
 pub type SectionSnapshot<'a> = g::Msg<11, &'a [u8]>;
 pub type ReadingFinished = g::Msg<12, i32>;
 pub type Revise<const OP: u8> = g::Msg<13, Arguments<OP>>;
@@ -393,7 +389,7 @@ pub fn reconsidering_publication() -> impl Projectable {
 
 pub fn snapshot_reads<const FILE: u8, const SNAPSHOTS: u8>() -> impl Projectable {
     let query = g::seq(
-        g::send::<FILE, SNAPSHOTS, ReadSection>(),
+        g::send::<FILE, SNAPSHOTS, ReadSection<SNAPSHOTS>>(),
         g::send::<SNAPSHOTS, FILE, SectionSnapshot>(),
     );
     let finished = g::send::<FILE, SNAPSHOTS, ReadingFinished>();
@@ -401,9 +397,9 @@ pub fn snapshot_reads<const FILE: u8, const SNAPSHOTS: u8>() -> impl Projectable
 }
 
 #[cfg(test)]
-pub fn write_chapter<const FILE: u8>() -> impl Projectable {
+pub fn write_chapter<const FILE: u8, const OP: u8>() -> impl Projectable {
     g::seq(
-        g::send::<FILE, DOCUMENT, Write>(),
+        g::send::<FILE, DOCUMENT, DraftRequest<OP>>(),
         g::send::<DOCUMENT, FILE, Written>(),
     )
 }
@@ -587,7 +583,7 @@ macro_rules! programs {
                         "review_1": QualityRequest::<REVIEW_1>::LOGICAL_LABEL,
                         "review_2": QualityRequest::<REVIEW_2>::LOGICAL_LABEL,
                         "review_3": QualityRequest::<REVIEW_3>::LOGICAL_LABEL,
-                        "read": ReadSection::LOGICAL_LABEL,
+                        "read": ReadSection::<WRITER_A_SNAPSHOTS>::LOGICAL_LABEL,
                         "snapshot": SectionSnapshot::LOGICAL_LABEL,
                         "writer_a_outcome": WriterOutcome::<WRITER_FILE>::LOGICAL_LABEL,
                         "writer_b_outcome": WriterOutcome::<WRITER_B_FILE>::LOGICAL_LABEL,

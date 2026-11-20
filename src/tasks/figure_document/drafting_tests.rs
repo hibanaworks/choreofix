@@ -4,7 +4,10 @@ use crate::{
     shell::{
         ShellResult,
         global::Loan,
-        imp::{bus::Bus, service::Domain},
+        imp::{
+            bus::Bus,
+            service::{ReceivedEffects, SimulatorOperation},
+        },
     },
 };
 use hibana::runtime::{SessionKitStorage, ids::SessionId, program::project};
@@ -14,23 +17,27 @@ use std::{cell::Cell, time::Duration};
 #[derive(Default)]
 struct World(Cell<Vec<Value>>);
 
-impl Domain for World {
-    async fn execute(
-        &self,
-        agent: &'static str,
-        tool: &'static str,
-        args: Value,
-    ) -> Result<Value, String> {
-        assert_eq!(tool, "write_section");
-        let mut writes = self.0.take();
-        let result = json!({"success":true,"tool_name":tool,"data":{
-            "agent":agent,"section":args["section_name"], "artifact":{
-                "id":format!("draft:{}", writes.len() + 1), "content":args["content_notes"]
-            }
-        }});
-        writes.push(result.clone());
-        self.0.set(writes);
-        Ok(result)
+impl ReceivedEffects for World {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+        let args = crate::imp::json::decode(received.as_bytes());
+        async move {
+            let args = args?;
+            let (agent, tool) = P::RPC;
+
+            assert_eq!(tool, "write_section");
+            let mut writes = self.0.take();
+            let result = json!({"success":true,"tool_name":tool,"data":{
+                "agent":agent,"section":args["section_name"], "artifact":{
+                    "id":format!("draft:{}", writes.len() + 1), "content":args["content_notes"]
+                }
+            }});
+            writes.push(result.clone());
+            self.0.set(writes);
+            Ok(result)
+        }
     }
 }
 

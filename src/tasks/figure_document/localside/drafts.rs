@@ -2,30 +2,36 @@
 use super::super::{CHAPTERS, global::*};
 use crate::{
     imp::json::encode,
-    shell::{ShellError, ShellResult, imp::service::Domain},
+    shell::{ShellError, ShellResult, imp::service::ReceivedEffects},
 };
 use hibana::Endpoint;
 use serde_json::{Map, Value};
 
 pub async fn initial(
     document: &mut Endpoint<'_, DOCUMENT>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<Value> {
     let mut sections = Map::new();
     for _ in CHAPTERS {
         let branch = document.offer().await?;
         let chapter = branch.label();
-        let (arguments, writer) = match chapter {
+        let (actual, writer) = match chapter {
             DRAFT_1 => (
-                branch.recv::<DraftRequest<DRAFT_1>>().await?.value()?,
+                effects
+                    .apply(branch.recv::<DraftRequest<DRAFT_1>>().await?)
+                    .await?,
                 "WRITER_A",
             ),
             DRAFT_2 => (
-                branch.recv::<DraftRequest<DRAFT_2>>().await?.value()?,
+                effects
+                    .apply(branch.recv::<DraftRequest<DRAFT_2>>().await?)
+                    .await?,
                 "WRITER_A",
             ),
             DRAFT_3 => (
-                branch.recv::<DraftRequest<DRAFT_3>>().await?.value()?,
+                effects
+                    .apply(branch.recv::<DraftRequest<DRAFT_3>>().await?)
+                    .await?,
                 "WRITER_B",
             ),
             label => {
@@ -35,10 +41,6 @@ pub async fn initial(
             }
         };
         let section = CHAPTERS[usize::from(chapter - DRAFT_1)];
-        let actual = domain
-            .execute(writer, "write_section", arguments)
-            .await
-            .map_err(ShellError::message)?;
         let data = &actual["data"];
         if actual["tool_name"] != "write_section"
             || actual["success"] != true

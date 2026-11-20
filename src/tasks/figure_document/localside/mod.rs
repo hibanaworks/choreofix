@@ -1,12 +1,13 @@
-use super::{CHAPTERS, global::*};
+use super::{Arguments, CHAPTERS, global::*};
 use crate::{
-    imp::json::{encode, same},
+    imp::json::{decode, encode, same},
     shell::{
         GUEST_MEMORY_BYTES, ShellError, ShellResult,
         global::{Exit, FileExit, Loan},
-        imp::service::Domain,
+        imp::service::{PairedEffects, ReceivedEffects, ResourceReceipt, SimulatorOperation},
     },
 };
+use hibana::runtime::wire::ReceivedPayload;
 use hibana::{Endpoint, g::Message};
 use hibana_wasip1_runtime::{ChoreoFsFile, ChoreoFsFiles, GuestMemory, HibanaWasiGuestStorage};
 
@@ -18,17 +19,18 @@ pub mod writers;
 /// A writer reads from the same world that applies document effects.
 pub async fn snapshots<const ROLE: u8>(
     endpoint: &mut Endpoint<'_, ROLE>,
-    (writer, domain): (&'static str, &impl Domain),
-) -> ShellResult<()> {
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()>
+where
+    Arguments<ROLE>: for<'a> SimulatorOperation<Decoded<'a> = ReceivedPayload<'a, Arguments<ROLE>>>,
+{
     loop {
         let branch = endpoint.offer().await?;
         match branch.label() {
-            ReadSection::LOGICAL_LABEL => {
-                let arguments = branch.recv::<ReadSection>().await?.value()?;
-                let actual = domain
-                    .execute(writer, "read_section", arguments.clone())
-                    .await
-                    .map_err(ShellError::message)?;
+            ReadSection::<ROLE>::LOGICAL_LABEL => {
+                let received = branch.recv::<ReadSection<ROLE>>().await?;
+                let arguments = decode(received.as_bytes())?;
+                let actual = effects.apply(received).await?;
                 let data = &actual["data"];
                 let artifact = &data["artifact"];
                 let valid = match actual["success"].as_bool() {
@@ -66,7 +68,7 @@ pub async fn snapshots<const ROLE: u8>(
 
 pub async fn document<'r, const OPERATIONS: usize>(
     endpoint: &mut Endpoint<'r, DRAFTING>,
-    domain: &impl Domain,
+    effects: &impl PairedEffects,
 ) -> ShellResult<(serde_json::Value, serde_json::Value)> {
     let mut document = endpoint.recv::<Loan<DOCUMENT>>().await?;
     let mut drafts = serde_json::Map::new();
@@ -74,40 +76,47 @@ pub async fn document<'r, const OPERATIONS: usize>(
     for _ in 0..OPERATIONS {
         let branch = document.offer().await?;
         let operation = branch.label();
-        let (arguments, agent, chapter, tool) = match operation {
+        let (actual, chapter, figure) = match operation {
             DRAFT_1 => (
-                branch.recv::<DraftRequest<DRAFT_1>>().await?.value()?,
-                "WRITER_A",
+                effects
+                    .apply(branch.recv::<DraftRequest<DRAFT_1>>().await?)
+                    .await?,
                 CHAPTERS[0],
-                "write_section",
+                None,
             ),
             DRAFT_2 => (
-                branch.recv::<DraftRequest<DRAFT_2>>().await?.value()?,
-                "WRITER_A",
+                effects
+                    .apply(branch.recv::<DraftRequest<DRAFT_2>>().await?)
+                    .await?,
                 CHAPTERS[1],
-                "write_section",
+                None,
             ),
             DRAFT_3 => (
-                branch.recv::<DraftRequest<DRAFT_3>>().await?.value()?,
-                "WRITER_B",
+                effects
+                    .apply(branch.recv::<DraftRequest<DRAFT_3>>().await?)
+                    .await?,
                 CHAPTERS[2],
-                "write_section",
+                None,
             ),
             INSERT_1 => {
-                let admitted = branch.recv::<Insert<INSERT_1>>().await?;
-                document.send::<Insert<INSERT_1>>(&admitted).await?;
+                let admitted = ResourceReceipt::retain(branch.recv::<Insert<INSERT_1>>().await?);
+                let arguments = decode(admitted.as_bytes())?;
+                document
+                    .send::<Insert<INSERT_1>>(&Arguments(admitted.as_bytes().to_vec()))
+                    .await?;
                 let store = document.recv::<Insert<INSERT_1>>().await?;
-                let arguments = admitted.value()?;
-                same(&arguments, &store.value()?)?;
-                (arguments, "FIGURE_CREATOR", CHAPTERS[0], "insert_figure")
+                let actual = effects.apply_pair(admitted, store).await?;
+                (actual, CHAPTERS[0], Some(arguments["figure_id"].clone()))
             }
             INSERT_3 => {
-                let admitted = branch.recv::<Insert<INSERT_3>>().await?;
-                document.send::<Insert<INSERT_3>>(&admitted).await?;
+                let admitted = ResourceReceipt::retain(branch.recv::<Insert<INSERT_3>>().await?);
+                let arguments = decode(admitted.as_bytes())?;
+                document
+                    .send::<Insert<INSERT_3>>(&Arguments(admitted.as_bytes().to_vec()))
+                    .await?;
                 let store = document.recv::<Insert<INSERT_3>>().await?;
-                let arguments = admitted.value()?;
-                same(&arguments, &store.value()?)?;
-                (arguments, "FIGURE_CREATOR", CHAPTERS[2], "insert_figure")
+                let actual = effects.apply_pair(admitted, store).await?;
+                (actual, CHAPTERS[2], Some(arguments["figure_id"].clone()))
             }
             label => {
                 return Err(ShellError::message(format!(
@@ -115,17 +124,18 @@ pub async fn document<'r, const OPERATIONS: usize>(
                 )));
             }
         };
-        let actual = domain
-            .execute(agent, tool, arguments.clone())
-            .await
-            .map_err(ShellError::message)?;
+        let tool = if figure.is_some() {
+            "insert_figure"
+        } else {
+            "write_section"
+        };
         let data = &actual["data"];
         if actual["tool_name"] != tool
             || actual["success"] != true
             || data["section"] != chapter
             || data["artifact"]["id"].as_str().is_none_or(str::is_empty)
             || !data["artifact"]["content"].is_string()
-            || (tool == "insert_figure" && data["figure_id"] != arguments["figure_id"])
+            || figure.as_ref().is_some_and(|id| *id != data["figure_id"])
         {
             return Err(ShellError::message(
                 "document effect differs from its admitted request",
@@ -175,27 +185,35 @@ pub async fn document<'r, const OPERATIONS: usize>(
 
 pub async fn creator<'r, const OPERATIONS: usize>(
     endpoint: &mut Endpoint<'r, FIGURE_CREATOR>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     let mut store = endpoint.recv::<Loan<FIGURE_STORE>>().await?;
     let mut figures = [serde_json::Value::Null, serde_json::Value::Null];
     for _ in 0..OPERATIONS {
         let branch = store.offer().await?;
         let operation = branch.label();
-        let arguments = match operation {
-            CREATE_1 => branch.recv::<Create<CREATE_1>>().await?.value()?,
-            CREATE_3 => branch.recv::<Create<CREATE_3>>().await?.value()?,
+        let (arguments, actual) = match operation {
+            CREATE_1 => {
+                let received = branch.recv::<Create<CREATE_1>>().await?;
+                (decode(received.as_bytes())?, effects.apply(received).await?)
+            }
+            CREATE_3 => {
+                let received = branch.recv::<Create<CREATE_3>>().await?;
+                (decode(received.as_bytes())?, effects.apply(received).await?)
+            }
             INSERT_1 => {
-                let admitted = branch.recv::<Insert<INSERT_1>>().await?;
-                same(&admitted.value()?["figure_id"], &figures[0])?;
+                let admitted =
+                    Arguments(branch.recv::<Insert<INSERT_1>>().await?.as_bytes().to_vec());
+                same(&decode(&admitted.0)?["figure_id"], &figures[0])?;
                 store.send::<Insert<INSERT_1>>(&admitted).await?;
                 let actual = store.recv::<Inserted<INSERT_1>>().await?.to_vec();
                 store.send::<Inserted<INSERT_1>>(&actual.as_slice()).await?;
                 continue;
             }
             INSERT_3 => {
-                let admitted = branch.recv::<Insert<INSERT_3>>().await?;
-                same(&admitted.value()?["figure_id"], &figures[1])?;
+                let admitted =
+                    Arguments(branch.recv::<Insert<INSERT_3>>().await?.as_bytes().to_vec());
+                same(&decode(&admitted.0)?["figure_id"], &figures[1])?;
                 store.send::<Insert<INSERT_3>>(&admitted).await?;
                 let actual = store.recv::<Inserted<INSERT_3>>().await?.to_vec();
                 store.send::<Inserted<INSERT_3>>(&actual.as_slice()).await?;
@@ -207,10 +225,6 @@ pub async fn creator<'r, const OPERATIONS: usize>(
                 )));
             }
         };
-        let actual = domain
-            .execute("FIGURE_CREATOR", "create_figure", arguments.clone())
-            .await
-            .map_err(ShellError::message)?;
         if actual["tool_name"] != "create_figure"
             || actual["success"] != true
             || actual["data"]["figure_id"]

@@ -4,10 +4,15 @@ use crate::{
     shell::{
         ShellResult,
         global::{Exit, Loan},
-        imp::{bus::Bus, private_fs::PrivateFs, service::Domain},
+        imp::{
+            bus::Bus,
+            private_fs::PrivateFs,
+            service::{ReceivedEffects, SimulatorOperation},
+        },
         localside::file_metadata,
     },
 };
+use hibana::runtime::wire::ReceivedPayload;
 use hibana::{
     Endpoint,
     g::Message,
@@ -21,13 +26,8 @@ use std::{cell::Cell, fs, process::Command, time::Duration};
 #[derive(Default)]
 struct World(Cell<Vec<Value>>);
 
-impl Domain for World {
-    async fn execute(
-        &self,
-        agent: &'static str,
-        tool: &'static str,
-        args: Value,
-    ) -> Result<Value, String> {
+impl World {
+    fn effect(&self, (agent, tool): (&str, &str), args: Value) -> ShellResult<Value> {
         let mut events = self.0.take();
         let data = match tool {
             "write_section" => json!({"section":args["section_name"], "artifact":{
@@ -62,11 +62,36 @@ impl Domain for World {
     }
 }
 
+impl ReceivedEffects for World {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+        let args = decode(received.as_bytes());
+        async move { self.effect(P::RPC, args?) }
+    }
+}
+impl crate::shell::imp::service::PairedEffects for World {
+    async fn apply_pair<'a, 'b, P: SimulatorOperation<2>>(
+        &self,
+        first: impl Into<crate::shell::imp::service::ResourceReceipt<'a, P>>,
+        second: impl Into<crate::shell::imp::service::ResourceReceipt<'b, P>>,
+    ) -> ShellResult<Value> {
+        let args = decode(first.into().as_bytes())?;
+        crate::imp::json::same(&args, &decode(second.into().as_bytes())?)?;
+        self.effect(P::RPC, args)
+    }
+}
+
 #[hibana_runtime::scope]
 async fn exercise<const DRAFT: u8, const CREATE: u8, const INSERT: u8>(
     figures_first: bool,
     substitutes_store_request: bool,
-) -> ShellResult<()> {
+) -> ShellResult<()>
+where
+    Arguments<CREATE>:
+        for<'a> SimulatorOperation<Decoded<'a> = ReceivedPayload<'a, Arguments<CREATE>>>,
+{
     let source = prepare_chapters(figure_chapter::<CREATE, INSERT>(
         draft::<WRITER_FILE, DRAFT>(),
     ));
@@ -115,11 +140,7 @@ async fn exercise<const DRAFT: u8, const CREATE: u8, const INSERT: u8>(
         async {
             if substitutes_store_request {
                 let mut store = creator.recv::<Loan<FIGURE_STORE>>().await?;
-                let create = store.recv::<Create<CREATE>>().await?.value()?;
-                let figure = world
-                    .execute("FIGURE_CREATOR", "create_figure", create)
-                    .await
-                    .map_err(crate::shell::ShellError::message)?;
+                let figure = world.apply(store.recv::<Create<CREATE>>().await?).await?;
                 let bytes = crate::imp::json::encode(&figure)?;
                 store.send::<Created<CREATE>>(&bytes.as_slice()).await?;
                 store.recv::<Insert<INSERT>>().await?;

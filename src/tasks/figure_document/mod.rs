@@ -4,7 +4,9 @@ pub mod localside;
 mod run;
 pub use run::{projection, run_stdio};
 
-use crate::{imp::json::decode, shell::ShellResult};
+#[cfg(test)]
+use crate::shell::ShellResult;
+use crate::shell::imp::service::SimulatorOperation;
 use hibana::runtime::wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload};
 use serde_json::Value;
 
@@ -34,17 +36,13 @@ fn sections(value: &str) -> impl Iterator<Item = &str> {
 #[derive(Debug)]
 pub struct Arguments<const OP: u8>(Vec<u8>);
 
+#[cfg(test)]
 impl<const OP: u8> Arguments<OP> {
-    #[cfg(test)]
     fn new(value: &Value) -> ShellResult<Self> {
         let bytes = crate::imp::json::encode(value)?;
         Self::validate_payload(Payload::new(&bytes))
             .map_err(|_| crate::shell::ShellError::message("invalid figure document arguments"))?;
         Ok(Self(bytes))
-    }
-
-    fn value(&self) -> ShellResult<Value> {
-        decode(&self.0)
     }
 }
 
@@ -59,7 +57,7 @@ impl<const OP: u8> WireEncode for Arguments<OP> {
 
 impl<const OP: u8> WirePayload for Arguments<OP> {
     const SCHEMA_ID: u32 = 0xac7d_0000 | OP as u32;
-    type Decoded<'a> = Self;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
 
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
         let value: Value =
@@ -69,10 +67,9 @@ impl<const OP: u8> WirePayload for Arguments<OP> {
             .as_str()
             .is_some_and(|name| CHAPTERS.contains(&name));
         let valid = match OP {
-            global::WRITE | global::DRAFT_1 | global::DRAFT_2 | global::DRAFT_3 => {
+            global::DRAFT_1 | global::DRAFT_2 | global::DRAFT_3 => {
                 chapter
-                    && (OP == global::WRITE
-                        || value["section_name"] == CHAPTERS[usize::from(OP - global::DRAFT_1)])
+                    && value["section_name"] == CHAPTERS[usize::from(OP - global::DRAFT_1)]
                     && args.iter().all(|(key, value)| {
                         matches!(key.as_str(), "section_name" | "content_notes")
                             && value.is_string()
@@ -96,7 +93,7 @@ impl<const OP: u8> WirePayload for Arguments<OP> {
                         .as_str()
                         .is_some_and(|id| !id.trim().is_empty())
             }
-            global::READ => chapter && args.len() == 1,
+            global::WRITER_A_SNAPSHOTS | global::WRITER_B_SNAPSHOTS => chapter && args.len() == 1,
             global::REFERENCES_1 | global::REFERENCES_2 | global::REFERENCES_3 => {
                 args.len() == 1
                     && value["section_name"] == CHAPTERS[usize::from(OP - global::REFERENCES_1)]
@@ -133,10 +130,44 @@ impl<const OP: u8> WirePayload for Arguments<OP> {
         }
     }
 
-    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
-        Self(input.as_bytes().to_vec())
+    fn decode_validated_payload(input: ReceivedPayload<'_, Self>) -> Self::Decoded<'_> {
+        input
     }
 }
+
+// Each effect accepts only its own wire type. Insertion requires both resource receives.
+macro_rules! operations {
+    ($count:literal; $($op:ident => ($agent:literal, $tool:literal)),+ $(,)?) => {
+        $(impl SimulatorOperation<$count> for Arguments<{ global::$op }> {
+            const RPC: (&'static str, &'static str) = ($agent, $tool);
+        })+
+    };
+}
+
+operations!(1;
+    DRAFT_1 => ("WRITER_A", "write_section"),
+    DRAFT_2 => ("WRITER_A", "write_section"),
+    DRAFT_3 => ("WRITER_B", "write_section"),
+    WRITER_A_SNAPSHOTS => ("WRITER_A", "read_section"),
+    WRITER_B_SNAPSHOTS => ("WRITER_B", "read_section"),
+    REFERENCES_1 => ("WRITER_A", "update_references"),
+    REFERENCES_2 => ("WRITER_A", "update_references"),
+    REFERENCES_3 => ("WRITER_B", "update_references"),
+    CREATE_1 => ("FIGURE_CREATOR", "create_figure"),
+    CREATE_3 => ("FIGURE_CREATOR", "create_figure"),
+    CHECK_12 => ("FACT_CHECKER", "fact_check"),
+    CHECK_3 => ("FACT_CHECKER", "fact_check"),
+    REVIEW_1 => ("EDITOR", "review_sections"),
+    REVIEW_2 => ("EDITOR", "review_sections"),
+    REVIEW_3 => ("EDITOR", "review_sections"),
+    REVISE_A => ("WRITER_A", "revise_section"),
+    REVISE_B => ("WRITER_B", "revise_section"),
+    COMBINE => ("EDITOR", "combine_sections"),
+);
+operations!(2;
+    INSERT_1 => ("FIGURE_CREATOR", "insert_figure"),
+    INSERT_3 => ("FIGURE_CREATOR", "insert_figure"),
+);
 
 #[cfg(test)]
 mod drafting_tests;

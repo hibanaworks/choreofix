@@ -7,7 +7,11 @@ use super::{
 use crate::shell::{
     ShellResult,
     global::Loan,
-    imp::{bus::Bus, private_fs::PrivateFs, service::Domain},
+    imp::{
+        bus::Bus,
+        private_fs::PrivateFs,
+        service::{ReceivedEffects, SimulatorOperation},
+    },
     localside::file_metadata,
 };
 use hibana::runtime::{SessionKitStorage, ids::SessionId, program::project, tap};
@@ -17,69 +21,77 @@ use std::{cell::Cell, time::Duration};
 #[derive(Default)]
 struct World(Cell<Vec<Value>>);
 
-impl Domain for World {
-    async fn execute(
-        &self,
-        agent: &'static str,
-        tool: &'static str,
-        args: Value,
-    ) -> Result<Value, String> {
-        let chapter = args["section_name"].as_str().unwrap();
-        let mut journal = self.0.take();
-        journal.push(json!({"started":tool,"section":chapter}));
-        self.0.set(journal);
-        let depends_on = match (tool, chapter) {
-            ("write_section", "CHAPTER_2") => Some(("tool_name", "update_references", "CHAPTER_3")),
-            ("update_references", "CHAPTER_3") => Some(("started", "write_section", "CHAPTER_2")),
-            _ => None,
-        };
-        if let Some((field, operation, target)) = depends_on {
-            loop {
-                let journal = self.0.take();
-                let reached = journal
-                    .iter()
-                    .any(|row| row[field] == operation && row["section"] == target);
-                self.0.set(journal);
-                if reached {
-                    break;
+impl ReceivedEffects for World {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+        let args = crate::imp::json::decode(received.as_bytes());
+        async move {
+            let args = args?;
+            let (agent, tool) = P::RPC;
+
+            let chapter = args["section_name"].as_str().unwrap();
+            let mut journal = self.0.take();
+            journal.push(json!({"started":tool,"section":chapter}));
+            self.0.set(journal);
+            let depends_on = match (tool, chapter) {
+                ("write_section", "CHAPTER_2") => {
+                    Some(("tool_name", "update_references", "CHAPTER_3"))
                 }
-                hibana_runtime::yield_now().await;
+                ("update_references", "CHAPTER_3") => {
+                    Some(("started", "write_section", "CHAPTER_2"))
+                }
+                _ => None,
+            };
+            if let Some((field, operation, target)) = depends_on {
+                loop {
+                    let journal = self.0.take();
+                    let reached = journal
+                        .iter()
+                        .any(|row| row[field] == operation && row["section"] == target);
+                    self.0.set(journal);
+                    if reached {
+                        break;
+                    }
+                    hibana_runtime::yield_now().await;
+                }
             }
+            let mut journal = self.0.take();
+            let (success, data) = match tool {
+                "write_section" => (
+                    true,
+                    json!({"agent":agent,"section":chapter,"artifact":{
+                        "id":format!("draft:{chapter}"),"content":args["content_notes"]
+                    }}),
+                ),
+                "update_references" => (
+                    true,
+                    json!({"agent":agent,"section":chapter,"scope":chapter,"artifact":{
+                        "id":format!("refs:{chapter}"),"content":format!("References for {chapter} by {agent}")
+                    }}),
+                ),
+                "read_section" => {
+                    assert_eq!(agent, "WRITER_A");
+                    let written = journal.iter().find(|row| {
+                        row["tool_name"] == "write_section" && row["section"] == chapter
+                    });
+                    let (status, artifact) = match written {
+                        Some(row) => ("read", row["actual"]["data"]["artifact"].clone()),
+                        None => ("missing_material", Value::Null),
+                    };
+                    (
+                        !artifact.is_null(),
+                        json!({"section":chapter,"status":status,"artifact":artifact}),
+                    )
+                }
+                _ => panic!("unexpected writer fixture operation: {tool}"),
+            };
+            let actual = json!({"success":success,"tool_name":tool,"data":data});
+            journal.push(json!({"tool_name":tool,"section":chapter,"actual":actual}));
+            self.0.set(journal);
+            Ok(actual)
         }
-        let mut journal = self.0.take();
-        let (success, data) = match tool {
-            "write_section" => (
-                true,
-                json!({"agent":agent,"section":chapter,"artifact":{
-                    "id":format!("draft:{chapter}"),"content":args["content_notes"]
-                }}),
-            ),
-            "update_references" => (
-                true,
-                json!({"agent":agent,"section":chapter,"scope":chapter,"artifact":{
-                    "id":format!("refs:{chapter}"),"content":format!("References for {chapter} by {agent}")
-                }}),
-            ),
-            "read_section" => {
-                assert_eq!(agent, "WRITER_A");
-                let written = journal
-                    .iter()
-                    .find(|row| row["tool_name"] == "write_section" && row["section"] == chapter);
-                let (status, artifact) = match written {
-                    Some(row) => ("read", row["actual"]["data"]["artifact"].clone()),
-                    None => ("missing_material", Value::Null),
-                };
-                (
-                    !artifact.is_null(),
-                    json!({"section":chapter,"status":status,"artifact":artifact}),
-                )
-            }
-            _ => panic!("unexpected writer fixture operation: {tool}"),
-        };
-        let actual = json!({"success":success,"tool_name":tool,"data":data});
-        journal.push(json!({"tool_name":tool,"section":chapter,"actual":actual}));
-        self.0.set(journal);
-        Ok(actual)
     }
 }
 
@@ -156,10 +168,10 @@ async fn two_wasm_writers_prepare_document_data_while_independent_references_ove
             .await?;
         };
         async {
-            snapshots(&mut reads_a, ("WRITER_A", &world)).await?;
+            snapshots(&mut reads_a, &world).await?;
         };
         async {
-            snapshots(&mut reads_b, ("WRITER_B", &world)).await?;
+            snapshots(&mut reads_b, &world).await?;
         };
         async {
             let (file_a, file_b) = async {
