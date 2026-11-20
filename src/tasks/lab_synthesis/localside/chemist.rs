@@ -1,13 +1,16 @@
 //! Actual file requests, specimen data and resource requests remain in one localside.
+use super::super::arguments::InstrumentRequest;
 use super::super::{global::*, imp};
 use crate::shell::{ShellError, ShellResult};
 use hibana::Endpoint;
 use serde_json::json;
 #[hibana_runtime::scope]
 pub async fn run(chemist: &mut Endpoint<CHEMIST>) -> ShellResult<()> {
-    let arguments = chemist.recv::<Raw>().await?.into_value();
+    let arguments = imp::decode(chemist.recv::<Raw>().await?.as_bytes())?;
     let bytes = imp::encode(&json!({"arguments":arguments}))?;
-    chemist.send::<RawOperation>(&bytes.as_slice()).await?;
+    chemist
+        .send::<RawOperation>(&InstrumentRequest(&bytes))
+        .await?;
     let raw = imp::decode(chemist.recv::<RawResult>().await?)?;
     let raw_id = imp::record(
         &raw,
@@ -16,9 +19,11 @@ pub async fn run(chemist: &mut Endpoint<CHEMIST>) -> ShellResult<()> {
     )?;
     let bytes = imp::encode(&raw)?;
     chemist.send::<FileRawResult>(&bytes.as_slice()).await?;
-    let arguments = chemist.recv::<Purify>().await?.into_value();
+    let arguments = imp::decode(chemist.recv::<Purify>().await?.as_bytes())?;
     let bytes = imp::encode(&json!({"arguments":arguments,"raw":raw}))?;
-    chemist.send::<PurifyOperation>(&bytes.as_slice()).await?;
+    chemist
+        .send::<PurifyOperation>(&InstrumentRequest(&bytes))
+        .await?;
     let purified = imp::decode(chemist.recv::<PurifiedResult>().await?)?;
     imp::record(
         &purified,
@@ -43,9 +48,11 @@ pub async fn run(chemist: &mut Endpoint<CHEMIST>) -> ShellResult<()> {
     }
     let bytes = imp::encode(&quality)?;
     chemist.send::<FileQuality>(&bytes.as_slice()).await?;
-    let arguments = chemist.recv::<Final>().await?.into_value();
+    let arguments = imp::decode(chemist.recv::<Final>().await?.as_bytes())?;
     let bytes = imp::encode(&json!({"arguments":arguments,"quality":quality}))?;
-    chemist.send::<FinalOperation>(&bytes.as_slice()).await?;
+    chemist
+        .send::<FinalOperation>(&InstrumentRequest(&bytes))
+        .await?;
     let result = imp::decode(chemist.recv::<FinalResult>().await?)?;
     imp::record(
         &result,

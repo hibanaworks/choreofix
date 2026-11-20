@@ -1,10 +1,13 @@
 //! Cell preparation and purification may arrive in either order at the physical owner.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{Endpoint, g::Message};
 use serde_json::{Value, json};
 #[hibana_runtime::scope]
-pub async fn run<D: Domain>(owner: &mut Endpoint<CENT_OWNER>, domain: &D) -> ShellResult<()> {
+pub async fn run(
+    owner: &mut Endpoint<CENT_OWNER>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()> {
     let mut cent = owner.recv::<CentLoan>().await?;
     let mut cells = Value::Null;
     let mut purified = Value::Null;
@@ -12,12 +15,8 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<CENT_OWNER>, domain: &D) -> She
         let branch = cent.offer().await?;
         match branch.label() {
             CellsOperation::LOGICAL_LABEL => {
-                let packet = imp::decode(branch.recv::<CellsOperation>().await?)?;
-                let arguments = imp::arguments::<2>(&packet)?;
-                let result = domain
-                    .execute("BIOLOGIST", "run_separation", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let received = branch.recv::<CellsOperation>().await?;
+                let result = effects.apply(received).await?;
                 imp::record(
                     &result,
                     ("run_separation", "BIOLOGIST", "cell_cultures"),
@@ -28,17 +27,14 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<CENT_OWNER>, domain: &D) -> She
                 cent.send::<CellsResult>(&bytes.as_slice()).await?;
             }
             PurifyOperation::LOGICAL_LABEL => {
-                let packet = imp::decode(branch.recv::<PurifyOperation>().await?)?;
-                let arguments = imp::arguments::<1>(&packet)?;
+                let received = branch.recv::<PurifyOperation>().await?;
+                let packet = imp::decode(received.as_bytes())?;
                 let raw = imp::record(
                     &packet["raw"],
                     ("run_analysis", "CHEMIST", "raw_materials"),
                     &json!({}),
                 )?;
-                let result = domain
-                    .execute("CHEMIST", "run_separation", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(received).await?;
                 imp::record(
                     &result,
                     ("run_separation", "CHEMIST", "compound_purification"),
@@ -49,18 +45,15 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<CENT_OWNER>, domain: &D) -> She
                 cent.send::<PurifiedResult>(&bytes.as_slice()).await?;
             }
             VerificationOperation::LOGICAL_LABEL => {
-                let packet = imp::decode(branch.recv::<VerificationOperation>().await?)?;
-                let arguments = imp::arguments::<6>(&packet)?;
+                let received = branch.recv::<VerificationOperation>().await?;
+                let packet = imp::decode(received.as_bytes())?;
                 let (compound, assay) = imp::assay(&packet["assay"])?;
                 if packet["assay"]["cells"] != cells || packet["assay"]["compound"] != purified {
                     return Err(ShellError::message(
                         "verification request substituted actual centrifuge results",
                     ));
                 }
-                let result = domain
-                    .execute("ANALYST", "run_separation", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(received).await?;
                 imp::record(
                     &result,
                     ("run_separation", "ANALYST", "verification"),

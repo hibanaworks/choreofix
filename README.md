@@ -8,7 +8,9 @@ endpoints. In review (6E), API development (8E) and CI/CD (16E), each
 simulator effect consumes the typed request received from an Endpoint. The
 [6E](analysis/review-receipts.md), [8E](analysis/8e-received-effects.json)
 and [16E](analysis/cicd-receipts.md) trials exercised this path with wash and
-live agents. Six qualified tasks (13E/M/H and 14E/M/H) still have receivers
+live agents. In [13E](analysis/13e-received-effects.json), three live agents
+completed the task after all eight effects moved to typed Endpoint receives.
+Five qualified tasks (13M, 13H, 14E, 14M and 14H) still have receivers
 that can select a simulator tool and supply its arguments directly. We check the
 protocol execution with EPF, match admitted requests to actual simulator effects,
 and score the business outcome. Whether this design preserves the original

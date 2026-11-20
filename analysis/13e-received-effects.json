@@ -1,0 +1,271 @@
+{
+  "task": "13E",
+  "archive": "output/verification/13e-received-effects-20261121.ICtopc",
+  "source_git_base": "0103f0e0bd918c32d1f0493712d8bda3f862ff38",
+  "source_manifest_sha256": "d8159fe3ba1437a960b8c5dd434369498e08a4eb913be6907646079dae4f14e5",
+  "source_scope": "The build receipt includes the working tree patch. The frozen 13E Rust sources match this receiver change.",
+  "runtime_sha256": "76d8124711c8fb1861274975770df9189f7b1ca75167e0ec169d45192f7326ba",
+  "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+  "projection_sha256": "324c9ee4ecd6193614199b9aefdeea0d656278cea6d5875ecfec9faedbb94e36",
+  "build_receipt_sha256": "0eba5abf8f7fc87eae28f134bebb92a96569c373a8134afcc1ef34c7d7bc1152",
+  "scored_comparison": false,
+  "wasm": {
+    "conditions": 25,
+    "effects": 200,
+    "epf_records": 55648,
+    "cases_with_complete_score": 25,
+    "record_mutations_rejected": 9,
+    "harness_sha256": "9f298c5179727f3b04ff9698435aad446c020d6f690cfa434126e968bf83cdb5",
+    "summary_sha256": "100a0eea8fb3e0351355b2a26a117e49278cbcadd90dead9a31d2fef93a40f25",
+    "cases": [
+      {
+        "case": 0,
+        "directory": "wasm/lab-wasm-1795209147062230000-0",
+        "effects": 8,
+        "epf_records": 2548,
+        "events_sha256": "c7c300a8ed69da68c5566683dc7ac1f12f36bf2af27242e7e076e70dfb8aa443",
+        "audit_sha256": "765e7e2b97f3b15362723717ac57ea034055a5552352b0edd1d56e95c7e69088",
+        "result_sha256": "9a1714ac5847c04e51bf66981b94342645abf091212858a38ad6390a22739c0e"
+      },
+      {
+        "case": 1,
+        "directory": "wasm/lab-wasm-1795209148697593000-1",
+        "effects": 8,
+        "epf_records": 2273,
+        "events_sha256": "eac2583c8ab34d2f7f9a4b470883ab6e9d6a348d398a9d1bafcb3825a4b2e634",
+        "audit_sha256": "17f6b6d32ca01b3df681ec4bf62ae91d9fe2f4abdc2dc8ef026944ba63aa104f",
+        "result_sha256": "58c07ab90b59e01881b30484af145e6074cf5568b963bb1c195f0a0b7b5e689b"
+      },
+      {
+        "case": 2,
+        "directory": "wasm/lab-wasm-1795209149627394000-2",
+        "effects": 8,
+        "epf_records": 2152,
+        "events_sha256": "b06cf343400114b21faf375a8e8e6c4af50282e70ebe1c31b1c0889c44e73326",
+        "audit_sha256": "7896d7342a042587b4082dafde0a529244fcff7432d14ff59ef25ac6ecc316ad",
+        "result_sha256": "45d110462619b5873cb369b408e5a955f36a9336758fb04ebb25c3911f709adc"
+      },
+      {
+        "case": 3,
+        "directory": "wasm/lab-wasm-1795209150525071000-3",
+        "effects": 8,
+        "epf_records": 2273,
+        "events_sha256": "4f695908ab58141eb8a7adf3fb95ebeb5943463abc5b9d2b436d46f0449083ba",
+        "audit_sha256": "69ae4aeda2e861afc9dc49d03deff25539349d23c89a2abf221b72de93a18bec",
+        "result_sha256": "a05dd4335ae306f651c8b12297d123442c68b9936c761222e00b0d7acc19c088"
+      },
+      {
+        "case": 4,
+        "directory": "wasm/lab-wasm-1795209151462287000-4",
+        "effects": 8,
+        "epf_records": 2152,
+        "events_sha256": "b8aa4b0986d76c8895723a9dbd29ce6d0bb9deffed7a1c75947eb18a9ae65faa",
+        "audit_sha256": "419e3c04c215ec014962d79957a1eeeaac2a6ccc0b098e5b701e0e1eac50eb73",
+        "result_sha256": "9d23cc8934ad9f1d1673749861462cdaddbfc24bc6dd48738a073939fc1c4541"
+      },
+      {
+        "case": 5,
+        "directory": "wasm/lab-wasm-1795209152358007000-5",
+        "effects": 8,
+        "epf_records": 2273,
+        "events_sha256": "7ed8a2074f29c6ea048d0d01d42819eb75a44ae74cbb13892d537a1c3a560c64",
+        "audit_sha256": "c67f158d35f4e9e103d90a1fc87e9db712ebc46ce116f87e2897d477812f10b7",
+        "result_sha256": "597fb286feec9e30382dffe797d378e550a9ae2b3b3aaab787246b9771c2ae89"
+      },
+      {
+        "case": 6,
+        "directory": "wasm/lab-wasm-1795209153289386000-6",
+        "effects": 8,
+        "epf_records": 2152,
+        "events_sha256": "7e6ac087d10aa5216369e2405ccecc69b485ac30c062f4386db4e52b4ea5ac07",
+        "audit_sha256": "ff4ef4b718f7b567b43dd834a4afd5809e0b49f5ddd1721762dd3f26d16d8acc",
+        "result_sha256": "f05c91de4460d9a9821184f6e2e05811af12ca7de8c0b453e58df3d42551f4c3"
+      },
+      {
+        "case": 7,
+        "directory": "wasm/lab-wasm-1795209154185132000-7",
+        "effects": 8,
+        "epf_records": 2273,
+        "events_sha256": "a0cee2e1fa4f421d87f025857bc1e4d60707dd976b6cd0b30d9472fb5687d9c8",
+        "audit_sha256": "1bd37c3839a08aa293bd0bee02311cc392bb4a28ca37fd4ff069b80a800fba62",
+        "result_sha256": "6ca5781b23a9a3b86e50937376cb47612ecf5960eed1b5ad37679ccc0b9cc9ba"
+      },
+      {
+        "case": 8,
+        "directory": "wasm/lab-wasm-1795209155116495000-8",
+        "effects": 8,
+        "epf_records": 2152,
+        "events_sha256": "69064fd0b4db587941a24edff081f86c687c48bc1ea63d94f282d2b0dd7602b6",
+        "audit_sha256": "578a91ef9addfdcb388b7fdf90c02ce38e8c2b1c21266ad4f8e2010518ba4107",
+        "result_sha256": "1b5a703f950ae736f8977d09e422f2b1ee53883c49669907e6bac29d54dd3f40"
+      },
+      {
+        "case": 9,
+        "directory": "wasm/lab-wasm-1795209156008206000-9",
+        "effects": 8,
+        "epf_records": 2273,
+        "events_sha256": "4fc3105c357d8a8bf8d3bd72750d01fee2d5063fc501df7470fb87205601cc51",
+        "audit_sha256": "773d854f53c4090da3f4d1aad70011bc7560db2ccf9dfdfc33f180e52585d8e2",
+        "result_sha256": "f978a78c4677312f255fa4e1847371b8aa01201af16630b72c25cbb92f51a1a0"
+      },
+      {
+        "case": 10,
+        "directory": "wasm/lab-wasm-1795209156936710000-10",
+        "effects": 8,
+        "epf_records": 2152,
+        "events_sha256": "e625a33f3b9157c175689e1519d9da624a909ef9dc923968748b8f239e88a927",
+        "audit_sha256": "cee9cbef7b53ab4e6526129d508566948845d025e8304da91370565a4afa39fd",
+        "result_sha256": "7315e2c822f07b1a9728b33c2ee12279ffcc28214b58b45625c79fdc21df9b9b"
+      },
+      {
+        "case": 11,
+        "directory": "wasm/lab-wasm-1795209157833617000-11",
+        "effects": 8,
+        "epf_records": 2273,
+        "events_sha256": "0ef1f879b5cb3d071ca2611522cb462f06c685f5b98b49e8f03c67af5e487c2c",
+        "audit_sha256": "a1f4023e843aa007d7cc5cd2af7d0e658540dff1e2d810a10b33f50b2937ce71",
+        "result_sha256": "e51ac15accb576b91471d47dd1b97b2917e2ce2eb39fca20c879a07ff7299bff"
+      },
+      {
+        "case": 12,
+        "directory": "wasm/lab-wasm-1795209158765150000-12",
+        "effects": 8,
+        "epf_records": 2152,
+        "events_sha256": "b0f14969a9041da91b4a8dbdd9c87eb6fe8b36f174b5a51c781887c3fd11bcca",
+        "audit_sha256": "00bac332865ab3337c9c53a3f1ddb2d0a28301df03898461795377312b5c3750",
+        "result_sha256": "7337880ae6da0349939a43180b7603dde0e738d35aff2adfd85bac4da0039b11"
+      },
+      {
+        "case": 13,
+        "directory": "wasm/lab-wasm-1795209159679357000-13",
+        "effects": 8,
+        "epf_records": 2273,
+        "events_sha256": "5b41be8fffd38ed5537dd93fd0002c3bf0fdd9988b4a005c9479810d109e6675",
+        "audit_sha256": "b88b9911e3d8a53527066bf4ee838ce57d56a94af8fbc9f7708fe88951d58a3d",
+        "result_sha256": "a971353809697bdb1ef4ef89daf25af266cea71b093f5928bbddfd6caa94836b"
+      },
+      {
+        "case": 14,
+        "directory": "wasm/lab-wasm-1795209160616484000-14",
+        "effects": 8,
+        "epf_records": 2152,
+        "events_sha256": "6ab58efa95c828261f2d1894b00ad1be02c4988a29bc42fd9e49ecaa44f3229a",
+        "audit_sha256": "f1b7564e184cf3a08ef4e331b9df89d9116b213ebf1c579ab4b58e61c2ec3570",
+        "result_sha256": "79a52f94af767a9797e228ba0445e348263bd86986bb8304b1c082e14aa9a60d"
+      },
+      {
+        "case": 15,
+        "directory": "wasm/lab-wasm-1795209161515145000-15",
+        "effects": 8,
+        "epf_records": 2273,
+        "events_sha256": "6c599bbb812ba0ebadcc1f8be80432a9884e6e999c7e7a0e50a30a859a265685",
+        "audit_sha256": "e20c0789998724e04fa4515adfa20f55bbba493f158ffe09cee7224459a039a8",
+        "result_sha256": "ce4d3894fb24df5e49d6af6b3cd7f9917d817beac937dd0d7ca671dc2bea216d"
+      },
+      {
+        "case": 16,
+        "directory": "wasm/lab-wasm-1795209162446811000-16",
+        "effects": 8,
+        "epf_records": 2152,
+        "events_sha256": "0164eea4387e7d57c65708a46f501df6fa8ea01669dc17ba4e29aaf17e487b4f",
+        "audit_sha256": "7b382cbf536303d2b4118e79a761cdc8746102123351f825e6e048b6648da7ee",
+        "result_sha256": "bbc7ffe28c5a20751da3d2e330343161535ddd5e461aa43d307ba105624f1cee"
+      },
+      {
+        "case": 17,
+        "directory": "wasm/lab-wasm-1795209163344269000-17",
+        "effects": 8,
+        "epf_records": 2273,
+        "events_sha256": "92430fc76c2aaac5eb62e1ea50dfec40c156c72151cdc1367e28a885e2a39ee2",
+        "audit_sha256": "48ae9097c739fb1f4ebdffa1bba5db73a4d1ce78722d053dea745a268453cb60",
+        "result_sha256": "6966c28955a45590919124e980bc80fda195732485d5fb2322701203bc94bd86"
+      },
+      {
+        "case": 18,
+        "directory": "wasm/lab-wasm-1795209164277700000-18",
+        "effects": 8,
+        "epf_records": 2152,
+        "events_sha256": "5fb74e69c740d181ccb9cdcd28051a311cf474aaf8e1d48bb9972ef273efaae7",
+        "audit_sha256": "d7f1785b6a81898f9304dfa164c5d2f1928b7fd3090de726781b80d67ce1aef0",
+        "result_sha256": "4975beb9a41300d8dc785f601c6b4367056561ca33f97c52207b71fb0f100e10"
+      },
+      {
+        "case": 19,
+        "directory": "wasm/lab-wasm-1795209165177126000-19",
+        "effects": 8,
+        "epf_records": 2273,
+        "events_sha256": "8df7d0dbc15ffbd45c878fc69a0900f80022b06344e2767a7344e9776d2aca72",
+        "audit_sha256": "12a97162b48225e4e0dda387e61f9b8557c3ab0535b5c11069534e016fe0733b",
+        "result_sha256": "c6fc0ab9f3a9d8a72995292959bb33221fb05fa0a1a904de1dbd8b10e65e6e5b"
+      },
+      {
+        "case": 20,
+        "directory": "wasm/lab-wasm-1795209166107268000-20",
+        "effects": 8,
+        "epf_records": 2152,
+        "events_sha256": "7a51748f7ea97ba36faa3cabdf37a0b62c314c61eedc8398fc4bf36d7fece5a4",
+        "audit_sha256": "05daac04b462caa5082fe592e8a95e6800e30dc0c98c09f55528d9227b2d1a0d",
+        "result_sha256": "0c324ca6d829b0f6d4ef290fbf177069d31dcb93b6e50cd542edddae4bc28837"
+      },
+      {
+        "case": 21,
+        "directory": "wasm/lab-wasm-1795209167013401000-21",
+        "effects": 8,
+        "epf_records": 2273,
+        "events_sha256": "abb0ec176e5aac95e3f236835e9f4310ff7620189311dc85113dd1c8d3a7bd04",
+        "audit_sha256": "57788c801b44379829c98f750196d0b7f8c34714f9b613151da8f3328a47575d",
+        "result_sha256": "c8ee59d89e4c1b1452c4d7fb08ad042570acabf61b23de72c6be778fe5890656"
+      },
+      {
+        "case": 22,
+        "directory": "wasm/lab-wasm-1795209167945226000-22",
+        "effects": 8,
+        "epf_records": 2152,
+        "events_sha256": "3ffcab9b5f2e3c24e37e4c1e5041ab9f9d0c9fee540d8e1c646db2edc4858896",
+        "audit_sha256": "1fc63c21cdb4e6eda0bfbb07c39f1a887bd800df4096430f907542fc70e37345",
+        "result_sha256": "34926cb6928b4607946a40cfbb4acb316f468a830cf2fee0d6e3b5b225dc6569"
+      },
+      {
+        "case": 23,
+        "directory": "wasm/lab-wasm-1795209168842944000-23",
+        "effects": 8,
+        "epf_records": 2273,
+        "events_sha256": "b0a46ab4ebc2796102072ee5c445ce6cc979168d39da1bd872a5a9baa148e23e",
+        "audit_sha256": "a066c1edb4d46c6d3dfcb9fe7eb22e16ae827f84868f6e776fe07470184f776d",
+        "result_sha256": "530ed8f5063990ac6ae2c00cda386bc29c612e85002a9b5166c84cb0a0970b15"
+      },
+      {
+        "case": 24,
+        "directory": "wasm/lab-wasm-1795209169785361000-24",
+        "effects": 8,
+        "epf_records": 2152,
+        "events_sha256": "1faa1421ddcf7ec205ba613056df7e958f6aa565587f9e4c966ce627dbc599b5",
+        "audit_sha256": "e84a1c331d2a5f308b1b6f75bea1f99e88338800ee3c19da900bc28e315e2f35",
+        "result_sha256": "f90542efee247d5c0742f6e87dd7eb203447869608929caa365e0b4c6e0ab790"
+      }
+    ]
+  },
+  "live": {
+    "directory": "live-0",
+    "depth": 0,
+    "participants": [
+      "BIOLOGIST",
+      "ANALYST",
+      "CHEMIST"
+    ],
+    "model": "gpt-6-luna",
+    "effort": "xhigh",
+    "elapsed_seconds": 59.4014805,
+    "inclusive_tokens": 491617,
+    "epf_records": 2416,
+    "effects": 8,
+    "violations": 0,
+    "common_score_complete": true,
+    "events_sha256": "445799141891fbb0be6ae106eb0be76935ac31b1d620351ccfbbd921084c35cb",
+    "result_sha256": "42d6d995ac89ce75bde9301ee3ec8c56bfb71b12b6d992bdb27137bfa56e45f6",
+    "run_audit_sha256": "2f2a56066a9db5f2004aa10d7d7ed1d1b9c23059ade5ecf2d135f7cbafe08631",
+    "effect_audit_sha256": "7cd49ba5b4ef90b64583b2762f56a66ebbc48733ef2434ee2d6b698a6a9ce6f4",
+    "simulator_manifest_sha256": "6fb3593772b07bc5557d20376f1ed0cfbbfb2542430e75bb43beec70bd13c8c4",
+    "runner_sha256": "771b1d7c57239ca75f2f2ed55323ed1978ce04337abc1d987f5adfa2bc12f8bb"
+  }
+}

@@ -1,4 +1,5 @@
 //! Independent measurements use the same actual assay and different instrument Endpoints.
+use super::super::arguments::InstrumentRequest;
 use super::super::{global::*, imp};
 use crate::shell::ShellResult;
 use hibana::Endpoint;
@@ -13,10 +14,10 @@ pub async fn run(analyst: &mut Endpoint<ANALYST>) -> ShellResult<()> {
     let (molecular, verification) = async {
         let [mut molecular, mut verification] = analyst.par()?;
         async {
-            let arguments = molecular.recv::<Molecular>().await?.into_value();
+            let arguments = imp::decode(molecular.recv::<Molecular>().await?.as_bytes())?;
             let bytes = imp::encode(&json!({"arguments":arguments,"assay":assay}))?;
             molecular
-                .send::<MolecularOperation>(&bytes.as_slice())
+                .send::<MolecularOperation>(&InstrumentRequest(&bytes))
                 .await?;
             let result = imp::decode(molecular.recv::<MolecularResult>().await?)?;
             imp::record(
@@ -31,10 +32,10 @@ pub async fn run(analyst: &mut Endpoint<ANALYST>) -> ShellResult<()> {
             Ok(result)
         };
         async {
-            let arguments = verification.recv::<Verify>().await?.into_value();
+            let arguments = imp::decode(verification.recv::<Verify>().await?.as_bytes())?;
             let bytes = imp::encode(&json!({"arguments":arguments,"assay":assay}))?;
             verification
-                .send::<VerificationOperation>(&bytes.as_slice())
+                .send::<VerificationOperation>(&InstrumentRequest(&bytes))
                 .await?;
             let result = imp::decode(verification.recv::<VerificationResult>().await?)?;
             imp::record(

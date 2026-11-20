@@ -1,8 +1,12 @@
 //! Production resource receivers reject forged material before invoking an effect.
+use super::arguments::InstrumentRequest;
 use super::{global::*, imp, localside};
 use crate::shell::{
     ShellError, ShellResult,
-    imp::{bus::Bus, service::Domain},
+    imp::{
+        bus::Bus,
+        service::{ReceivedEffects, SimulatorOperation},
+    },
 };
 use core::cell::Cell;
 use hibana::{
@@ -11,17 +15,20 @@ use hibana::{
 };
 use serde_json::{Value, json};
 struct Effects(Cell<Vec<Value>>);
-impl Domain for Effects {
-    async fn execute(
-        &self,
-        actor: &'static str,
-        tool: &'static str,
-        args: Value,
-    ) -> Result<Value, String> {
-        let mut calls = self.0.take();
-        calls.push(json!({"actor":actor,"tool":tool,"arguments":args}));
-        self.0.set(calls);
-        Err("unexpected physical effect in a refused request".into())
+impl ReceivedEffects for Effects {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+        let packet = imp::decode(received.as_bytes());
+        async move {
+            let mut calls = self.0.take();
+            calls.push(packet?);
+            self.0.set(calls);
+            Err(ShellError::message(
+                "unexpected physical effect in a refused request",
+            ))
+        }
     }
 }
 fn material((tool, actor, target): (&str, &str, &str), (id, inputs): (u64, Value)) -> Value {
@@ -119,16 +126,24 @@ async fn spectrometer_rejects_twelve_forged_argument_or_material_requests() -> S
                 };
                 async {
                     match bad {
-                        0..4 => chemist.send::<RawOperation>(&bytes.as_slice()).await?,
-                        4..10 => {
-                            biologist
-                                .send::<CalibrationOperation>(&bytes.as_slice())
+                        0..4 => {
+                            chemist
+                                .send::<RawOperation>(&InstrumentRequest(&bytes))
                                 .await?
                         }
-                        10 => chemist.send::<FinalOperation>(&bytes.as_slice()).await?,
+                        4..10 => {
+                            biologist
+                                .send::<CalibrationOperation>(&InstrumentRequest(&bytes))
+                                .await?
+                        }
+                        10 => {
+                            chemist
+                                .send::<FinalOperation>(&InstrumentRequest(&bytes))
+                                .await?
+                        }
                         _ => {
                             analyst
-                                .send::<MolecularOperation>(&bytes.as_slice())
+                                .send::<MolecularOperation>(&InstrumentRequest(&bytes))
                                 .await?
                         }
                     }
@@ -143,13 +158,26 @@ async fn spectrometer_rejects_twelve_forged_argument_or_material_requests() -> S
         )
         .await
         .expect_err("forged scientific request succeeded");
-        let message = error.to_string();
-        assert!(
-            !message.contains("EndpointError")
-                && !message.contains("deadline")
-                && !message.contains("unexpected physical effect"),
-            "{bad}: {error}"
-        );
+        let expected = match bad {
+            0..4 => None,
+            4..9 => Some("laboratory result does not match the actual completed scientific inputs"),
+            9 => Some("missing actual scientific artifact"),
+            10 => Some("final request substituted actual spectrometer results"),
+            _ => Some("molecular request substituted actual spectrometer inputs"),
+        };
+        match (expected, error) {
+            (None, ShellError::Endpoint(cause)) => {
+                assert_eq!(
+                    format!("{cause:?}"),
+                    r#"EndpointError { operation: "recv", kind: Codec(Malformed) }"#,
+                    "case {bad}"
+                );
+            }
+            (Some(expected), ShellError::Message(actual)) => {
+                assert_eq!(actual, expected, "case {bad}")
+            }
+            (_, error) => panic!("case {bad}: unexpected rejection: {error}"),
+        }
         assert!(effects.0.take().is_empty(), "{bad}: actual physical effect");
     }
     Ok(())
@@ -196,7 +224,7 @@ async fn centrifuge_rejects_substituted_targets_and_fabricated_positive_assays()
                 };
                 async {
                     analyst
-                        .send::<VerificationOperation>(&bytes.as_slice())
+                        .send::<VerificationOperation>(&InstrumentRequest(&bytes))
                         .await?;
                 };
                 core::future::pending::<ShellResult<()>>().await
@@ -208,13 +236,24 @@ async fn centrifuge_rejects_substituted_targets_and_fabricated_positive_assays()
         )
         .await
         .expect_err("forged verification succeeded");
-        let message = error.to_string();
-        assert!(
-            !message.contains("EndpointError")
-                && !message.contains("deadline")
-                && !message.contains("unexpected physical effect"),
-            "{bad}: {error}"
-        );
+        let expected = match bad {
+            0 => None,
+            1 => Some("laboratory result does not match the actual completed scientific inputs"),
+            _ => Some("verification request substituted actual centrifuge results"),
+        };
+        match (expected, error) {
+            (None, ShellError::Endpoint(cause)) => {
+                assert_eq!(
+                    format!("{cause:?}"),
+                    r#"EndpointError { operation: "recv", kind: Codec(Malformed) }"#,
+                    "case {bad}"
+                );
+            }
+            (Some(expected), ShellError::Message(actual)) => {
+                assert_eq!(actual, expected, "case {bad}")
+            }
+            (_, error) => panic!("case {bad}: unexpected rejection: {error}"),
+        }
         assert!(effects.0.take().is_empty(), "{bad}: actual physical effect");
     }
     Ok(())

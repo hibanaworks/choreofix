@@ -1,16 +1,22 @@
 //! Cell preparation and arrival of the real specimen are independent.
+use super::super::arguments::InstrumentRequest;
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::Endpoint;
 use serde_json::json;
 #[hibana_runtime::scope]
-pub async fn run<D: Domain>(biologist: &mut Endpoint<BIOLOGIST>, domain: &D) -> ShellResult<()> {
+pub async fn run(
+    biologist: &mut Endpoint<BIOLOGIST>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()> {
     let ((cells, calibrated), sample) = async {
         let [mut specimen, mut prepared] = biologist.par()?;
         async {
-            let arguments = prepared.recv::<Cells>().await?.into_value();
+            let arguments = imp::decode(prepared.recv::<Cells>().await?.as_bytes())?;
             let bytes = imp::encode(&json!({"arguments":arguments}))?;
-            prepared.send::<CellsOperation>(&bytes.as_slice()).await?;
+            prepared
+                .send::<CellsOperation>(&InstrumentRequest(&bytes))
+                .await?;
             let cells = imp::decode(prepared.recv::<CellsResult>().await?)?;
             let cells_id = imp::record(
                 &cells,
@@ -19,10 +25,10 @@ pub async fn run<D: Domain>(biologist: &mut Endpoint<BIOLOGIST>, domain: &D) -> 
             )?;
             let bytes = imp::encode(&cells)?;
             prepared.send::<FileCellsResult>(&bytes.as_slice()).await?;
-            let arguments = prepared.recv::<Calibrate>().await?.into_value();
+            let arguments = imp::decode(prepared.recv::<Calibrate>().await?.as_bytes())?;
             let bytes = imp::encode(&json!({"arguments":arguments,"cells":cells}))?;
             prepared
-                .send::<CalibrationOperation>(&bytes.as_slice())
+                .send::<CalibrationOperation>(&InstrumentRequest(&bytes))
                 .await?;
             let calibrated = imp::decode(prepared.recv::<CalibrationResult>().await?)?;
             imp::record(
@@ -52,12 +58,10 @@ pub async fn run<D: Domain>(biologist: &mut Endpoint<BIOLOGIST>, domain: &D) -> 
     )?;
     let bytes = imp::encode(&sample)?;
     biologist.send::<Sample>(&bytes.as_slice()).await?;
-    let arguments = biologist.recv::<Bioassay>().await?.into_value();
+    let received = biologist.recv::<Bioassay>().await?;
+    let arguments = imp::decode(received.as_bytes())?;
     let culture = arguments["cell_type"].as_str().unwrap_or("").to_owned();
-    let assay = domain
-        .execute("BIOLOGIST", "run_bioassay", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let assay = effects.apply(received).await?;
     imp::record(
         &assay,
         ("run_bioassay", "BIOLOGIST", "compound_purification"),

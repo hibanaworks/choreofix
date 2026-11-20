@@ -1,10 +1,13 @@
 //! The unique spectrometer I/O owner consumes real resource requests before effects.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{Endpoint, g::Message};
 use serde_json::{Value, json};
 #[hibana_runtime::scope]
-pub async fn run<D: Domain>(owner: &mut Endpoint<SPEC_OWNER>, domain: &D) -> ShellResult<()> {
+pub async fn run(
+    owner: &mut Endpoint<SPEC_OWNER>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()> {
     let mut spec = owner.recv::<SpecLoan>().await?;
     let mut raw = Value::Null;
     let mut calibration = Value::Null;
@@ -13,12 +16,8 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<SPEC_OWNER>, domain: &D) -> She
         let branch = spec.offer().await?;
         match branch.label() {
             RawOperation::LOGICAL_LABEL => {
-                let packet = imp::decode(branch.recv::<RawOperation>().await?)?;
-                let arguments = imp::arguments::<0>(&packet)?;
-                let result = domain
-                    .execute("CHEMIST", "run_analysis", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let received = branch.recv::<RawOperation>().await?;
+                let result = effects.apply(received).await?;
                 imp::record(
                     &result,
                     ("run_analysis", "CHEMIST", "raw_materials"),
@@ -29,17 +28,14 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<SPEC_OWNER>, domain: &D) -> She
                 spec.send::<RawResult>(&bytes.as_slice()).await?;
             }
             CalibrationOperation::LOGICAL_LABEL => {
-                let packet = imp::decode(branch.recv::<CalibrationOperation>().await?)?;
-                let arguments = imp::arguments::<3>(&packet)?;
+                let received = branch.recv::<CalibrationOperation>().await?;
+                let packet = imp::decode(received.as_bytes())?;
                 let cells = imp::record(
                     &packet["cells"],
                     ("run_separation", "BIOLOGIST", "cell_cultures"),
                     &json!({}),
                 )?;
-                let result = domain
-                    .execute("BIOLOGIST", "run_analysis", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(received).await?;
                 imp::record(
                     &result,
                     ("run_analysis", "BIOLOGIST", "fluorescence"),
@@ -50,18 +46,15 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<SPEC_OWNER>, domain: &D) -> She
                 spec.send::<CalibrationResult>(&bytes.as_slice()).await?;
             }
             MolecularOperation::LOGICAL_LABEL => {
-                let packet = imp::decode(branch.recv::<MolecularOperation>().await?)?;
-                let arguments = imp::arguments::<5>(&packet)?;
+                let received = branch.recv::<MolecularOperation>().await?;
+                let packet = imp::decode(received.as_bytes())?;
                 let (compound, assay) = imp::assay(&packet["assay"])?;
                 if packet["assay"]["raw"] != raw || packet["assay"]["calibration"] != calibration {
                     return Err(ShellError::message(
                         "molecular request substituted actual spectrometer inputs",
                     ));
                 }
-                let result = domain
-                    .execute("ANALYST", "run_analysis", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(received).await?;
                 imp::record(
                     &result,
                     ("run_analysis", "ANALYST", "molecular_detail"),
@@ -72,8 +65,8 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<SPEC_OWNER>, domain: &D) -> She
                 spec.send::<MolecularResult>(&bytes.as_slice()).await?;
             }
             FinalOperation::LOGICAL_LABEL => {
-                let packet = imp::decode(branch.recv::<FinalOperation>().await?)?;
-                let arguments = imp::arguments::<7>(&packet)?;
+                let received = branch.recv::<FinalOperation>().await?;
+                let packet = imp::decode(received.as_bytes())?;
                 let inputs = imp::quality(&packet["quality"])?;
                 if packet["quality"]["assay"]["raw"] != raw
                     || packet["quality"]["assay"]["calibration"] != calibration
@@ -83,10 +76,7 @@ pub async fn run<D: Domain>(owner: &mut Endpoint<SPEC_OWNER>, domain: &D) -> She
                         "final request substituted actual spectrometer results",
                     ));
                 }
-                let result = domain
-                    .execute("CHEMIST", "run_analysis", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(received).await?;
                 imp::record(
                     &result,
                     ("run_analysis", "CHEMIST", "final_validation"),

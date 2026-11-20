@@ -230,10 +230,17 @@ including either author receiving a review before the other starts research.
 Three live participants completed the depth-two task on the same binary after
 two rejected reviews. The EPF audit checked 5,834 capture records and the effect
 audit matched all 13 simulator calls. This rerun adds evidence for an existing
-task in the cohort. Six production tasks still use the caller-selected simulator
-API (13E/M/H and 14E/M/H, 85 call sites). Those six tasks account for eight
-of the original 43 selected conditions and 149 recorded simulator calls in
-total. The archived events, audit and simulator result for each of the 43
+task in the cohort.
+
+The [13E receiver trials](13e-received-effects.json) cover all eight calls on
+typed Endpoint receives. All 25 scripted Wasm conditions completed the common
+task, with 200 effects and 55,648 EPF records. On the same binary, three live
+agents completed the depth-zero task. The audit checked 2,416 EPF records,
+matched all eight effects to receives and found zero violations.
+Five production tasks still use the caller-selected simulator API (13M, 13H,
+14E, 14M and 14H, 77 call sites). They account for seven of the original 43
+selected conditions and 141 recorded simulator calls.
+The archived events, audit and simulator result for each of the 43
 conditions match their SHA-256 digests in `verified-conditions.json`.
 
 The [11M component results](11m-received-effects.json) cover 30 cabinet

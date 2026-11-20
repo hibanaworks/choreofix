@@ -1,5 +1,5 @@
 //! One scientific dataflow; two affine instrument Endpoints have actual I/O owners.
-use super::arguments::Arguments;
+use super::arguments::{Arguments, InstrumentRequest};
 pub use crate::shell::global::{Exit, FileExit, Loan};
 use hibana::{
     Endpoint, g,
@@ -61,13 +61,13 @@ pub type FileCalibrationResult<'a> = g::Msg<125, &'a [u8]>;
 pub type FileMolecularResult<'a> = g::Msg<126, &'a [u8]>;
 pub type FileVerificationResult<'a> = g::Msg<127, &'a [u8]>;
 pub type FileFinalResult<'a> = g::Msg<128, &'a [u8]>;
-pub type RawOperation<'a> = g::Msg<129, &'a [u8]>;
-pub type PurifyOperation<'a> = g::Msg<130, &'a [u8]>;
-pub type CellsOperation<'a> = g::Msg<131, &'a [u8]>;
-pub type CalibrationOperation<'a> = g::Msg<132, &'a [u8]>;
-pub type MolecularOperation<'a> = g::Msg<133, &'a [u8]>;
-pub type VerificationOperation<'a> = g::Msg<134, &'a [u8]>;
-pub type FinalOperation<'a> = g::Msg<135, &'a [u8]>;
+pub type RawOperation<'a> = g::Msg<129, InstrumentRequest<'a, 0>>;
+pub type PurifyOperation<'a> = g::Msg<130, InstrumentRequest<'a, 1>>;
+pub type CellsOperation<'a> = g::Msg<131, InstrumentRequest<'a, 2>>;
+pub type CalibrationOperation<'a> = g::Msg<132, InstrumentRequest<'a, 3>>;
+pub type MolecularOperation<'a> = g::Msg<133, InstrumentRequest<'a, 5>>;
+pub type VerificationOperation<'a> = g::Msg<134, InstrumentRequest<'a, 6>>;
+pub type FinalOperation<'a> = g::Msg<135, InstrumentRequest<'a, 7>>;
 
 const fn operation(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
     ChoreoFsObject::read_write(

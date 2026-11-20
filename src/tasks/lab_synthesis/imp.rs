@@ -83,7 +83,3 @@ pub fn quality(value: &Value) -> ShellResult<Value> {
         json!({"compound":compound,"bioassay":assay,"molecular":molecular,"verification":verification}),
     )
 }
-pub fn arguments<const OP: u8>(packet: &Value) -> ShellResult<Value> {
-    let bytes = encode(&packet["arguments"])?;
-    Ok(super::arguments::Arguments::<OP>::try_from(bytes.as_slice())?.into_value())
-}
