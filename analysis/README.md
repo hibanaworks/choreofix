@@ -178,6 +178,11 @@ simulator reported completion with zero violations.
 The [per-run measurements](7m-figure-receipts.json) identify the input build,
 the captures and the rejected figure-ID substitution in the depth-2 journal.
 
+A five-agent depth-one run ended after the fact checker received the revised
+chapter and exited. A subsequent scripted run on the same executable submitted
+the recheck and published the document. The [paired records](7m-fact-recheck.json)
+identify the shell response, simulator outcomes and audit of the scripted run.
+
 For 8M, all four archived model results have matching saved audits, and three
 additional attempts have no aggregate report. The three v26 trials at depths
 0, 1 and 2 account for 36 effects and 5,882,177 inclusive tokens. The fourth

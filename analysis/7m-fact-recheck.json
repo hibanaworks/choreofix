@@ -1,0 +1,53 @@
+{
+  "task": "7M",
+  "depth": 1,
+  "scored_benchmark": false,
+  "scope": "One live trial and a subsequent scripted check of the legal continuation after revision of CHAPTER_1.",
+  "runtime_sha256": "46e083e0aa7f9ffe0318243dacd4acd56f83b442619fc5b25c0d4fe1e9c4aa7f",
+  "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+  "runtime_source_manifest_sha256": "3249fdd2f099c76bb80210ad30de1cf1b885d79ff85890264f9179fff52fca13",
+  "live": {
+    "archive": "output/verification/figure-document-receipts-20261120.F8KpAH/live-depth-1",
+    "events_sha256": "f33047c817f390f5f4b1b4fcbcb60daa2b193d5814c2cdc5de8ae2c76dedd1a3",
+    "result_sha256": "baac4056d43ccc3ce410529948f3fcd0169cd5a24f25a6f6e97450efd88ba31c",
+    "fact_checker_trace_sha256": "40bae5e329893cd7ce203211de0885fb2c6c371e7314438e131e7a8286370523",
+    "participants": 5,
+    "model": "gpt-6-luna",
+    "effort": "xhigh",
+    "elapsed_seconds": 1743.70031275,
+    "effects": 17,
+    "simulator_complete": false,
+    "score_violations": [],
+    "session_error": "EndpointError { operation: \"offer\", kind: SessionFault(EndpointDropped) }",
+    "revision": {
+      "chapter": "CHAPTER_1",
+      "version": "document:17",
+      "elapsed_seconds": 413.979505
+    },
+    "updated_work_delivery": {
+      "participant": "FACT_CHECKER",
+      "command": "cat /service/outcome",
+      "call_id": "exec-d80bb9ee-3dc6-4910-9279-09c7abed0076",
+      "elapsed_seconds": 414.214346333
+    },
+    "later_fact_check_calls": 0,
+    "exit_command": {
+      "participant": "FACT_CHECKER",
+      "command": "exit 0",
+      "elapsed_seconds": 1743.668185375
+    },
+    "session_end_seconds": 1743.682883625
+  },
+  "scripted": {
+    "archive": "output/verification/figure-document-receipts-20261120.F8KpAH/recheck-matrix/depth-1-recheck-chapters-1-2",
+    "events_sha256": "664d34d7cffbabf403b65970c5d4875e7d23067fd10b090904c761b1bfb087f4",
+    "audit_sha256": "c8db1377d356f61ac334d07ce0cfaf2479ccc8bf447d28e61e4119f2155cde42",
+    "model_calls": 0,
+    "effects": 24,
+    "simulator_complete": true,
+    "violations": 0,
+    "epf_status": "passed",
+    "epf_records": 7884,
+    "case": "depth-1-recheck-chapters-1-2"
+  }
+}

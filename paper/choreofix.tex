@@ -575,6 +575,18 @@ the figure ID in a saved store request caused the audit to reject that record.
 The journal rows, effect IDs and build hashes are in
 \path{analysis/7m-figure-receipts.json}.
 
+A separate depth-one 7M trial with five live agents ended before publication.
+The fact checker received the revised first chapter in its shell response.
+It issued no further fact check and sent \texttt{exit 0}; the session then
+closed after 17 effects, 1,744 seconds into its 1,800-second budget.
+We tested that continuation on the same executable and Wasm guest. A
+scripted fact checker tried rereading the consumed notice and result, received
+permission errors, and submitted the revised pair of chapters for checking.
+The document reached publication with 24 effects, zero scoring violations
+and 7,884 records accepted by EPF. This case was selected after observing the
+live failure. The two records are identified in
+\path{analysis/7m-fact-recheck.json}.
+
 \subsection{Live-agent evidence across 36 tasks}
 The 19 November inventory includes one audited execution for each of the
 43 qualified task--depth conditions across 29 families. We matched each raw

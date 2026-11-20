@@ -70,6 +70,20 @@ async fn five_wash_guests_complete_the_document_and_reconsider() -> Result<()> {
             ],
         ),
         (
+            "depth-1-recheck-chapters-1-2",
+            1,
+            [
+                ("create", 0),
+                ("write", 2),
+                ("read", 2),
+                ("write", 0),
+                ("insert", 0),
+                ("create", 2),
+                ("insert", 2),
+                ("write", 1),
+            ],
+        ),
+        (
             "depth-2",
             2,
             [
@@ -287,7 +301,7 @@ async fn five_wash_guests_complete_the_document_and_reconsider() -> Result<()> {
                     assert_eq!(actual["data"]["section"], chapter);
                 }
             }
-            let scopes = if depth == 0 {
+            let scopes = if depth == 0 || case == "depth-1-recheck-chapters-1-2" {
                 FACT_SCOPES
             } else {
                 [FACT_SCOPES[1], FACT_SCOPES[0]]
@@ -344,6 +358,16 @@ async fn five_wash_guests_complete_the_document_and_reconsider() -> Result<()> {
                             || text.contains("Resource temporarily unavailable"),
                         "{reread}"
                     );
+                    if case == "depth-1-recheck-chapters-1-2" {
+                        // The live checker read the delivered revision and then tried
+                        // to read the notice and old result again before resubmitting.
+                        for path in ["/service/outcome", "/service/fact_check/CHAPTERS_1_2"] {
+                            let reply =
+                                guest.command("FACT_CHECKER", format!("cat {path}")).await?;
+                            let text = reply["stdout"].as_str().ok_or("duplicate read output")?;
+                            assert!(text.contains("Permission denied"), "{reply}");
+                        }
+                    }
                 }
                 for scope in scopes
                     .into_iter()
@@ -386,7 +410,10 @@ async fn five_wash_guests_complete_the_document_and_reconsider() -> Result<()> {
                     .find(|receipt| receipt["success"] == false)
                 {
                     let (writer, chapter) = if rejection["data"]["section"] == FACT_SCOPES[0] {
-                        ("WRITER_A", CHAPTERS[1])
+                        (
+                            "WRITER_A",
+                            if depth == 1 { CHAPTERS[0] } else { CHAPTERS[1] },
+                        )
                     } else {
                         ("WRITER_B", CHAPTERS[2])
                     };
@@ -394,7 +421,12 @@ async fn five_wash_guests_complete_the_document_and_reconsider() -> Result<()> {
                         output_json(&guest.command(writer, "cat /service/outcome".into()).await?);
                     assert_eq!(&notice, rejection);
                     if depth == 1 {
-                        let wrong = json!({"section_name":CHAPTERS[0],"feedback":"outside the assigned chapters"});
+                        let unassigned = if writer == "WRITER_A" {
+                            CHAPTERS[2]
+                        } else {
+                            CHAPTERS[0]
+                        };
+                        let wrong = json!({"section_name":unassigned,"feedback":"outside the assigned chapters"});
                         let refused = guest
                             .command(writer, format!("echo '{wrong}' > /service/revise_section"))
                             .await?;
@@ -643,39 +675,28 @@ async fn five_wash_guests_complete_the_document_and_reconsider() -> Result<()> {
             .filter(|effect| effect["tool"] == "fact_check")
             .map(|effect| effect["args"]["section_name"].as_str().unwrap())
             .collect();
-        assert_eq!(
-            checks,
-            [
-                &FACT_SCOPES[..],
-                &[
-                    FACT_SCOPES[1],
-                    FACT_SCOPES[0],
-                    FACT_SCOPES[1],
-                    FACT_SCOPES[0]
-                ],
-                &[
-                    FACT_SCOPES[1],
-                    FACT_SCOPES[0],
-                    FACT_SCOPES[0],
-                    FACT_SCOPES[1],
-                    FACT_SCOPES[0]
-                ],
-            ][usize::from(depth)],
-            "{case}: checked scope sequence",
-        );
+        let [pair, third] = FACT_SCOPES;
+        let expected_checks: &[&str] = match (case, depth) {
+            (_, 0) => &[pair, third],
+            ("depth-1-recheck-chapters-1-2", 1) => &[pair, third, pair, pair],
+            (_, 1) => &[third, pair, third, pair],
+            (_, 2) => &[third, pair, pair, third, pair],
+            _ => unreachable!(),
+        };
+        assert_eq!(checks, expected_checks, "{case}: checked scope sequence");
         let revisions = effects
             .iter()
             .filter(|event| event["tool"] == "revise_section")
             .map(|event| event["args"]["section_name"].as_str().unwrap())
             .collect::<Vec<_>>();
-        assert_eq!(
-            revisions,
-            [
-                &[][..],
-                &[CHAPTERS[2], CHAPTERS[0]],
-                &[CHAPTERS[1], CHAPTERS[2], CHAPTERS[0]]
-            ][usize::from(depth)]
-        );
+        let expected_revisions: &[&str] = match (case, depth) {
+            (_, 0) => &[],
+            ("depth-1-recheck-chapters-1-2", 1) => &[CHAPTERS[0], CHAPTERS[0]],
+            (_, 1) => &[CHAPTERS[2], CHAPTERS[0]],
+            (_, 2) => &[CHAPTERS[1], CHAPTERS[2], CHAPTERS[0]],
+            _ => unreachable!(),
+        };
+        assert_eq!(revisions, expected_revisions, "{case}: revised chapters");
         let checked = crate::figure_document_audit::audit(&output.join("events.jsonl"))?;
         assert_eq!(checked["status"], "passed");
         save(&output.join("audit.json"), &checked)?;
