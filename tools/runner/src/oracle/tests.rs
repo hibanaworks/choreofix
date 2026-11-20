@@ -912,14 +912,14 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
         } else {
             &[]
         };
-        let (world, fixture) = Simulator::new("15E", 0, 1.0, trace.clone(), failures)?;
+        let (world, _) = Simulator::new("15E", 0, 1.0, trace.clone(), failures)?;
         world
             .set_test_delays(json!({"run_stepper_exposure":[0.5,0.5],
             "run_metrology_measurement":[0.0,0.0],"check_monitoring":[0.0,0.0],
             "run_etch_process":[0.0,0.0],"run_deposition":[0.0,0.0]}))
             .await?;
-        let receipts = prepare_wafers(&world, &fixture).await?;
-        let upstream_events = world.observed_events().await?.len();
+        let fabrication_calls = 8 + 3 * usize::from(retry_control);
+        let guest_effects = 9 + 2 * usize::from(retry) + usize::from(retry_control);
         let (guest, runtime) =
             process::guest(&binary, &wash, &[], &directory, trace, world.clone())?;
         let ((), outcome) = hibana_runtime::race(
@@ -927,6 +927,162 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                 async {
                     let agent = "INTEGRATION_ENGINEER";
                     let controller = "PROCESS_CONTROLLER";
+                    let measurer = "METROLOGY_ENGINEER";
+                    let materials = ["pattern", "film", "etch"];
+                    let dimensions = [
+                        "cd_measurement",
+                        "thickness_measurement",
+                        "profile_measurement",
+                    ];
+                    let processing: [&[(&str, &str, &str)]; 3] = [
+                        &[
+                            ("run_stepper_exposure", "process", "photo_exposure"),
+                            ("check_monitoring", "check_type", "exposure_dose"),
+                            ("run_etch_process", "process", "pattern_transfer_etch"),
+                            ("check_monitoring", "check_type", "etch_endpoint"),
+                        ],
+                        &[
+                            ("run_deposition", "process", "cvd_growth"),
+                            ("check_monitoring", "check_type", "deposition_rate"),
+                        ],
+                        &[
+                            ("run_etch_process", "process", "reactive_ion_etch"),
+                            ("check_monitoring", "check_type", "etch_rate"),
+                        ],
+                    ];
+                    let mut measure_order = delivery;
+                    let schedule: Vec<_> = if deferred_reads {
+                        measure_order.rotate_left(1);
+                        delivery
+                            .into_iter()
+                            .map(|i| (i, true))
+                            .chain(measure_order.into_iter().map(|i| (i, false)))
+                            .collect()
+                    } else {
+                        delivery
+                            .into_iter()
+                            .flat_map(|i| [(i, true), (i, false)])
+                            .collect()
+                    };
+                    let mut inputs = [Value::Null, Value::Null, Value::Null];
+                    let mut readings = [Value::Null, Value::Null, Value::Null];
+                    let mut first_measure = true;
+                    for (i, prepare) in schedule {
+                        let who = recipients[i].0;
+                        let material = materials[i];
+                        let dimension = dimensions[i];
+                        if prepare {
+                            let mut receipts = Vec::new();
+                            for &(tool, field, operation) in processing[i] {
+                                let result =
+                                    wafer_fixture_call(&world, who, tool, field, operation, operation).await?;
+                                receipts.push(result["data"]["receipt"].clone());
+                            }
+                            inputs[i] = json!({"receipts": &receipts[receipts.len()-2..]});
+                            let sent = guest
+                                .command(
+                                    who,
+                                    format!("printf '%s' '{}' > /service/fab_ready", inputs[i]),
+                                )
+                                .await?;
+                            assert_eq!(sent["stdout"], "wash> ", "{sent}");
+                            continue;
+                        }
+                        let ready = guest
+                            .command(measurer, format!("cat /service/{material}"))
+                            .await?;
+                        assert_eq!(wafer_shell_result(&ready)?, inputs[i]);
+                        let command = format!(
+                            "echo '{{\"measurement\":\"{dimension}\"}}' > /service/{dimension}; cat /service/{dimension}"
+                        );
+                        let attempts = if first_measure {
+                            2 + usize::from(retry)
+                        } else {
+                            1
+                        };
+                        for n in 0..attempts {
+                            let read = guest.command(measurer, command.clone()).await?;
+                            let value = wafer_shell_result(&read)?;
+                            if first_measure && retry && n == 0 {
+                                assert_eq!(value["success"], false, "{value}");
+                                assert_eq!(value["data"]["status"], "measurement_failed");
+                                let denied = guest
+                                    .command(
+                                        measurer,
+                                        format!("printf '%s' '{value}' > /service/{material}"),
+                                    )
+                                    .await?;
+                                assert!(
+                                    denied["stdout"]
+                                        .as_str()
+                                        .is_some_and(|s| s.contains("Invalid argument")),
+                                    "{denied}"
+                                );
+                                continue;
+                            }
+                            assert_eq!(value["success"], true, "{value}");
+                            assert_eq!(value["data"]["inputs"], inputs[i]["receipts"]);
+                            if !readings[i].is_null() {
+                                assert_ne!(value["data"]["receipt"], readings[i]["data"]["receipt"]);
+                            }
+                            readings[i] = value;
+                        }
+                        first_measure = false;
+                        if !deferred_reads {
+                            let sent = guest
+                                .command(
+                                    measurer,
+                                    format!("printf '%s' '{}' > /service/{material}", readings[i]),
+                                )
+                                .await?;
+                            assert_eq!(sent["stdout"], "wash> ", "{sent}");
+                        }
+                    }
+                    if deferred_reads {
+                        for i in delivery {
+                            let material = materials[i];
+                            let wrong = &readings[(i + 1) % 3];
+                            let denied = guest
+                                .command(
+                                    measurer,
+                                    format!("printf '%s' '{wrong}' > /service/{material}"),
+                                )
+                                .await?;
+                            assert!(
+                                denied["stdout"]
+                                    .as_str()
+                                    .is_some_and(|s| s.contains("Invalid argument")),
+                                "{denied}"
+                            );
+                            let sent = guest
+                                .command(
+                                    measurer,
+                                    format!("printf '%s' '{}' > /service/{material}", readings[i]),
+                                )
+                                .await?;
+                            assert_eq!(sent["stdout"], "wash> ", "{sent}");
+                        }
+                    }
+                    assert_eq!(
+                        guest.command(measurer, "exit 0".into()).await?["exit_status"],
+                        0
+                    );
+                    for (position, i) in delivery.into_iter().rev().enumerate() {
+                        if position == 2 {
+                            let premature=guest.command(controller,"echo '{\"check_type\":\"cross_reference\"}' | dd of=/service/check_monitoring oflag=nonblock".into()).await?;
+                            assert!(
+                                premature["stdout"]
+                                    .as_str()
+                                    .is_some_and(|s| s.contains("Permission denied")
+                                        || s.contains("Resource temporarily unavailable")),
+                                "{premature}"
+                            );
+                        }
+                        let read = guest
+                            .command(controller, format!("cat /service/{}_report", materials[i]))
+                            .await?;
+                        assert_eq!(wafer_shell_result(&read)?, readings[i]);
+                    }
                     let check = "echo '{\"check_type\":\"cross_reference\"}' > /service/check_monitoring; cat /service/check_monitoring";
                     let early = "echo premature | dd of=/service/all_validated oflag=nonblock";
                     let premature = guest.command(controller, early.into()).await?;
@@ -940,7 +1096,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                         validation = wafer_shell_result(&guest.command(controller, check.into()).await?)?;
                     }
                     assert_eq!(validation["success"], true, "{validation}");
-                    assert_eq!(validation["data"]["inputs"], json!([receipts[11], receipts[3], receipts[6]]));
+                    assert_eq!(validation["data"]["inputs"], json!(readings.map(|r| r["data"]["receipt"].clone())));
                     let notices = ["validated_lithographer", "validated_depositor", "validated_etcher", "all_validated"];
                     let mut broadcast = delivery.to_vec();
                     broadcast.insert(if deferred_reads { 0 } else { 3 }, 3);
@@ -1074,12 +1230,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
         assert!(outcome["error"].is_null());
         assert_eq!(
             outcome["score"]["events"].as_array().unwrap().len(),
-            upstream_events
-                + 2
-                + 2 * usize::from(retry)
-                + 5
-                + usize::from(retry)
-                + usize::from(retry_control)
+            fabrication_calls + 2 + 2 * usize::from(retry) + guest_effects
         );
         assert_eq!(outcome["score"]["complete"], true);
         assert_eq!(outcome["score"]["violations"], json!([]));
@@ -1106,10 +1257,58 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
         let validation = effects.last().ok_or("missing validation")?;
         assert_eq!(validation["tool"], "check_monitoring");
         assert_eq!(validation["success"], true);
-        assert_eq!(
-            validation["inputs"],
-            json!([receipts[11], receipts[3], receipts[6]])
-        );
+        let measurements = check_dimension_reports(
+            roles,
+            captures,
+            &labels,
+            &rows,
+            &outcome["score"],
+            validation,
+        )?;
+        let mut measure_order = delivery;
+        if deferred_reads {
+            measure_order.rotate_left(1);
+        }
+        for pair in measure_order.windows(2) {
+            let previous = measurements[pair[0]]["attempts"]
+                .as_array()
+                .unwrap()
+                .last()
+                .unwrap();
+            let next = &measurements[pair[1]]["attempts"][0];
+            assert!(
+                previous["effect_end_row"].as_u64().unwrap()
+                    < next["effect_start_row"].as_u64().unwrap()
+            );
+        }
+        for (index, &material) in measure_order.iter().enumerate() {
+            assert_eq!(
+                measurements[material]["attempts"].as_array().unwrap().len(),
+                if index == 0 {
+                    2 + usize::from(retry)
+                } else {
+                    1
+                }
+            );
+        }
+        for ordered in delivery.windows(2) {
+            assert!(
+                measurements[ordered[0]]["ready_send"].as_u64().unwrap()
+                    < measurements[ordered[1]]["ready_send"].as_u64().unwrap()
+            );
+            assert!(
+                measurements[ordered[0]]["report_send"].as_u64().unwrap()
+                    < measurements[ordered[1]]["report_send"].as_u64().unwrap()
+            );
+            if !deferred_reads {
+                assert!(
+                    measurements[ordered[0]]["report_send"].as_u64().unwrap()
+                        < measurements[ordered[1]]["first_fabrication_start"]
+                            .as_u64()
+                            .unwrap()
+                );
+            }
+        }
         let mut confirmations = Vec::new();
         for (view, actor) in [
             ("LITHO_INBOX", "LITHO"),
@@ -1209,9 +1408,9 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
         }
         save(
             &directory.join("result.json"),
-            &json!({"task":"15E","order":order,"wasm_participants":5,"disposition":decision,"deliveries":delivered,"deferred_reads":deferred_reads,
-            "model_calls":0,"scored_benchmark":false,"fixture_prefix_calls":upstream_events, "fixture_post_validation_calls":2 + 2 * usize::from(retry),
-                "shell_effects":5 + usize::from(retry) + usize::from(retry_control),"instrument_effects":effects,"confirmations":confirmations,"injected_first_check_failure":retry_control,"injected_first_measurement_failure":retry,"early_reads":2,"rejected_wrong_operations":2,"score":outcome["score"],"epf":epf,
+            &json!({"task":"15E","order":order,"wasm_participants":6,"disposition":decision,"deliveries":delivered,"deferred_reads":deferred_reads,
+            "model_calls":0,"scored_benchmark":false,"fabrication_fixture_calls":fabrication_calls, "fixture_post_validation_calls":2 + 2 * usize::from(retry),
+                "shell_effects":guest_effects,"measurements":measurements,"instrument_effects":effects,"confirmations":confirmations,"injected_first_check_failure":retry_control,"injected_first_measurement_failure":retry,"early_reads":2,"rejected_wrong_operations":2,"score":outcome["score"],"epf":epf,
             "events_sha256":digest(&journal)?,"runtime_binary_sha256":digest(&binary)?,
             "wash_sha256":digest(&wash)?,"build_receipt_sha256":digest(&output.join("build-receipt.json"))?}),
         )?;
@@ -1328,6 +1527,211 @@ fn wafer_frame(journal_rows: &[Value], call: &Value) -> Result<(usize, Value)> {
     Ok((index, serde_json::from_slice(&bytes)?))
 }
 
+fn wafer_instrument_effect(
+    rows: &[Value],
+    request: &Value,
+    reply: &Value,
+    (start, invoked): (usize, &Value),
+    scored: &Value,
+) -> Result<Value> {
+    let message = &invoked["message"];
+    let id = &message["id"];
+    let mut ends = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r["direction"] == "domain_end" && r["message"]["id"] == *id);
+    let (end, finished) = ends.next().ok_or("missing instrument completion")?;
+    assert!(ends.next().is_none(), "duplicate instrument completion");
+    let finished = &finished["message"];
+    let (sent, args) = wafer_frame(rows, request)?;
+    let (reply_sent, result) = wafer_frame(rows, reply)?;
+    assert_eq!(invoked["direction"], "domain_start");
+    assert_eq!(finished["agent"], message["agent"]);
+    assert_eq!(finished["tool"], message["tool"]);
+    assert_eq!(scored["agent"], message["agent"]);
+    assert_eq!(scored["tool"], message["tool"]);
+    assert_eq!(args, message["arguments"]);
+    assert_eq!(args, scored["args"]);
+    assert_eq!(result, finished["result"]);
+    assert_eq!(result["data"], scored["result"]);
+    assert_eq!(result["success"], scored["success"]);
+    let received = request["receive_commit"]["journal_row"]
+        .as_u64()
+        .ok_or("missing instrument receive row")?;
+    assert!(received < start as u64 && start < end && end < reply_sent);
+    Ok(
+        json!({"tool":message["tool"],"rpc_id":id,"success":result["success"],"request_frame":request["frame_id"],"reply_frame":reply["frame_id"],
+        "request_sent_row":sent,"receive_row":received,"effect_start_row":start,"effect_end_row":end,"reply_row":reply_sent,"reply_received_row":reply["receive_commit"]["journal_row"],
+        "arguments":args,"receipt":result["data"]["receipt"],"inputs":result["data"]["inputs"],"result":result}),
+    )
+}
+
+fn check_dimension_reports(
+    roles: &Value,
+    captures: &[Value],
+    labels: &std::collections::BTreeMap<u64, u8>,
+    rows: &[Value],
+    score: &Value,
+    validation: &Value,
+) -> Result<Vec<Value>> {
+    use self::instruments::{CD, Dimension, MeasurementReport, PROFILE, Reading, THICKNESS};
+    use hibana::g::Message;
+    let deliveries = |from: &str, to: &str, label: u8| {
+        let mut matched: Vec<_> = captures
+            .iter()
+            .filter(|call| {
+                call["send_view"] == roles[from]
+                    && call["receive_commit"]["view"] == roles[to]
+                    && call["frame_id"].as_u64().and_then(|id| labels.get(&id)) == Some(&label)
+            })
+            .collect();
+        matched.sort_by_key(|call| call["receive_commit"]["journal_row"].as_u64());
+        matched
+    };
+    let events = score["events"].as_array().ok_or("missing wafer score")?;
+    let mut evidence = Vec::new();
+    for (inbox, vm, who, name, request_label, reply_label, report_label, physical_inputs) in [
+        (
+            "LITHO_INBOX",
+            "LITHO",
+            "LITHOGRAPHER",
+            "cd_measurement",
+            Dimension::<CD>::LOGICAL_LABEL,
+            Reading::<CD>::LOGICAL_LABEL,
+            MeasurementReport::<CD>::LOGICAL_LABEL,
+            ["pattern_transfer_etch", "etch_endpoint"],
+        ),
+        (
+            "DEP_INBOX",
+            "DEP",
+            "DEPOSITOR",
+            "thickness_measurement",
+            Dimension::<THICKNESS>::LOGICAL_LABEL,
+            Reading::<THICKNESS>::LOGICAL_LABEL,
+            MeasurementReport::<THICKNESS>::LOGICAL_LABEL,
+            ["cvd_growth", "deposition_rate"],
+        ),
+        (
+            "ETCH_INBOX",
+            "ETCH",
+            "ETCHER",
+            "profile_measurement",
+            Dimension::<PROFILE>::LOGICAL_LABEL,
+            Reading::<PROFILE>::LOGICAL_LABEL,
+            MeasurementReport::<PROFILE>::LOGICAL_LABEL,
+            ["reactive_ion_etch", "etch_rate"],
+        ),
+    ] {
+        let ready = deliveries(
+            inbox,
+            "MEASURE_FILE",
+            serde_json::from_value(roles[inbox].clone())?,
+        );
+        let [ready] = ready.as_slice() else {
+            return Err("missing or duplicate fab-ready operation".into());
+        };
+        let (ready_send, notice) = wafer_frame(rows, ready)?;
+        assert_eq!(ready["send_actor"], roles[vm]);
+        assert_eq!(ready["receive_commit"]["actor"], roles["MEASURER"]);
+        let inputs: Vec<_> = physical_inputs
+            .iter()
+            .map(|op| {
+                let source = events
+                    .iter()
+                    .find(|e| {
+                        e["agent"] == who
+                            && e["success"] == true
+                            && (e["result"]["process"] == *op || e["result"]["check_type"] == *op)
+                    })
+                    .ok_or("missing fabrication effect")?;
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
+                    source["result"]["receipt"].clone(),
+                )
+            })
+            .collect::<Result<_>>()?;
+        assert_eq!(notice["receipts"], json!(inputs));
+        let requests = deliveries("MEASURE_FILE", "METROLOGY", request_label);
+        let replies = deliveries("METROLOGY", "MEASURE_FILE", reply_label);
+        let starts: Vec<_> = rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| {
+                row["direction"] == "domain_start"
+                    && row["message"]["agent"] == "METROLOGY_ENGINEER"
+                    && row["message"]["tool"] == "run_metrology_measurement"
+                    && row["message"]["arguments"]["measurement"] == name
+            })
+            .collect();
+        let scored: Vec<_> = events
+            .iter()
+            .filter(|e| {
+                e["agent"] == "METROLOGY_ENGINEER"
+                    && e["tool"] == "run_metrology_measurement"
+                    && e["args"]["measurement"] == name
+            })
+            .collect();
+        assert!(!starts.is_empty());
+        assert_eq!(
+            [requests.len(), replies.len(), scored.len()],
+            [starts.len(); 3]
+        );
+        let mut attempts = Vec::new();
+        for (i, (start, invoked)) in starts.into_iter().enumerate() {
+            assert_eq!(requests[i]["send_actor"], roles["MEASURER"]);
+            assert_eq!(requests[i]["receive_commit"]["actor"], roles["METROLOGY"]);
+            assert_eq!(replies[i]["send_actor"], roles["METROLOGY"]);
+            assert_eq!(replies[i]["receive_commit"]["actor"], roles["MEASURER"]);
+            let effect = wafer_instrument_effect(
+                rows,
+                requests[i],
+                replies[i],
+                (start, invoked),
+                scored[i],
+            )?;
+            assert_eq!(effect["arguments"], json!({"measurement":name}));
+            assert!(
+                ready["receive_commit"]["journal_row"].as_u64().unwrap()
+                    < effect["request_sent_row"].as_u64().unwrap()
+            );
+            if effect["success"] == true {
+                assert_eq!(effect["inputs"], json!(inputs));
+            }
+            attempts.push(effect);
+        }
+        let actual = &attempts.last().ok_or("missing measurement")?["result"];
+        let reports = deliveries("MEASURE_FILE", "CONTROL_FILE", report_label);
+        let [report] = reports.as_slice() else {
+            return Err("missing or duplicate measurement report".into());
+        };
+        let (report_send, reported) = wafer_frame(rows, report)?;
+        assert_eq!(report["send_actor"], roles["MEASURER"]);
+        assert_eq!(report["receive_commit"]["actor"], roles["CONTROL"]);
+        assert_eq!(actual["success"], true);
+        assert_eq!(&reported, actual);
+        assert!(
+            replies.last().unwrap()["receive_commit"]["journal_row"]
+                .as_u64()
+                .unwrap()
+                < report_send as u64
+        );
+        assert!(
+            report["receive_commit"]["journal_row"].as_u64().unwrap()
+                < validation["receive_row"].as_u64().unwrap()
+        );
+        assert_eq!(
+            validation["inputs"][evidence.len()],
+            actual["data"]["receipt"]
+        );
+        let first_fabrication_start = rows
+            .iter()
+            .position(|row| row["direction"] == "domain_start" && row["message"]["agent"] == who)
+            .ok_or("missing first fabrication start")?;
+        evidence.push(json!({"measurement":name,"ready":ready["frame_id"],"ready_send":ready_send,"report":report["frame_id"],
+            "first_fabrication_start":first_fabrication_start,"report_send":report_send,"receipt":actual["data"]["receipt"],"attempts":attempts}));
+    }
+    Ok(evidence)
+}
+
 fn check_wafer_effects(
     labels: &std::collections::BTreeMap<u64, u8>,
     epf: &Value,
@@ -1432,33 +1836,8 @@ fn check_wafer_effects(
             assert_eq!(requests[i]["send_view"], caller);
             assert_eq!(replies[i]["send_actor"], responder);
             assert_eq!(replies[i]["receive_commit"]["view"], caller);
-            let (_, arguments) = wafer_frame(rows, requests[i])?;
-            let (reply_row, result) = wafer_frame(rows, replies[i])?;
-            let (start, invoked) = starts[i];
-            let id = &invoked["message"]["id"];
-            let ends: Vec<_> = rows
-                .iter()
-                .enumerate()
-                .filter(|(_, r)| r["direction"] == "domain_end" && &r["message"]["id"] == id)
-                .collect();
-            let [(end, finished)] = ends[..] else {
-                return Err("missing or duplicate instrument completion".into());
-            };
-            assert_eq!(finished["message"]["tool"], tool);
-            assert_eq!(finished["message"]["agent"], agent);
-            assert!(
-                receive["journal_row"]
-                    .as_u64()
-                    .ok_or("instrument receive row")?
-                    < start as u64
-                    && start < end
-                    && end < reply_row
-            );
-            assert_eq!(arguments, invoked["message"]["arguments"]);
-            assert_eq!(arguments, scored[i]["args"]);
-            assert_eq!(result, finished["message"]["result"]);
-            assert_eq!(result["success"], scored[i]["success"]);
-            assert_eq!(result["data"], scored[i]["result"]);
+            let effect =
+                wafer_instrument_effect(rows, requests[i], replies[i], starts[i], scored[i])?;
             if actor == METROLOGY || actor == operator {
                 let report = if actor == METROLOGY {
                     reports[i]
@@ -1469,17 +1848,13 @@ fn check_wafer_effects(
                 assert_eq!(report["send_actor"], actor);
                 assert_eq!(report["receive_commit"]["actor"], responder);
                 assert!(
-                    end < reported_at
+                    effect["effect_end_row"].as_u64().unwrap() < reported_at as u64
                         && report["receive_commit"]["journal_row"].as_u64().unwrap()
-                            < reply_row as u64
+                            < effect["reply_row"].as_u64().unwrap()
                 );
-                assert_eq!(reported, result);
+                assert_eq!(reported, effect["result"]);
             }
-            evidence.push(json!({"tool":tool,"rpc_id":id,"success":result["success"],
-                "request_frame":requests[i]["frame_id"],"reply_frame":replies[i]["frame_id"],
-                "receive_row":receive["journal_row"],"effect_start_row":start,"effect_end_row":end,
-                "reply_row":reply_row,"reply_received_row":replies[i]["receive_commit"]["journal_row"],
-                "result":result,"receipt":result["data"]["receipt"],"inputs":result["data"]["inputs"]}));
+            evidence.push(effect);
         }
     }
     let mount = &evidence[0];
@@ -1524,8 +1899,7 @@ fn check_spot_check_effects(
         };
         let request = accepted(WAFER, chamber)?;
         let reply = accepted(chamber, WAFER)?;
-        let (request_sent, submitted) = wafer_frame(journal_rows, request)?;
-        let (reply_sent, returned) = wafer_frame(journal_rows, reply)?;
+        let (request_sent, _) = wafer_frame(journal_rows, request)?;
         if let Some(previous) = previous_reply {
             assert!(
                 previous < request_sent,
@@ -1552,14 +1926,8 @@ fn check_spot_check_effects(
         };
         assert_eq!(invoked["direction"], "domain_start");
         assert_eq!(finished["direction"], "domain_end");
-        assert!(
-            request["receive_commit"]["journal_row"].as_u64().unwrap() < start as u64
-                && start < end
-                && end < reply_sent
-        );
-        assert_eq!(submitted, invoked["message"]["arguments"]);
-        assert_eq!(returned, finished["message"]["result"]);
         assert_eq!(invoked["message"]["id"], finished["message"]["id"]);
+        assert!(start < end);
         let mut scored = score["events"]
             .as_array()
             .ok_or("missing scored wafer events")?
@@ -1567,8 +1935,7 @@ fn check_spot_check_effects(
             .filter(|e| e["agent"] == "INTEGRATION_ENGINEER" && e["tool"] == name);
         let effect = scored.next().ok_or("missing scored spot check")?;
         assert!(scored.next().is_none(), "extra scored spot check");
-        assert_eq!(effect["args"], submitted);
-        assert_eq!(effect["result"], returned["data"]);
+        wafer_instrument_effect(journal_rows, request, reply, (start, invoked), effect)?;
         assert_eq!(effect["success"], true);
     }
     Ok(())

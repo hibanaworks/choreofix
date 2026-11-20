@@ -1,0 +1,262 @@
+{
+  "task": "15E",
+  "scope": "Six scripted wash participants, including fab-ready notifications, metrology requests, measurement reports, validation, alignment and lot disposition. The three upstream fabrication sequences and two post-validation instrument calls use simulator fixtures.",
+  "model_calls": 0,
+  "scored_benchmark": false,
+  "wasm_participants": 6,
+  "archive": "output/verification/wafer-measurements-15e-20261121.6ALSON",
+  "runtime_sha256": "195f0aed7b6b851b49e7e23bf4531b14bcf0d61c98e79984984515eee4b20577",
+  "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+  "test_binary_sha256": "6a0378e6824f9a18792356f5fb6a4b818bcf5376ec1b52668dcb49622dd8d910",
+  "source_manifest_sha256": "64d81b091afd39b489dc084f2757b6a165d8fd14ba12fc839103bf45db1f9c35",
+  "build_receipt_sha256": "f946876e2909b4b2782555ea01f674a15774647ac987d1d97870d884bfd98702",
+  "totals": {
+    "shell_effects": 57,
+    "fabrication_fixture_calls": 51,
+    "fixture_post_validation_calls": 14,
+    "captured_records": 31938
+  },
+  "cases": [
+    {
+      "case": "dep-litho-etch",
+      "ready_order": [
+        "thickness_measurement",
+        "cd_measurement",
+        "profile_measurement"
+      ],
+      "measurement_order": [
+        "cd_measurement",
+        "profile_measurement",
+        "thickness_measurement"
+      ],
+      "report_order": [
+        "thickness_measurement",
+        "cd_measurement",
+        "profile_measurement"
+      ],
+      "interleaved_fabrication": false,
+      "measurement_attempts": {
+        "cd_measurement": [
+          true,
+          true
+        ],
+        "thickness_measurement": [
+          true
+        ],
+        "profile_measurement": [
+          true
+        ]
+      },
+      "shell_effects": 9,
+      "fabrication_fixture_calls": 8,
+      "fixture_post_validation_calls": 2,
+      "captured_records": 5420,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "events_sha256": "14f879635ed45126ee1cc02b241ad709639c52724b42c4f74c7f4600786d9ab0",
+      "result_sha256": "794b899cacb1fd83abe5fa43f9ae2aa5fb2b5e091c66bf75f85ffb347d599440"
+    },
+    {
+      "case": "etch-dep-litho",
+      "ready_order": [
+        "profile_measurement",
+        "thickness_measurement",
+        "cd_measurement"
+      ],
+      "measurement_order": [
+        "thickness_measurement",
+        "cd_measurement",
+        "profile_measurement"
+      ],
+      "report_order": [
+        "profile_measurement",
+        "thickness_measurement",
+        "cd_measurement"
+      ],
+      "interleaved_fabrication": false,
+      "measurement_attempts": {
+        "cd_measurement": [
+          true
+        ],
+        "thickness_measurement": [
+          true,
+          true
+        ],
+        "profile_measurement": [
+          true
+        ]
+      },
+      "shell_effects": 9,
+      "fabrication_fixture_calls": 8,
+      "fixture_post_validation_calls": 2,
+      "captured_records": 5409,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "events_sha256": "26635582f071901c5a15b2fb7b7da47aeed215a03f4e68002a58c058985dcfde",
+      "result_sha256": "3135e3694a2569654198cf92374d08bd36ee07b606df25687864fac6cf2530fc"
+    },
+    {
+      "case": "etch-first",
+      "ready_order": [
+        "thickness_measurement",
+        "profile_measurement",
+        "cd_measurement"
+      ],
+      "measurement_order": [
+        "thickness_measurement",
+        "profile_measurement",
+        "cd_measurement"
+      ],
+      "report_order": [
+        "thickness_measurement",
+        "profile_measurement",
+        "cd_measurement"
+      ],
+      "interleaved_fabrication": true,
+      "measurement_attempts": {
+        "cd_measurement": [
+          true
+        ],
+        "thickness_measurement": [
+          true,
+          true
+        ],
+        "profile_measurement": [
+          true
+        ]
+      },
+      "shell_effects": 9,
+      "fabrication_fixture_calls": 8,
+      "fixture_post_validation_calls": 2,
+      "captured_records": 4969,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "events_sha256": "8201e86f772182149f7f33636d1c2b27a86365fce6b47f8b76e4d0a3af8b1aea",
+      "result_sha256": "5286eb744aac743978fc419de7c49e00006ecc8f1162c464f843152486fe9559"
+    },
+    {
+      "case": "film-first",
+      "ready_order": [
+        "cd_measurement",
+        "thickness_measurement",
+        "profile_measurement"
+      ],
+      "measurement_order": [
+        "cd_measurement",
+        "thickness_measurement",
+        "profile_measurement"
+      ],
+      "report_order": [
+        "cd_measurement",
+        "thickness_measurement",
+        "profile_measurement"
+      ],
+      "interleaved_fabrication": true,
+      "measurement_attempts": {
+        "cd_measurement": [
+          true,
+          true
+        ],
+        "thickness_measurement": [
+          true
+        ],
+        "profile_measurement": [
+          true
+        ]
+      },
+      "shell_effects": 9,
+      "fabrication_fixture_calls": 8,
+      "fixture_post_validation_calls": 2,
+      "captured_records": 4980,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "events_sha256": "eff3f9de4343a467fb6e4a8996453b9cb290ed5dd5d0f9a252523cbc3d870804",
+      "result_sha256": "01de1bf06a69ccdb59bff6d6c34a497710fd1ba154867ff7c9c6b4f9a71c1b3b"
+    },
+    {
+      "case": "litho-etch-dep",
+      "ready_order": [
+        "cd_measurement",
+        "profile_measurement",
+        "thickness_measurement"
+      ],
+      "measurement_order": [
+        "profile_measurement",
+        "thickness_measurement",
+        "cd_measurement"
+      ],
+      "report_order": [
+        "cd_measurement",
+        "profile_measurement",
+        "thickness_measurement"
+      ],
+      "interleaved_fabrication": false,
+      "measurement_attempts": {
+        "cd_measurement": [
+          true
+        ],
+        "thickness_measurement": [
+          true
+        ],
+        "profile_measurement": [
+          true,
+          true
+        ]
+      },
+      "shell_effects": 10,
+      "fabrication_fixture_calls": 11,
+      "fixture_post_validation_calls": 2,
+      "captured_records": 5652,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "events_sha256": "d28a61f9d1c223ccb1a027d701f24d1489cfb589dd2ef5c70385e2c677aeae23",
+      "result_sha256": "253920f37d09290b434ce8570db3b1970bce8841e0ebd539f2f049ed70e3bcef"
+    },
+    {
+      "case": "overlay-retry",
+      "ready_order": [
+        "profile_measurement",
+        "cd_measurement",
+        "thickness_measurement"
+      ],
+      "measurement_order": [
+        "profile_measurement",
+        "cd_measurement",
+        "thickness_measurement"
+      ],
+      "report_order": [
+        "profile_measurement",
+        "cd_measurement",
+        "thickness_measurement"
+      ],
+      "interleaved_fabrication": true,
+      "measurement_attempts": {
+        "cd_measurement": [
+          true
+        ],
+        "thickness_measurement": [
+          true
+        ],
+        "profile_measurement": [
+          false,
+          true,
+          true
+        ]
+      },
+      "shell_effects": 11,
+      "fabrication_fixture_calls": 8,
+      "fixture_post_validation_calls": 4,
+      "captured_records": 5508,
+      "epf_status": "passed",
+      "simulator_complete": true,
+      "violations": [],
+      "events_sha256": "1fdf88154de5f5601431482c2f8492cb63e60c95f5a2d4575018d772f496b5ce",
+      "result_sha256": "343c37188fc5188e82596297f63923f41848f61e9d4e5b972625a517975877b9"
+    }
+  ]
+}

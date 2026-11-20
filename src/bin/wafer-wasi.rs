@@ -50,6 +50,11 @@ const CONTROL_FILES: u8 = 24;
 const CONTROL_TERM: u8 = 25;
 const CONTROL_OPERATOR: u8 = 26;
 const MONITOR_STATION: u8 = 27;
+const MEASURER: u8 = 28;
+const MEASURE_FILE: u8 = 29;
+const MEASURE_FILES: u8 = 30;
+const MEASURE_TERM: u8 = 31;
+type FabReady<'a, const FAB: u8> = g::Msg<FAB, &'a [u8]>;
 type Confirmation<'a, const LABEL: u8> = g::Msg<LABEL, &'a [u8]>;
 const CONFIRM_LITHO: u8 = 40;
 const CONFIRM_DEP: u8 = 41;
@@ -73,6 +78,27 @@ const VALIDATION_FILE: ChoreoFsObject<'static> = ChoreoFsObject::readable(
     FdBinding::read(FdReadRow::Base),
 );
 
+const READY_FILE: ChoreoFsObject<'static> = ChoreoFsObject::writable(
+    b"service/fab_ready",
+    ObjectId(6),
+    FdSpec::new(6, 64),
+    FdBinding::write(FdWriteRow::Object),
+);
+
+fn measure_wafer<const FAB: u8, const KIND: u8>() -> impl Projectable + Copy {
+    g::seq(
+        g::send::<FAB, MEASURE_FILE, FabReady<FAB>>(),
+        g::seq(
+            g::seq(
+                g::send::<MEASURE_FILE, METROLOGY, Dimension<KIND>>(),
+                g::send::<METROLOGY, MEASURE_FILE, Reading<KIND>>(),
+            )
+            .roll(),
+            g::send::<MEASURE_FILE, CONTROL_FILE, MeasurementReport<KIND>>(),
+        ),
+    )
+}
+
 fn recipient_io<const VM: u8, const INBOX: u8, const DATA: u8, const TERM: u8>()
 -> impl Projectable + Copy {
     g::par(
@@ -91,10 +117,13 @@ async fn fabrication_guest<'run, const VM: u8, const INBOX: u8, const VALIDATION
     let inbox = vm.recv::<Loan<INBOX>>().await?;
     let mut buffer = vec![0; GUEST_MEMORY_BYTES];
     let mut validation = vec![0; GUEST_MEMORY_BYTES];
+    let mut ready = vec![0; GUEST_MEMORY_BYTES];
     let file = ChoreoFsFile::new(INBOX_FILE, inbox)
         .read_as::<Disposition<INBOX>>(&mut buffer)
         .file(VALIDATION_FILE)?
-        .read_as::<Confirmation<VALIDATION>>(&mut validation);
+        .read_as::<Confirmation<VALIDATION>>(&mut validation)
+        .file(READY_FILE)?
+        .write_as::<FabReady<INBOX>>(&mut ready);
     let files = ChoreoFsFiles::new(vm).file(file)?;
     let mut memory = vec![0; GUEST_MEMORY_BYTES];
     let mut storage = Box::new(HibanaWasiGuestStorage::uninit());
@@ -181,7 +210,10 @@ async fn main() -> ShellResult<()> {
                 g::send::<DEP_FILES, DEP, Loan<DEP_INBOX>>(),
                 g::par(
                     g::send::<ETCH_FILES, ETCH, Loan<ETCH_INBOX>>(),
-                    g::send::<CONTROL_FILES, CONTROL, Loan<CONTROL_FILE>>(),
+                    g::par(
+                        g::send::<CONTROL_FILES, CONTROL, Loan<CONTROL_FILE>>(),
+                        g::send::<MEASURE_FILES, MEASURER, Loan<MEASURE_FILE>>(),
+                    ),
                 ),
             ),
         ),
@@ -192,7 +224,10 @@ async fn main() -> ShellResult<()> {
             recipient_io::<DEP, DEP_INBOX, DEP_FILES, DEP_TERM>(),
             g::par(
                 recipient_io::<ETCH, ETCH_INBOX, ETCH_FILES, ETCH_TERM>(),
-                recipient_io::<CONTROL, CONTROL_FILE, CONTROL_FILES, CONTROL_TERM>(),
+                g::par(
+                    recipient_io::<CONTROL, CONTROL_FILE, CONTROL_FILES, CONTROL_TERM>(),
+                    recipient_io::<MEASURER, MEASURE_FILE, MEASURE_FILES, MEASURE_TERM>(),
+                ),
             ),
         ),
     );
@@ -204,7 +239,16 @@ async fn main() -> ShellResult<()> {
                 g::seq(
                     g::par(
                         g::seq(
-                            validation,
+                            g::seq(
+                                g::par(
+                                    measure_wafer::<LITHO_INBOX, CD>(),
+                                    g::par(
+                                        measure_wafer::<DEP_INBOX, THICKNESS>(),
+                                        measure_wafer::<ETCH_INBOX, PROFILE>(),
+                                    ),
+                                ),
+                                validation,
+                            ),
                             g::seq(confirmations, g::seq(alignment, g::seq(checks(), notices))),
                         ),
                         g::seq(
@@ -249,6 +293,10 @@ async fn main() -> ShellResult<()> {
     let p_control_file = project::<CONTROL_FILE>(&source);
     let p_control_files = project::<CONTROL_FILES>(&source);
     let p_control_term = project::<CONTROL_TERM>(&source);
+    let p_measurer = project::<MEASURER>(&source);
+    let p_measure_file = project::<MEASURE_FILE>(&source);
+    let p_measure_files = project::<MEASURE_FILES>(&source);
+    let p_measure_term = project::<MEASURE_TERM>(&source);
     let projection = json!({
         "type":"compiled_projection", "format_version":1, "task":"15E", "session":SESSION,
         "roles":{
@@ -258,14 +306,16 @@ async fn main() -> ShellResult<()> {
             "LITHO":LITHO, "LITHO_INBOX":LITHO_INBOX, "LITHO_FILES":LITHO_FILES, "LITHO_TERM":LITHO_TERM,
             "DEP":DEP, "DEP_INBOX":DEP_INBOX, "DEP_FILES":DEP_FILES, "DEP_TERM":DEP_TERM,
             "ETCH":ETCH, "ETCH_INBOX":ETCH_INBOX, "ETCH_FILES":ETCH_FILES, "ETCH_TERM":ETCH_TERM,
-            "MONITOR":MONITOR,"CONTROL_OPERATOR":CONTROL_OPERATOR,"MONITOR_STATION":MONITOR_STATION,"CONTROL":CONTROL,"CONTROL_FILE":CONTROL_FILE,"CONTROL_FILES":CONTROL_FILES,"CONTROL_TERM":CONTROL_TERM
+            "MONITOR":MONITOR,"CONTROL_OPERATOR":CONTROL_OPERATOR,"MONITOR_STATION":MONITOR_STATION,"CONTROL":CONTROL,"CONTROL_FILE":CONTROL_FILE,"CONTROL_FILES":CONTROL_FILES,"CONTROL_TERM":CONTROL_TERM,
+            "MEASURER":MEASURER,"MEASURE_FILE":MEASURE_FILE,"MEASURE_FILES":MEASURE_FILES,"MEASURE_TERM":MEASURE_TERM
         },
         "programs":[
             rows(&aligner), rows(&engineer), rows(&wafer), rows(&deposition_chamber),
             rows(&etch_chamber), rows(&terminal), rows(&stepper), rows(&metrology), rows(&stage),
             rows(&p_litho), rows(&p_litho_inbox), rows(&p_litho_files), rows(&p_litho_term),
             rows(&p_dep), rows(&p_dep_inbox), rows(&p_dep_files), rows(&p_dep_term),
-            rows(&p_etch), rows(&p_etch_inbox), rows(&p_etch_files), rows(&p_etch_term),rows(&p_monitor),rows(&p_control_operator),rows(&p_monitor_station),rows(&p_control),rows(&p_control_file),rows(&p_control_files),rows(&p_control_term)
+            rows(&p_etch), rows(&p_etch_inbox), rows(&p_etch_files), rows(&p_etch_term),rows(&p_monitor),rows(&p_control_operator),rows(&p_monitor_station),rows(&p_control),rows(&p_control_file),rows(&p_control_files),rows(&p_control_term),
+            rows(&p_measurer), rows(&p_measure_file), rows(&p_measure_files), rows(&p_measure_term)
         ]
     });
     if path == "--projection" {
@@ -274,25 +324,37 @@ async fn main() -> ShellResult<()> {
     }
     let module = std::fs::read(path)?;
     let session = SessionId::new(SESSION);
-    let (mut connection, mut io, [shell, litho_shell, dep_shell, etch_shell, control_shell]) =
-        Bus::open(
-            [
-                "INTEGRATION_ENGINEER",
-                "LITHOGRAPHER",
-                "DEPOSITOR",
-                "ETCHER",
-                "PROCESS_CONTROLLER",
-            ],
-            [
-                (session, WAFER),
-                (session, STAGE),
-                (session, LITHO_INBOX),
-                (session, DEP_INBOX),
-                (session, ETCH_INBOX),
-                (session, CONTROL_FILE),
-                (session, MONITOR),
-            ],
-        );
+    let (
+        mut connection,
+        mut io,
+        [
+            shell,
+            litho_shell,
+            dep_shell,
+            etch_shell,
+            control_shell,
+            measure_shell,
+        ],
+    ) = Bus::open(
+        [
+            "INTEGRATION_ENGINEER",
+            "LITHOGRAPHER",
+            "DEPOSITOR",
+            "ETCHER",
+            "PROCESS_CONTROLLER",
+            "METROLOGY_ENGINEER",
+        ],
+        [
+            (session, WAFER),
+            (session, STAGE),
+            (session, LITHO_INBOX),
+            (session, DEP_INBOX),
+            (session, ETCH_INBOX),
+            (session, CONTROL_FILE),
+            (session, MONITOR),
+            (session, MEASURE_FILE),
+        ],
+    );
     let (bus, effects) = connection.split();
     bus.projected(projection);
     let instrument = |path, fd: u8| {
@@ -316,12 +378,32 @@ async fn main() -> ShellResult<()> {
             FdBinding::write(FdWriteRow::Object),
         )
     };
+    let readable = |path, fd: u8| {
+        ChoreoFsObject::readable(
+            path,
+            ObjectId(fd.into()),
+            FdSpec::new(fd, 2),
+            b"",
+            FdBinding::read(FdReadRow::Base),
+        )
+    };
+    let measure_files = [
+        instrument(b"service/pattern", 4),
+        instrument(b"service/film", 5),
+        instrument(b"service/etch", 6),
+        instrument(b"service/cd_measurement", 7),
+        instrument(b"service/thickness_measurement", 8),
+        instrument(b"service/profile_measurement", 9),
+    ];
     let control_files = [
         instrument(b"service/check_monitoring", 4),
         notice(b"service/validated_lithographer", 5),
         notice(b"service/validated_depositor", 6),
         notice(b"service/validated_etcher", 7),
         notice(b"service/all_validated", 8),
+        readable(b"service/pattern_report", 9),
+        readable(b"service/film_report", 10),
+        readable(b"service/etch_report", 11),
     ];
     let files = [
         instrument(b"service/run_deposition", 4),
@@ -375,14 +457,14 @@ async fn main() -> ShellResult<()> {
             localside::file_metadata::run(
                 &mut litho_files_ep,
                 litho_inbox_ep,
-                [INBOX_FILE, VALIDATION_FILE],
+                [INBOX_FILE, VALIDATION_FILE, READY_FILE],
             )
             .await
         };
         async {
             localside::private_io::run(
                 &mut litho_term_ep,
-                PrivateFs::new(litho_shell, bus, &[INBOX_FILE, VALIDATION_FILE]),
+                PrivateFs::new(litho_shell, bus, &[INBOX_FILE, VALIDATION_FILE, READY_FILE]),
             )
             .await
         };
@@ -391,14 +473,14 @@ async fn main() -> ShellResult<()> {
             localside::file_metadata::run(
                 &mut dep_files_ep,
                 dep_inbox_ep,
-                [INBOX_FILE, VALIDATION_FILE],
+                [INBOX_FILE, VALIDATION_FILE, READY_FILE],
             )
             .await
         };
         async {
             localside::private_io::run(
                 &mut dep_term_ep,
-                PrivateFs::new(dep_shell, bus, &[INBOX_FILE, VALIDATION_FILE]),
+                PrivateFs::new(dep_shell, bus, &[INBOX_FILE, VALIDATION_FILE, READY_FILE]),
             )
             .await
         };
@@ -407,16 +489,77 @@ async fn main() -> ShellResult<()> {
             localside::file_metadata::run(
                 &mut etch_files_ep,
                 etch_inbox_ep,
-                [INBOX_FILE, VALIDATION_FILE],
+                [INBOX_FILE, VALIDATION_FILE, READY_FILE],
             )
             .await
         };
         async {
             localside::private_io::run(
                 &mut etch_term_ep,
-                PrivateFs::new(etch_shell, bus, &[INBOX_FILE, VALIDATION_FILE]),
+                PrivateFs::new(etch_shell, bus, &[INBOX_FILE, VALIDATION_FILE, READY_FILE]),
             )
             .await
+        };
+        let mut measurer = rv.enter(session, &p_measurer)?;
+        let mut measure_data = rv.enter(session, &p_measure_files)?;
+        let measure_file = rv.enter(session, &p_measure_file)?;
+        let mut measure_term = rv.enter(session, &p_measure_term)?;
+        async {
+            localside::file_metadata::run(&mut measure_data, measure_file, measure_files).await
+        };
+        async {
+            localside::private_io::run(
+                &mut measure_term,
+                PrivateFs::new(measure_shell, bus, &measure_files),
+            )
+            .await
+        };
+        async {
+            let file = measurer.recv::<Loan<MEASURE_FILE>>().await?;
+            let [
+                mut pattern,
+                mut film,
+                mut etch,
+                mut pattern_report,
+                mut film_report,
+                mut etch_report,
+            ] = [(); 6].map(|_| vec![0; GUEST_MEMORY_BYTES]);
+            let [
+                mut cd,
+                mut thickness,
+                mut profile,
+                mut cd_reply,
+                mut thickness_reply,
+                mut profile_reply,
+            ] = [(); 6].map(|_| vec![0; GUEST_MEMORY_BYTES]);
+            let file = ChoreoFsFile::new(measure_files[0], file)
+                .read_as::<FabReady<LITHO_INBOX>>(&mut pattern)
+                .write_as::<MeasurementReport<CD>>(&mut pattern_report)
+                .file(measure_files[1])?
+                .read_as::<FabReady<DEP_INBOX>>(&mut film)
+                .write_as::<MeasurementReport<THICKNESS>>(&mut film_report)
+                .file(measure_files[2])?
+                .read_as::<FabReady<ETCH_INBOX>>(&mut etch)
+                .write_as::<MeasurementReport<PROFILE>>(&mut etch_report)
+                .file(measure_files[3])?
+                .write_as::<Dimension<CD>>(&mut cd)
+                .read_as::<Reading<CD>>(&mut cd_reply)
+                .file(measure_files[4])?
+                .write_as::<Dimension<THICKNESS>>(&mut thickness)
+                .read_as::<Reading<THICKNESS>>(&mut thickness_reply)
+                .file(measure_files[5])?
+                .write_as::<Dimension<PROFILE>>(&mut profile)
+                .read_as::<Reading<PROFILE>>(&mut profile_reply);
+            let files = ChoreoFsFiles::new(measurer).file(file)?;
+            let mut memory = vec![0; GUEST_MEMORY_BYTES];
+            let mut storage = Box::new(HibanaWasiGuestStorage::uninit());
+            let guest = storage.init(&module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut measurer, (file, ())) = files.into_parts();
+            file.into_endpoint().send::<FileExit>(&status).await?;
+            measurer.send::<Exit>(&status).await?;
+            Ok(())
         };
         let mut control = rv.enter(session, &p_control)?;
         let mut control_data = rv.enter(session, &p_control_files)?;
@@ -436,6 +579,8 @@ async fn main() -> ShellResult<()> {
             let file = control.recv::<Loan<CONTROL_FILE>>().await?;
             let [mut check, mut result, mut litho, mut dep, mut etch, mut all] =
                 [(); 6].map(|_| vec![0; GUEST_MEMORY_BYTES]);
+            let [mut pattern, mut film, mut etch_report] =
+                [(); 3].map(|_| vec![0; GUEST_MEMORY_BYTES]);
             let file = ChoreoFsFile::new(control_files[0], file)
                 .write_as::<CrossReference>(&mut check)
                 .read_as::<CrossReferenceResult>(&mut result)
@@ -446,7 +591,13 @@ async fn main() -> ShellResult<()> {
                 .file(control_files[3])?
                 .write_as::<Confirmation<CONFIRM_ETCH>>(&mut etch)
                 .file(control_files[4])?
-                .write_as::<Confirmation<ALL_VALIDATED>>(&mut all);
+                .write_as::<Confirmation<ALL_VALIDATED>>(&mut all)
+                .file(control_files[5])?
+                .read_as::<MeasurementReport<CD>>(&mut pattern)
+                .file(control_files[6])?
+                .read_as::<MeasurementReport<THICKNESS>>(&mut film)
+                .file(control_files[7])?
+                .read_as::<MeasurementReport<PROFILE>>(&mut etch_report);
             let files = ChoreoFsFiles::new(control).file(file)?;
             let mut memory = vec![0; GUEST_MEMORY_BYTES];
             let mut storage = Box::new(HibanaWasiGuestStorage::uninit());
@@ -536,7 +687,41 @@ async fn main() -> ShellResult<()> {
             Ok(())
         };
         async {
-            let mut stage = metrology.recv::<Loan<STAGE>>().await?;
+            let mut stage = loop {
+                let request = metrology.offer().await?;
+                match request.label() {
+                    CD => {
+                        let measured = effects
+                            .apply(request.recv::<Dimension<CD>>().await?)
+                            .await?;
+                        metrology
+                            .send::<Reading<CD>>(&encode(&measured)?.as_slice())
+                            .await?;
+                    }
+                    THICKNESS => {
+                        let measured = effects
+                            .apply(request.recv::<Dimension<THICKNESS>>().await?)
+                            .await?;
+                        metrology
+                            .send::<Reading<THICKNESS>>(&encode(&measured)?.as_slice())
+                            .await?;
+                    }
+                    PROFILE => {
+                        let measured = effects
+                            .apply(request.recv::<Dimension<PROFILE>>().await?)
+                            .await?;
+                        metrology
+                            .send::<Reading<PROFILE>>(&encode(&measured)?.as_slice())
+                            .await?;
+                    }
+                    Loan::<STAGE>::LOGICAL_LABEL => break request.recv::<Loan<STAGE>>().await?,
+                    label => {
+                        return Err(ShellError::message(format!(
+                            "unexpected metrology operation {label}"
+                        )));
+                    }
+                }
+            };
             loop {
                 let actual = effects.apply(stage.recv::<Measure>().await?).await?;
                 let bytes = encode(&actual)?;

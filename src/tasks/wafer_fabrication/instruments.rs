@@ -1,4 +1,4 @@
-//! The integration engineer's typed requests to the four 15E instruments.
+//! Received instrument requests and their physical operations in 15E.
 use choreofix::imp::json::encode;
 use choreofix::shell::imp::review_reply::ReviewReply;
 use choreofix::shell::{
@@ -23,6 +23,54 @@ pub const STEPPER: u8 = 6;
 pub const METROLOGY: u8 = 7;
 pub const STAGE: u8 = 8;
 pub const MONITOR: u8 = 21;
+pub const CD: u8 = 50;
+pub const THICKNESS: u8 = 51;
+pub const PROFILE: u8 = 52;
+pub type Dimension<const KIND: u8> = g::Msg<KIND, InstrumentRequest<KIND>>;
+pub type Reading<'a, const KIND: u8> = g::Msg<KIND, &'a [u8]>;
+pub type MeasurementReport<'a, const KIND: u8> = g::Msg<KIND, WaferReading<'a, KIND>>;
+
+fn dimension_name(kind: u8) -> Option<&'static str> {
+    match kind {
+        CD => Some("cd_measurement"),
+        THICKNESS => Some("thickness_measurement"),
+        PROFILE => Some("profile_measurement"),
+        _ => None,
+    }
+}
+
+pub struct WaferReading<'a, const KIND: u8>(&'a [u8]);
+
+impl<const KIND: u8> WireEncode for WaferReading<'_, KIND> {
+    fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
+        self.0.encode_into(output)
+    }
+}
+
+impl<const KIND: u8> WirePayload for WaferReading<'_, KIND> {
+    const SCHEMA_ID: u32 = 0xac15_1000 | KIND as u32;
+    type Decoded<'a> = &'a [u8];
+
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        let result: Value =
+            serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
+        let name = dimension_name(KIND).ok_or(CodecError::Malformed)?;
+        if result["success"] == true
+            && result["tool_name"] == "run_metrology_measurement"
+            && result["data"]["engineer"] == "METROLOGY_ENGINEER"
+            && result["data"]["measurement"] == name
+            && result["data"]["receipt"].as_u64().is_some_and(|r| r > 0)
+        {
+            Ok(())
+        } else {
+            Err(CodecError::Malformed)
+        }
+    }
+
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
+        input.as_bytes()
+    }
+}
 
 pub type Film = g::Msg<20, InstrumentRequest<DEPOSITION_CHAMBER>>;
 pub type FilmResult<'a> = g::Msg<21, &'a [u8]>;
@@ -87,7 +135,10 @@ impl<const CHAMBER: u8> WirePayload for InstrumentRequest<CHAMBER> {
             STEPPER => ("process", "overlay_alignment"),
             MONITOR => ("check_type", "cross_reference"),
             METROLOGY => ("measurement", "overlay_alignment"),
-            _ => return Err(CodecError::Malformed),
+            other => (
+                "measurement",
+                dimension_name(other).ok_or(CodecError::Malformed)?,
+            ),
         };
         let process = args[field].as_str().ok_or(CodecError::Malformed)?;
         if args.as_object().is_some_and(|args| args.len() == 1)
@@ -126,6 +177,16 @@ impl SimulatorOperation for InstrumentRequest<STEPPER> {
 
 impl SimulatorOperation for InstrumentRequest<METROLOGY> {
     const RPC: (&'static str, &'static str) = ("INTEGRATION_ENGINEER", "run_metrology_measurement");
+}
+
+impl SimulatorOperation for InstrumentRequest<CD> {
+    const RPC: (&'static str, &'static str) = ("METROLOGY_ENGINEER", "run_metrology_measurement");
+}
+impl SimulatorOperation for InstrumentRequest<THICKNESS> {
+    const RPC: (&'static str, &'static str) = ("METROLOGY_ENGINEER", "run_metrology_measurement");
+}
+impl SimulatorOperation for InstrumentRequest<PROFILE> {
+    const RPC: (&'static str, &'static str) = ("METROLOGY_ENGINEER", "run_metrology_measurement");
 }
 
 pub async fn deposition<'run>(
