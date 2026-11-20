@@ -156,9 +156,20 @@ async fn manuscript_amendments() -> Result<()> {
     .await
 }
 
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires the versioned 7H executable and wash Wasm"]
+async fn full_replacements() -> Result<()> {
+    run_cases(
+        "full_replacements",
+        [("append-then-replace", 0, false, [0; 5], &[][..], false)],
+    )
+    .await
+}
+
 type DocumentCase<'a> = (&'a str, u8, bool, [u32; 5], &'a [&'a str], bool);
 
-async fn run_cases(group: &str, cases: [DocumentCase<'_>; 6]) -> Result<()> {
+async fn run_cases<const N: usize>(group: &str, cases: [DocumentCase<'_>; N]) -> Result<()> {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()?;
@@ -239,7 +250,9 @@ async fn publication_case(
     let reject_amended_part_i = case == "part-i-amendment-fact-repair";
     let repeated_major = matches!(
         case,
-        "repeated-major-before-part-i" | "repeated-major-nonblocking-review"
+        "repeated-major-before-part-i"
+            | "repeated-major-nonblocking-review"
+            | "append-then-replace"
     );
     let major_then_accept = case == "major-then-accept" || repeated_major;
     let major_first = major_then_accept || case == "major-then-two-amendments";
@@ -410,7 +423,9 @@ async fn publication_case(
                 ("CHAPTER_3", &contribution, "Stable contribution"),
                 ("CHAPTER_4", &evaluation, "Stable evaluation"),
             ] {
-                if part_ii_minor.contains(&chapter) {
+                if case == "append-then-replace" {
+                    assert_eq!(artifact["content"], format!("Replacement for {chapter}."));
+                } else if part_ii_minor.contains(&chapter) {
                     let amended = format!("Clarified {chapter}");
                     if reject_amended_part_ii {
                         let content = artifact["content"].as_str().ok_or("corrected chapter content")?;
@@ -648,9 +663,18 @@ async fn publication_case(
                 } else {
                     outcome
                 };
-                let args = json!({"section_name":chapter,"feedback":format!("Correct {chapter} issue {}", outcome["data"]["review_id"].as_str()
-                    .or(outcome["data"]["check_id"].as_str()).ok_or("rejected artifact receipt")?)});
-                let revised = response(guest.command(author, format!("echo '{args}' > /service/revise_section/{chapter}; cat /service/revise_section/{chapter}")).await?)?;
+                let assessment = outcome["data"]["review_id"].as_str()
+                    .or(outcome["data"]["check_id"].as_str()).ok_or("rejected assessment ID")?;
+                let replace = case == "append-then-replace" && preceding_revision.is_some();
+                let (tool, args) = if replace {
+                    ("write_section", json!({"section_name":chapter,"content_notes":format!("Replacement for {chapter}.")}))
+                } else {
+                    ("revise_section", json!({"section_name":chapter,"feedback":format!("Correct {chapter} issue {assessment}")}))
+                };
+                let revised = response(guest.command(author, format!("echo '{args}' > /service/{tool}/{chapter}; cat /service/{tool}/{chapter}")).await?)?;
+                if replace {
+                    assert_eq!(revised["data"]["artifact"]["content"], args["content_notes"]);
+                }
                 assert_eq!(revised["success"], true);
                 let updated = revised["data"]["artifact"].clone();
                 assert_ne!(updated["id"], snapshot["sections"][chapter]["id"]);
@@ -867,7 +891,8 @@ async fn publication_case(
             && call.request["arguments"]["section_name"] == "CHAPTER_3"
     }))?;
     let evaluation_draft = one(journal.calls.values().filter(|call| {
-        call.request["tool"] == "write_section"
+        call.request["arguments"]["content_notes"] == "Stable evaluation"
+            && call.request["tool"] == "write_section"
             && call.request["arguments"]["section_name"] == "CHAPTER_4"
     }))?;
     assert!(chapter_three_figure.ended()?.0 < evaluation_draft.started()?.0);

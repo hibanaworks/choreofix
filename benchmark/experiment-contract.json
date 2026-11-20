@@ -17,7 +17,7 @@
     "first_technical_gate": "T3/T4: compose unique resource ownership and its remaining protocol with actual effects; define the adapter trust boundary and test old owners, duplicate transfers and argument substitution before scored comparisons",
     "theorem_scope_and_milestones": "plan.md",
     "effect_boundary_contract_and_inventory": "benchmark/effect-boundaries.md",
-    "effect_boundary_status": "The migration_status inventory records 36 source-bound task qualifications across 29 families, with 12 tasks open. The paper inventory selects 43 qualified task/depth runs. These records establish the direct boundary on their own sources. Final all-family certification and formal benchmark scoring remain open.",
+    "effect_boundary_status": "The migration_status inventory records 37 source-bound task qualifications across 30 families, with 11 tasks open. The 19 November inventory selects 43 qualified task/depth runs; the 21 November 7H depth-zero pilot is recorded separately. These records establish the direct boundary on their own sources. Final all-family certification and formal benchmark scoring remain open.",
     "minimum_handoff_case": {
       "source": "src/tasks/handoff",
       "scope": "Native hibana-runtime mechanism fixture with two independent runtimes and the application's actual Endpoint transport; not a remote-network, Wasm or model experiment",
@@ -1164,6 +1164,7 @@
       "6H",
       "6M",
       "7E",
+      "7H",
       "7M",
       "8E",
       "8M",
@@ -1171,9 +1172,9 @@
       "9H",
       "9M"
     ],
-    "count": 36,
-    "remaining": 12,
-    "qualified_direct_families": 29,
+    "count": 37,
+    "remaining": 11,
+    "qualified_direct_families": 30,
     "final_source_all_family_certification": false,
     "scored_comparisons": 0,
     "removed_legacy_adapters": {
@@ -1191,15 +1192,16 @@
     },
     "latest_source_bound_port": {
       "tasks": [
-        "16M"
+        "7H"
       ],
-      "simulator_contract": "common-environment-v29",
-      "evidence": "output/verification/cicd-16m-20261119/verified-live-depths-0-1-2.json"
+      "simulator_contract": "common-environment-v33",
+      "evidence": "analysis/7h-review-inbox.json",
+      "record": "full_chapter_replacement.live_depth_0"
     },
     "direct_choreofs_boundary": {
       "status": "migration_in_progress",
-      "strengthened_boundary_qualified_tasks": 36,
-      "remaining_tasks": 12,
+      "strengthened_boundary_qualified_tasks": 37,
+      "remaining_tasks": 11,
       "unsafe_application_miri_required": false,
       "scored_runs": 0,
       "full_48_task_goal_unchanged": true,
@@ -1390,7 +1392,6 @@
       "15M",
       "16H",
       "4H",
-      "7H",
       "8H"
     ]
   },

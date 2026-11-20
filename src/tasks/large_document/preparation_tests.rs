@@ -306,18 +306,28 @@ async fn each_draft_order_delivers_the_actual_cross_chapter_inputs() -> ShellRes
             };
             async { check_and_review(&mut editorial_facts, &world).await };
             async {
-                check_chapter::<FACT_3, CHECK_3, MATERIAL_3, REVISE_3, MINOR_3, CHAPTER_3_OUTCOME>(
-                    &mut third_facts,
-                    &world,
-                )
+                check_chapter::<
+                    FACT_3,
+                    CHECK_3,
+                    MATERIAL_3,
+                    REVISE_3,
+                    WRITE_3,
+                    MINOR_3,
+                    CHAPTER_3_OUTCOME,
+                >(&mut third_facts, &world)
                 .await
                 .map_err(|error| shell::ShellError::message(format!("facts 3: {error:?}")))
             };
             async {
-                check_chapter::<FACT_4, CHECK_4, MATERIAL_4, REVISE_4, MINOR_4, CHAPTER_4_OUTCOME>(
-                    &mut fourth_facts,
-                    &world,
-                )
+                check_chapter::<
+                    FACT_4,
+                    CHECK_4,
+                    MATERIAL_4,
+                    REVISE_4,
+                    WRITE_4,
+                    MINOR_4,
+                    CHAPTER_4_OUTCOME,
+                >(&mut fourth_facts, &world)
                 .await
                 .map_err(|error| shell::ShellError::message(format!("facts 4: {error:?}")))
             };

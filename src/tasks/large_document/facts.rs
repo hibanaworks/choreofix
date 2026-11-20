@@ -69,6 +69,7 @@ pub(super) fn chapter_flow<
     const FILE: u8,
     const OP: u8,
     const REVISION: u8,
+    const WRITE: u8,
     const MINOR: u8,
     const OUTCOME: u8,
 >() -> impl Projectable {
@@ -98,9 +99,9 @@ pub(super) fn chapter_flow<
                 g::send::<DOCUMENT, REVIEW_FILE, ReviewInput>(),
             ),
         ),
-        g::seq(
-            g::send::<FILE, DOCUMENT, Request<REVISION>>(),
-            g::send::<DOCUMENT, FILE, ResultFor<REVISION>>(),
+        g::route(
+            super::preparation::operation::<FILE, DOCUMENT, REVISION>(),
+            super::preparation::operation::<FILE, DOCUMENT, WRITE>(),
         ),
     );
     let amendment = g::seq(
@@ -161,6 +162,7 @@ pub(super) async fn check_chapter<
     const OP: u8,
     const MATERIAL: u8,
     const REVISION: u8,
+    const WRITE: u8,
     const MINOR: u8,
     const OUTCOME: u8,
 >(
@@ -336,18 +338,43 @@ pub(super) async fn check_chapter<
             Ok(())
         }
         .await?;
-        let args = document.recv::<Request<REVISION>>().await?;
-        let revised = effects.apply(args).await?;
-        let current = artifact(&revised, "revise_section", index)?;
-        if current["content"] == snapshot["sections"][chapter]["content"] {
-            return Err(ShellError::message(
-                "chapter revision did not change the manuscript",
-            ));
+        let edit = document.offer().await?;
+        let label = edit.label();
+        let (result, current) = if label == REVISION {
+            let result = effects
+                .apply(edit.recv::<Request<REVISION>>().await?)
+                .await?;
+            let current = artifact(&result, "revise_section", index)?;
+            if current["content"] == snapshot["sections"][chapter]["content"] {
+                return Err(ShellError::message(
+                    "chapter revision did not change the manuscript",
+                ));
+            }
+            (result, current)
+        } else if label == WRITE {
+            let request = edit.recv::<Request<WRITE>>().await?;
+            let arguments = decode(request.as_bytes())?;
+            let result = effects.apply(request).await?;
+            let current = artifact(&result, "write_section", index)?;
+            if let Some(text) = arguments.get("content_notes") {
+                same(&current["content"], text)?;
+            }
+            (result, current)
+        } else {
+            return Err(ShellError::message("unexpected chapter edit"));
+        };
+        if current["id"] == snapshot["sections"][chapter]["id"] {
+            return Err(ShellError::message("chapter edit reused the old version"));
         }
         snapshot["sections"][chapter] = current;
-        document
-            .send::<ResultFor<REVISION>>(&encode(&revised)?.as_slice())
-            .await?;
+        let bytes = encode(&result)?;
+        if label == WRITE {
+            document.send::<ResultFor<WRITE>>(&bytes.as_slice()).await?;
+        } else {
+            document
+                .send::<ResultFor<REVISION>>(&bytes.as_slice())
+                .await?;
+        }
     }
 }
 

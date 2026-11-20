@@ -20,10 +20,11 @@ const MULTI_ROUND_DISCOVERY_CASES: usize = 3;
 const RESEARCH_PAPER_CASES: usize = 2;
 const SURVEY_PAPER_DEPTHS: [usize; 2] = [0, 2];
 
-const LARGE_DOCUMENT_GROUPS: [&str; 3] = [
-    "chapter_reviews",
-    "editorial_reviews",
-    "manuscript_amendments",
+const LARGE_DOCUMENT_GROUPS: [(&str, usize); 4] = [
+    ("full_replacements", 1),
+    ("chapter_reviews", 6),
+    ("editorial_reviews", 6),
+    ("manuscript_amendments", 6),
 ];
 
 const FAMILIES: [&str; 30] = [
@@ -217,7 +218,7 @@ fn boundary_assignments(family: &str, filter: &str) -> Result<Vec<(String, Optio
     }
     if family == "large_document" {
         let groups = LARGE_DOCUMENT_GROUPS
-            .map(|group| format!("large_document_boundary::{group}"))
+            .map(|(group, _)| format!("large_document_boundary::{group}"))
             .into_iter()
             .filter(|name| name.contains(filter))
             .map(|name| (name, None))
@@ -687,7 +688,7 @@ pub fn run(output: &Path, filter: Option<&str>) -> Result<Value> {
             )?;
             let mut cases = Vec::new();
             let mut names = BTreeSet::new();
-            for group in LARGE_DOCUMENT_GROUPS {
+            for (group, count) in LARGE_DOCUMENT_GROUPS {
                 let report: Value = serde_json::from_slice(&fs::read(
                     directory.join(group).join("boundary.json"),
                 )?)?;
@@ -697,7 +698,7 @@ pub fn run(output: &Path, filter: Option<&str>) -> Result<Value> {
                     || report["runtime_binary_sha256"] != runtime
                     || report["build"] != build
                     || report["wasm_sha256"] != wash
-                    || rows.len() != 6
+                    || rows.len() != count
                 {
                     return Err("incomplete 7H test group or mismatched binary".into());
                 }

@@ -200,7 +200,7 @@ pub type EvaluationToPartI<'a> = g::Msg<10, &'a [u8]>;
 pub type EvaluationToChapter3<'a> = g::Msg<11, &'a [u8]>;
 type StableEvaluation<'a> = g::Msg<12, &'a [u8]>;
 
-fn operation<const FILE: u8, const OWNER: u8, const OP: u8>() -> impl Projectable {
+pub(super) fn operation<const FILE: u8, const OWNER: u8, const OP: u8>() -> impl Projectable {
     g::seq(
         g::send::<FILE, OWNER, Request<OP>>(),
         g::send::<OWNER, FILE, ResultFor<OP>>(),
@@ -229,7 +229,8 @@ pub fn preparation() -> impl Projectable {
         ),
     );
     let stable_part_ii = g::seq(
-        chapter_flow::<FACT_4, WRITER_C_FILE, CHECK_4, REVISE_4, MINOR_4, CHAPTER_4_OUTCOME>(),
+        chapter_flow::<FACT_4, WRITER_C_FILE, CHECK_4, REVISE_4, WRITE_4, MINOR_4, CHAPTER_4_OUTCOME>(
+        ),
         g::seq(
             g::send::<DOCUMENT, REFERENCES, StableEvaluation>(),
             g::par(
@@ -246,6 +247,7 @@ pub fn preparation() -> impl Projectable {
                                     WRITER_B_FILE,
                                     CHECK_3,
                                     REVISE_3,
+                                    WRITE_3,
                                     MINOR_3,
                                     CHAPTER_3_OUTCOME,
                                 >(),

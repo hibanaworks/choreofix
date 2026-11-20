@@ -197,6 +197,12 @@ Both passed the saved protocol audit and received a negative task score.
 The individual results and original audit references are in
 `output/verification/7h-paper-inventory.viAUKS/16m-usage-recheck/`.
 
+On 21 November, seven live agents completed 7H at depth zero. The same-run
+audit linked 33 effects and their replies to 147,787 EPF records; the common
+simulator recorded publication and zero violations. This adds a 37th task and
+a 30th family. The original 43-condition cohort below is preserved for its
+published aggregates. [7H source, binary, run and audit hashes](7h-review-inbox.json)
+
 The 19 November paper inventory joins the 36 source-bound task qualifications
 in `output/verification/paper-36-ports-20261119.CogEVn/verified-conditions.json`.
 `conditions.csv` gives the 43 selected task--depth rows with links to their

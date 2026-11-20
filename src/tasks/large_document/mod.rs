@@ -247,17 +247,27 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             async { check_and_review(&mut fact_part_i, &simulator).await };
             async { check_and_review(&mut fact_editorial, &simulator).await };
             async {
-                check_chapter::<FACT_3, CHECK_3, MATERIAL_3, REVISE_3, MINOR_3, CHAPTER_3_OUTCOME>(
-                    &mut fact_3,
-                    &simulator,
-                )
+                check_chapter::<
+                    FACT_3,
+                    CHECK_3,
+                    MATERIAL_3,
+                    REVISE_3,
+                    WRITE_3,
+                    MINOR_3,
+                    CHAPTER_3_OUTCOME,
+                >(&mut fact_3, &simulator)
                 .await
             };
             async {
-                check_chapter::<FACT_4, CHECK_4, MATERIAL_4, REVISE_4, MINOR_4, CHAPTER_4_OUTCOME>(
-                    &mut fact_4,
-                    &simulator,
-                )
+                check_chapter::<
+                    FACT_4,
+                    CHECK_4,
+                    MATERIAL_4,
+                    REVISE_4,
+                    WRITE_4,
+                    MINOR_4,
+                    CHAPTER_4_OUTCOME,
+                >(&mut fact_4, &simulator)
                 .await
             };
             async { file_metadata::run(&mut fact_data, fact_file, FACT_FILES).await };

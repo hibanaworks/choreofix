@@ -266,7 +266,18 @@ pub(crate) fn check(
             .iter()
             .find(|name| compiled["labels"][name.as_str()] == u64::from(request.logical_label))
             .ok_or("7H effect operation")?;
+        let replacement = tool == "write_section"
+            && ordered.iter().any(|prior| {
+                prior.tool().ok() == Some("write_section")
+                    && prior.request["arguments"]["section_name"] == section
+                    && prior.ended.is_some_and(|(at, _)| at < request_at)
+            });
         let performer = match tool {
+            "write_section" if replacement => match section {
+                "CHAPTER_3" => &["FACT_3"][..],
+                "CHAPTER_4" => &["FACT_4"][..],
+                _ => return Err("unexpected full replacement for this chapter".into()),
+            },
             "write_section" | "insert_figure" => &["DRAFTING"][..],
             "create_figure" => &["FIGURE_CREATOR"][..],
             "revise_section" if operation.starts_with("Finalize") => &["DRAFTING"][..],
@@ -568,7 +579,7 @@ pub(crate) fn check(
                 }
             }
         }
-        let revision_trigger = if tool == "revise_section"
+        let revision_trigger = if (replacement || tool == "revise_section")
             && matches!(
                 section,
                 "CHAPTER_1" | "CHAPTER_2" | "CHAPTER_3" | "CHAPTER_4"
