@@ -13,7 +13,7 @@ use crate::{
     shell::{
         GUEST_MEMORY_BYTES, ShellError, ShellResult,
         global::{Exit, FileExit, Loan},
-        imp::{review_reply::ReviewReply, service::Domain},
+        imp::{review_reply::ReviewReply, service::ReceivedEffects},
     },
 };
 use hibana::{
@@ -160,7 +160,7 @@ pub fn publication() -> impl Projectable {
 pub async fn document_owner<'run>(
     owner: &mut Endpoint<'run, DOCUMENT_OWNER>,
     document: Endpoint<'run, DOCUMENT>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     owner.send::<Loan<DOCUMENT>>(document).await?;
     let fourth = decode(owner.recv::<ResultFor<REVISE_4>>().await?)?;
@@ -258,9 +258,17 @@ pub async fn document_owner<'run>(
         document.send::<AuthorOutcome>(&refused.as_slice()).await?;
         let branch = document.offer().await?;
         let label = branch.label();
-        let args = match label {
-            RECONSIDER_1 => branch.recv::<Request<RECONSIDER_1>>().await?.into_value(),
-            RECONSIDER_2 => branch.recv::<Request<RECONSIDER_2>>().await?.into_value(),
+        let actual = match label {
+            RECONSIDER_1 => {
+                effects
+                    .apply(branch.recv::<Request<RECONSIDER_1>>().await?)
+                    .await?
+            }
+            RECONSIDER_2 => {
+                effects
+                    .apply(branch.recv::<Request<RECONSIDER_2>>().await?)
+                    .await?
+            }
             _ => {
                 return Err(ShellError::message(
                     "unexpected chapter for editorial revision",
@@ -268,10 +276,6 @@ pub async fn document_owner<'run>(
             }
         };
         let index = usize::from(label - RECONSIDER_1);
-        let actual = domain
-            .execute("WRITER_A", "revise_section", args)
-            .await
-            .map_err(ShellError::message)?;
         let revised = artifact(&actual, "revise_section", index)?;
         if revised["content"] == snapshot["sections"][CHAPTERS[index]]["content"] {
             return Err(ShellError::message(
@@ -316,7 +320,7 @@ pub async fn document_owner<'run>(
 #[hibana_runtime::scope]
 pub async fn edit_document(
     editor: &mut Endpoint<'_, EDITOR>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     let branch = editor.offer().await?;
     let mut document = match branch.label() {
@@ -336,12 +340,9 @@ pub async fn edit_document(
         document
             .send::<PublicationMaterial>(&evidence.as_slice())
             .await?;
-        let arguments = document.recv::<Request<EDITORIAL>>().await?.into_value();
-        let summary = arguments["review_summary"].clone();
-        let decision = domain
-            .execute("EDITOR_IN_CHIEF", "make_editorial_decision", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let arguments = document.recv::<Request<EDITORIAL>>().await?;
+        let summary = decode(arguments.as_bytes())?["review_summary"].take();
+        let decision = effects.apply(arguments).await?;
         let data = &decision["data"];
         if decision["tool_name"] != "make_editorial_decision"
             || data["agent"] != "EDITOR_IN_CHIEF"
@@ -364,11 +365,8 @@ pub async fn edit_document(
             document
                 .send::<ResultFor<EDITORIAL>>(&receipt.as_slice())
                 .await?;
-            let arguments = document.recv::<Request<COMBINE>>().await?.into_value();
-            let output = domain
-                .execute("EDITOR_IN_CHIEF", "combine_sections", arguments)
-                .await
-                .map_err(ShellError::message)?;
+            let arguments = document.recv::<Request<COMBINE>>().await?;
+            let output = effects.apply(arguments).await?;
             let result = &output["data"];
             if output["tool_name"] != "combine_sections"
                 || output["success"] != true

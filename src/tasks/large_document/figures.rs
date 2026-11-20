@@ -5,7 +5,7 @@ use crate::{
     shell::{
         GUEST_MEMORY_BYTES, ShellError, ShellResult,
         global::{Exit, FileExit, Loan},
-        imp::service::Domain,
+        imp::service::ReceivedEffects,
     },
 };
 use hibana::{Endpoint, g, runtime::program::Projectable};
@@ -48,9 +48,9 @@ pub fn create_figure<const CREATE: u8>() -> impl Projectable {
 
 pub fn insert_figure<const INSERT: u8>() -> impl Projectable {
     g::seq(
-        g::send::<FIGURE_FILE, DOCUMENT, Request<INSERT>>(),
+        g::send::<FIGURE_FILE, DOCUMENT, FigureLookup<INSERT>>(),
         g::seq(
-            g::send::<DOCUMENT, FIGURE_STORE, Request<INSERT>>(),
+            g::send::<DOCUMENT, FIGURE_STORE, FigureLookup<INSERT>>(),
             g::seq(
                 g::send::<FIGURE_STORE, DOCUMENT, Request<INSERT>>(),
                 g::seq(
@@ -65,39 +65,57 @@ pub fn insert_figure<const INSERT: u8>() -> impl Projectable {
 /// Owns the three actual created figure artifacts until their insertion.
 pub async fn figure_store<'run>(
     creator: &mut Endpoint<'run, FIGURE_CREATOR>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     let mut store = creator.recv::<Loan<FIGURE_STORE>>().await?;
     let mut created = [const { Value::Null }; 3];
     for _ in 0..2 * FIGURE_CHAPTERS.len() {
         let branch = store.offer().await?;
         let label = branch.label();
-        let arguments = match label {
-            CREATE_1 => branch.recv::<Request<CREATE_1>>().await?.into_value(),
-            CREATE_3 => branch.recv::<Request<CREATE_3>>().await?.into_value(),
-            CREATE_4 => branch.recv::<Request<CREATE_4>>().await?.into_value(),
+        let (description, result) = match label {
+            CREATE_1 => {
+                let request = branch.recv::<Request<CREATE_1>>().await?;
+                let description = decode(request.as_bytes())?["description"].take();
+                (description, effects.apply(request).await?)
+            }
+            CREATE_3 => {
+                let request = branch.recv::<Request<CREATE_3>>().await?;
+                let description = decode(request.as_bytes())?["description"].take();
+                (description, effects.apply(request).await?)
+            }
+            CREATE_4 => {
+                let request = branch.recv::<Request<CREATE_4>>().await?;
+                let description = decode(request.as_bytes())?["description"].take();
+                (description, effects.apply(request).await?)
+            }
             INSERT_1 => {
-                let args = branch.recv::<Request<INSERT_1>>().await?;
-                same(&args.value()["figure_id"], &created[0]["id"])?;
-                store.send::<Request<INSERT_1>>(&args).await?;
+                let args = branch.recv::<FigureLookup<INSERT_1>>().await?;
+                same(&args.0["figure_id"], &created[0]["id"])?;
+                store
+                    .send::<Request<INSERT_1>>(&ChapterArguments(args.0))
+                    .await?;
                 let reply = store.recv::<ResultFor<INSERT_1>>().await?.to_vec();
                 same(&decode(&reply)?["data"]["artifact"], &created[0])?;
                 store.send::<ResultFor<INSERT_1>>(&reply.as_slice()).await?;
                 continue;
             }
             INSERT_3 => {
-                let args = branch.recv::<Request<INSERT_3>>().await?;
-                same(&args.value()["figure_id"], &created[1]["id"])?;
-                store.send::<Request<INSERT_3>>(&args).await?;
+                let args = branch.recv::<FigureLookup<INSERT_3>>().await?;
+                same(&args.0["figure_id"], &created[1]["id"])?;
+                store
+                    .send::<Request<INSERT_3>>(&ChapterArguments(args.0))
+                    .await?;
                 let reply = store.recv::<ResultFor<INSERT_3>>().await?.to_vec();
                 same(&decode(&reply)?["data"]["artifact"], &created[1])?;
                 store.send::<ResultFor<INSERT_3>>(&reply.as_slice()).await?;
                 continue;
             }
             INSERT_4 => {
-                let args = branch.recv::<Request<INSERT_4>>().await?;
-                same(&args.value()["figure_id"], &created[2]["id"])?;
-                store.send::<Request<INSERT_4>>(&args).await?;
+                let args = branch.recv::<FigureLookup<INSERT_4>>().await?;
+                same(&args.0["figure_id"], &created[2]["id"])?;
+                store
+                    .send::<Request<INSERT_4>>(&ChapterArguments(args.0))
+                    .await?;
                 let reply = store.recv::<ResultFor<INSERT_4>>().await?.to_vec();
                 same(&decode(&reply)?["data"]["artifact"], &created[2])?;
                 store.send::<ResultFor<INSERT_4>>(&reply.as_slice()).await?;
@@ -109,17 +127,13 @@ pub async fn figure_store<'run>(
                 )));
             }
         };
-        let result = domain
-            .execute("FIGURE_CREATOR", "create_figure", arguments.clone())
-            .await
-            .map_err(ShellError::message)?;
         let data = &result["data"];
         if result["success"] != true
             || result["tool_name"] != "create_figure"
             || data["agent"] != "FIGURE_CREATOR"
             || data["figure_id"].as_str().is_none_or(str::is_empty)
             || data["artifact"]["id"] != data["figure_id"]
-            || data["artifact"]["content"] != arguments["description"]
+            || data["artifact"]["content"] != description
         {
             return Err(ShellError::message(
                 "creation does not match the admitted figure",
@@ -158,13 +172,13 @@ pub async fn figure_guest(module: &[u8], mut root: Endpoint<'_, FIGURE_VM>) -> S
         .write_as::<Request<CREATE_4>>(&mut c)
         .read_as::<ResultFor<CREATE_4>>(&mut created_c)
         .file(FIGURE_FILES[3])?
-        .write_as::<Request<INSERT_1>>(&mut insert_a)
+        .write_as::<FigureLookup<INSERT_1>>(&mut insert_a)
         .read_as::<ResultFor<INSERT_1>>(&mut inserted_a)
         .file(FIGURE_FILES[4])?
-        .write_as::<Request<INSERT_3>>(&mut insert_b)
+        .write_as::<FigureLookup<INSERT_3>>(&mut insert_b)
         .read_as::<ResultFor<INSERT_3>>(&mut inserted_b)
         .file(FIGURE_FILES[5])?
-        .write_as::<Request<INSERT_4>>(&mut insert_c)
+        .write_as::<FigureLookup<INSERT_4>>(&mut insert_c)
         .read_as::<ResultFor<INSERT_4>>(&mut inserted_c);
     let files = ChoreoFsFiles::new(root).file(file)?;
     let mut memory = vec![0; GUEST_MEMORY_BYTES];

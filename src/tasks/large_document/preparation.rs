@@ -1,8 +1,8 @@
 //! Initial writing, references and completed cross-chapter inputs for 7H.
 use super::{facts::*, figures::*, publication::*};
 use crate::{
-    imp::json::{encode, same},
-    shell::{ShellError, ShellResult, global::Loan, imp::service::Domain},
+    imp::json::{decode, encode, same},
+    shell::{ShellError, ShellResult, global::Loan, imp::service::ReceivedEffects},
 };
 use hibana::{
     Endpoint, g,
@@ -41,27 +41,17 @@ pub const MINOR_2: u8 = 43;
 pub const MINOR_3: u8 = 46;
 pub const MINOR_4: u8 = 48;
 
-pub struct ChapterArguments<const OP: u8>(Value);
+pub struct ChapterArguments<const OP: u8, const RESOURCE: bool = true>(pub(super) Value);
 
-impl<const OP: u8> ChapterArguments<OP> {
-    #[cfg(test)]
+#[cfg(test)]
+impl<const OP: u8, const RESOURCE: bool> ChapterArguments<OP, RESOURCE> {
     pub fn new(value: Value) -> ShellResult<Self> {
-        let bytes = encode(&value)?;
-        Self::validate_payload(Payload::new(&bytes))
-            .map_err(|_| ShellError::message("invalid chapter arguments"))?;
+        Self::validate(Payload::new(&encode(&value)?))?;
         Ok(Self(value))
-    }
-
-    pub fn into_value(self) -> Value {
-        self.0
-    }
-
-    pub fn value(&self) -> &Value {
-        &self.0
     }
 }
 
-impl<const OP: u8> WireEncode for ChapterArguments<OP> {
+impl<const OP: u8, const RESOURCE: bool> WireEncode for ChapterArguments<OP, RESOURCE> {
     fn encode_into(&self, out: &mut [u8]) -> Result<usize, CodecError> {
         let mut cursor = std::io::Cursor::new(out);
         serde_json::to_writer(&mut cursor, &self.0).map_err(|_| CodecError::Truncated)?;
@@ -69,11 +59,8 @@ impl<const OP: u8> WireEncode for ChapterArguments<OP> {
     }
 }
 
-impl<const OP: u8> WirePayload for ChapterArguments<OP> {
-    const SCHEMA_ID: u32 = 0xac7e_0000 | OP as u32;
-    type Decoded<'a> = Self;
-
-    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+impl<const OP: u8, const RESOURCE: bool> ChapterArguments<OP, RESOURCE> {
+    fn validate(input: Payload<'_>) -> Result<(), CodecError> {
         let value: Value =
             serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
         let fields = value.as_object().ok_or(CodecError::Malformed)?;
@@ -161,12 +148,51 @@ impl<const OP: u8> WirePayload for ChapterArguments<OP> {
         }
         Ok(())
     }
+}
 
+// A figure lookup conveys data to the two resource owners. Only the
+// message received back from the figure store can submit the insertion.
+impl<const OP: u8> WirePayload for ChapterArguments<OP, false> {
+    const SCHEMA_ID: u32 = 0xac7e_0200 | OP as u32;
+    type Decoded<'a> = Self;
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        Self::validate(input)
+    }
     fn decode_validated_payload(input: ReceivedPayload<'_, Self>) -> Self {
-        Self(serde_json::from_slice(input.as_bytes()).expect("validated chapter arguments"))
+        Self(serde_json::from_slice(input.as_bytes()).expect("validated figure lookup"))
     }
 }
 
+impl<const OP: u8> WirePayload for ChapterArguments<OP> {
+    const SCHEMA_ID: u32 = 0xac7e_0000 | OP as u32;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        Self::validate(input)
+    }
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
+        input
+    }
+}
+
+impl<const OP: u8> crate::shell::imp::service::SimulatorOperation for ChapterArguments<OP> {
+    const RPC: (&'static str, &'static str) = match OP {
+        WRITE_1..=WRITE_4 => (WRITERS[(OP - WRITE_1) as usize], "write_section"),
+        REFERENCES_1..=REFERENCES_4 => (WRITERS[(OP - REFERENCES_1) as usize], "update_references"),
+        FINALIZE_1 | FINALIZE_2 | RECONSIDER_1 | RECONSIDER_2 | MINOR_1 | MINOR_2 => {
+            ("WRITER_A", "revise_section")
+        }
+        REVISE_3 | MINOR_3 => ("WRITER_B", "revise_section"),
+        REVISE_4 | MINOR_4 => ("WRITER_C", "revise_section"),
+        CREATE_1..=CREATE_4 => ("FIGURE_CREATOR", "create_figure"),
+        INSERT_1..=INSERT_4 => ("FIGURE_CREATOR", "insert_figure"),
+        CHECK_PART_I..=CHECK_4 => ("FACT_CHECKER", "fact_check"),
+        EDITORIAL => ("EDITOR_IN_CHIEF", "make_editorial_decision"),
+        COMBINE => ("EDITOR_IN_CHIEF", "combine_sections"),
+        _ => panic!("unknown manuscript operation"),
+    };
+}
+
+pub type FigureLookup<const OP: u8> = g::Msg<OP, ChapterArguments<OP, false>>;
 pub type Request<const OP: u8> = g::Msg<OP, ChapterArguments<OP>>;
 pub type ResultFor<'a, const OP: u8> = g::Msg<OP, &'a [u8]>;
 pub type ContributionToPartI<'a> = g::Msg<9, &'a [u8]>;
@@ -303,7 +329,7 @@ pub(super) fn artifact(result: &Value, tool: &str, index: usize) -> ShellResult<
 #[hibana_runtime::scope]
 pub async fn write_drafts(
     drafting: &mut Endpoint<DRAFTING>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<[Value; 4]> {
     let mut document = drafting.recv::<Loan<DOCUMENT>>().await?;
     let mut chapters = [const { Value::Null }; 4];
@@ -311,43 +337,31 @@ pub async fn write_drafts(
     for _ in 0..CHAPTERS.len() + FIGURE_CHAPTERS.len() {
         let branch = document.offer().await?;
         let label = branch.label();
-        let args = match label {
-            WRITE_1 => branch.recv::<Request<WRITE_1>>().await?.into_value(),
-            WRITE_2 => branch.recv::<Request<WRITE_2>>().await?.into_value(),
-            WRITE_3 => branch.recv::<Request<WRITE_3>>().await?.into_value(),
-            WRITE_4 => branch.recv::<Request<WRITE_4>>().await?.into_value(),
-            INSERT_1 => {
-                let request = branch.recv::<Request<INSERT_1>>().await?;
-                document.send::<Request<INSERT_1>>(&request).await?;
-                let registered = document.recv::<Request<INSERT_1>>().await?;
-                same(request.value(), registered.value())?;
-                request.into_value()
-            }
-            INSERT_3 => {
-                let request = branch.recv::<Request<INSERT_3>>().await?;
-                document.send::<Request<INSERT_3>>(&request).await?;
-                let registered = document.recv::<Request<INSERT_3>>().await?;
-                same(request.value(), registered.value())?;
-                request.into_value()
-            }
-            INSERT_4 => {
-                let request = branch.recv::<Request<INSERT_4>>().await?;
-                document.send::<Request<INSERT_4>>(&request).await?;
-                let registered = document.recv::<Request<INSERT_4>>().await?;
-                same(request.value(), registered.value())?;
-                request.into_value()
-            }
-            _ => {
-                return Err(ShellError::message(format!(
-                    "unexpected initial chapter {label}"
-                )));
-            }
-        };
         if (INSERT_1..=INSERT_4).contains(&label) {
-            let actual = domain
-                .execute("FIGURE_CREATOR", "insert_figure", args.clone())
-                .await
-                .map_err(ShellError::message)?;
+            let (args, actual) = match label {
+                INSERT_1 => {
+                    let lookup = branch.recv::<FigureLookup<INSERT_1>>().await?;
+                    document.send::<FigureLookup<INSERT_1>>(&lookup).await?;
+                    let confirmed = document.recv::<Request<INSERT_1>>().await?;
+                    same(&lookup.0, &decode(confirmed.as_bytes())?)?;
+                    (lookup.0, effects.apply(confirmed).await?)
+                }
+                INSERT_3 => {
+                    let lookup = branch.recv::<FigureLookup<INSERT_3>>().await?;
+                    document.send::<FigureLookup<INSERT_3>>(&lookup).await?;
+                    let confirmed = document.recv::<Request<INSERT_3>>().await?;
+                    same(&lookup.0, &decode(confirmed.as_bytes())?)?;
+                    (lookup.0, effects.apply(confirmed).await?)
+                }
+                INSERT_4 => {
+                    let lookup = branch.recv::<FigureLookup<INSERT_4>>().await?;
+                    document.send::<FigureLookup<INSERT_4>>(&lookup).await?;
+                    let confirmed = document.recv::<Request<INSERT_4>>().await?;
+                    same(&lookup.0, &decode(confirmed.as_bytes())?)?;
+                    (lookup.0, effects.apply(confirmed).await?)
+                }
+                _ => unreachable!("figure insertion label"),
+            };
             let data = &actual["data"];
             if actual["tool_name"] != "insert_figure"
                 || actual["success"] != true
@@ -392,11 +406,34 @@ pub async fn write_drafts(
             }
             continue;
         }
+        let result = match label {
+            WRITE_1 => {
+                effects
+                    .apply(branch.recv::<Request<WRITE_1>>().await?)
+                    .await?
+            }
+            WRITE_2 => {
+                effects
+                    .apply(branch.recv::<Request<WRITE_2>>().await?)
+                    .await?
+            }
+            WRITE_3 => {
+                effects
+                    .apply(branch.recv::<Request<WRITE_3>>().await?)
+                    .await?
+            }
+            WRITE_4 => {
+                effects
+                    .apply(branch.recv::<Request<WRITE_4>>().await?)
+                    .await?
+            }
+            _ => {
+                return Err(ShellError::message(format!(
+                    "unexpected initial chapter {label}"
+                )));
+            }
+        };
         let index = usize::from(label - WRITE_1);
-        let result = domain
-            .execute(WRITERS[index], "write_section", args)
-            .await
-            .map_err(ShellError::message)?;
         chapters[index] = artifact(&result, "write_section", index)?;
         let bytes = encode(&result)?;
         match label {
@@ -441,9 +478,27 @@ pub async fn write_drafts(
     for _ in 0..2 {
         let branch = document.offer().await?;
         let label = branch.label();
-        let arguments = match label {
-            FINALIZE_1 => branch.recv::<Request<FINALIZE_1>>().await?.into_value(),
-            FINALIZE_2 => branch.recv::<Request<FINALIZE_2>>().await?.into_value(),
+        let revised = match label {
+            FINALIZE_1 => {
+                let request = branch.recv::<Request<FINALIZE_1>>().await?;
+                if chapters[0]["input_sections"] != inputs
+                    || decode(request.as_bytes())?.get("feedback").is_some()
+                {
+                    Some(effects.apply(request).await?)
+                } else {
+                    None
+                }
+            }
+            FINALIZE_2 => {
+                let request = branch.recv::<Request<FINALIZE_2>>().await?;
+                if chapters[1]["input_sections"] != inputs
+                    || decode(request.as_bytes())?.get("feedback").is_some()
+                {
+                    Some(effects.apply(request).await?)
+                } else {
+                    None
+                }
+            }
             _ => {
                 return Err(ShellError::message(format!(
                     "unexpected Part I submission {label}"
@@ -451,11 +506,7 @@ pub async fn write_drafts(
             }
         };
         let index = usize::from(label - FINALIZE_1);
-        if arguments.get("feedback").is_some() || chapters[index]["input_sections"] != inputs {
-            let revised = domain
-                .execute(WRITERS[index], "revise_section", arguments)
-                .await
-                .map_err(ShellError::message)?;
+        if let Some(revised) = revised {
             let current = artifact(&revised, "revise_section", index)?;
             same(&current["input_sections"], &inputs)?;
             chapters[index] = current;
@@ -488,7 +539,7 @@ pub async fn write_drafts(
 #[hibana_runtime::scope]
 pub async fn update_references(
     endpoint: &mut Endpoint<REFERENCES>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<[Value; 4]> {
     let ((one, two), (three, four)) = async {
         let [mut part_i, mut part_ii] = endpoint.par()?;
@@ -496,22 +547,18 @@ pub async fn update_references(
             let (one, two) = async {
                 let [mut one, mut two] = part_i.par()?;
                 async {
-                    let args = one.recv::<Request<REFERENCES_1>>().await?.into_value();
-                    let result = domain
-                        .execute("WRITER_A", "update_references", args)
-                        .await
-                        .map_err(ShellError::message)?;
+                    let result = effects
+                        .apply(one.recv::<Request<REFERENCES_1>>().await?)
+                        .await?;
                     let material = artifact(&result, "update_references", 0)?;
                     one.send::<ResultFor<REFERENCES_1>>(&encode(&result)?.as_slice())
                         .await?;
                     Ok(material)
                 };
                 async {
-                    let args = two.recv::<Request<REFERENCES_2>>().await?.into_value();
-                    let result = domain
-                        .execute("WRITER_A", "update_references", args)
-                        .await
-                        .map_err(ShellError::message)?;
+                    let result = effects
+                        .apply(two.recv::<Request<REFERENCES_2>>().await?)
+                        .await?;
                     let material = artifact(&result, "update_references", 1)?;
                     two.send::<ResultFor<REFERENCES_2>>(&encode(&result)?.as_slice())
                         .await?;
@@ -526,11 +573,9 @@ pub async fn update_references(
             Ok((one, two))
         };
         async {
-            let args = part_ii.recv::<Request<REFERENCES_4>>().await?.into_value();
-            let result = domain
-                .execute("WRITER_C", "update_references", args)
-                .await
-                .map_err(ShellError::message)?;
+            let result = effects
+                .apply(part_ii.recv::<Request<REFERENCES_4>>().await?)
+                .await?;
             let material = artifact(&result, "update_references", 3)?;
             part_ii
                 .send::<ResultFor<REFERENCES_4>>(&encode(&result)?.as_slice())
@@ -549,14 +594,9 @@ pub async fn update_references(
                     contribution
                         .send::<EvaluationToChapter3>(&evaluation.as_slice())
                         .await?;
-                    let args = contribution
-                        .recv::<Request<REFERENCES_3>>()
-                        .await?
-                        .into_value();
-                    let result = domain
-                        .execute("WRITER_B", "update_references", args)
-                        .await
-                        .map_err(ShellError::message)?;
+                    let result = effects
+                        .apply(contribution.recv::<Request<REFERENCES_3>>().await?)
+                        .await?;
                     let material = artifact(&result, "update_references", 2)?;
                     if material["input_sections"]
                         != serde_json::json!({(CHAPTERS[3]): evaluation_artifact})

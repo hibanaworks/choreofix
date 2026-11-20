@@ -7,20 +7,23 @@ use serde_json::{Value, json};
 use shell::{
     ShellResult,
     global::Loan,
-    imp::{bus::Bus, service::Domain},
+    imp::{
+        bus::Bus,
+        service::{ReceivedEffects, SimulatorOperation},
+    },
 };
 use std::{cell::Cell, time::Duration};
 
 #[derive(Default)]
 struct Journal(Cell<Vec<Value>>);
 
-impl Domain for Journal {
-    async fn execute(
+impl ReceivedEffects for Journal {
+    async fn apply<P: SimulatorOperation>(
         &self,
-        agent: &'static str,
-        tool: &'static str,
-        args: Value,
-    ) -> Result<Value, String> {
+        request: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> ShellResult<Value> {
+        let (agent, tool) = P::RPC;
+        let args = decode(request.as_bytes())?;
         let mut entries = self.0.take();
         let section = &args["section_name"];
         if tool == "review_sections" {
@@ -29,7 +32,9 @@ impl Domain for Journal {
                 .find(|entry| {
                     entry["tool_name"] == "fact_check" && entry["data"]["section"] == *section
                 })
-                .ok_or("review requires an actual fact check")?;
+                .ok_or_else(|| {
+                    shell::ShellError::message("review requires an actual fact check")
+                })?;
             let approved = true;
             let result = json!({"success":approved,"tool_name":tool,"data":{
                 "scope":section,"agent":agent,"review_id":format!("review:{}", entries.len() + 1),
@@ -45,7 +50,7 @@ impl Domain for Journal {
                 Some("CHAPTERS_1_2") => &CHAPTERS[..2],
                 Some("CHAPTER_3") => &CHAPTERS[2..3],
                 Some("CHAPTER_4") => &CHAPTERS[3..],
-                _ => return Err("unknown fact-check scope".into()),
+                _ => return Err(shell::ShellError::message("unknown fact-check scope")),
             };
             let mut snapshot = json!({"sections":{},"references":{},"figures":{}});
             for entry in &entries {
@@ -82,12 +87,12 @@ impl Domain for Journal {
                     .find(|entry| {
                         entry["tool_name"] == "review_sections" && entry["data"]["scope"] == scope
                     })
-                    .ok_or("missing publication review")?;
+                    .ok_or_else(|| shell::ShellError::message("missing publication review"))?;
                 let data = &review["data"];
                 for category in ["sections", "figures", "references"] {
                     for (chapter, artifact) in data["input_snapshot"][category]
                         .as_object()
-                        .ok_or("fixture snapshot")?
+                        .ok_or_else(|| shell::ShellError::message("fixture snapshot"))?
                     {
                         snapshot[category][chapter] = artifact.clone();
                     }
@@ -132,7 +137,7 @@ impl Domain for Journal {
                         entry["tool_name"] == "write_section"
                             && entry["data"]["section"] == *section
                     })
-                    .ok_or("missing draft to revise")?;
+                    .ok_or_else(|| shell::ShellError::message("missing draft to revise"))?;
                 artifact["content"] = json!(format!(
                     "{}\n{}",
                     prior["data"]["artifact"]["content"].as_str().unwrap(),
@@ -148,7 +153,9 @@ impl Domain for Journal {
                 .find(|entry| {
                     entry["tool_name"] == "write_section" && entry["data"]["section"] == "CHAPTER_4"
                 })
-                .ok_or("Chapter 3 referenced an incomplete evaluation")?;
+                .ok_or_else(|| {
+                    shell::ShellError::message("Chapter 3 referenced an incomplete evaluation")
+                })?;
             artifact["input_sections"] = json!({"CHAPTER_4":evaluation["data"]["artifact"]});
         }
         if tool == "insert_figure" {
@@ -158,7 +165,7 @@ impl Domain for Journal {
                     entry["tool_name"] == "create_figure"
                         && entry["data"]["figure_id"] == args["figure_id"]
                 })
-                .ok_or("insertion has no creation")?;
+                .ok_or_else(|| shell::ShellError::message("insertion has no creation"))?;
             artifact = figure["data"]["artifact"].clone();
         }
         let mut result = json!({"success":true,"tool_name":tool,"data":{
@@ -425,7 +432,7 @@ async fn each_draft_order_delivers_the_actual_cross_chapter_inputs() -> ShellRes
                     .await?;
                 let first = decode(figure.recv::<ResultFor<CREATE_1>>().await?)?;
                 figure
-                    .send::<Request<INSERT_3>>(&ChapterArguments::new(
+                    .send::<FigureLookup<INSERT_3>>(&ChapterArguments::new(
                         json!({"section_name":"CHAPTER_3","figure_id":third["data"]["figure_id"]}),
                     )?)
                     .await?;
@@ -434,7 +441,7 @@ async fn each_draft_order_delivers_the_actual_cross_chapter_inputs() -> ShellRes
                     third["data"]["artifact"]
                 );
                 figure
-                    .send::<Request<INSERT_1>>(&ChapterArguments::new(
+                    .send::<FigureLookup<INSERT_1>>(&ChapterArguments::new(
                         json!({"section_name":"CHAPTER_1","figure_id":first["data"]["figure_id"]}),
                     )?)
                     .await?;
@@ -443,7 +450,7 @@ async fn each_draft_order_delivers_the_actual_cross_chapter_inputs() -> ShellRes
                     first["data"]["artifact"]
                 );
                 figure
-                    .send::<Request<INSERT_4>>(&ChapterArguments::new(
+                    .send::<FigureLookup<INSERT_4>>(&ChapterArguments::new(
                         json!({"section_name":"CHAPTER_4","figure_id":fourth["data"]["figure_id"]}),
                     )?)
                     .await?;

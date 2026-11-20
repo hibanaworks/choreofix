@@ -15,7 +15,7 @@ use crate::{
     shell::{
         GUEST_MEMORY_BYTES, ShellError, ShellResult,
         global::{Exit, FileExit, Loan},
-        imp::service::Domain,
+        imp::service::ReceivedEffects,
     },
 };
 use hibana::{
@@ -161,7 +161,7 @@ pub(super) async fn check_chapter<
     const MINOR: u8,
 >(
     facts: &mut Endpoint<FACT>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     let (mut snapshot, references) = if OP == CHECK_4 {
         async {
@@ -179,16 +179,12 @@ pub(super) async fn check_chapter<
     let mut document = facts.recv::<Loan<DOCUMENT>>().await?;
     let index = 2 + usize::from(OP - CHECK_3);
     let chapter = CHAPTERS[index];
-    let author = ["WRITER_B", "WRITER_C"][index - 2];
     loop {
         facts
             .send::<FactInput>(&encode(&snapshot)?.as_slice())
             .await?;
-        let request = facts.recv::<Request<OP>>().await?.into_value();
-        let checked = domain
-            .execute("FACT_CHECKER", "fact_check", request)
-            .await
-            .map_err(ShellError::message)?;
+        let request = facts.recv::<Request<OP>>().await?;
+        let checked = effects.apply(request).await?;
         let data = &checked["data"];
         if checked["tool_name"] != "fact_check"
             || data["agent"] != "FACT_CHECKER"
@@ -207,12 +203,9 @@ pub(super) async fn check_chapter<
                 .send::<ResultFor<OP>>(&checked_bytes.as_slice())
                 .await?;
             facts.send::<ReviewInput>(&checked_bytes.as_slice()).await?;
-            let request = facts.recv::<ReviewRequest<OP>>().await?.into_value();
-            let feedback = request.get("feedback").cloned();
-            let result = domain
-                .execute("REVIEWER", "review_sections", request)
-                .await
-                .map_err(ShellError::message)?;
+            let request = facts.recv::<ReviewRequest<OP>>().await?;
+            let feedback = decode(request.as_bytes())?.get("feedback").cloned();
+            let result = effects.apply(request).await?;
             let data = &result["data"];
             if result["tool_name"] != "review_sections"
                 || data["agent"] != "REVIEWER"
@@ -262,13 +255,10 @@ pub(super) async fn check_chapter<
                 .ok_or_else(|| {
                     ShellError::message("minor amendment exceeds the reviewed chapter")
                 })?;
-            let args = document.recv::<Request<MINOR>>().await?.into_value();
+            let args = document.recv::<Request<MINOR>>().await?;
             let prior = &snapshot["sections"][chapter];
-            same(&args["review_id"], &review["review_id"])?;
-            let revised = domain
-                .execute(author, "revise_section", args)
-                .await
-                .map_err(ShellError::message)?;
+            same(&decode(args.as_bytes())?["review_id"], &review["review_id"])?;
+            let revised = effects.apply(args).await?;
             let current = artifact(&revised, "revise_section", index)?;
             let mut expected = prior.clone();
             expected["id"] = current["id"].clone();
@@ -288,11 +278,8 @@ pub(super) async fn check_chapter<
             facts
                 .send::<FactInput>(&encode(&snapshot)?.as_slice())
                 .await?;
-            let args = facts.recv::<Request<OP>>().await?.into_value();
-            let checked = domain
-                .execute("FACT_CHECKER", "fact_check", args)
-                .await
-                .map_err(ShellError::message)?;
+            let args = facts.recv::<Request<OP>>().await?;
+            let checked = effects.apply(args).await?;
             let data = &checked["data"];
             if checked["tool_name"] != "fact_check"
                 || data["agent"] != "FACT_CHECKER"
@@ -346,11 +333,8 @@ pub(super) async fn check_chapter<
             Ok(())
         }
         .await?;
-        let args = document.recv::<Request<REVISION>>().await?.into_value();
-        let revised = domain
-            .execute(author, "revise_section", args)
-            .await
-            .map_err(ShellError::message)?;
+        let args = document.recv::<Request<REVISION>>().await?;
+        let revised = effects.apply(args).await?;
         let current = artifact(&revised, "revise_section", index)?;
         if current["content"] == snapshot["sections"][chapter]["content"] {
             return Err(ShellError::message(
@@ -462,7 +446,7 @@ pub fn part_i_fact_flow<const FACT: u8>() -> impl Projectable {
 #[hibana_runtime::scope]
 pub async fn check_and_review<const FACT: u8>(
     facts: &mut Endpoint<FACT>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     let scope = FACT_SCOPES[0];
     loop {
@@ -501,11 +485,8 @@ pub async fn check_and_review<const FACT: u8>(
         let scope_receipt = loop {
             let bytes = encode(&snapshot)?;
             facts.send::<FactInput>(&bytes.as_slice()).await?;
-            let arguments = facts.recv::<Request<CHECK_PART_I>>().await?.into_value();
-            let checked = domain
-                .execute("FACT_CHECKER", "fact_check", arguments)
-                .await
-                .map_err(ShellError::message)?;
+            let arguments = facts.recv::<Request<CHECK_PART_I>>().await?;
+            let checked = effects.apply(arguments).await?;
             let data = &checked["data"];
             if checked["tool_name"] != "fact_check"
                 || data["agent"] != "FACT_CHECKER"
@@ -522,16 +503,11 @@ pub async fn check_and_review<const FACT: u8>(
                     .send::<ResultFor<CHECK_PART_I>>(&receipt.as_slice())
                     .await?;
                 facts.send::<ReviewInput>(&receipt.as_slice()).await?;
-                let arguments = facts
-                    .recv::<ReviewRequest<CHECK_PART_I>>()
-                    .await?
-                    .into_value();
-                let decision = arguments["decision"].clone();
-                let feedback = arguments.get("feedback").cloned();
-                let review = domain
-                    .execute("REVIEWER", "review_sections", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let arguments = facts.recv::<ReviewRequest<CHECK_PART_I>>().await?;
+                let values = decode(arguments.as_bytes())?;
+                let decision = &values["decision"];
+                let feedback = values.get("feedback");
+                let review = effects.apply(arguments).await?;
                 let result = &review["data"];
                 let status = result["status"]
                     .as_str()
@@ -560,7 +536,7 @@ pub async fn check_and_review<const FACT: u8>(
                 if review["tool_name"] != "review_sections"
                     || result["agent"] != "REVIEWER"
                     || result["scope"] != scope
-                    || (recorded && result.get("feedback") != feedback.as_ref())
+                    || (recorded && result.get("feedback") != feedback)
                     || !correct_outcome
                 {
                     return Err(ShellError::message(
@@ -604,28 +580,36 @@ pub async fn check_and_review<const FACT: u8>(
                 for _ in edits {
                     let branch = held.offer().await?;
                     let label = branch.label();
-                    let args = match label {
-                        MINOR_1 => branch.recv::<Request<MINOR_1>>().await?.into_value(),
-                        MINOR_2 => branch.recv::<Request<MINOR_2>>().await?.into_value(),
+                    let index = match label {
+                        MINOR_1 => 0,
+                        MINOR_2 => 1,
                         _ => return Err(ShellError::message("unexpected minor amendment")),
                     };
-                    let index = usize::from(label - MINOR_1);
                     let chapter = CHAPTERS[index];
                     let prior = &review_data["input_snapshot"]["sections"][chapter];
                     let replacement = edits.get(chapter).ok_or_else(|| {
                         ShellError::message("section has no authorized minor edit")
                     })?;
-                    if args["review_id"] != review_data["review_id"]
-                        || snapshot["sections"][chapter] != *prior
-                    {
-                        return Err(ShellError::message(
-                            "minor amendment differs from current review",
-                        ));
-                    }
-                    let revised = domain
-                        .execute("WRITER_A", "revise_section", args)
-                        .await
-                        .map_err(ShellError::message)?;
+                    same(&snapshot["sections"][chapter], prior)?;
+                    let revised = match label {
+                        MINOR_1 => {
+                            let request = branch.recv::<Request<MINOR_1>>().await?;
+                            same(
+                                &decode(request.as_bytes())?["review_id"],
+                                &review_data["review_id"],
+                            )?;
+                            effects.apply(request).await?
+                        }
+                        MINOR_2 => {
+                            let request = branch.recv::<Request<MINOR_2>>().await?;
+                            same(
+                                &decode(request.as_bytes())?["review_id"],
+                                &review_data["review_id"],
+                            )?;
+                            effects.apply(request).await?
+                        }
+                        _ => unreachable!("matched minor amendment"),
+                    };
                     let artifact = artifact(&revised, "revise_section", index)?;
                     let mut expected = prior.clone();
                     expected["id"] = artifact["id"].clone();
@@ -664,11 +648,8 @@ pub async fn check_and_review<const FACT: u8>(
                 }
                 let material = encode(&snapshot)?;
                 facts.send::<FactInput>(&material.as_slice()).await?;
-                let request = facts.recv::<Request<CHECK_PART_I>>().await?.into_value();
-                let checked = domain
-                    .execute("FACT_CHECKER", "fact_check", request)
-                    .await
-                    .map_err(ShellError::message)?;
+                let request = facts.recv::<Request<CHECK_PART_I>>().await?;
+                let checked = effects.apply(request).await?;
                 let actual = &checked["data"];
                 if checked["tool_name"] != "fact_check"
                     || actual["agent"] != "FACT_CHECKER"
@@ -700,15 +681,19 @@ pub async fn check_and_review<const FACT: u8>(
                 .await?;
                 let branch = held.offer().await?;
                 let label = branch.label();
-                let args = match label {
-                    RECONSIDER_1 => branch.recv::<Request<RECONSIDER_1>>().await?.into_value(),
-                    RECONSIDER_2 => branch.recv::<Request<RECONSIDER_2>>().await?.into_value(),
+                let revised = match label {
+                    RECONSIDER_1 => {
+                        effects
+                            .apply(branch.recv::<Request<RECONSIDER_1>>().await?)
+                            .await?
+                    }
+                    RECONSIDER_2 => {
+                        effects
+                            .apply(branch.recv::<Request<RECONSIDER_2>>().await?)
+                            .await?
+                    }
                     _ => return Err(ShellError::message("unexpected Part I revision")),
                 };
-                let revised = domain
-                    .execute("WRITER_A", "revise_section", args)
-                    .await
-                    .map_err(ShellError::message)?;
                 let index = usize::from(label - RECONSIDER_1);
                 let chapter = CHAPTERS[index];
                 let artifact = artifact(&revised, "revise_section", index)?;

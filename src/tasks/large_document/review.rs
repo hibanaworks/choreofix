@@ -28,18 +28,18 @@ pub type ReviewRequest<const OP: u8> = g::Msg<OP, ReviewArguments<OP>>;
 
 pub struct ReviewArguments<const OP: u8>(Value);
 
+#[cfg(test)]
 impl<const OP: u8> ReviewArguments<OP> {
-    #[cfg(test)]
     pub fn new(value: Value) -> ShellResult<Self> {
         let bytes = crate::imp::json::encode(&value)?;
         Self::validate_payload(Payload::new(&bytes))
             .map_err(|_| crate::shell::ShellError::message("invalid review arguments"))?;
         Ok(Self(value))
     }
+}
 
-    pub fn into_value(self) -> Value {
-        self.0
-    }
+impl<const OP: u8> crate::shell::imp::service::SimulatorOperation for ReviewArguments<OP> {
+    const RPC: (&'static str, &'static str) = ("REVIEWER", "review_sections");
 }
 
 impl<const OP: u8> WireEncode for ReviewArguments<OP> {
@@ -52,7 +52,7 @@ impl<const OP: u8> WireEncode for ReviewArguments<OP> {
 
 impl<const OP: u8> WirePayload for ReviewArguments<OP> {
     const SCHEMA_ID: u32 = 0xac7e_0100 | OP as u32;
-    type Decoded<'a> = Self;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
 
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
         let value: Value =
@@ -107,8 +107,8 @@ impl<const OP: u8> WirePayload for ReviewArguments<OP> {
         }
     }
 
-    fn decode_validated_payload(input: ReceivedPayload<'_, Self>) -> Self {
-        Self(serde_json::from_slice(input.as_bytes()).expect("validated review arguments"))
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
+        input
     }
 }
 
