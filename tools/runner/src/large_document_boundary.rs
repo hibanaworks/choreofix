@@ -132,6 +132,14 @@ async fn authors_receive_the_completed_chapters_their_work_depends_on() -> Resul
             &["CHAPTER_2", "CHAPTER_1"][..],
             false,
         ),
+        (
+            "repeated-major-before-part-i",
+            0,
+            false,
+            [0, 0, 0, 0, 0],
+            &[][..],
+            false,
+        ),
     ];
     let mut reports = Vec::with_capacity(cases.len());
     for (case, depth, repair_part_ii, failures, minor_sections, reject_amended_part_ii) in cases {
@@ -187,7 +195,13 @@ async fn publication_case(
         .copied()
         .partition(|chapter| matches!(*chapter, "CHAPTER_3" | "CHAPTER_4"));
     let reject_amended_part_i = case == "part-i-amendment-fact-repair";
-    let major_first = matches!(case, "major-then-accept" | "major-then-two-amendments");
+    let major_then_accept = matches!(case, "major-then-accept" | "repeated-major-before-part-i");
+    let major_first = major_then_accept || case == "major-then-two-amendments";
+    let part_ii_major_reviews_per_chapter = if case == "repeated-major-before-part-i" {
+        2
+    } else {
+        usize::from(repair_part_ii)
+    };
     let part_i_feedback = "Explain “scope” in the opening claim.\nIdentify the evidence.";
     let part_i_review_rejections = review_failures as usize + usize::from(major_first);
     let output = root.join(case);
@@ -218,12 +232,13 @@ async fn publication_case(
         "injected_part_i_fact_failures":fact_failures,"injected_part_i_review_failures":review_failures,
         "post_edit_fact_failures":post_edit_fact,"post_edit_review_failures":post_edit_review,
         "reviewer_requests_major_first":major_first,
+        "part_ii_major_reviews_per_chapter":part_ii_major_reviews_per_chapter,
         "requested_part_i_minor_edits":minor_sections,"requested_part_ii_minor_edits":part_ii_minor,
         "reject_amended_part_ii":reject_amended_part_ii,"reject_amended_part_i":reject_amended_part_i}),
     )?;
     let trace = Trace::create(&output.join("events.jsonl"))?;
     let part_ii_fact_rejections = 2 * usize::from(repair_part_ii) + depth as usize;
-    let part_ii_review_rejections = 2 * usize::from(repair_part_ii) + depth as usize;
+    let part_ii_review_rejections = 2 * part_ii_major_reviews_per_chapter + depth as usize;
     let first_part_i_fact = 2
         + part_ii_fact_rejections as u32
         + part_ii_review_rejections as u32
@@ -488,7 +503,7 @@ async fn publication_case(
                 let stable = response(guest.command("WRITER_B", "cat /service/evaluation".into()).await?)?;
                 let cited = response(guest.command("WRITER_B", r#"echo '{"section_name":"CHAPTER_3"}' > /service/update_references/CHAPTER_3; cat /service/update_references/CHAPTER_3"#.into()).await?)?;
                 assert_eq!(cited["data"]["artifact"]["input_sections"]["CHAPTER_4"], stable);
-                assert_eq!(stable["id"] != evaluation["data"]["artifact"]["id"], repair_part_ii || depth > 0 || part_ii_minor.contains(&"CHAPTER_4"));
+                assert_eq!(stable["id"] != evaluation["data"]["artifact"]["id"], part_ii_major_reviews_per_chapter > 0 || depth > 0 || part_ii_minor.contains(&"CHAPTER_4"));
             }
             let early = json!({"section_name":chapter,"feedback":"Revision without a refusal"});
             let refused = guest.command(author, format!("echo '{early}' | dd of=/service/revise_section/{chapter} oflag=nonblock")).await?;
@@ -499,7 +514,7 @@ async fn publication_case(
             let text = refused["stdout"].as_str().ok_or("early minor edit result")?;
             assert!(text.contains("Permission denied") || text.contains("Resource temporarily unavailable"), "{text}");
             let mut preceding_revision = None;
-            let mut decisions = repair_part_ii.then_some("major").into_iter()
+            let mut decisions = std::iter::repeat_n("major", part_ii_major_reviews_per_chapter)
                 .chain(part_ii_minor.contains(&chapter).then_some("minor"))
                 .chain(std::iter::repeat("accept"));
             loop {
@@ -600,6 +615,14 @@ async fn publication_case(
         async {
             loop {
                 let snapshot = response(guest.command("FACT_CHECKER", "cat /service/inbox".into()).await?)?;
+                if major_then_accept
+                    && snapshot["sections"]["CHAPTER_1"]["content"].as_str().ok_or("revised introduction")?
+                        .contains("Align the introduction terminology")
+                {
+                    let early = guest.command("FACT_CHECKER", "cat /service/inbox".into()).await?;
+                    let text = early["stdout"].as_str().ok_or("blocking read before renewed fact check")?;
+                    assert!(text.contains("Permission denied"), "{text}");
+                }
                 let checked = response(guest.command("FACT_CHECKER", r#"echo '{"section_name":"CHAPTERS_1_2"}' > /service/fact_check/CHAPTERS_1_2; cat /service/fact_check/CHAPTERS_1_2"#.into()).await?)?;
                 assert_eq!(checked["data"]["input_snapshot"], snapshot);
                 if checked["success"] == false {
@@ -647,7 +670,7 @@ async fn publication_case(
                 && !evidence["data"]["input_snapshot"]["sections"]["CHAPTER_1"]["content"]
                     .as_str().ok_or("reviewed introduction")?
                     .contains("Align the introduction terminology");
-            if case == "major-then-accept" && !request_major {
+            if major_then_accept && !request_major {
                 let early = guest.command("REVIEWER", "cat /service/inbox".into()).await?;
                 let text = early["stdout"].as_str().ok_or("blocking read before renewed review")?;
                 assert!(text.contains("Permission denied"), "{text}");
@@ -659,7 +682,7 @@ async fn publication_case(
                 && minor_sections.iter().all(|chapter|
                     evidence["data"]["input_snapshot"]["sections"][chapter]["minor_review_id"].is_null());
             let args = if request_major { json!({"section_name":"CHAPTERS_1_2","decision":"major","feedback":part_i_feedback}) }
-            else if case == "major-then-accept" { json!({"section_name":"CHAPTERS_1_2","decision":"accept"}) }
+            else if major_then_accept { json!({"section_name":"CHAPTERS_1_2","decision":"accept"}) }
             else if !request_minor { json!({"section_name":"CHAPTERS_1_2"}) }
             else {
                 let edits: Vec<_> = minor_sections.iter().map(|chapter| match *chapter {
