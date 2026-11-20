@@ -885,13 +885,22 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
     archive_build_receipt(&binary, &receipt, &output)?;
     let film = ("run_deposition", "film_integrity_check");
     let etch = ("run_etch_process", "etch_uniformity_check");
-    for (case, order, retry) in [
-        ("film-first", [film, etch], false),
-        ("etch-first", [etch, film], false),
-        ("overlay-retry", [film, etch], true),
+    let recipients = [
+        ("LITHOGRAPHER", "/service/lot_lithographer"),
+        ("DEPOSITOR", "/service/lot_depositor"),
+        ("ETCHER", "/service/lot_etcher"),
+    ];
+    for (case, order, retry, delivery, deferred_reads) in [
+        ("film-first", [film, etch], false, [0, 1, 2], false),
+        ("etch-first", [etch, film], false, [1, 2, 0], false),
+        ("overlay-retry", [film, etch], true, [2, 0, 1], false),
+        ("litho-etch-dep", [etch, film], false, [0, 2, 1], true),
+        ("dep-litho-etch", [film, etch], false, [1, 0, 2], true),
+        ("etch-dep-litho", [etch, film], false, [2, 1, 0], true),
     ] {
         let directory = output.join(case);
         fs::create_dir(&directory)?;
+        let verdict = if retry { "hold for review" } else { "release" };
         let journal = directory.join("events.jsonl");
         let artifact = projection::archive(&binary, &directory, "15E")?;
         let trace = Trace::create(&journal)?;
@@ -917,6 +926,9 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                     let measure = "/service/run_metrology_measurement";
                     let mount_write = format!("echo '{{\"process\":\"overlay_alignment\"}}' > {mount}");
                     let measure_write = format!("echo '{{\"measurement\":\"overlay_alignment\"}}' > {measure}");
+                    let refused = guest.command(agent,
+                        format!("echo premature | dd of={} oflag=nonblock", recipients[delivery[0]].1)).await?;
+                    assert!(refused["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{refused}");
                     let first = guest.command(agent, mount_write).await?;
                     assert_eq!(first["stdout"], "wash> ", "{first}");
                     let sent = guest.command(agent, measure_write.clone()).await?;
@@ -943,6 +955,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                     assert_eq!(measured["success"], true, "{measured}");
                     assert_eq!(mounted["data"]["inputs"], json!([receipts[12]]));
                     assert_eq!(measured["data"]["inputs"], json!([mounted["data"]["receipt"]]));
+                    let mut inspection = serde_json::Map::new();
                     for (tool, operation) in order {
                         let path = format!("/service/{tool}");
                         let early = guest
@@ -978,11 +991,30 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                         let result = wafer_shell_result(&reply)?;
                         assert_eq!(result["tool_name"], tool);
                         assert_eq!(result["success"], true);
+                        inspection.insert(operation.into(), result["data"]["receipt"].clone());
                         assert_eq!(result["data"]["process"], operation);
                         assert_eq!(
                             result["data"]["inputs"],
                             json!([mounted["data"]["receipt"], measured["data"]["receipt"]])
                         );
+                    }
+                    let decision = json!({"lot_disposition":verdict, "inspection":inspection});
+                    let writes = delivery.map(|i| (i, true));
+                    let schedule: Vec<_> = if deferred_reads {
+                        writes.into_iter().chain(delivery.into_iter().rev().map(|i| (i, false))).collect()
+                    } else {
+                        delivery.into_iter().flat_map(|i| [(i, true), (i, false)]).collect()
+                    };
+                    for (i, write) in schedule {
+                        let (recipient, path) = recipients[i];
+                        if write {
+                            let sent = guest.command(agent, format!("printf '%s' '{decision}' > {path}")).await?;
+                            assert_eq!(sent["stdout"], "wash> ", "{sent}");
+                        } else {
+                            let read = guest.command(recipient, "cat /service/lot_disposition".into()).await?;
+                            assert_eq!(wafer_shell_result(&read)?, decision, "{read}");
+                            assert_eq!(guest.command(recipient, "exit 0".into()).await?["exit_status"], 0);
+                        }
                     }
                     assert_eq!(
                         guest.command(agent, "exit 0".into()).await?["exit_status"],
@@ -1017,9 +1049,81 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
         let epf = projection::check_dynamic(&artifact, &rows)?;
         let alignment = check_alignment_effects(&labels, &epf, &rows, &outcome["score"], retry)?;
         check_spot_check_effects(&epf, &rows, &outcome["score"], order[0] == etch)?;
+        let captures = epf["sessions"][0]["acceptances"]
+            .as_array()
+            .ok_or("missing EPF deliveries")?;
+        let mut delivered = Vec::new();
+        let mut inspections = serde_json::Map::new();
+        let mut last_inspection_read = 0;
+        for call in captures {
+            if call["receive_commit"]["view"] != instruments::WAFER
+                || ![instruments::DEPOSITION_CHAMBER, instruments::ETCH_CHAMBER]
+                    .iter()
+                    .any(|role| call["send_view"] == *role)
+            {
+                continue;
+            }
+            let (_, reply) = wafer_frame(&rows, call)?;
+            inspections.insert(
+                reply["data"]["process"]
+                    .as_str()
+                    .ok_or("inspection target")?
+                    .into(),
+                reply["data"]["receipt"].clone(),
+            );
+            last_inspection_read = last_inspection_read.max(
+                call["receive_commit"]["journal_row"]
+                    .as_u64()
+                    .ok_or("missing inspection receive")?,
+            );
+        }
+        assert_eq!(inspections.len(), 2);
+        let decision = json!({"lot_disposition":verdict, "inspection":inspections});
+        for role in delivery {
+            let (recipient, _) = recipients[role];
+            let inbox = artifact["compiled"]["roles"]
+                [["LITHO_INBOX", "DEP_INBOX", "ETCH_INBOX"][role]]
+                .as_u64()
+                .ok_or("missing inbox view")?;
+            let vm = artifact["compiled"]["roles"][["LITHO", "DEP", "ETCH"][role]]
+                .as_u64()
+                .ok_or("missing receiving participant")?;
+            let mut matched = captures.iter().filter(|c| {
+                c["send_view"] == instruments::WAFER && c["receive_commit"]["view"] == inbox
+            });
+            let call = matched.next().ok_or("missing lot disposition")?;
+            assert!(matched.next().is_none());
+            assert_eq!(call["send_actor"], instruments::ENGINEER);
+            assert_eq!(call["receive_commit"]["actor"], vm);
+            let (sent, payload) = wafer_frame(&rows, call)?;
+            assert_eq!(payload, decision);
+            assert!(sent as u64 > last_inspection_read);
+            delivered.push(json!({"recipient":recipient,"frame":call["frame_id"],"send_row":sent,"receive_row":call["receive_commit"]["journal_row"]}));
+        }
+        assert!(
+            delivered
+                .windows(2)
+                .all(|p| p[0]["send_row"].as_u64().unwrap() < p[1]["send_row"].as_u64().unwrap())
+        );
+        if deferred_reads {
+            assert!(
+                delivered.last().unwrap()["send_row"].as_u64().unwrap()
+                    < delivered.last().unwrap()["receive_row"].as_u64().unwrap()
+            );
+            assert!(
+                delivered
+                    .windows(2)
+                    .all(|p| p[0]["receive_row"].as_u64().unwrap()
+                        > p[1]["receive_row"].as_u64().unwrap())
+            );
+        } else {
+            assert!(delivered.windows(2).all(
+                |p| p[0]["receive_row"].as_u64().unwrap() < p[1]["send_row"].as_u64().unwrap()
+            ));
+        }
         save(
             &directory.join("result.json"),
-            &json!({"task":"15E","order":order,"wasm_participants":1,
+            &json!({"task":"15E","order":order,"wasm_participants":4,"disposition":decision,"deliveries":delivered,"deferred_reads":deferred_reads,
             "model_calls":0,"scored_benchmark":false,"upstream_simulator_calls":upstream_events,
                 "shell_effects":4 + usize::from(retry),"alignment":alignment,"injected_first_measurement_failure":retry,"early_reads":2,"rejected_wrong_operations":2,"score":outcome["score"],"epf":epf,
             "events_sha256":digest(&journal)?,"runtime_binary_sha256":digest(&binary)?,

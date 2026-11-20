@@ -596,8 +596,15 @@ load again without remounting. Both final instrument results referred to the
 original mount and the successful measurement. All three runs completed the
 common-world score with zero violations. EPF checked the communication records;
 we separately matched each instrument request and reply to the scored effect.
-The other five participants' upstream work came from the fixture. The evidence
-and timing conditions are in \path{analysis/15e-wafer-alignment.json}.
+The evidence and timing conditions are in \path{analysis/15e-wafer-alignment.json}.
+A subsequent six-run fixture added three wash guests to receive the engineer's
+lot disposition and the two inspection receipt identifiers. All six send
+orders completed. In three runs all writes finished before the first read,
+and the recipients read in reverse order. Across the six runs EPF checked
+11,691 records, and the common simulator recorded zero violations.
+The other five roles' upstream work remained fixture-driven; these trials
+made no model calls. Per-run receipts, delivery order and hashes are in
+\path{analysis/15e-wafer-disposition.json}.
 
 \subsection{Live-agent evidence across 36 tasks}
 The 19 November inventory includes one audited execution for each of the

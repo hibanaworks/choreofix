@@ -1,0 +1,309 @@
+{
+  "task": "15E",
+  "scope": "Four scripted wash guests exercise reference-wafer alignment, both spot checks and the three lot-disposition channels. Upstream fabrication, process control and metrology work remains fixture-driven. Live six-agent qualification is open.",
+  "model_calls": 0,
+  "scored_benchmark": false,
+  "raw_archive": "output/verification/wafer-disposition-15e-20261121.rcGk0M/delivery-wasm",
+  "source_manifest_sha256": "7c1240d8709c4284df78d1a9312357a4cabe1403ba4b52374d61a72b51c21a44",
+  "application_source_sha256": "18c085713ba62b51f6694e0fbc7cb8e9e4ca74dec1636bd11332a7462bc01f9e",
+  "test_source_sha256": "2b007a798c2ee95e40c1146e390988b3381634ba8dd935ee1e1abe1a560d177c",
+  "build_receipt_sha256": "cdd734055c1c3beb9c5d8c2a560676ce98a01e335de278da340d8192f5f5e137",
+  "runtime_sha256": "d645349926a9482e17eb043b34f876bbb56da7b1ccc4ec0db5547e5a9e33c4a8",
+  "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+  "cases": [
+    {
+      "case": "film-first",
+      "spot_check_order": [
+        "film_integrity_check",
+        "etch_uniformity_check"
+      ],
+      "disposition": {
+        "inspection": {
+          "etch_uniformity_check": 19,
+          "film_integrity_check": 18
+        },
+        "lot_disposition": "release"
+      },
+      "deliveries_in_send_order": [
+        {
+          "frame": 246,
+          "receive_row": 1780,
+          "recipient": "LITHOGRAPHER",
+          "send_row": 1673
+        },
+        {
+          "frame": 284,
+          "receive_row": 2026,
+          "recipient": "DEPOSITOR",
+          "send_row": 1919
+        },
+        {
+          "frame": 322,
+          "receive_row": 2272,
+          "recipient": "ETCHER",
+          "send_row": 2165
+        }
+      ],
+      "receive_order": [
+        "LITHOGRAPHER",
+        "DEPOSITOR",
+        "ETCHER"
+      ],
+      "all_sent_before_first_read": false,
+      "upstream_fixture_effects": 15,
+      "guest_effects": 4,
+      "scored_world_events": 19,
+      "world_complete": true,
+      "violations": 0,
+      "epf_records": 1908,
+      "journal_sha256": "4fe5d3d518b95bca2995941de8a1bc063c815732f6025be3489a5772c3ffc776",
+      "projection_sha256": "6cd69e18094315bc87d0c9fc745b3d6f90a2ed18d93f243164427259855c772e",
+      "result_sha256": "f03b8af0fcccb5ae4d16aff381edca782dcc2cce0a1f7e1259028c275bde2fc5"
+    },
+    {
+      "case": "etch-first",
+      "spot_check_order": [
+        "etch_uniformity_check",
+        "film_integrity_check"
+      ],
+      "disposition": {
+        "inspection": {
+          "etch_uniformity_check": 18,
+          "film_integrity_check": 19
+        },
+        "lot_disposition": "release"
+      },
+      "deliveries_in_send_order": [
+        {
+          "frame": 246,
+          "receive_row": 1780,
+          "recipient": "DEPOSITOR",
+          "send_row": 1673
+        },
+        {
+          "frame": 284,
+          "receive_row": 2026,
+          "recipient": "ETCHER",
+          "send_row": 1919
+        },
+        {
+          "frame": 322,
+          "receive_row": 2272,
+          "recipient": "LITHOGRAPHER",
+          "send_row": 2165
+        }
+      ],
+      "receive_order": [
+        "DEPOSITOR",
+        "ETCHER",
+        "LITHOGRAPHER"
+      ],
+      "all_sent_before_first_read": false,
+      "upstream_fixture_effects": 15,
+      "guest_effects": 4,
+      "scored_world_events": 19,
+      "world_complete": true,
+      "violations": 0,
+      "epf_records": 1908,
+      "journal_sha256": "5f0cb4d7b6a896bb421c2292f45239be5364ff10c1f5983cb0c6c5a75ce1db87",
+      "projection_sha256": "6cd69e18094315bc87d0c9fc745b3d6f90a2ed18d93f243164427259855c772e",
+      "result_sha256": "57879dcbea9dc580400d1a3df2496610c685750dde1089a88f203ca34dee364a"
+    },
+    {
+      "case": "overlay-retry",
+      "spot_check_order": [
+        "film_integrity_check",
+        "etch_uniformity_check"
+      ],
+      "disposition": {
+        "inspection": {
+          "etch_uniformity_check": 23,
+          "film_integrity_check": 22
+        },
+        "lot_disposition": "hold for review"
+      },
+      "deliveries_in_send_order": [
+        {
+          "frame": 291,
+          "receive_row": 2087,
+          "recipient": "ETCHER",
+          "send_row": 1980
+        },
+        {
+          "frame": 329,
+          "receive_row": 2333,
+          "recipient": "LITHOGRAPHER",
+          "send_row": 2226
+        },
+        {
+          "frame": 367,
+          "receive_row": 2579,
+          "recipient": "DEPOSITOR",
+          "send_row": 2472
+        }
+      ],
+      "receive_order": [
+        "ETCHER",
+        "LITHOGRAPHER",
+        "DEPOSITOR"
+      ],
+      "all_sent_before_first_read": false,
+      "upstream_fixture_effects": 18,
+      "guest_effects": 5,
+      "scored_world_events": 23,
+      "world_complete": true,
+      "violations": 0,
+      "epf_records": 2151,
+      "journal_sha256": "5112069198a4a4ef307b299b57d3581307cb854ecef17f645b3cfbc6216f33f2",
+      "projection_sha256": "6cd69e18094315bc87d0c9fc745b3d6f90a2ed18d93f243164427259855c772e",
+      "result_sha256": "8432cd4ce2b607237545dc0b963beec1a5331044b8b43138e642bc582417e4fd"
+    },
+    {
+      "case": "litho-etch-dep",
+      "spot_check_order": [
+        "etch_uniformity_check",
+        "film_integrity_check"
+      ],
+      "disposition": {
+        "inspection": {
+          "etch_uniformity_check": 18,
+          "film_integrity_check": 19
+        },
+        "lot_disposition": "release"
+      },
+      "deliveries_in_send_order": [
+        {
+          "frame": 246,
+          "receive_row": 2272,
+          "recipient": "LITHOGRAPHER",
+          "send_row": 1673
+        },
+        {
+          "frame": 261,
+          "receive_row": 2122,
+          "recipient": "ETCHER",
+          "send_row": 1769
+        },
+        {
+          "frame": 276,
+          "receive_row": 1972,
+          "recipient": "DEPOSITOR",
+          "send_row": 1865
+        }
+      ],
+      "receive_order": [
+        "DEPOSITOR",
+        "ETCHER",
+        "LITHOGRAPHER"
+      ],
+      "all_sent_before_first_read": true,
+      "upstream_fixture_effects": 15,
+      "guest_effects": 4,
+      "scored_world_events": 19,
+      "world_complete": true,
+      "violations": 0,
+      "epf_records": 1908,
+      "journal_sha256": "10349e0bb191f2a692cfb89788ccb54dfebef4e595b64251e051039643c46281",
+      "projection_sha256": "6cd69e18094315bc87d0c9fc745b3d6f90a2ed18d93f243164427259855c772e",
+      "result_sha256": "00064acb2f6e7da27d0f15c2fce11479975eb5f104c7c843e0d910131e510ae4"
+    },
+    {
+      "case": "dep-litho-etch",
+      "spot_check_order": [
+        "film_integrity_check",
+        "etch_uniformity_check"
+      ],
+      "disposition": {
+        "inspection": {
+          "etch_uniformity_check": 19,
+          "film_integrity_check": 18
+        },
+        "lot_disposition": "release"
+      },
+      "deliveries_in_send_order": [
+        {
+          "frame": 246,
+          "receive_row": 2272,
+          "recipient": "DEPOSITOR",
+          "send_row": 1673
+        },
+        {
+          "frame": 261,
+          "receive_row": 2122,
+          "recipient": "LITHOGRAPHER",
+          "send_row": 1769
+        },
+        {
+          "frame": 276,
+          "receive_row": 1972,
+          "recipient": "ETCHER",
+          "send_row": 1865
+        }
+      ],
+      "receive_order": [
+        "ETCHER",
+        "LITHOGRAPHER",
+        "DEPOSITOR"
+      ],
+      "all_sent_before_first_read": true,
+      "upstream_fixture_effects": 15,
+      "guest_effects": 4,
+      "scored_world_events": 19,
+      "world_complete": true,
+      "violations": 0,
+      "epf_records": 1908,
+      "journal_sha256": "510cd1e43df1ee7f8ea968abb7b2bf347573f4e175343efcdbaff45145f1b833",
+      "projection_sha256": "6cd69e18094315bc87d0c9fc745b3d6f90a2ed18d93f243164427259855c772e",
+      "result_sha256": "8877fc64055dbf33c4fac47bc7c710bf7c6cac6978f7ac9611b0ee23ef226cde"
+    },
+    {
+      "case": "etch-dep-litho",
+      "spot_check_order": [
+        "etch_uniformity_check",
+        "film_integrity_check"
+      ],
+      "disposition": {
+        "inspection": {
+          "etch_uniformity_check": 18,
+          "film_integrity_check": 19
+        },
+        "lot_disposition": "release"
+      },
+      "deliveries_in_send_order": [
+        {
+          "frame": 246,
+          "receive_row": 2272,
+          "recipient": "ETCHER",
+          "send_row": 1673
+        },
+        {
+          "frame": 261,
+          "receive_row": 2122,
+          "recipient": "DEPOSITOR",
+          "send_row": 1769
+        },
+        {
+          "frame": 276,
+          "receive_row": 1972,
+          "recipient": "LITHOGRAPHER",
+          "send_row": 1865
+        }
+      ],
+      "receive_order": [
+        "LITHOGRAPHER",
+        "DEPOSITOR",
+        "ETCHER"
+      ],
+      "all_sent_before_first_read": true,
+      "upstream_fixture_effects": 15,
+      "guest_effects": 4,
+      "scored_world_events": 19,
+      "world_complete": true,
+      "violations": 0,
+      "epf_records": 1908,
+      "journal_sha256": "9d80620a63b27b624808c714e4da642fae1b94227fb2e73e58a9302d0417b6c7",
+      "projection_sha256": "6cd69e18094315bc87d0c9fc745b3d6f90a2ed18d93f243164427259855c772e",
+      "result_sha256": "33ed3c0c0a1ea196876eb149794a62f3d855ce9dece722a36352e7d62ed775bc"
+    }
+  ]
+}
