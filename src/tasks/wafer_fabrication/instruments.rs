@@ -58,19 +58,36 @@ impl<const KIND: u8> WireEncode for WaferReading<'_, KIND> {
     }
 }
 
-impl<const KIND: u8> WirePayload for WaferReading<'_, KIND> {
+impl<const KIND: u8> WirePayload for WaferReading<'_, KIND>
+where
+    InstrumentRequest<KIND>: SimulatorOperation,
+{
     const SCHEMA_ID: u32 = 0xac15_1000 | KIND as u32;
     type Decoded<'a> = &'a [u8];
 
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
         let result: Value =
             serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
-        let name = dimension_name(KIND).ok_or(CodecError::Malformed)?;
+        let (field, name) = if KIND == MONITOR {
+            ("check_type", "cross_reference")
+        } else {
+            (
+                "measurement",
+                dimension_name(KIND).ok_or(CodecError::Malformed)?,
+            )
+        };
+        let (engineer, tool) = InstrumentRequest::<KIND>::RPC;
         if result["success"] == true
-            && result["tool_name"] == "run_metrology_measurement"
-            && result["data"]["engineer"] == "METROLOGY_ENGINEER"
-            && result["data"]["measurement"] == name
+            && result["tool_name"] == tool
+            && result["data"]["engineer"] == engineer
+            && result["data"][field] == name
             && result["data"]["receipt"].as_u64().is_some_and(|r| r > 0)
+            && (KIND != MONITOR
+                || result["data"]["inputs"].as_array().is_some_and(|inputs| {
+                    matches!(inputs.as_slice(), [a, b, c]
+                    if [a, b, c].iter().all(|r| r.as_u64().is_some_and(|n| n > 0))
+                    && a != b && a != c && b != c)
+                }))
         {
             Ok(())
         } else {

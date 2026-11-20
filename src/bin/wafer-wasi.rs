@@ -5,7 +5,10 @@ use choreofix::{
         GUEST_MEMORY_BYTES, ShellError, ShellResult,
         global::{Exit, FileExit, Loan, file_metadata, private_io},
         imp::{
-            bus::Bus, private_fs::PrivateFs, review_reply::ReviewReply, service::ReceivedEffects,
+            bus::Bus,
+            private_fs::PrivateFs,
+            review_reply::ReviewReply,
+            service::{ReceivedEffects, SimulatorOperation},
         },
         localside,
     },
@@ -54,7 +57,7 @@ const MEASURE_FILE: u8 = 29;
 const MEASURE_FILES: u8 = 30;
 const MEASURE_TERM: u8 = 31;
 type FabReady<'a, const FAB: u8> = g::Msg<FAB, &'a [u8]>;
-type Confirmation<'a, const LABEL: u8> = g::Msg<LABEL, &'a [u8]>;
+type Confirmation<'a, const LABEL: u8> = g::Msg<LABEL, WaferReading<'a, MONITOR>>;
 const CONFIRM_LITHO: u8 = 40;
 const CONFIRM_DEP: u8 = 41;
 const CONFIRM_ETCH: u8 = 42;
@@ -84,7 +87,10 @@ const READY_FILE: ChoreoFsObject<'static> = ChoreoFsObject::writable(
     FdBinding::write(FdWriteRow::Object),
 );
 
-fn measure_wafer<const FAB: u8, const KIND: u8>() -> impl Projectable + Copy {
+fn measure_wafer<const FAB: u8, const KIND: u8>() -> impl Projectable + Copy
+where
+    InstrumentRequest<KIND>: SimulatorOperation,
+{
     g::seq(
         g::send::<FAB, MEASURE_FILE, FabReady<FAB>>(),
         g::seq(

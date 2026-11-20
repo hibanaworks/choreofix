@@ -927,7 +927,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
         };
         let (guest, runtime) =
             process::guest(&binary, &wash, &[], &directory, trace, world.clone())?;
-        let ((), outcome) = hibana_runtime::race(
+        let (rejected_confirmations, outcome) = hibana_runtime::race(
             async {
                 async {
                     let agent = "INTEGRATION_ENGINEER";
@@ -1124,28 +1124,47 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                         assert_eq!(wafer_shell_result(&read)?, readings[i]);
                     }
                     let check = "echo '{\"check_type\":\"cross_reference\"}' > /service/check_monitoring; cat /service/check_monitoring";
-                    let early = "echo premature | dd of=/service/all_validated oflag=nonblock";
-                    let premature = guest.command(controller, early.into()).await?;
+                    let prospective = json!({"tool_name":"check_monitoring","success":true,"data":{
+                        "engineer":controller,"check_type":"cross_reference","receipt":1,
+                        "inputs":readings.each_ref().map(|r| &r["data"]["receipt"]),
+                    }});
+                    let early = format!("printf '%s' '{prospective}' | dd of=/service/all_validated oflag=nonblock");
+                    let premature = guest.command(controller, early.clone()).await?;
                     assert!(premature["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{premature}");
                     let mut validation = wafer_shell_result(&guest.command(controller, check.into()).await?)?;
+                    let first_validation = validation.clone();
                     if retry_control {
                         assert_eq!(validation["success"], false, "{validation}");
                         assert_eq!(validation["data"]["status"], "check_failed");
-                        let premature = guest.command(controller, early.into()).await?;
+                        let premature = guest.command(controller, early).await?;
                         assert!(premature["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{premature}");
                         validation = wafer_shell_result(&guest.command(controller, check.into()).await?)?;
                     }
                     assert_eq!(validation["success"], true, "{validation}");
-                    assert_eq!(validation["data"]["inputs"], json!(readings.map(|r| r["data"]["receipt"].clone())));
+                    assert_eq!(validation["data"]["inputs"], json!(readings.each_ref().map(|r| &r["data"]["receipt"])));
                     let notices = ["validated_lithographer", "validated_depositor", "validated_etcher", "all_validated"];
+                    let mut invalid = [readings[0].clone(), validation.clone(), first_validation, validation.clone()];
+                    invalid[1]["data"]["inputs"][1] = invalid[1]["data"]["inputs"][0].clone();
+                    if !retry_control {
+                        invalid[2]["data"]["engineer"] = json!("DEPOSITOR");
+                    }
+                    invalid[3]["data"]["inputs"].as_array_mut().unwrap().pop();
+                    let mut rejected = Vec::new();
+                    for (path, value) in notices.iter().zip(&invalid) {
+                        let reply = guest.command(controller, format!("printf '%s' '{value}' > /service/{path}")).await?;
+                        assert!(reply["stdout"].as_str().is_some_and(|s| s.contains("Invalid argument")), "{reply}");
+                        rejected.push(json!({"path":path,"payload":value,"stdout":reply["stdout"]}));
+                    }
                     let mut broadcast = delivery.to_vec();
                     broadcast.insert(if deferred_reads { 0 } else { 3 }, 3);
+                    if deferred_reads {
+                        broadcast.retain(|i| *i != 2);
+                    }
                     for &i in &broadcast {
                         let path = notices[i];
                         let sent = guest.command(controller, format!("printf '%s' '{validation}' > /service/{path}")).await?;
                         assert_eq!(sent["stdout"], "wash> ", "{sent}");
                     }
-                    assert_eq!(guest.command(controller, "exit 0".into()).await?["exit_status"], 0);
                     for i in broadcast.into_iter().rev() {
                         let (who, file) = if i == 3 { (agent, "all_validated") } else { (recipients[i].0, "process_validation") };
                         let read = guest.command(who, format!("cat /service/{file}")).await?;
@@ -1232,6 +1251,13 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                         );
                     }
                     let decision = json!({"lot_disposition":verdict, "inspection":inspection});
+                    if deferred_reads {
+                        let sent = guest.command(controller, format!("printf '%s' '{validation}' > /service/validated_etcher")).await?;
+                        assert_eq!(sent["stdout"], "wash> ", "{sent}");
+                        let read = guest.command("ETCHER", "cat /service/process_validation".into()).await?;
+                        assert_eq!(wafer_shell_result(&read)?, validation);
+                    }
+                    assert_eq!(guest.command(controller, "exit 0".into()).await?["exit_status"], 0);
                     let writes = delivery.map(|i| (i, true));
                     let schedule: Vec<_> = if deferred_reads {
                         writes.into_iter().chain(delivery.into_iter().rev().map(|i| (i, false))).collect()
@@ -1253,7 +1279,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                         guest.command(agent, "exit 0".into()).await?["exit_status"],
                         0
                     );
-                    Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+                    Ok::<_, Box<dyn std::error::Error + Send + Sync>>(rejected)
                 };
                 async { runtime.await };
             },
@@ -1422,6 +1448,13 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
             );
         }
         assert_eq!(inspections.len(), 2);
+        if deferred_reads {
+            let etcher = confirmations
+                .iter()
+                .find(|notice| notice["view"] == "ETCH_INBOX")
+                .ok_or("missing etcher confirmation")?;
+            assert!(last_inspection_read < etcher["send_row"].as_u64().unwrap());
+        }
         let decision = json!({"lot_disposition":verdict, "inspection":inspections});
         for role in delivery {
             let (recipient, _) = recipients[role];
@@ -1469,7 +1502,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
             &directory.join("result.json"),
             &json!({"task":"15E","order":order,"wasm_participants":6,"disposition":decision,"deliveries":delivered,"deferred_reads":deferred_reads,
             "model_calls":0,"scored_benchmark":false,"fabrication_fixture_calls":fabrication_calls, "fixture_post_validation_calls":2 + 2 * usize::from(retry),
-                "shell_effects":guest_effects,"concurrent_load_exposure_first":exposure_first,"measurements":measurements,"instrument_effects":effects,"confirmations":confirmations,"injected_first_check_failure":retry_control,"injected_first_measurement_failure":retry,"early_reads":2,"rejected_wrong_operations":2,"score":outcome["score"],"epf":epf,
+                "shell_effects":guest_effects,"concurrent_load_exposure_first":exposure_first,"measurements":measurements,"instrument_effects":effects,"confirmations":confirmations,"rejected_confirmations":rejected_confirmations,"etcher_confirmation_after_inspections":deferred_reads,"injected_first_check_failure":retry_control,"injected_first_measurement_failure":retry,"early_reads":2,"rejected_wrong_operations":2,"score":outcome["score"],"epf":epf,
             "events_sha256":digest(&journal)?,"runtime_binary_sha256":digest(&binary)?,
             "wash_sha256":digest(&wash)?,"build_receipt_sha256":digest(&output.join("build-receipt.json"))?}),
         )?;

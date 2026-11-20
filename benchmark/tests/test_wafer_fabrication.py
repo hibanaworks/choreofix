@@ -74,6 +74,24 @@ class WaferFabrication(unittest.IsolatedAsyncioTestCase):
         await self.run_steps((VALIDATE, ALIGN, VERIFY, MOUNT, OVERLAY, INTEGRITY, UNIFORMITY))
         self.assertTrue(self.sim.is_complete())
         self.assertIn(second, next(e for e in self.sim.events if e.agent == CONTROL).result["inputs"])
+
+    async def test_three_post_validation_measurements_can_use_the_station_in_any_order(self):
+        for order in itertools.permutations((ALIGN, VERIFY, OVERLAY)):
+            with self.subTest(order=[step[1] for step in order]):
+                self.setUp()
+                for group in FABRICATION:
+                    await self.run_steps(group)
+                *_, validation = await self.run_steps((*REPORTS, VALIDATE))
+                for step in order:
+                    expected = validation
+                    if step == OVERLAY:
+                        expected, = await self.run_steps((MOUNT,))
+                    reading = await self.call(step)
+                    self.assertTrue(reading.success, reading)
+                    self.assertEqual(reading.data["inputs"], [expected])
+                await self.run_steps((INTEGRITY, UNIFORMITY))
+                self.assertTrue(self.sim.is_complete())
+                self.assertEqual(self.sim.violations, [])
         self.assertEqual(self.sim.violations, [])
 
     async def test_unassigned_inputs_and_reversed_calls_do_not_complete_a_lot(self):
