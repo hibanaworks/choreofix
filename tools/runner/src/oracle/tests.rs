@@ -1,5 +1,5 @@
-#[path = "../../../../src/tasks/wafer_fabrication/spot_checks.rs"]
-mod spot_checks;
+#[path = "../../../../src/tasks/wafer_fabrication/instruments.rs"]
+mod instruments;
 
 use super::*;
 use std::collections::BTreeSet;
@@ -885,19 +885,64 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
     archive_build_receipt(&binary, &receipt, &output)?;
     let film = ("run_deposition", "film_integrity_check");
     let etch = ("run_etch_process", "etch_uniformity_check");
-    for (case, order) in [("film-first", [film, etch]), ("etch-first", [etch, film])] {
+    for (case, order, retry) in [
+        ("film-first", [film, etch], false),
+        ("etch-first", [etch, film], false),
+        ("overlay-retry", [film, etch], true),
+    ] {
         let directory = output.join(case);
         fs::create_dir(&directory)?;
         let journal = directory.join("events.jsonl");
         let artifact = projection::archive(&binary, &directory, "15E")?;
         let trace = Trace::create(&journal)?;
-        let (world, fixture) = Simulator::new("15E", 0, 0.0, trace.clone(), &[])?;
+        let failures: &[(&str, u32)] = if retry {
+            &[("run_metrology_measurement", 0)]
+        } else {
+            &[]
+        };
+        let (world, fixture) = Simulator::new("15E", 0, 1.0, trace.clone(), failures)?;
+        world
+            .set_test_delays(json!({"run_stepper_exposure":[0.5,0.5],
+            "run_metrology_measurement":[0.0,0.0],"check_monitoring":[0.0,0.0],
+            "run_etch_process":[0.0,0.0],"run_deposition":[0.0,0.0]}))
+            .await?;
         let receipts = prepare_wafers(&world, &fixture).await?;
+        let upstream_events = world.observed_events().await?.len();
         let (guest, runtime) = process::guest(&binary, &wash, &[], &directory, trace, world)?;
         let ((), outcome) = hibana_runtime::race(
             async {
                 async {
                     let agent = "INTEGRATION_ENGINEER";
+                    let mount = "/service/run_stepper_exposure";
+                    let measure = "/service/run_metrology_measurement";
+                    let mount_write = format!("echo '{{\"process\":\"overlay_alignment\"}}' > {mount}");
+                    let measure_write = format!("echo '{{\"measurement\":\"overlay_alignment\"}}' > {measure}");
+                    let first = guest.command(agent, mount_write).await?;
+                    assert_eq!(first["stdout"], "wash> ", "{first}");
+                    let sent = guest.command(agent, measure_write.clone()).await?;
+                    assert_eq!(sent["stdout"], "wash> ", "{sent}");
+                    if retry {
+                        let failed = wafer_shell_result(&guest.command(agent, format!("cat {measure}")).await?)?;
+                        assert_eq!(failed["success"], false, "{failed}");
+                        assert_eq!(failed["data"]["status"], "measurement_failed");
+                        let refused = guest.command(agent,
+                            "echo '{\"process\":\"film_integrity_check\"}' | dd of=/service/run_deposition oflag=nonblock".into()).await?;
+                        let output = refused["stdout"].as_str().ok_or("missing refused command output")?;
+                        assert!(output.contains("Permission denied") || output.contains("Resource temporarily unavailable"), "{refused}");
+                        let sent = guest.command(agent, measure_write).await?;
+                        assert_eq!(sent["stdout"], "wash> ", "{sent}");
+                    }
+                    let (mounted, measured) = if order[0] == etch {
+                        let mounted = wafer_shell_result(&guest.command(agent, format!("cat {mount}")).await?)?;
+                        (mounted, wafer_shell_result(&guest.command(agent, format!("cat {measure}")).await?)?)
+                    } else {
+                        let measured = wafer_shell_result(&guest.command(agent, format!("cat {measure}")).await?)?;
+                        (wafer_shell_result(&guest.command(agent, format!("cat {mount}")).await?)?, measured)
+                    };
+                    assert_eq!(mounted["success"], true, "{mounted}");
+                    assert_eq!(measured["success"], true, "{measured}");
+                    assert_eq!(mounted["data"]["inputs"], json!([receipts[12]]));
+                    assert_eq!(measured["data"]["inputs"], json!([mounted["data"]["receipt"]]));
                     for (tool, operation) in order {
                         let path = format!("/service/{tool}");
                         let early = guest
@@ -930,20 +975,13 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                                 ),
                             )
                             .await?;
-                        let stdout = reply["stdout"].as_str().ok_or("missing shell output")?;
-                        let json = &stdout[stdout
-                            .find('{')
-                            .ok_or_else(|| format!("missing {tool} result: {reply}"))?..];
-                        let result = serde_json::Deserializer::from_str(json)
-                            .into_iter::<Value>()
-                            .next()
-                            .ok_or("empty result")??;
+                        let result = wafer_shell_result(&reply)?;
                         assert_eq!(result["tool_name"], tool);
                         assert_eq!(result["success"], true);
                         assert_eq!(result["data"]["process"], operation);
                         assert_eq!(
                             result["data"]["inputs"],
-                            json!([receipts[15], receipts[16]])
+                            json!([mounted["data"]["receipt"], measured["data"]["receipt"]])
                         );
                     }
                     assert_eq!(
@@ -961,13 +999,13 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
         assert_eq!(outcome["runtime_exit_code"], 0);
         assert_eq!(
             outcome["protocol"],
-            json!({"type":"run_result","status":"complete","scope":"aligned_wafer_spot_checks"})
+            json!({"type":"run_result","status":"complete","scope":"reference_wafer_integration"})
         );
         assert_eq!(outcome["backend_errors"], json!([]));
         assert!(outcome["error"].is_null());
         assert_eq!(
             outcome["score"]["events"].as_array().unwrap().len(),
-            receipts.len() + 2
+            upstream_events + 4 + usize::from(retry)
         );
         assert_eq!(outcome["score"]["complete"], true);
         assert_eq!(outcome["score"]["violations"], json!([]));
@@ -975,14 +1013,15 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
             .lines()
             .map(serde_json::from_str)
             .collect::<std::result::Result<Vec<Value>, _>>()?;
-        projection::frames(&artifact, &rows)?;
+        let labels = projection::frames(&artifact, &rows)?;
         let epf = projection::check_dynamic(&artifact, &rows)?;
+        let alignment = check_alignment_effects(&labels, &epf, &rows, &outcome["score"], retry)?;
         check_spot_check_effects(&epf, &rows, &outcome["score"], order[0] == etch)?;
         save(
             &directory.join("result.json"),
             &json!({"task":"15E","order":order,"wasm_participants":1,
-            "model_calls":0,"scored_benchmark":false,"upstream_simulator_calls":receipts.len(),
-                "shell_effects":2,"early_reads":2,"rejected_wrong_operations":2,"score":outcome["score"],"epf":epf,
+            "model_calls":0,"scored_benchmark":false,"upstream_simulator_calls":upstream_events,
+                "shell_effects":4 + usize::from(retry),"alignment":alignment,"injected_first_measurement_failure":retry,"early_reads":2,"rejected_wrong_operations":2,"score":outcome["score"],"epf":epf,
             "events_sha256":digest(&journal)?,"runtime_binary_sha256":digest(&binary)?,
             "wash_sha256":digest(&wash)?,"build_receipt_sha256":digest(&output.join("build-receipt.json"))?}),
         )?;
@@ -1009,6 +1048,17 @@ impl choreofix::shell::imp::service::ReceivedEffects for Simulator {
     }
 }
 
+fn wafer_shell_result(reply: &Value) -> Result<Value> {
+    let stdout = reply["stdout"].as_str().ok_or("missing shell output")?;
+    let offset = stdout
+        .find('{')
+        .ok_or_else(|| format!("missing instrument result: {reply}"))?;
+    Ok(serde_json::Deserializer::from_str(&stdout[offset..])
+        .into_iter::<Value>()
+        .next()
+        .ok_or("empty instrument result")??)
+}
+
 async fn prepare_wafers(world: &Simulator, fixture: &Value) -> Result<Vec<u64>> {
     let actors = fixture["fixtures"].as_array().ok_or("wafer participants")?;
     assert_eq!(actors.len(), 6);
@@ -1021,11 +1071,7 @@ async fn prepare_wafers(world: &Simulator, fixture: &Value) -> Result<Vec<u64>> 
         );
     }
     let (litho, dep, etch) = ("LITHOGRAPHER", "DEPOSITOR", "ETCHER");
-    let (metro, controller, integration) = (
-        "METROLOGY_ENGINEER",
-        "PROCESS_CONTROLLER",
-        "INTEGRATION_ENGINEER",
-    );
+    let (metro, controller) = ("METROLOGY_ENGINEER", "PROCESS_CONTROLLER");
     let (stepper, chamber, etcher) = ("run_stepper_exposure", "run_deposition", "run_etch_process");
     let (measure, monitor) = ("run_metrology_measurement", "check_monitoring");
     let film = (metro, measure, "measurement", "thickness_measurement");
@@ -1045,17 +1091,18 @@ async fn prepare_wafers(world: &Simulator, fixture: &Value) -> Result<Vec<u64>> 
         (controller, monitor, "check_type", "cross_reference"),
         (litho, measure, "measurement", "alignment_check"),
         (dep, measure, "measurement", "thickness_verification"),
-        (integration, stepper, "process", "overlay_alignment"),
-        (integration, measure, "measurement", "overlay_alignment"),
     ];
     let mut receipts = Vec::new();
     for (index, (agent, tool, field, value)) in steps.into_iter().enumerate() {
-        let reply = world
-            .call(
-                json!({"type":"execute","id":index + 1,"agent":agent,"tool":tool,
-            "arguments":{(field):value}}),
-            )
-            .await?;
+        let request = json!({"type":"execute","id":format!("prep-{index}"),"agent":agent,"tool":tool,
+            "arguments":{(field):value}});
+        let mut reply = world.call(request.clone()).await?;
+        if reply["result"]["data"]["status"] == "measurement_failed" {
+            assert_eq!(reply["result"]["success"], false);
+            let mut retried = request;
+            retried["id"] = json!(format!("prep-{index}-retry"));
+            reply = world.call(retried).await?;
+        }
         assert_eq!(reply["result"]["success"], true, "{reply}");
         receipts.push(
             reply["result"]["data"]["receipt"]
@@ -1073,13 +1120,162 @@ async fn prepare_wafers(world: &Simulator, fixture: &Value) -> Result<Vec<u64>> 
     Ok(receipts)
 }
 
+fn wafer_frame(journal_rows: &[Value], call: &Value) -> Result<(usize, Value)> {
+    let (index, row) = journal_rows
+        .iter()
+        .enumerate()
+        .find(|(_, row)| {
+            let message = &row["message"];
+            row["direction"] == "runtime"
+                && message["type"] == "protocol_frame"
+                && message["action"] == "send"
+                && message["frame_id"] == call["frame_id"]
+        })
+        .ok_or("missing accepted frame")?;
+    let bytes: Vec<u8> = serde_json::from_value(row["message"]["payload"].clone())?;
+    Ok((index, serde_json::from_slice(&bytes)?))
+}
+
+fn check_alignment_effects(
+    labels: &std::collections::BTreeMap<u64, u8>,
+    epf: &Value,
+    rows: &[Value],
+    score: &Value,
+    retry: bool,
+) -> Result<Vec<Value>> {
+    use self::instruments::*;
+    use hibana::g::Message;
+
+    let calls = epf["sessions"][0]["acceptances"]
+        .as_array()
+        .ok_or("EPF deliveries")?;
+    let by_label = |label| -> Vec<&Value> {
+        let mut found: Vec<_> = calls
+            .iter()
+            .filter(|call| {
+                call["frame_id"]
+                    .as_u64()
+                    .and_then(|id| labels.get(&id))
+                    .copied()
+                    == Some(label)
+            })
+            .collect();
+        found.sort_by_key(|c| c["receive_commit"]["journal_row"].as_u64());
+        found
+    };
+    let events = score["events"].as_array().ok_or("wafer events")?;
+    let mut evidence = Vec::new();
+    let mut reports = by_label(OverlayFailed::LOGICAL_LABEL);
+    assert_eq!(reports.len(), usize::from(retry));
+    let passed = by_label(OverlayPassed::LOGICAL_LABEL);
+    assert_eq!(passed.len(), 1);
+    reports.extend(passed);
+    for (tool, actor, request_label, reply_label, count) in [
+        (
+            "run_stepper_exposure",
+            STEPPER,
+            Mount::LOGICAL_LABEL,
+            Mounted::LOGICAL_LABEL,
+            1,
+        ),
+        (
+            "run_metrology_measurement",
+            METROLOGY,
+            Measure::LOGICAL_LABEL,
+            Measured::LOGICAL_LABEL,
+            reports.len(),
+        ),
+    ] {
+        let requests = by_label(request_label);
+        let replies = by_label(reply_label);
+        let scored: Vec<_> = events
+            .iter()
+            .filter(|e| e["agent"] == "INTEGRATION_ENGINEER" && e["tool"] == tool)
+            .collect();
+        let starts: Vec<_> = rows
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| {
+                r["direction"] == "domain_start"
+                    && r["message"]["agent"] == "INTEGRATION_ENGINEER"
+                    && r["message"]["tool"] == tool
+            })
+            .collect();
+        assert_eq!(
+            [requests.len(), replies.len(), scored.len(), starts.len()],
+            [count; 4]
+        );
+        for i in 0..count {
+            let receive = &requests[i]["receive_commit"];
+            assert_eq!(receive["view"], STAGE);
+            assert_eq!(receive["actor"], actor);
+            assert_eq!(requests[i]["send_view"], WAFER);
+            assert_eq!(replies[i]["send_actor"], STEPPER);
+            assert_eq!(replies[i]["receive_commit"]["view"], WAFER);
+            let (_, arguments) = wafer_frame(rows, requests[i])?;
+            let (reply_row, result) = wafer_frame(rows, replies[i])?;
+            let (start, invoked) = starts[i];
+            let id = &invoked["message"]["id"];
+            let ends: Vec<_> = rows
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| r["direction"] == "domain_end" && &r["message"]["id"] == id)
+                .collect();
+            let [(end, finished)] = ends[..] else {
+                return Err("missing or duplicate instrument completion".into());
+            };
+            assert_eq!(finished["message"]["tool"], tool);
+            assert_eq!(finished["message"]["agent"], "INTEGRATION_ENGINEER");
+            assert!(
+                receive["journal_row"]
+                    .as_u64()
+                    .ok_or("instrument receive row")?
+                    < start as u64
+                    && start < end
+                    && end < reply_row
+            );
+            assert_eq!(arguments, invoked["message"]["arguments"]);
+            assert_eq!(arguments, scored[i]["args"]);
+            assert_eq!(result, finished["message"]["result"]);
+            assert_eq!(result["success"], scored[i]["success"]);
+            assert_eq!(result["data"], scored[i]["result"]);
+            if actor == METROLOGY {
+                let report = reports[i];
+                let (reported_at, reported) = wafer_frame(rows, report)?;
+                assert_eq!(report["send_actor"], METROLOGY);
+                assert_eq!(report["receive_commit"]["actor"], STEPPER);
+                assert!(
+                    end < reported_at
+                        && report["receive_commit"]["journal_row"].as_u64().unwrap()
+                            < reply_row as u64
+                );
+                assert_eq!(reported, result);
+            }
+            evidence.push(json!({"tool":tool,"rpc_id":id,"success":result["success"],
+                "request_frame":requests[i]["frame_id"],"reply_frame":replies[i]["frame_id"],
+                "receive_row":receive["journal_row"],"effect_start_row":start,"effect_end_row":end,
+                "reply_row":reply_row,"receipt":result["data"]["receipt"],"inputs":result["data"]["inputs"]}));
+        }
+    }
+    let mount = &evidence[0];
+    let first_measure = &evidence[1];
+    assert!(
+        mount["effect_start_row"].as_u64().unwrap()
+            < first_measure["effect_start_row"].as_u64().unwrap()
+            && first_measure["effect_start_row"].as_u64().unwrap()
+                < mount["effect_end_row"].as_u64().unwrap(),
+        "the in-situ measurement must start during the physical load call"
+    );
+    Ok(evidence)
+}
+
 fn check_spot_check_effects(
     epf: &Value,
     journal_rows: &[Value],
     score: &Value,
     etch_first: bool,
 ) -> Result<()> {
-    use self::spot_checks::{DEPOSITION_CHAMBER, ETCH_CHAMBER, WAFER};
+    use self::instruments::{DEPOSITION_CHAMBER, ETCH_CHAMBER, WAFER};
     let calls = epf["sessions"][0]["acceptances"]
         .as_array()
         .ok_or("EPF source occurrences")?;
@@ -1103,23 +1299,8 @@ fn check_spot_check_effects(
         };
         let request = accepted(WAFER, chamber)?;
         let reply = accepted(chamber, WAFER)?;
-        let frame = |call: &Value| -> Result<(usize, Value)> {
-            let (index, row) = journal_rows
-                .iter()
-                .enumerate()
-                .find(|(_, row)| {
-                    let message = &row["message"];
-                    row["direction"] == "runtime"
-                        && message["type"] == "protocol_frame"
-                        && message["action"] == "send"
-                        && message["frame_id"] == call["frame_id"]
-                })
-                .ok_or("missing accepted frame")?;
-            let bytes: Vec<u8> = serde_json::from_value(row["message"]["payload"].clone())?;
-            Ok((index, serde_json::from_slice(&bytes)?))
-        };
-        let (request_sent, submitted) = frame(request)?;
-        let (reply_sent, returned) = frame(reply)?;
+        let (request_sent, submitted) = wafer_frame(journal_rows, request)?;
+        let (reply_sent, returned) = wafer_frame(journal_rows, reply)?;
         if let Some(previous) = previous_reply {
             assert!(
                 previous < request_sent,
@@ -1170,7 +1351,7 @@ fn check_spot_check_effects(
 
 #[hibana_runtime::scope]
 async fn wafer_trial(etch_first: bool) -> Result<()> {
-    use self::spot_checks::*;
+    use self::instruments::*;
     use choreofix::{
         imp::projection::{record, rows},
         shell::{global::Loan, imp::bus::Bus},
@@ -1200,7 +1381,24 @@ async fn wafer_trial(etch_first: bool) -> Result<()> {
     let journal = directory.join("events.jsonl");
     let trace = Trace::create(&journal)?;
     let (world, fixture) = Simulator::new("15E", 0, 0.0, trace.clone(), &[])?;
-    let receipts = prepare_wafers(&world, &fixture).await?;
+    let mut receipts = prepare_wafers(&world, &fixture).await?;
+    for (tool, field) in [
+        ("run_stepper_exposure", "process"),
+        ("run_metrology_measurement", "measurement"),
+    ] {
+        let result = world
+            .call(
+                json!({"type":"execute","id":tool,"agent":"INTEGRATION_ENGINEER",
+            "tool":tool,"arguments":{(field):"overlay_alignment"}}),
+            )
+            .await?;
+        assert_eq!(result["result"]["success"], true);
+        receipts.push(
+            result["result"]["data"]["receipt"]
+                .as_u64()
+                .ok_or("alignment receipt")?,
+        );
+    }
     let session = SessionId::new(150);
     let (bus, _, _) = Bus::open([], [(session, WAFER)]);
     let source = hibana::g::seq(
@@ -1258,9 +1456,11 @@ async fn wafer_trial(etch_first: bool) -> Result<()> {
         async {
             let mut wafer = engineer.recv::<Loan<WAFER>>().await.unwrap();
             let film =
-                SpotCheck::try_from(br#"{"process":"film_integrity_check"}"#.as_slice()).unwrap();
+                InstrumentRequest::try_from(br#"{"process":"film_integrity_check"}"#.as_slice())
+                    .unwrap();
             let uniformity =
-                SpotCheck::try_from(br#"{"process":"etch_uniformity_check"}"#.as_slice()).unwrap();
+                InstrumentRequest::try_from(br#"{"process":"etch_uniformity_check"}"#.as_slice())
+                    .unwrap();
             let mut replies = Vec::new();
             for check_etch in [etch_first, !etch_first] {
                 let bytes = if check_etch {

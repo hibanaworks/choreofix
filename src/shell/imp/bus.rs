@@ -435,6 +435,27 @@ impl Terminal {
 /// The simulator connection held by the native resource receivers of a trial.
 pub struct Simulator<'bus>(&'bus Bus);
 
+impl<'bus> Simulator<'bus> {
+    /// Enqueue this received instrument request before handing its physical
+    /// resource to the next participant. The reply may still be outstanding.
+    pub fn submit<P: SimulatorOperation>(
+        &self,
+        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+    ) -> ShellResult<impl Future<Output = ShellResult<Value>> + use<'bus, P>> {
+        let (agent, tool) = P::RPC;
+        let args = received_arguments::<P>(received)?;
+        Ok(self.0.queue_rpc(agent, tool, args)?.receive())
+    }
+}
+
+fn received_arguments<P: SimulatorOperation>(
+    received: hibana::runtime::wire::ReceivedPayload<'_, P>,
+) -> ShellResult<Value> {
+    let value = serde_json::from_slice(received.as_bytes())
+        .map_err(|e| ShellError::message(format!("simulator request JSON: {e}")))?;
+    rpc_arguments::<1, P>(value)
+}
+
 fn rpc_arguments<const N: usize, P: SimulatorOperation<N>>(
     mut request: Value,
 ) -> ShellResult<Value> {
@@ -464,11 +485,10 @@ impl<'bus> ReceivedEffects for Simulator<'bus> {
         received: hibana::runtime::wire::ReceivedPayload<'_, P>,
     ) -> impl Future<Output = ShellResult<Value>> + use<'bus, 'io, P> {
         let bus: &'io Bus = self.0;
-        let arguments = serde_json::from_slice(received.as_bytes())
-            .map_err(|e| ShellError::message(format!("simulator request JSON: {e}")));
+        let arguments = received_arguments::<P>(received);
         async move {
             let (agent, tool) = P::RPC;
-            bus.rpc(agent, tool, rpc_arguments::<1, P>(arguments?)?)
+            bus.rpc(agent, tool, arguments?)
                 .await
                 .map_err(ShellError::message)
         }
@@ -503,28 +523,35 @@ impl PairedEffects for Simulator<'_> {
 }
 
 impl Bus {
+    fn queue_rpc(
+        &self,
+        agent: &'static str,
+        tool: &'static str,
+        arguments: Value,
+    ) -> ShellResult<Reply<'_>> {
+        let reply = self.reply()?;
+        let request =
+            json!({"type":"execute","id":reply.id,"agent":agent,"tool":tool,"arguments":arguments});
+        self.enqueue(self.transport.take_observations().chain([request]), None);
+        self.wake_output();
+        Ok(reply)
+    }
+
+    // A borrowed race may drop its waiter and later resume this same request.
     fn rpc(
         &self,
         agent: &'static str,
         tool: &'static str,
         arguments: Value,
-    ) -> impl Future<Output = Result<Value, String>> {
-        // The unpolled request stays lazy. Once accepted, the actual RPC
-        // receipt can be borrowed by a race without cancelling the operation.
-        let mut request =
-            Some(json!({"type":"execute", "agent":agent, "tool":tool, "arguments":arguments}));
+    ) -> impl Future<Output = Result<Value, String>> + Unpin {
+        let mut arguments = Some(arguments);
         let mut receipt = None;
         poll_fn(move |cx| {
-            if let Some(mut request) = request.take() {
-                let reply = match self.reply() {
-                    Ok(reply) => reply,
+            if let Some(args) = arguments.take() {
+                match self.queue_rpc(agent, tool, args) {
+                    Ok(reply) => receipt = Some(reply),
                     Err(error) => return Poll::Ready(Err(error.to_string())),
-                };
-                request["id"] = json!(reply.id);
-                let values = self.transport.take_observations().chain([request]);
-                self.enqueue(values, None);
-                self.wake_output();
-                receipt = Some(reply);
+                }
             }
             let result = receipt
                 .as_ref()

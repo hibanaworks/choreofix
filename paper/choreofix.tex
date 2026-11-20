@@ -587,16 +587,17 @@ and 7,884 records accepted by EPF. This case was selected after observing the
 live failure. The two records are identified in
 \path{analysis/7m-fact-recheck.json}.
 
-Task 15E isolates a shared physical input. One wash guest received the aligned
-reference-wafer Endpoint and used it at two instruments. We exercised both
-orders. At each instrument an early read and a request naming the other
-instrument's process returned shell errors; the guest could then submit a
-valid request. In both runs the two instrument replies matched the scored
-results and named the same wafer alignment receipts. Each run yielded 763
-EPF records. The fixture supplied the preceding 17 effects directly to the
-common simulator, so this evidence covers the two final checks by one
-scripted guest. The per-occurrence measurements are in
-\path{analysis/15e-wafer-spot-checks.json}.
+In task 15E, one scripted wash guest used a delegated reference-wafer
+Endpoint to mount the wafer, measure alignment, and run two spot checks in
+either order. In three runs, the measurement started while the mount call was
+still outstanding. In the recovery run, the first measurement failed. An
+immediate spot check returned a shell error, and the guest measured the same
+load again without remounting. Both final instrument results referred to the
+original mount and the successful measurement. All three runs completed the
+common-world score with zero violations. EPF checked the communication records;
+we separately matched each instrument request and reply to the scored effect.
+The other five participants' upstream work came from the fixture. The evidence
+and timing conditions are in \path{analysis/15e-wafer-alignment.json}.
 
 \subsection{Live-agent evidence across 36 tasks}
 The 19 November inventory includes one audited execution for each of the

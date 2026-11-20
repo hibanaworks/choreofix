@@ -1,0 +1,209 @@
+{
+  "task": "15E",
+  "scope": "One scripted wash guest submits the four integration-engineer operations on a delegated reference wafer. Other participants are simulator fixtures. The recovery fixture fails the first metrology call of each participating engineer.",
+  "model_calls": 0,
+  "scored_benchmark": false,
+  "core_revision": "331afd6e4",
+  "runtime_sha256": "473300eca62b49adba43be91af918d30eb4702c0c90c854ed67b030fea0a70fc",
+  "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+  "source_manifest_sha256": "6617adc62b578b14da13f176963573eb8e9ebb9460a4e6abd3f7b30ba1730353",
+  "test_source_sha256": "0f9dfbde160c3fec4fc27f3d5959981c8d0880910d13c64e1866ede280ce6163",
+  "build_receipt_sha256": "37fea23b3c3f7bc7f219b1e407e145b0aa8241ea98a18fa4f825463aa2d803c5",
+  "cases": [
+    {
+      "case": "film-first",
+      "journal_sha256": "6837525e282fc06df5b955b17b9d5b360fb816ad458858b5e6d185aee55c7c77",
+      "projection_sha256": "978dae74e9b41c0e20b578b56b819f3cd95d87a0ed7f81b866b1c4190e82d6da",
+      "result_sha256": "32d5f9a8b63657b08d11a5f0b51407e58f0361de360225271ef5d7a2a04b438f",
+      "upstream_fixture_effects": 15,
+      "guest_effects": 4,
+      "scored_world_events": 19,
+      "world_complete": true,
+      "violations": 0,
+      "epf_records": 1128,
+      "measurement_start_before_mount_reply_ms": 478.91,
+      "alignment": [
+        {
+          "effect_end_row": 491,
+          "effect_start_row": 199,
+          "inputs": [
+            13
+          ],
+          "receipt": 16,
+          "receive_row": 196,
+          "reply_frame": 67,
+          "reply_row": 494,
+          "request_frame": 21,
+          "rpc_id": 2,
+          "success": true,
+          "tool": "run_stepper_exposure"
+        },
+        {
+          "effect_end_row": 300,
+          "effect_start_row": 291,
+          "inputs": [
+            16
+          ],
+          "receipt": 17,
+          "receive_row": 288,
+          "reply_frame": 43,
+          "reply_row": 333,
+          "request_frame": 35,
+          "rpc_id": 4,
+          "success": true,
+          "tool": "run_metrology_measurement"
+        }
+      ],
+      "spot_check_order": [
+        "film_integrity_check",
+        "etch_uniformity_check"
+      ],
+      "spot_check_alignment_inputs": [
+        [
+          16,
+          17
+        ],
+        [
+          16,
+          17
+        ]
+      ]
+    },
+    {
+      "case": "etch-first",
+      "journal_sha256": "9eeeb5d4f37a214e0f41d1fcad3c046dc1a064f4ea1a93f9cb9e9e0752a905a2",
+      "projection_sha256": "978dae74e9b41c0e20b578b56b819f3cd95d87a0ed7f81b866b1c4190e82d6da",
+      "result_sha256": "1ae73aebba00fdd3bd4fee5b53d4b0961fafc3873d3745eda9cf09bbae99f3c7",
+      "upstream_fixture_effects": 15,
+      "guest_effects": 4,
+      "scored_world_events": 19,
+      "world_complete": true,
+      "violations": 0,
+      "epf_records": 1128,
+      "measurement_start_before_mount_reply_ms": 477.12,
+      "alignment": [
+        {
+          "effect_end_row": 370,
+          "effect_start_row": 199,
+          "inputs": [
+            13
+          ],
+          "receipt": 16,
+          "receive_row": 196,
+          "reply_frame": 49,
+          "reply_row": 373,
+          "request_frame": 21,
+          "rpc_id": 2,
+          "success": true,
+          "tool": "run_stepper_exposure"
+        },
+        {
+          "effect_end_row": 300,
+          "effect_start_row": 291,
+          "inputs": [
+            16
+          ],
+          "receipt": 17,
+          "receive_row": 288,
+          "reply_frame": 43,
+          "reply_row": 333,
+          "request_frame": 35,
+          "rpc_id": 4,
+          "success": true,
+          "tool": "run_metrology_measurement"
+        }
+      ],
+      "spot_check_order": [
+        "etch_uniformity_check",
+        "film_integrity_check"
+      ],
+      "spot_check_alignment_inputs": [
+        [
+          16,
+          17
+        ],
+        [
+          16,
+          17
+        ]
+      ]
+    },
+    {
+      "case": "overlay-retry",
+      "journal_sha256": "2ec09a3da0ef8346a9ff4e74a38971f61ede5c49eccf05bc129c81f41ceed526",
+      "projection_sha256": "978dae74e9b41c0e20b578b56b819f3cd95d87a0ed7f81b866b1c4190e82d6da",
+      "result_sha256": "70fc51b8bfce6dd68b9c32cb9dce3297bf383c7b4789d4d97a2940759d47505f",
+      "upstream_fixture_effects": 18,
+      "guest_effects": 5,
+      "scored_world_events": 23,
+      "world_complete": true,
+      "violations": 0,
+      "epf_records": 1371,
+      "measurement_start_before_mount_reply_ms": 476.89,
+      "alignment": [
+        {
+          "effect_end_row": 798,
+          "effect_start_row": 208,
+          "inputs": [
+            14
+          ],
+          "receipt": 19,
+          "receive_row": 205,
+          "reply_frame": 112,
+          "reply_row": 801,
+          "request_frame": 21,
+          "rpc_id": 2,
+          "success": true,
+          "tool": "run_stepper_exposure"
+        },
+        {
+          "effect_end_row": 309,
+          "effect_start_row": 300,
+          "inputs": null,
+          "receipt": null,
+          "receive_row": 297,
+          "reply_frame": 42,
+          "reply_row": 337,
+          "request_frame": 35,
+          "rpc_id": 4,
+          "success": false,
+          "tool": "run_metrology_measurement"
+        },
+        {
+          "effect_end_row": 608,
+          "effect_start_row": 598,
+          "inputs": [
+            19
+          ],
+          "receipt": 21,
+          "receive_row": 596,
+          "reply_frame": 88,
+          "reply_row": 640,
+          "request_frame": 80,
+          "rpc_id": 8,
+          "success": true,
+          "tool": "run_metrology_measurement"
+        }
+      ],
+      "spot_check_order": [
+        "film_integrity_check",
+        "etch_uniformity_check"
+      ],
+      "spot_check_alignment_inputs": [
+        [
+          19,
+          21
+        ],
+        [
+          19,
+          21
+        ]
+      ]
+    }
+  ],
+  "unscored_timing": {
+    "delay_multiplier": 1,
+    "run_stepper_exposure_seconds": 0.5,
+    "other_tools_seconds": 0
+  }
+}
