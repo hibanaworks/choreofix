@@ -224,8 +224,15 @@ The new [7E receiver trials](7e-received-effects.json) likewise supplement the
 original cohort. Both initial writer orders and revisions across chapters passed
 the twelve scripted conditions. The depth-two live trial on the same binary
 completed after two negative reviews, a revision and two positive reviews.
-Seven production tasks still use the caller-selected simulator API on this
-revision: 3E, 13E/M/H and 14E/M/H.
+The [3E receiver trials](3e-received-effects.json) cover both authors on the
+typed effect interface. All 33 scripted Wasm cases passed scoring and audit,
+including either author receiving a review before the other starts research.
+Three live participants completed the depth-two task on the same binary after
+two rejected reviews. The EPF audit checked 5,834 capture records and the effect
+audit matched all 13 simulator calls. This rerun adds evidence for an existing
+task in the cohort. Six production tasks still use the caller-selected simulator
+API (13E/M/H and 14E/M/H, 85 call sites). The native-only 11M fixture has seven
+additional calls.
 
 The cohort-wide measurement is reproducible from the same source-bound trials.
 From the repository root, supply the verified cohort and a new output file:

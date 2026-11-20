@@ -1,0 +1,314 @@
+{
+  "task": "3E",
+  "source_commit": "1cc40a7ea9f37f5a03c0ac2ebd48b4cf754ba2bc",
+  "archive": "output/verification/3e-received-effects-20261121.kJpy5T",
+  "source_manifest_sha256": "511afa0422484a1e3e1f20c4791b2f8f117668027bb440fcaa308e094071cbbd",
+  "runtime_sha256": "63ddb41406dd347e9904ddd5bdfafb20e572b23b5535c17c827f4677b434384f",
+  "build_receipt_sha256": "ec02c56bb0a7ec2dca95a256dc750d03bfc1a4e2e3b7231d721d001822ae7207",
+  "working_source": "The frozen workspace also contains three existing 7H edits. All 3E task inputs match the source commit.",
+  "scored_comparison": false,
+  "wasm": {
+    "conditions": 33,
+    "totals": {
+      "effects": 393,
+      "captures": 112348,
+      "mutations_rejected": 8817
+    },
+    "cases": [
+      {
+        "directory": "wasm/report-rust-boundary-1795198322153437000/depth0-section_a-FinishFirst-delay0.01-extra[]",
+        "effects": 9,
+        "captures": 2326,
+        "mutations_rejected": 193,
+        "events_sha256": "77e32c439b5e54f5d00055eee1b300d10ce96caceedbaa8f105c2f12d2f8fb11",
+        "audit_sha256": "fafef4e274af2ace84d4bbbfc2b56081305f1dd04267e82b0c46145f5873613d"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795198322153437000/depth0-section_a-FinishFirst-delay1-extra[]",
+        "effects": 9,
+        "captures": 2326,
+        "mutations_rejected": 193,
+        "events_sha256": "1e3ad6c2ac75a1aeac5723fc45f573303446423c2ea1e6d06efe4487b8701ece",
+        "audit_sha256": "2c8b15289e585a2ffdeafc234bfd6507fff0bcd5e2532e39e77edfaac92910d4"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795198322153437000/depth0-section_a-Alternate-delay0.01-extra[]",
+        "effects": 9,
+        "captures": 2326,
+        "mutations_rejected": 193,
+        "events_sha256": "54e154d00d85f7db0a54ba4eb1e08e8e4f53ddeca7e5a58ddde86786254542cd",
+        "audit_sha256": "5163a4de9f763acce4119d74a6759336140a3e62829bc8f8bfc7f8402679668e"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795198322153437000/depth0-section_b-FinishFirst-delay0.01-extra[]",
+        "effects": 9,
+        "captures": 2326,
+        "mutations_rejected": 193,
+        "events_sha256": "3aa56b6e9d8dbec62202b60d23e1b12ba342043deef76fb9331b45105a3ed970",
+        "audit_sha256": "7923c9b4ded410b3fc7fd42fe6c0c2ae7869e6bca034e598017106679d9eeec1"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795198322153437000/depth0-section_b-FinishFirst-delay1-extra[]",
+        "effects": 9,
+        "captures": 2326,
+        "mutations_rejected": 193,
+        "events_sha256": "c0e925ca1452971b2e2e4c32cfb95297207b6923c7f0678aadf584dc44be57d2",
+        "audit_sha256": "4aca44c8bd8accdf05bd37e07875bf1a84aa069c727909240939c8c6ea1bfb9e"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795198322153437000/depth0-section_b-Alternate-delay0.01-extra[]",
+        "effects": 9,
+        "captures": 2326,
+        "mutations_rejected": 193,
+        "events_sha256": "3329f628ce9ac5fd96b9681021344c5e822c721f7a927a5a56822c6599d1efb7",
+        "audit_sha256": "4f4fd9d1ebc5d7acb36aebe72e84a0850cc4add8cfd1ce5c98b3b5763a7c2730"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795198322153437000/depth1-section_a-FinishFirst-delay0.01-extra[]",
+        "effects": 11,
+        "captures": 3034,
+        "mutations_rejected": 244,
+        "events_sha256": "f8f8389bb9575d0aaca44848c32ba2464db85e576a5d2a8f917998557b95e86e",
+        "audit_sha256": "9158446b290bb3a206f4ad81ecd84e4f69533e71a938d774894d41d86bc567eb"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795198322153437000/depth1-section_a-Alternate-delay0.01-extra[]",
+        "effects": 11,
+        "captures": 3035,
+        "mutations_rejected": 244,
+        "events_sha256": "8fa890d7f876758841cf94436f582644369c2fa4a65fc66114509b628dfb60c2",
+        "audit_sha256": "37ce1d7184a8ea3bc5e9386ba6c528339247f63929480f845bb79201ee78c304"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795198322153437000/depth1-section_a-Alternate-delay1-extra[]",
+        "effects": 11,
+        "captures": 3035,
+        "mutations_rejected": 244,
+        "events_sha256": "73a79443a373242dd8b74b99648154448c7408e40ff1e962ac5520fd4132c705",
+        "audit_sha256": "87b78a916b39083fb3fec68fff3540283272bab83161030a36e0525ec405eec6"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795198322153437000/depth1-section_b-FinishFirst-delay0.01-extra[]",
+        "effects": 11,
+        "captures": 3034,
+        "mutations_rejected": 244,
+        "events_sha256": "580d993c8c4c9c6325a4dafcf6b68ccd0910b43b5fcc857098527c81883997d7",
+        "audit_sha256": "62007fd02e26a0a623271e6d9c0e9875d406b4669cb2b397a13c74ec60240d10"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795198322153437000/depth1-section_b-Alternate-delay0.01-extra[]",
+        "effects": 11,
+        "captures": 3035,
+        "mutations_rejected": 244,
+        "events_sha256": "1b330b43b7cfcd8675be8018a40d656e78f9df74a5b035ce8e2daf27dcc99a49",
+        "audit_sha256": "936bb03f03cc08ee78bfd4eb9712d04cf5b0f9b6407acd82ad5424bd21c72372"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795198322153437000/depth1-section_b-Alternate-delay1-extra[]",
+        "effects": 11,
+        "captures": 3035,
+        "mutations_rejected": 244,
+        "events_sha256": "a08222968102f1313ebf5cabab7b91d769599eea8c83fb361730df6cec129182",
+        "audit_sha256": "23215b1259bdc29c0e12efd2a7f29c912534678be22c14ad0392caf49acad2bc"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795198322153437000/depth2-section_a-FinishFirst-delay0.01-extra[]",
+        "effects": 13,
+        "captures": 3779,
+        "mutations_rejected": 295,
+        "events_sha256": "43b71949f7317c097abc2d933b3c4aa79c987c7d5a7f13e7c115742a9055b072",
+        "audit_sha256": "afa1ab54edfa47dc088575a81f859feed894a0190a9dbf9fd039b66b1275b37c"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795198322153437000/depth2-section_a-Alternate-delay0.01-extra[]",
+        "effects": 13,
+        "captures": 3744,
+        "mutations_rejected": 295,
+        "events_sha256": "0c214225bcec3af5bf9dc7920d40f68fbc2e81eb331380a8c53e7228d422e9b3",
+        "audit_sha256": "265a4785ffd691f6bab61d0981f23dd96cd3e61aeedc5cc5b7be6927f1cafb49"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795198322153437000/depth2-section_a-Alternate-delay1-extra[]",
+        "effects": 13,
+        "captures": 3744,
+        "mutations_rejected": 295,
+        "events_sha256": "1ee2d6a0fee3c57d11b4f0fe27e457232da9e1661da9f4a0ea817e57af6da5c3",
+        "audit_sha256": "f820439a2e649d2db636f1631735a80faaac56e3ad163e8b1e72e523ebe64bca"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795198322153437000/depth2-section_b-FinishFirst-delay0.01-extra[]",
+        "effects": 13,
+        "captures": 3779,
+        "mutations_rejected": 295,
+        "events_sha256": "55587f4b423fe3885e6b798dc24b3c69b1d7c3313516197b8d551ac0d535db47",
+        "audit_sha256": "3f58b3080b9248060534e427d214da406600cc279040dac141514f5fc62acfc0"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795198322153437000/depth2-section_b-Alternate-delay0.01-extra[]",
+        "effects": 13,
+        "captures": 3744,
+        "mutations_rejected": 295,
+        "events_sha256": "5a71b2f5f79c3a9716b698f598d1a8866f23de05f7b567ea0f75612641d02599",
+        "audit_sha256": "b33cff2276aa019c2cfd1b11deaa96783580d5b93faf691761c7dd7d892a71e4"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795198322153437000/depth2-section_b-Alternate-delay1-extra[]",
+        "effects": 13,
+        "captures": 3744,
+        "mutations_rejected": 295,
+        "events_sha256": "9983e587847abcb3e4dd6346626f0f8eec1b7c99c8642f034be3f443db65b530",
+        "audit_sha256": "ac0adada697d9f097ce7320bd70a6e2db6d55ee049fd91b9360bd78741ce9d5a"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795198967142631000/depth2-section_a-FinishFirst-delay0.01-extra[]",
+        "effects": 13,
+        "captures": 4890,
+        "mutations_rejected": 295,
+        "events_sha256": "f9f9ad64035ca22b13e1dcdc57f811835621b55a182d8797294bd17805778bc0",
+        "audit_sha256": "aa5e6ca8d84e2d88de9b8f115dd78059e882ef8ca3010639c6beb72ad253c802"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795199007743028000/depth2-section_a-BothRejectedThenFirst-delay0.01-extra[2]",
+        "effects": 15,
+        "captures": 4483,
+        "mutations_rejected": 346,
+        "events_sha256": "b1dfa2e0b6d831ec44b256ced0dc6985b864e71df70e1e7ff07d740a5abfcc45",
+        "audit_sha256": "f19798f1ab459fe9c4ca8958ffbd253503f303c419d69f456a91421ece6892cd"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795199007743028000/depth2-section_a-BothRejectedThenFirst-delay0.01-extra[2, 3]",
+        "effects": 17,
+        "captures": 5219,
+        "mutations_rejected": 397,
+        "events_sha256": "379007dc997dfea7b0cb94dd4c8616f2aff660fdf7dd8e7e98f6ebccf347e388",
+        "audit_sha256": "356c023f7ee73459ed34970389748e25cf87690c49667396d6004d40b7b2aee4"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795199007743028000/depth2-section_a-BothRejectedThenOther-delay0.01-extra[2]",
+        "effects": 15,
+        "captures": 4482,
+        "mutations_rejected": 346,
+        "events_sha256": "ccfed258ba1ed61faa8ddf6ce3eae9695835649d0dddb7e2639e00d187405498",
+        "audit_sha256": "c12e087d6ce2902405ac2ad2ec6bf2c1376e5bbf0760a11cc2554157b848bdba"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795199007743028000/depth2-section_a-BothRejectedThenOther-delay0.01-extra[2, 3]",
+        "effects": 17,
+        "captures": 5218,
+        "mutations_rejected": 397,
+        "events_sha256": "1de8c2b09f9c829b801c365d3d6cb16b389d7276ea48ce0730538376f12652e1",
+        "audit_sha256": "be3318bd7f5d02c25843bf6a6768c97503ba05da1852c1cb5bb9cc87e1bacbc2"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795199007743028000/depth2-section_b-BothRejectedThenFirst-delay0.01-extra[2]",
+        "effects": 15,
+        "captures": 4483,
+        "mutations_rejected": 346,
+        "events_sha256": "9355025a1aae89a00df50449eff8fabf8fdd2049426cda27cedcd372b056d795",
+        "audit_sha256": "061abfc8d93aef032b6657c442bc80b4bfe6baf015a3e5c4c4e7531d3e98153b"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795199007743028000/depth2-section_b-BothRejectedThenFirst-delay0.01-extra[2, 3]",
+        "effects": 17,
+        "captures": 5219,
+        "mutations_rejected": 397,
+        "events_sha256": "af9a2ccd4379ac4f6cf625e30e78d727756b7e1775be4d1a771d5765a99a1bbd",
+        "audit_sha256": "c8c5dba8e6264d427c7ead95933843445852ea4e299fbe93909e0646279095c3"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795199007743028000/depth2-section_b-BothRejectedThenOther-delay0.01-extra[2]",
+        "effects": 15,
+        "captures": 4482,
+        "mutations_rejected": 346,
+        "events_sha256": "a2f7ecf2cc4525f6fd9a649c58936689d3ddad250f992e2ca8a0c8c0b25b1564",
+        "audit_sha256": "2ac75f1769819f72fce70b718c7cc4e6cf8ef61d81be1cb13db2397d6acef87d"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795199007743028000/depth2-section_b-BothRejectedThenOther-delay0.01-extra[2, 3]",
+        "effects": 17,
+        "captures": 5218,
+        "mutations_rejected": 397,
+        "events_sha256": "60e8266f3567c4f678dff8b1c28bd325638d023a8ddd2f4c360f858d2e7367b4",
+        "audit_sha256": "be7d35c5716a398fc013f8958fa63d3696ad960576fc7721480e175265a3bae5"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795199414103258000/depth0-section_b-WriterFirst-delay0.01-extra[]",
+        "effects": 9,
+        "captures": 2326,
+        "mutations_rejected": 193,
+        "events_sha256": "d31b4f508a991cb597a4910c4326962fae22bea97c9d82f73a6a7b8281ce8e62",
+        "audit_sha256": "c392d0f32bdacb22bbf96c51522122338759e8493def8b3115c7aaa3ec9f90af"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795199414103258000/depth0-section_b-ReferencesFirst-delay0.01-extra[]",
+        "effects": 9,
+        "captures": 2326,
+        "mutations_rejected": 193,
+        "events_sha256": "ecfeebd401dea9c1a44141057fb210ee207978297c407465218c395aab16dad4",
+        "audit_sha256": "42cf32aad8fc9356121f9b4880d4a8c65806e87087d394ab73232019a63201fb"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795199414103258000/depth0-section_a-WriterFirst-delay0.01-extra[]",
+        "effects": 9,
+        "captures": 2326,
+        "mutations_rejected": 193,
+        "events_sha256": "ca591c1fd539008ccc57ce49e935d4413d275beddcf6222c56f9d6d4c6ce7007",
+        "audit_sha256": "7f5227b8e7b8609915cdfacfa57eb030207b504a72b475b3602649f2358e131a"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795199414103258000/depth0-section_a-ReferencesFirst-delay0.01-extra[]",
+        "effects": 9,
+        "captures": 2326,
+        "mutations_rejected": 193,
+        "events_sha256": "7dcb5a847d481728e24b369d04fe93c72eedf4fcf993b932000ade04242cf112",
+        "audit_sha256": "a61369fb8142085b2bc3630c306c911c5780100edfd4e49f3ced6a8572473d80"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795199515641760000/depth0-section_a-EarlyReview-delay0.01-extra[]",
+        "effects": 9,
+        "captures": 2326,
+        "mutations_rejected": 193,
+        "events_sha256": "db746ec97d6cc837a73314a56e2ceb41fb0ec04afbacc73b21ea5efec203076d",
+        "audit_sha256": "7ecfbc8b327e493b67295c2f4c8527f92a701d354587b3c3c4a441888758bf36"
+      },
+      {
+        "directory": "wasm/report-rust-boundary-1795199515641760000/depth0-section_b-EarlyReview-delay0.01-extra[]",
+        "effects": 9,
+        "captures": 2326,
+        "mutations_rejected": 193,
+        "events_sha256": "6c4714746cc2690f5dba8ce510161095080878761d5024083be59aea3e8a3c66",
+        "audit_sha256": "983db3e79fdf9c3853005f1c7881a7a7af6f1009a6106c6461d9f063d5ad9e4b"
+      }
+    ]
+  },
+  "live": {
+    "directory": "live-2",
+    "depth": 2,
+    "model": "gpt-6-luna",
+    "effort": "xhigh",
+    "participants": [
+      "EDITOR",
+      "RESEARCHER_A",
+      "RESEARCHER_B"
+    ],
+    "elapsed_seconds": 107.712316833,
+    "inclusive_tokens": 741701,
+    "effects": 13,
+    "capture_records": 5834,
+    "actual_review_requests": 4,
+    "actual_resource_endpoint_requests": 7,
+    "rejections": 2,
+    "simulator_complete": true,
+    "violations": 0,
+    "events_sha256": "7bde6af84cea78c70ad190ca98b2ce23f8084f3c8d2077329ab3611d9196442d",
+    "result_sha256": "26429afb42cce2c05d8fb02f70cdd4fd1fe1a1b324613b98a0bf081e91202d92",
+    "run_audit_sha256": "be8de9fa973c9be164fad5729bf85db6334e59641aed0e89b29b4802a9a2b181",
+    "effect_audit_sha256": "3b14e2cf21fa9eeab654509204ca3d7ea5aa5c3bed3238b32dcdddd2b647b311",
+    "projection_sha256": "22fae7831919ec0866936c17c2eb70240742739526ebf9adfe128798d518aae9",
+    "binaries": {
+      "runner": "771b1d7c57239ca75f2f2ed55323ed1978ce04337abc1d987f5adfa2bc12f8bb",
+      "runtime": "63ddb41406dd347e9904ddd5bdfafb20e572b23b5535c17c827f4677b434384f",
+      "wash.wasm": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca"
+    }
+  }
+}
