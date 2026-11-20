@@ -296,7 +296,9 @@ counterexample violates the stated task. A shared terminal, private filesystem o
 a callable effect with caller-selected agent, tool and JSON. Where a task file
 already yields a typed effect request, consume the actual Hibana receive in the
 resource receiver. Derive the external operation from its type and the input
-from its validated bytes. For multi-resource effects, keep every required
+from its validated bytes. When an intent and a resource request have identical
+JSON, only the resource request may decode to a simulator effect receipt.
+For multi-resource effects, keep every required
 receive and the comparison with the actual admitted data visible. Record which
 families still entrust these checks to a privileged simulator caller.
 

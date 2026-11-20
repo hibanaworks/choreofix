@@ -4,10 +4,11 @@ ChoreoFix tests whether a global choreography can be the sole source of authorit
 for agents that share resources. Each agent chooses commands in its own
 [hibana-wash](https://github.com/hibanaworks/hibana-wash) shell. WASI file
 operations on ChoreoFS drive the projected [Hibana](https://github.com/hibanaworks/hibana)
-endpoints. In the review task (6E), submitting a simulator effect consumes the
-typed request received through the endpoint. The [6E qualification](analysis/review-receipts.md) records 34 scripted Wasm
-trials and one three-agent live run on the same binary. Other families still
-entrust the simulator call and its arguments to the resource receiver. We check the
+endpoints. In review (6E) and CI/CD (16E), each simulator effect consumes the
+typed request received by its resource owner. The [6E trials](analysis/review-receipts.md)
+and [16E trials](analysis/cicd-receipts.md) exercised this path with wash and
+live agents. Other families still have resource receivers that can select a
+simulator tool and supply its arguments directly. We check the
 protocol execution with EPF, match admitted requests to actual simulator effects,
 and score the business outcome. Whether this design preserves the original
 choices or makes a workflow cheaper to change is an empirical question.

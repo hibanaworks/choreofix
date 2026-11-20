@@ -271,3 +271,13 @@ In the [final inspection fragment](../src/tasks/wafer_fabrication/spot_checks.rs
 Two native trials used the same compiled fragment and common environment v32. In each trial the runner issued 17 instrument calls before the loan, including a second thickness measurement before either other fabrication stream started. It then exercised the two final effects through the projected Endpoints. One trial used the original film–etch order and the other used etch–film. Both completed with 19 instrument effects and zero violations. For each final pair, EPF checked 28 records covering six accepted transfers. The test independently matched the two committed requests and both replies to the actual simulator calls, including arguments, results and their positions in the journal.
 
 The evidence and source digests are under `output/verification/wafer-15e-20261119/`. These runs cover the native final inspection fragment. A six-agent wash trial and EPF verification of the upstream fabrication, measurement reports and final dispositions are still required for a 15E task qualification. No model calls or scored comparisons were made.
+
+On November 20 the [two chamber receivers](https://github.com/hibanaworks/choreofix/commit/0481bfc)
+were retested using the typed resource request as the sole input to each final
+simulator effect. Both orders passed with six checked Endpoint send occurrences
+and 28 EPF records per trial. The common score completed with zero violations.
+The preceding 17 simulator calls were setup for this native fragment. Full
+six-agent Wasm and live-model qualification of 15E remains open. The film-first
+and etch-first journal SHA-256 digests are
+`dfd6656802ea5f22248ec5048f46c64f0846c9b21a8083240d40bf853e0aa364`
+and `253898335dc0ed2b1843c461f68306480cd18ae795d2f013b3f64c731bc0997b`.

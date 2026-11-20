@@ -613,6 +613,11 @@ reply waits for review and includes its actual result. Canonical object targets
 are checked before execution. The unchanged baseline retains its own argument
 matching and original tool replies. These differences must be controlled in a
 causal shell comparison or reported as a separate interface experiment.
+For the controlled comparison, both arms must receive the same task and
+role information. We will freeze the prompts and simulator revision and run
+a smoke trial for each included arm and task before scoring. Current live
+pilots with task-specific shell guidance cannot isolate the effect of endpoint
+enforcement.
 
 The original tools simulate work and do not consume an agent's source patch.
 They can measure coordination, not whether one reasoning strategy produces a
@@ -635,7 +640,10 @@ authorization decisions that must change. Two manual rules that can disagree
 about a request count separately even in the same file. Two reviewers will
 label edits independently and reconcile disagreements. Secondary outcomes are
 edited files, engine versus application changes, elapsed time, and remaining
-acceptance failures. Generated artifacts are accounted for separately.
+acceptance failures. The change cost includes edits to task-specific auditors,
+scripted guests, and regression tests. We report those edits separately from
+the global, localsides, common simulator, and engine. Generated artifacts are
+accounted for separately.
 Unfinished tickets retain their time and failing observations. Ticket-level
 results and missing pairs will be reported individually. No maintenance
 advantage has yet been measured.
