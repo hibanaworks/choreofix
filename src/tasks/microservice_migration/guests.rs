@@ -27,7 +27,6 @@ pub(super) const REVIEW_IO: u8 = 36;
 pub(super) const TEST_DATA: u8 = 37;
 pub(super) const TEST_VM: u8 = 38;
 pub(super) const TEST_IO: u8 = 39;
-pub(super) const TEST_COMMAND_DATA: u8 = 40;
 pub(super) const DEVOPS_DATA: u8 = 43;
 pub(super) const DEVOPS_VM: u8 = 44;
 pub(super) const DEVOPS_IO: u8 = 45;
@@ -103,10 +102,7 @@ pub(super) fn global() -> impl Projectable {
                     g::send::<C_DATA, C_VM, Loan<DEVELOPER_C_FILE>>(),
                     g::par(
                         g::send::<REVIEW_DATA, REVIEW_VM, Loan<REVIEW_FILE>>(),
-                        g::par(
-                            g::send::<TEST_DATA, TEST_VM, Loan<TEST_FILE>>(),
-                            g::send::<TEST_COMMAND_DATA, TEST_VM, Loan<TEST_COMMAND>>(),
-                        ),
+                        g::send::<TEST_DATA, TEST_VM, Loan<TEST_FILE>>(),
                     ),
                 ),
             ),
@@ -138,10 +134,7 @@ pub(super) fn global() -> impl Projectable {
                             terminal::<REVIEW_VM, REVIEW_IO>(),
                         ),
                         g::par(
-                            g::par(
-                                metadata::<TEST_COMMAND, TEST_COMMAND_DATA>(),
-                                metadata::<TEST_FILE, TEST_DATA>(),
-                            ),
+                            metadata::<TEST_FILE, TEST_DATA>(),
                             terminal::<TEST_VM, TEST_IO>(),
                         ),
                     ),
@@ -266,14 +259,8 @@ pub(super) async fn review_guest(
     root.send::<Exit>(&status).await?;
     Ok(())
 }
-#[hibana_runtime::scope]
 pub(super) async fn test_guest(module: &[u8], mut root: Endpoint<'_, TEST_VM>) -> ShellResult<()> {
-    let (endpoint, command) = async {
-        let [mut approval, mut tests] = root.par()?;
-        async { approval.recv::<Loan<TEST_FILE>>().await };
-        async { tests.recv::<Loan<TEST_COMMAND>>().await };
-    }
-    .await?;
+    let endpoint = root.recv::<Loan<TEST_FILE>>().await?;
     let [
         mut result_1,
         mut result_2,
@@ -290,8 +277,8 @@ pub(super) async fn test_guest(module: &[u8], mut root: Endpoint<'_, TEST_VM>) -
         .file(TEST_FILES[1])?
         .read_as::<TestCandidate<SERVICE_B>>(&mut result_2)
         .file(TEST_FILES[2])?
-        .read_as::<TestCandidate<SERVICE_C>>(&mut result_3);
-    let commands = ChoreoFsFile::new(TEST_FILES[3], command)
+        .read_as::<TestCandidate<SERVICE_C>>(&mut result_3)
+        .file(TEST_FILES[3])?
         .write_as::<RunTests<TESTER_A>>(&mut request_4)
         .read_as::<Tested<TESTER_A>>(&mut result_4)
         .file(TEST_FILES[4])?
@@ -300,15 +287,16 @@ pub(super) async fn test_guest(module: &[u8], mut root: Endpoint<'_, TEST_VM>) -
         .file(TEST_FILES[5])?
         .write_as::<RunTests<TESTER_C>>(&mut request_6)
         .read_as::<Tested<TESTER_C>>(&mut result_6);
-    let files = ChoreoFsFiles::new(root).file(file)?.file(commands)?;
+    let files = ChoreoFsFiles::new(root).file(file)?;
     let mut memory = vec![0; GUEST_MEMORY_BYTES];
     let mut storage = Box::new(HibanaWasiGuestStorage::uninit());
     let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
     let (exit, files) = guest.run().await?;
     let status = exit.status() as i32;
-    let (mut root, (commands, (file, ()))) = files.into_parts();
-    file.into_endpoint().send::<FileExit>(&status).await?;
-    commands.into_endpoint().send::<FileExit>(&status).await?;
+    let (mut root, (file, ())) = files.into_parts();
+    let mut file = file.into_endpoint();
+    file.send::<Exit>(&status).await?;
+    file.send::<FileExit>(&status).await?;
     root.send::<Exit>(&status).await?;
     Ok(())
 }

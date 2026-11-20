@@ -96,10 +96,13 @@ impl ReceivedEffects for Journal {
                     .rposition(|(_, name, args)| *name == "code_review" && args["pr_id"] == *suite)
                     .unwrap()
                     + 1;
+                let success = *suite != SERVICES[1]
+                    || entries
+                        .iter()
+                        .any(|(_, name, args)| *name == "run_tests" && args["suite"] == *suite);
                 entries.push((agent, tool, arguments.clone()));
                 let receipt = entries.len();
                 self.0.set(entries);
-                let success = *suite != SERVICES[1];
                 return Ok(json!({"tool_name":tool,"success":success,"data":{
                     "agent":agent, "suite":suite, "service":suite, "candidate":candidate,
                     "review":review, "plan":1, "receipt":receipt,
@@ -194,7 +197,7 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
             (session, role, binding)
         });
         let transport = InMemoryTransport::new(bindings);
-        let mut slab = vec![0; 128 * 1024];
+        let mut slab = vec![0; 2 * 1024 * 1024];
         let mut storage = SessionKitStorage::uninit();
         let rv = storage.init().rendezvous(&mut slab, &transport)?;
         let mut author = rv.enter(session, &project::<ARCHITECT_FILE>(&source))?;
@@ -210,7 +213,7 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
         let mut review_b = rv.enter(session, &project::<REVIEWER_B>(&source))?;
         let mut review_c = rv.enter(session, &project::<REVIEWER_C>(&source))?;
         let mut review_file = rv.enter(session, &project::<REVIEW_FILE>(&source))?;
-        let mut testing_slab = vec![0; 128 * 1024];
+        let mut testing_slab = vec![0; 2 * 1024 * 1024];
         let mut testing_storage = SessionKitStorage::uninit();
         let testing = testing_storage
             .init()
@@ -222,7 +225,6 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
         let mut test_side_c = testing.enter(session, &project::<TESTER_C>(&source))?;
         let mut env_owner = testing.enter(session, &project::<ENV_OWNER>(&source))?;
         let environment = testing.enter(session, &project::<TEST_ENV>(&source))?;
-        let mut test_command = rv.enter(session, &project::<TEST_COMMAND>(&source))?;
         let mut test_file = rv.enter(session, &project::<TEST_FILE>(&source))?;
         let service_a = rv.enter(session, &project::<SERVICE_A>(&source))?;
         let service_b = rv.enter(session, &project::<SERVICE_B>(&source))?;
@@ -251,7 +253,6 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
             "microservice_a":["microservice_c"], "microservice_b":["microservice_a"],
         }});
         let expected = json!({"microservice_a":["microservice_c"],"microservice_b":["microservice_a"],"microservice_c":[]});
-        let [mut test_a, mut test_b, mut test_c] = test_file.par()?;
         let check_review = |receipt: Value, service: &str| -> ShellResult<()> {
             assert_eq!(receipt["data"]["service"], service);
             assert_eq!(receipt["data"]["status"], "reviewed");
@@ -307,7 +308,7 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
             async {
                 let report =
                     tester::<TESTER_B, SERVICE_B>(&mut test_side_b, &journal).await?;
-                assert_eq!(report["success"], false);
+                assert_eq!(report["success"], true);
             };
             async {
                 let report =
@@ -316,15 +317,6 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
             };
             async {
                 let _environment = test_environment(&mut env_owner, environment).await?;
-            };
-            async {
-                check_review(
-                    decode(test_a.recv::<TestCandidate<SERVICE_A>>().await?)?,
-                    SERVICES[0],
-                )
-            };
-            async {
-                check_review(decode(test_b.recv::<TestCandidate<SERVICE_B>>().await?)?, SERVICES[1])?;
             };
             async {
                 author
@@ -348,12 +340,12 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
                     // and delivered C's approval. A join across services would stall.
                     if attempt == 0 {
                         check_review(
-                            decode(test_c.recv::<TestCandidate<SERVICE_C>>().await?)?,
+                            decode(test_file.recv::<TestCandidate<SERVICE_C>>().await?)?,
                             SERVICES[2],
                         )?;
                         if order[0] != 2 { continue; }
                         // C finishes testing while A's next implementation is still withheld.
-                        test_command
+                        test_file
                             .send::<RunTests<TESTER_C>>(&Arguments(encode(
                                 &json!({"suite":SERVICES[2]}),
                             )?))
@@ -361,36 +353,63 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
                         transport.take_observations().for_each(drop);
                         {
                             let other = Arguments(encode(&json!({"suite":SERVICES[1]}))?);
-                            let mut overlapping = pin!(test_command.send::<RunTests<TESTER_B>>(&other));
+                            let mut overlapping = pin!(test_file.send::<RunTests<TESTER_B>>(&other));
                             let second = poll_fn(|cx| Poll::Ready(overlapping.as_mut().poll(cx))).await;
                             assert!(matches!(second, Poll::Ready(Err(error)) if error.is_unavailable()), "{second:?}");
                             assert_eq!(transport.take_observations().len(), 0);
                         }
-                        let report = decode(test_command.recv::<Tested<TESTER_C>>().await?)?;
+                        let report = decode(test_file.recv::<Tested<TESTER_C>>().await?)?;
                         assert_eq!(report["data"]["suite"], SERVICES[2]);
                         assert_eq!(report["success"], true);
                     }
                 }
                 for &service in &order[usize::from(order[0] == 2)..] {
+                    match service {
+                        0 => check_review(decode(test_file.recv::<TestCandidate<SERVICE_A>>().await?)?, SERVICES[0])?,
+                        1 => check_review(decode(test_file.recv::<TestCandidate<SERVICE_B>>().await?)?, SERVICES[1])?,
+                        2 => (),
+                        _ => unreachable!(),
+                    }
                     let bytes = encode(&json!({"suite": SERVICES[service]}))?;
                     let report = match service {
                         0 => {
-                            test_command.send::<RunTests<TESTER_A>>(&Arguments(bytes)).await?;
-                            decode(test_command.recv::<Tested<TESTER_A>>().await?)?
+                            test_file.send::<RunTests<TESTER_A>>(&Arguments(bytes)).await?;
+                            decode(test_file.recv::<Tested<TESTER_A>>().await?)?
                         }
                         1 => {
-                            test_command.send::<RunTests<TESTER_B>>(&Arguments(bytes)).await?;
-                            decode(test_command.recv::<Tested<TESTER_B>>().await?)?
+                            test_file.send::<RunTests<TESTER_B>>(&Arguments(bytes)).await?;
+                            decode(test_file.recv::<Tested<TESTER_B>>().await?)?
                         }
                         2 => {
-                            test_command.send::<RunTests<TESTER_C>>(&Arguments(bytes)).await?;
-                            decode(test_command.recv::<Tested<TESTER_C>>().await?)?
+                            test_file.send::<RunTests<TESTER_C>>(&Arguments(bytes)).await?;
+                            decode(test_file.recv::<Tested<TESTER_C>>().await?)?
                         }
                         _ => unreachable!(),
                     };
                     assert_eq!(report["data"]["suite"], SERVICES[service]);
                     assert_eq!(report["success"], service != 1);
+                    if service == 1 {
+                        let args = Arguments(encode(&json!({"suite": SERVICES[1]}))?);
+                        let mut stale = pin!(test_file.send::<RunTests<TESTER_B>>(&args));
+                        let outcome = poll_fn(|cx| Poll::Ready(stale.as_mut().poll(cx))).await;
+                        assert!(!matches!(outcome, Poll::Ready(Ok(_))), "accepted the failed candidate again before repair");
+                    }
                 }
+                let approval = decode(test_file.recv::<TestCandidate<SERVICE_B>>().await?)?;
+                check_review(approval.clone(), SERVICES[1])?;
+                let args = Arguments(encode(&json!({"suite": SERVICES[1]}))?);
+                test_file.send::<RunTests<TESTER_B>>(&args).await?;
+                let retested = decode(test_file.recv::<Tested<TESTER_B>>().await?)?;
+                assert_eq!(retested["success"], true);
+                same(&retested["data"]["review"], &approval["data"]["receipt"])?;
+                transport.take_observations().for_each(drop);
+                {
+                    let mut duplicate = pin!(test_file.send::<RunTests<TESTER_B>>(&args));
+                    let outcome = poll_fn(|cx| Poll::Ready(duplicate.as_mut().poll(cx))).await;
+                    assert!(matches!(outcome, Poll::Ready(Err(error)) if error.is_unavailable()), "{outcome:?}");
+                }
+                assert_eq!(transport.take_observations().len(), 0);
+                test_file.send::<Exit>(&0).await?;
                 let tested = decode(a_file.recv::<TestReport>().await?)?;
                 assert_eq!(tested["data"]["service"], SERVICES[0]);
                 assert_eq!(tested["success"], true);
@@ -420,6 +439,10 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
                 assert_ne!(repaired["data"]["receipt"], failed["data"]["candidate"]);
                 same(&repaired["data"]["plan"], &failed["data"]["plan"])?;
                 let reviewed = decode(b_file.recv::<Reviewed<DEVELOPER_B>>().await?)?;
+                let tested = decode(b_file.recv::<TestReport>().await?)?;
+                same(&tested["data"]["review"], &reviewed["data"]["receipt"])?;
+                same(&tested["data"]["candidate"], &repaired["data"]["receipt"])?;
+                assert_eq!(tested["success"], true);
                 check_review(reviewed, SERVICES[1])
             };
             async {
@@ -454,6 +477,8 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
                             assert_eq!(review["success"], accepted);
                             same(&review["data"]["candidate"], &candidate["data"]["receipt"])?;
                         }
+                        let tested = decode(a.recv::<Candidate<SERVICE_A>>().await?)?;
+                        assert_eq!(tested["data"]["status"], "tests passed");
                         Ok(())
                     };
                     async {
@@ -464,7 +489,18 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
                         .await?;
                         let review = decode(b.recv::<Reviewed<DEVELOPER_B>>().await?)?;
                         assert_eq!(review["success"], true);
-                        same(&review["data"]["candidate"], &candidate["data"]["receipt"])
+                        same(&review["data"]["candidate"], &candidate["data"]["receipt"])?;
+                        let repaired = decode(b.recv::<Candidate<SERVICE_B>>().await?)?;
+                        assert_eq!(repaired["data"]["service"], SERVICES[1]);
+                        assert_eq!(repaired["data"]["agent"], "DEVELOPER_B");
+                        b.send::<Review<SERVICE_B>>(&Arguments(encode(&json!({"pr_id":SERVICES[1]}))?)).await?;
+                        let reviewed = decode(b.recv::<Reviewed<DEVELOPER_B>>().await?)?;
+                        assert_eq!(reviewed["data"]["candidate"], repaired["data"]["receipt"]);
+                        check_review(reviewed, SERVICES[1])?;
+
+                        let tested = decode(b.recv::<Candidate<SERVICE_B>>().await?)?;
+                        assert_eq!(tested["data"]["status"], "tests passed");
+                        Ok::<(), ShellError>(())
                     };
                     async {
                         let candidate = decode(c.recv::<Candidate<SERVICE_C>>().await?)?;
@@ -474,21 +510,13 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
                         .await?;
                         let review = decode(c.recv::<Reviewed<DEVELOPER_C>>().await?)?;
                         assert_eq!(review["success"], true);
-                        same(&review["data"]["candidate"], &candidate["data"]["receipt"])
+                        same(&review["data"]["candidate"], &candidate["data"]["receipt"])?;
+                        let tested = decode(c.recv::<Candidate<SERVICE_C>>().await?)?;
+                        assert_eq!(tested["data"]["status"], "tests passed");
+                        Ok::<(), ShellError>(())
                     };
                     Ok::<(), ShellError>(())
                 }.await?;
-                let repaired = decode(review_file.recv::<Candidate<SERVICE_B>>().await?)?;
-                assert_eq!(repaired["data"]["service"], SERVICES[1]);
-                assert_eq!(repaired["data"]["agent"], "DEVELOPER_B");
-                review_file.send::<Review<SERVICE_B>>(&Arguments(encode(&json!({"pr_id":SERVICES[1]}))?)).await?;
-                let reviewed = decode(review_file.recv::<Reviewed<DEVELOPER_B>>().await?)?;
-                assert_eq!(reviewed["data"]["candidate"], repaired["data"]["receipt"]);
-                check_review(reviewed, SERVICES[1])?;
-                let a = decode(review_file.recv::<Candidate<SERVICE_A>>().await?)?;
-                let c = decode(review_file.recv::<Candidate<SERVICE_C>>().await?)?;
-                assert_eq!(a["data"]["status"], "tests passed");
-                assert_eq!(c["data"]["status"], "tests passed");
                 Ok(())
             };
             Ok::<(), ShellError>(())
@@ -539,6 +567,7 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
                 ("REVIEWER", "code_review"),
                 ("REVIEWER", "code_review"),
                 ("REVIEWER", "code_review"),
+                ("TESTER", "run_tests"),
                 ("TESTER", "run_tests"),
                 ("TESTER", "run_tests"),
                 ("TESTER", "run_tests"),

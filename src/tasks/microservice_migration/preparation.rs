@@ -2,7 +2,7 @@ use crate::{
     imp::json::{decode, encode, same},
     shell::{
         ShellError, ShellResult,
-        global::Loan,
+        global::{Exit, Loan},
         imp::{
             review_reply::ReviewReply,
             service::{ReceivedEffects, SimulatorOperation},
@@ -39,7 +39,6 @@ pub(super) const TESTER_B: u8 = 17;
 pub(super) const TESTER_C: u8 = 18;
 pub(super) const TEST_ENV: u8 = 19;
 pub(super) const ENV_OWNER: u8 = 20;
-pub(super) const TEST_COMMAND: u8 = 21;
 
 pub(super) const DEVOPS_FILE: u8 = 41;
 pub(super) const SCHEMAS: u8 = 42;
@@ -69,12 +68,12 @@ type Failed<'a> = g::Msg<94, ReviewReply<'a, false>>;
 pub(super) type TestReport<'a> = g::Msg<95, &'a [u8]>;
 
 pub(super) type RunTests<const TESTER: u8> = g::Msg<TESTER, Arguments<TESTER>>;
-type EnvironmentRequest<const TESTER: u8> = g::Msg<TESTER, Arguments<TESTER, true>>;
+type EnvironmentRequest<'a, const TESTER: u8> = g::Msg<TESTER, TestRequest<'a, TESTER>>;
 pub(super) type Tested<'a, const TESTER: u8> = g::Msg<TESTER, &'a [u8]>;
 
-pub(super) struct Arguments<const OPERATION: u8, const FROM_ENV: bool = false>(Vec<u8>);
+pub(super) struct Arguments<const OPERATION: u8>(Vec<u8>);
 
-impl<const OPERATION: u8, const FROM_ENV: bool> WireEncode for Arguments<OPERATION, FROM_ENV> {
+impl<const OPERATION: u8> WireEncode for Arguments<OPERATION> {
     fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
         output
             .get_mut(..self.0.len())
@@ -84,8 +83,8 @@ impl<const OPERATION: u8, const FROM_ENV: bool> WireEncode for Arguments<OPERATI
     }
 }
 
-impl<const OPERATION: u8, const FROM_ENV: bool> WirePayload for Arguments<OPERATION, FROM_ENV> {
-    const SCHEMA_ID: u32 = 0xac04_4800 | ((FROM_ENV as u32) << 8) | OPERATION as u32;
+impl<const OPERATION: u8> WirePayload for Arguments<OPERATION> {
+    const SCHEMA_ID: u32 = 0xac04_4800 | OPERATION as u32;
     type Decoded<'a> = ReceivedPayload<'a, Self>;
 
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
@@ -129,19 +128,42 @@ impl<const OPERATION: u8, const FROM_ENV: bool> WirePayload for Arguments<OPERAT
     }
 }
 
-impl<const OPERATION: u8, const FROM_ENV: bool> SimulatorOperation
-    for Arguments<OPERATION, FROM_ENV>
-{
-    const RPC: (&'static str, &'static str) = match (FROM_ENV, OPERATION) {
-        (false, PLAN) => ("ARCHITECT", "design_proposal"),
-        (false, SCHEMA_A | SCHEMA_B | SCHEMA_C) => ("DEVOPS", "migrate_schema"),
-        (false, DEVELOPER_A) => ("DEVELOPER_A", "implement_feature"),
-        (false, DEVELOPER_B) => ("DEVELOPER_B", "implement_feature"),
-        (false, DEVELOPER_C) => ("DEVELOPER_C", "implement_feature"),
-        (false, SERVICE_A | SERVICE_B | SERVICE_C) => ("REVIEWER", "code_review"),
-        (true, TESTER_A | TESTER_B | TESTER_C) => ("TESTER", "run_tests"),
+impl<const OPERATION: u8> SimulatorOperation for Arguments<OPERATION> {
+    const RPC: (&'static str, &'static str) = match OPERATION {
+        PLAN => ("ARCHITECT", "design_proposal"),
+        SCHEMA_A | SCHEMA_B | SCHEMA_C => ("DEVOPS", "migrate_schema"),
+        DEVELOPER_A => ("DEVELOPER_A", "implement_feature"),
+        DEVELOPER_B => ("DEVELOPER_B", "implement_feature"),
+        DEVELOPER_C => ("DEVELOPER_C", "implement_feature"),
+        SERVICE_A | SERVICE_B | SERVICE_C => ("REVIEWER", "code_review"),
         _ => panic!("not a physical migration request"),
     };
+}
+
+/// The environment forwards the request consumed from this suite's projected file.
+struct TestRequest<'a, const TESTER: u8>(ReceivedPayload<'a, Arguments<TESTER>>);
+
+impl<const TESTER: u8> WireEncode for TestRequest<'_, TESTER> {
+    fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
+        self.0.as_bytes().encode_into(output)
+    }
+}
+
+impl<const TESTER: u8> WirePayload for TestRequest<'_, TESTER> {
+    const SCHEMA_ID: u32 = Arguments::<TESTER>::SCHEMA_ID | 0x100;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
+
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        Arguments::<TESTER>::validate_payload(input)
+    }
+
+    fn decode_validated_payload(input: ReceivedPayload<'_, Self>) -> Self::Decoded<'_> {
+        input
+    }
+}
+
+impl<const TESTER: u8> SimulatorOperation for TestRequest<'_, TESTER> {
+    const RPC: (&'static str, &'static str) = ("TESTER", "run_tests");
 }
 
 /// Keep the authored dependencies and expand omitted services to empty lists.
@@ -249,19 +271,20 @@ fn build<const DEVELOPER: u8, const FILE: u8, const SERVICE: u8, const TESTER: u
     )
 }
 
-fn test_session<const SERVICE: u8, const TESTER: u8>() -> impl Projectable + Copy {
+fn test_session<const TESTER: u8>() -> impl Projectable + Copy {
     g::seq(
-        g::send::<TEST_COMMAND, TEST_ENV, RunTests<TESTER>>(),
+        g::send::<TEST_ENV, TESTER, EnvironmentRequest<TESTER>>(),
         g::seq(
-            g::send::<TEST_ENV, SERVICE, EnvironmentRequest<TESTER>>(),
-            g::seq(
-                g::send::<ENV_OWNER, TESTER, Loan<TEST_ENV>>(),
-                g::seq(
-                    g::send::<TEST_ENV, TEST_COMMAND, Tested<TESTER>>(),
-                    g::send::<TESTER, ENV_OWNER, Loan<TEST_ENV>>(),
-                ),
-            ),
+            g::send::<ENV_OWNER, TESTER, Loan<TEST_ENV>>(),
+            g::send::<TESTER, ENV_OWNER, Loan<TEST_ENV>>(),
         ),
+    )
+}
+
+fn request_test<const SERVICE: u8, const TESTER: u8>() -> impl Projectable + Copy {
+    g::seq(
+        g::send::<SERVICE, TEST_FILE, TestCandidate<SERVICE>>(),
+        g::send::<TEST_FILE, ENV_OWNER, RunTests<TESTER>>(),
     )
 }
 
@@ -273,8 +296,12 @@ fn test_result<
     const FILE: u8,
 >() -> impl Projectable {
     let report = g::send::<DEVELOPER, FILE, TestReport>();
+    let reply = g::seq(
+        g::send::<SERVICE, ENV_OWNER, TestReport>(),
+        g::send::<ENV_OWNER, TEST_FILE, Tested<TESTER>>(),
+    );
     let passed = g::seq(
-        g::send::<SERVICE, DEVELOPER, Passed>(),
+        g::seq(g::send::<SERVICE, DEVELOPER, Passed>(), reply),
         g::par(
             report,
             g::seq(
@@ -288,13 +315,28 @@ fn test_result<
         g::send::<REVIEWER, DEVELOPER, Loan<SERVICE>>(),
     );
     let failed = g::seq(
-        g::send::<SERVICE, DEVELOPER, Failed>(),
+        g::seq(g::send::<SERVICE, DEVELOPER, Failed>(), reply),
         g::seq(
             report,
-            g::seq(g::send::<TESTER, DEVELOPER, Loan<SERVICE>>(), repair),
+            g::seq(
+                g::send::<TESTER, DEVELOPER, Loan<SERVICE>>(),
+                g::seq(
+                    repair,
+                    g::seq(
+                        g::send::<SERVICE, TESTER, TestCandidate<SERVICE>>(),
+                        g::seq(
+                            g::send::<REVIEWER, TESTER, Loan<SERVICE>>(),
+                            request_test::<SERVICE, TESTER>(),
+                        ),
+                    ),
+                ),
+            ),
         ),
     );
-    g::route(passed, failed)
+    g::seq(
+        request_test::<SERVICE, TESTER>(),
+        g::route(passed, g::seq(failed.roll(), passed)),
+    )
 }
 
 fn schema<const S: u8>() -> impl Projectable + Copy {
@@ -328,48 +370,42 @@ pub(super) fn preparation() -> impl Projectable {
             ),
         ),
     );
-    let prepare = g::par(
+    let service_a = g::seq(
         build::<DEVELOPER_A, DEVELOPER_A_FILE, SERVICE_A, TESTER_A>(
             review_candidate::<DEVELOPER_A, REVIEWER_A, SERVICE_A>(),
             g::send::<REVIEWER_A, DEVELOPER_A, Loan<SERVICE_A>>(),
             g::send::<REVIEWER_A, TESTER_A, Loan<SERVICE_A>>(),
         ),
-        g::par(
-            build::<DEVELOPER_B, DEVELOPER_B_FILE, SERVICE_B, TESTER_B>(
-                review_candidate::<DEVELOPER_B, REVIEWER_B, SERVICE_B>(),
-                g::send::<REVIEWER_B, DEVELOPER_B, Loan<SERVICE_B>>(),
-                g::send::<REVIEWER_B, TESTER_B, Loan<SERVICE_B>>(),
-            ),
-            build::<DEVELOPER_C, DEVELOPER_C_FILE, SERVICE_C, TESTER_C>(
-                review_candidate::<DEVELOPER_C, REVIEWER_C, SERVICE_C>(),
-                g::send::<REVIEWER_C, DEVELOPER_C, Loan<SERVICE_C>>(),
-                g::send::<REVIEWER_C, TESTER_C, Loan<SERVICE_C>>(),
-            ),
-        ),
-    );
-    let a = test_session::<SERVICE_A, TESTER_A>();
-    let b = test_session::<SERVICE_B, TESTER_B>();
-    let c = test_session::<SERVICE_C, TESTER_C>();
-    let approvals = g::par(
-        g::send::<SERVICE_A, TEST_FILE, TestCandidate<SERVICE_A>>(),
-        g::par(
-            g::send::<SERVICE_B, TEST_FILE, TestCandidate<SERVICE_B>>(),
-            g::send::<SERVICE_C, TEST_FILE, TestCandidate<SERVICE_C>>(),
-        ),
-    );
-    let reports = g::par(
         test_result::<SERVICE_A, TESTER_A, REVIEWER_A, DEVELOPER_A, DEVELOPER_A_FILE>(),
-        g::par(
-            test_result::<SERVICE_B, TESTER_B, REVIEWER_B, DEVELOPER_B, DEVELOPER_B_FILE>(),
-            test_result::<SERVICE_C, TESTER_C, REVIEWER_C, DEVELOPER_C, DEVELOPER_C_FILE>(),
-        ),
     );
-    let tests = g::route(
-        g::seq(a, g::route(g::seq(b, c), g::seq(c, b))),
-        g::route(
-            g::seq(b, g::route(g::seq(a, c), g::seq(c, a))),
-            g::seq(c, g::route(g::seq(a, b), g::seq(b, a))),
+    let service_b = g::seq(
+        build::<DEVELOPER_B, DEVELOPER_B_FILE, SERVICE_B, TESTER_B>(
+            review_candidate::<DEVELOPER_B, REVIEWER_B, SERVICE_B>(),
+            g::send::<REVIEWER_B, DEVELOPER_B, Loan<SERVICE_B>>(),
+            g::send::<REVIEWER_B, TESTER_B, Loan<SERVICE_B>>(),
         ),
+        test_result::<SERVICE_B, TESTER_B, REVIEWER_B, DEVELOPER_B, DEVELOPER_B_FILE>(),
+    );
+    let service_c = g::seq(
+        build::<DEVELOPER_C, DEVELOPER_C_FILE, SERVICE_C, TESTER_C>(
+            review_candidate::<DEVELOPER_C, REVIEWER_C, SERVICE_C>(),
+            g::send::<REVIEWER_C, DEVELOPER_C, Loan<SERVICE_C>>(),
+            g::send::<REVIEWER_C, TESTER_C, Loan<SERVICE_C>>(),
+        ),
+        test_result::<SERVICE_C, TESTER_C, REVIEWER_C, DEVELOPER_C, DEVELOPER_C_FILE>(),
+    );
+    let a = test_session::<TESTER_A>().roll();
+    let b = test_session::<TESTER_B>().roll();
+    let c = test_session::<TESTER_C>().roll();
+    let tests = g::seq(
+        g::route(
+            g::seq(a, g::route(g::seq(b, c), g::seq(c, b))),
+            g::route(
+                g::seq(b, g::route(g::seq(a, c), g::seq(c, a))),
+                g::seq(c, g::route(g::seq(a, b), g::seq(b, a))),
+            ),
+        ),
+        g::send::<TEST_FILE, ENV_OWNER, Exit>(),
     );
     g::seq(
         g::send::<ARCHITECT_FILE, ARCHITECT, Propose>(),
@@ -378,7 +414,7 @@ pub(super) fn preparation() -> impl Projectable {
                 g::send::<ARCHITECT, ARCHITECT_FILE, Proposed<ARCHITECT_FILE>>(),
                 staging,
             ),
-            g::seq(prepare, g::seq(g::par(approvals, tests), reports)),
+            g::par(g::par(service_a, g::par(service_b, service_c)), tests),
         ),
     )
 }
@@ -554,60 +590,61 @@ pub(super) async fn developer<'run, const DEVELOPER: u8, const SERVICE: u8>(
                 endpoint
                     .send::<Reviewed<DEVELOPER>>(&result.as_slice())
                     .await?;
-                let tested = endpoint.offer().await?;
-                match tested.label() {
-                    <Passed as g::Message>::LOGICAL_LABEL => {
-                        let result = tested.recv::<Passed>().await?.to_vec();
-                        endpoint.send::<TestReport>(&result.as_slice()).await?;
-                        return Ok(());
-                    }
-                    <Failed as g::Message>::LOGICAL_LABEL => {
-                        let result = tested.recv::<Failed>().await?.to_vec();
-                        endpoint.send::<TestReport>(&result.as_slice()).await?;
-                        let failed = decode(&result)?;
-                        let mut prior = failed["data"]["candidate"].clone();
-                        loop {
-                            let mut returned = endpoint.recv::<Loan<SERVICE>>().await?;
-                            let received = returned.recv::<Implement<DEVELOPER>>().await?;
-                            let repair = effects.apply(received).await?;
-                            checked_build(&repair, agent, service, &plan)?;
-                            if repair["data"]["receipt"] == prior {
-                                return Err(ShellError::message(
-                                    "repair reused the failed candidate",
-                                ));
-                            }
-                            prior = repair["data"]["receipt"].clone();
-                            let repaired = encode(&repair)?;
-                            returned.send::<Implemented>(&repaired.as_slice()).await?;
-                            endpoint.send::<Loan<SERVICE>>(returned).await?;
-                            endpoint
-                                .send::<Candidate<SERVICE>>(&repaired.as_slice())
-                                .await?;
-                            let decision = endpoint.offer().await?;
-                            match decision.label() {
-                                <Approved as g::Message>::LOGICAL_LABEL => {
-                                    let result = decision.recv::<Approved>().await?.to_vec();
-                                    endpoint
-                                        .send::<Reviewed<DEVELOPER>>(&result.as_slice())
-                                        .await?;
-                                    break;
-                                }
-                                <Rejected as g::Message>::LOGICAL_LABEL => {
-                                    let result = decision.recv::<Rejected>().await?.to_vec();
-                                    endpoint
-                                        .send::<Reviewed<DEVELOPER>>(&result.as_slice())
-                                        .await?;
-                                }
-                                _ => {
+                loop {
+                    let tested = endpoint.offer().await?;
+                    match tested.label() {
+                        <Passed as g::Message>::LOGICAL_LABEL => {
+                            let result = tested.recv::<Passed>().await?.to_vec();
+                            endpoint.send::<TestReport>(&result.as_slice()).await?;
+                            return Ok(());
+                        }
+                        <Failed as g::Message>::LOGICAL_LABEL => {
+                            let result = tested.recv::<Failed>().await?.to_vec();
+                            endpoint.send::<TestReport>(&result.as_slice()).await?;
+                            let failed = decode(&result)?;
+                            let mut prior = failed["data"]["candidate"].clone();
+                            loop {
+                                let mut returned = endpoint.recv::<Loan<SERVICE>>().await?;
+                                let received = returned.recv::<Implement<DEVELOPER>>().await?;
+                                let repair = effects.apply(received).await?;
+                                checked_build(&repair, agent, service, &plan)?;
+                                if repair["data"]["receipt"] == prior {
                                     return Err(ShellError::message(
-                                        "unknown service review outcome",
+                                        "repair reused the failed candidate",
                                     ));
+                                }
+                                prior = repair["data"]["receipt"].clone();
+                                let repaired = encode(&repair)?;
+                                returned.send::<Implemented>(&repaired.as_slice()).await?;
+                                endpoint.send::<Loan<SERVICE>>(returned).await?;
+                                endpoint
+                                    .send::<Candidate<SERVICE>>(&repaired.as_slice())
+                                    .await?;
+                                let decision = endpoint.offer().await?;
+                                match decision.label() {
+                                    <Approved as g::Message>::LOGICAL_LABEL => {
+                                        let result = decision.recv::<Approved>().await?.to_vec();
+                                        endpoint
+                                            .send::<Reviewed<DEVELOPER>>(&result.as_slice())
+                                            .await?;
+                                        break;
+                                    }
+                                    <Rejected as g::Message>::LOGICAL_LABEL => {
+                                        let result = decision.recv::<Rejected>().await?.to_vec();
+                                        endpoint
+                                            .send::<Reviewed<DEVELOPER>>(&result.as_slice())
+                                            .await?;
+                                    }
+                                    _ => {
+                                        return Err(ShellError::message(
+                                            "unknown service review outcome",
+                                        ));
+                                    }
                                 }
                             }
                         }
-                        return Ok(());
+                        _ => return Err(ShellError::message("unknown service test outcome")),
                     }
-                    _ => return Err(ShellError::message("unknown service test outcome")),
                 }
             }
             <Rejected as g::Message>::LOGICAL_LABEL => {
@@ -687,163 +724,173 @@ pub(super) async fn reviewer<const REVIEWER: u8, const DEVELOPER: u8, const SERV
             }
         }
     }
-    let outcome = endpoint.offer().await?;
-    match outcome.label() {
-        <Passed as g::Message>::LOGICAL_LABEL => {
-            let tested = outcome.recv::<Passed>().await?.to_vec();
-            endpoint
-                .send::<Candidate<SERVICE>>(&tested.as_slice())
-                .await?;
-        }
-        <Loan<SERVICE> as g::Message>::LOGICAL_LABEL => {
-            let mut service = outcome.recv::<Loan<SERVICE>>().await?;
-            loop {
-                let bytes = endpoint.recv::<Candidate<SERVICE>>().await?.to_vec();
-                let candidate = decode(&bytes)?;
-                service
-                    .send::<Candidate<SERVICE>>(&bytes.as_slice())
+    loop {
+        let outcome = endpoint.offer().await?;
+        match outcome.label() {
+            <Passed as g::Message>::LOGICAL_LABEL => {
+                let tested = outcome.recv::<Passed>().await?.to_vec();
+                endpoint
+                    .send::<Candidate<SERVICE>>(&tested.as_slice())
                     .await?;
-                let received = service.recv::<Review<SERVICE>>().await?;
-                let arguments = decode(received.as_bytes())?;
-                same(&arguments["pr_id"], &candidate["data"]["service"])?;
-                let result = effects.apply(received).await?;
-                checked_review(&result, &arguments["pr_id"], &candidate)?;
-                let bytes = encode(&result)?;
-                match (
-                    result["success"].as_bool(),
-                    result["data"]["status"].as_str(),
-                ) {
-                    (Some(true), Some("reviewed")) => {
-                        let approval = ReviewReply::<true>::from_bytes(&bytes)?;
-                        endpoint.send::<Approved>(&approval).await?;
-                        service
-                            .send::<Reviewed<DEVELOPER>>(&bytes.as_slice())
-                            .await?;
+                return Ok(());
+            }
+            <Loan<SERVICE> as g::Message>::LOGICAL_LABEL => {
+                let mut service = outcome.recv::<Loan<SERVICE>>().await?;
+                loop {
+                    let bytes = endpoint.recv::<Candidate<SERVICE>>().await?.to_vec();
+                    let candidate = decode(&bytes)?;
+                    service
+                        .send::<Candidate<SERVICE>>(&bytes.as_slice())
+                        .await?;
+                    let received = service.recv::<Review<SERVICE>>().await?;
+                    let arguments = decode(received.as_bytes())?;
+                    same(&arguments["pr_id"], &candidate["data"]["service"])?;
+                    let result = effects.apply(received).await?;
+                    checked_review(&result, &arguments["pr_id"], &candidate)?;
+                    let bytes = encode(&result)?;
+                    match (
+                        result["success"].as_bool(),
+                        result["data"]["status"].as_str(),
+                    ) {
+                        (Some(true), Some("reviewed")) => {
+                            let approval = ReviewReply::<true>::from_bytes(&bytes)?;
+                            endpoint.send::<Approved>(&approval).await?;
+                            service
+                                .send::<Reviewed<DEVELOPER>>(&bytes.as_slice())
+                                .await?;
 
-                        break;
-                    }
-                    (Some(false), Some("changes_requested")) => {
-                        endpoint
-                            .send::<Rejected>(&ReviewReply::<false>::from_bytes(&bytes)?)
-                            .await?;
-                        service
-                            .send::<Reviewed<DEVELOPER>>(&bytes.as_slice())
-                            .await?;
-                        endpoint.send::<Loan<SERVICE>>(service).await?;
-                        service = endpoint.recv::<Loan<SERVICE>>().await?;
-                    }
-                    _ => {
-                        return Err(ShellError::message(
-                            "unknown result from the migration reviewer",
-                        ));
+                            service.send::<TestCandidate<SERVICE>>(&approval).await?;
+                            endpoint.send::<Loan<SERVICE>>(service).await?;
+                            break;
+                        }
+                        (Some(false), Some("changes_requested")) => {
+                            endpoint
+                                .send::<Rejected>(&ReviewReply::<false>::from_bytes(&bytes)?)
+                                .await?;
+                            service
+                                .send::<Reviewed<DEVELOPER>>(&bytes.as_slice())
+                                .await?;
+                            endpoint.send::<Loan<SERVICE>>(service).await?;
+                            service = endpoint.recv::<Loan<SERVICE>>().await?;
+                        }
+                        _ => {
+                            return Err(ShellError::message(
+                                "unknown result from the migration reviewer",
+                            ));
+                        }
                     }
                 }
             }
-        }
-        _ => {
-            return Err(ShellError::message(
-                "unexpected migration review continuation",
-            ));
+            _ => {
+                return Err(ShellError::message(
+                    "unexpected migration review continuation",
+                ));
+            }
         }
     }
-    Ok(())
 }
 
 pub(super) async fn tester<'run, const TESTER: u8, const SERVICE: u8>(
     endpoint: &mut Endpoint<'run, TESTER>,
     effects: &impl ReceivedEffects,
 ) -> ShellResult<Value> {
-    let approval = endpoint.recv::<TestCandidate<SERVICE>>().await?.to_vec();
-    let mut service = endpoint.recv::<Loan<SERVICE>>().await?;
-    service
-        .send::<TestCandidate<SERVICE>>(&ReviewReply::from_bytes(&approval)?)
-        .await?;
-    let reviewed = decode(&approval)?;
-    let received = service.recv::<EnvironmentRequest<TESTER>>().await?;
-    let arguments = decode(received.as_bytes())?;
-    same(&arguments["suite"], &reviewed["data"]["service"])?;
-    let mut environment = endpoint.recv::<Loan<TEST_ENV>>().await?;
-    let result = effects.apply(received).await?;
-    let data = &result["data"];
-    if result["tool_name"] != "run_tests"
-        || data["agent"] != "TESTER"
-        || data["suite"] != reviewed["data"]["service"]
-        || data["service"] != data["suite"]
-        || data["candidate"] != reviewed["data"]["candidate"]
-        || data["review"] != reviewed["data"]["receipt"]
-        || data["plan"] != reviewed["data"]["plan"]
-        || data["receipt"].as_u64().is_none_or(|id| id == 0)
-        || !matches!(
-            (result["success"].as_bool(), data["status"].as_str()),
-            (Some(true), Some("tests passed")) | (Some(false), Some("tests_failed"))
-        )
-    {
-        return Err(ShellError::message(
-            "test result differs from its approved service",
-        ));
+    loop {
+        let approval = endpoint.recv::<TestCandidate<SERVICE>>().await?.to_vec();
+        let mut service = endpoint.recv::<Loan<SERVICE>>().await?;
+        service
+            .send::<TestCandidate<SERVICE>>(&ReviewReply::from_bytes(&approval)?)
+            .await?;
+        let reviewed = decode(&approval)?;
+        let received = endpoint.recv::<EnvironmentRequest<TESTER>>().await?;
+        let arguments = decode(received.as_bytes())?;
+        same(&arguments["suite"], &reviewed["data"]["service"])?;
+        let run_tests = effects.apply(received);
+        let environment = endpoint.recv::<Loan<TEST_ENV>>().await?;
+        let result = run_tests.await?;
+        let data = &result["data"];
+        if result["tool_name"] != "run_tests"
+            || data["agent"] != "TESTER"
+            || data["suite"] != reviewed["data"]["service"]
+            || data["service"] != data["suite"]
+            || data["candidate"] != reviewed["data"]["candidate"]
+            || data["review"] != reviewed["data"]["receipt"]
+            || data["plan"] != reviewed["data"]["plan"]
+            || data["receipt"].as_u64().is_none_or(|id| id == 0)
+            || !matches!(
+                (result["success"].as_bool(), data["status"].as_str()),
+                (Some(true), Some("tests passed")) | (Some(false), Some("tests_failed"))
+            )
+        {
+            return Err(ShellError::message(
+                "test result differs from its approved service",
+            ));
+        }
+        let bytes = encode(&result)?;
+        if result["success"] == true {
+            service
+                .send::<Passed>(&ReviewReply::from_bytes(&bytes)?)
+                .await?;
+            service.send::<TestReport>(&bytes.as_slice()).await?;
+            endpoint.send::<Loan<TEST_ENV>>(environment).await?;
+            service
+                .send::<Passed>(&ReviewReply::from_bytes(&bytes)?)
+                .await?;
+            return Ok(result);
+        } else {
+            service
+                .send::<Failed>(&ReviewReply::from_bytes(&bytes)?)
+                .await?;
+            service.send::<TestReport>(&bytes.as_slice()).await?;
+            endpoint.send::<Loan<TEST_ENV>>(environment).await?;
+            endpoint.send::<Loan<SERVICE>>(service).await?;
+        }
     }
-    environment
-        .send::<Tested<TESTER>>(&encode(&result)?.as_slice())
-        .await?;
-    endpoint.send::<Loan<TEST_ENV>>(environment).await?;
-    let bytes = encode(&result)?;
-    if result["success"] == true {
-        service
-            .send::<Passed>(&ReviewReply::from_bytes(&bytes)?)
-            .await?;
-        service
-            .send::<Passed>(&ReviewReply::from_bytes(&bytes)?)
-            .await?;
-    } else {
-        service
-            .send::<Failed>(&ReviewReply::from_bytes(&bytes)?)
-            .await?;
-        endpoint.send::<Loan<SERVICE>>(service).await?;
-    }
-    Ok(result)
 }
 
 pub(super) async fn test_environment<'run>(
     owner: &mut Endpoint<'run, ENV_OWNER>,
     mut environment: Endpoint<'run, TEST_ENV>,
 ) -> ShellResult<Endpoint<'run, TEST_ENV>> {
-    for _ in SERVICES {
-        let request = environment.offer().await?;
-        match request.label() {
+    loop {
+        let request = owner.offer().await?;
+        let suite = request.label();
+        match suite {
+            <Exit as g::Message>::LOGICAL_LABEL => {
+                let exit = request.recv::<Exit>().await?;
+                if exit != 0 {
+                    return Err(ShellError::message("testing shell exited unsuccessfully"));
+                }
+                break;
+            }
             TESTER_A => {
-                let arguments = request
-                    .recv::<RunTests<TESTER_A>>()
-                    .await?
-                    .as_bytes()
-                    .to_vec();
+                let arguments = request.recv::<RunTests<TESTER_A>>().await?;
                 environment
-                    .send::<EnvironmentRequest<TESTER_A>>(&Arguments(arguments))
+                    .send::<EnvironmentRequest<TESTER_A>>(&TestRequest(arguments))
                     .await?;
             }
             TESTER_B => {
-                let arguments = request
-                    .recv::<RunTests<TESTER_B>>()
-                    .await?
-                    .as_bytes()
-                    .to_vec();
+                let arguments = request.recv::<RunTests<TESTER_B>>().await?;
                 environment
-                    .send::<EnvironmentRequest<TESTER_B>>(&Arguments(arguments))
+                    .send::<EnvironmentRequest<TESTER_B>>(&TestRequest(arguments))
                     .await?;
             }
             TESTER_C => {
-                let arguments = request
-                    .recv::<RunTests<TESTER_C>>()
-                    .await?
-                    .as_bytes()
-                    .to_vec();
+                let arguments = request.recv::<RunTests<TESTER_C>>().await?;
                 environment
-                    .send::<EnvironmentRequest<TESTER_C>>(&Arguments(arguments))
+                    .send::<EnvironmentRequest<TESTER_C>>(&TestRequest(arguments))
                     .await?;
             }
             _ => return Err(ShellError::message("unknown migration test suite")),
         }
         owner.send::<Loan<TEST_ENV>>(environment).await?;
+        let result = owner.recv::<TestReport>().await?.to_vec();
         environment = owner.recv::<Loan<TEST_ENV>>().await?;
+        match suite {
+            TESTER_A => owner.send::<Tested<TESTER_A>>(&result.as_slice()).await?,
+            TESTER_B => owner.send::<Tested<TESTER_B>>(&result.as_slice()).await?,
+            TESTER_C => owner.send::<Tested<TESTER_C>>(&result.as_slice()).await?,
+            _ => unreachable!(),
+        }
     }
     Ok(environment)
 }

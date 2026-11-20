@@ -1,0 +1,379 @@
+{
+  "task": "4H",
+  "scope": "Seven scripted wash guests on the preparation, schema migration, review and service-test portion of 4H. Deployment, rollback, registration and live-model qualification are open.",
+  "evidence_directory": "output/verification/4h-service-retest-20261121.USmiEE",
+  "runtime_sha256": "13c7d4fb3c9f4179f86a581d7a3acaf900079fecddd18efb03d4c4dc9517392a",
+  "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+  "harness_sha256": "d19f385830181ae1cf05180c1a682072576cfb00452de91958180ddb69dc4cdd",
+  "harness_source_sha256": "1109278466d347cb2692050fb20cc5ffef102071fa6934bd76b2b65e28debac4",
+  "projection_sha256": "3be1f8a932f099d5752cffa3a89054c01f2082f2406436a5526583357eb15955",
+  "source_manifest_sha256": "dfdac67e143e4e3449cdaab5559e647641e779e793d0c3871ace6fa770584c93",
+  "conditions": {
+    "independent_schema_and_test_orders": 36,
+    "repair_and_retest": 6,
+    "epf_passed": 42,
+    "epf_records": 216834,
+    "effects": 576,
+    "run_tests_effects": 132,
+    "score_violations": 0,
+    "full_task_completions": 0,
+    "model_calls": 0,
+    "scored_runs": 0
+  },
+  "cases": [
+    {
+      "case": "abc-tests-abc",
+      "journal_sha256": "215dff8947aa2b8b1a6e98c08a9dc45295f7b07323459ed9e49d66634fe996fa",
+      "test_receipts_sha256": "fa26eac281b5038423e50c6269e9e0d765e34cf6ba29f87bb8a97ce9abe2403d",
+      "epf_sha256": "b0b36629ea47e0988bb5526be6efacdef16ed94ea391ffad514836c5e780dd57",
+      "result_sha256": "6b930c593057a14982b2ded0213674626a86b05aad050ec18d33eb7210ae4b5f"
+    },
+    {
+      "case": "abc-tests-acb",
+      "journal_sha256": "3a2d28156212ffd6f16dc1d68d8d976c78a68793b3c14263a2e27ab7841660e0",
+      "test_receipts_sha256": "76f2b81b6e0d96d4b425880445a5c87569044fd635b0a8e928e178f59b7cc086",
+      "epf_sha256": "c01b9db295c20e14a43d2b66eba8d2ddeaa2553d2f8dad0e4c94e3451c3807cd",
+      "result_sha256": "d0a338fba65eff9fdfc555eabc4c03c24692f4a04bc661f058738602e4b51e53"
+    },
+    {
+      "case": "abc-tests-bac",
+      "journal_sha256": "bc7704bf3d136690ae7b5d4bece47498369073b744a6a699309b0337b8a0af70",
+      "test_receipts_sha256": "6ee79a00177a0043f703db9c1a275585bf6b8de1139c3d19fcbb20bcccddff15",
+      "epf_sha256": "b87cfc17ee3e8e976f1af44542f72d3e38990b6b6532e14c3a72d1aebe81f7a7",
+      "result_sha256": "877227b2927f1c19ec96d50ccd1fa5d3ee21b0794b7c80e2d43d8d3f23f03331"
+    },
+    {
+      "case": "abc-tests-bca",
+      "journal_sha256": "3d38c6f7940a4c7148010553e0e0d9da38ca628957f3a21bf35e0a454b4f7ae5",
+      "test_receipts_sha256": "dfd8e4c2a137e3face8d89360add1806ef80d60e2bf6ab7d8e881dfccc1cf1aa",
+      "epf_sha256": "ce25b9b8e60e9352a9b84031ffe8a99aa073b4f28de3b281c8c82c45c49eed1a",
+      "result_sha256": "bdaae8676ade2fc357e89a39738cdd37fd9ae87cf32abd53b8b72565f21da4b6"
+    },
+    {
+      "case": "abc-tests-cab",
+      "journal_sha256": "842e99a8794d2bf7183483a785d2d132efb4a2d8fe7d3d15526e7fd769f77d15",
+      "test_receipts_sha256": "a8f28a6b8f1177cf2bd0634ddbf88a54c795613258baff7a8df8a0c2136c7391",
+      "epf_sha256": "d97cb7d7d93a578aa2055f503ddbf80ab491bb59b0d5253a56a76d050f9b4167",
+      "result_sha256": "3769f9df5c1c71adaad2479ca103e64ba53e22aac1725ed17cb058e86c2c68e6"
+    },
+    {
+      "case": "abc-tests-cba",
+      "journal_sha256": "09be3a95a5a0ecb410485d1b51d3d054a346ac04ead3c04a73ebbcb32a4f1ae5",
+      "test_receipts_sha256": "c559ae78866d527e91cf44ad83691bbf53f7f723f23b606b0ba87d927cff47ed",
+      "epf_sha256": "ceae37b7a4811893c0fbfcee489045aefba47f4351ae6edff4686616144520f6",
+      "result_sha256": "eec58bb818b4fc0c79ee698a24ed4dc9c9c5c17cf75f7d90b8e3b73e616ca115"
+    },
+    {
+      "case": "acb-tests-abc",
+      "journal_sha256": "f925ead1564154bed83039dfa10dea8ee11432c4ba78f9a96c2a8c9a4a2275d0",
+      "test_receipts_sha256": "f9ecf0787a2f5ab23772dea0a2e21926dd9dd0d72a59626a6a5a4b94a7339f48",
+      "epf_sha256": "9bcaa1f4c7c55848e5cdc51e8676f42043526f61d482941b31b6531213d1e9d3",
+      "result_sha256": "ba29d952ce206ca55b986d013884299fa09ffd94b4e60775a198b06e59a9ffba"
+    },
+    {
+      "case": "acb-tests-acb",
+      "journal_sha256": "b54145dd7181595becb029ff6b79620e205be9dcfe69230f6f491571ca71233b",
+      "test_receipts_sha256": "68331b4cb19316eedbfb71a084ca26b241ffdcb77989c06c044b095f41a28e56",
+      "epf_sha256": "a222082d84c7b3c1e350f2cbd7a6f187c5a2793fa3623512d3fffe536dea0e48",
+      "result_sha256": "12dea3a5eacdf407ee87ad76b12c877dc0cd327085058210965a9e06b9c3084f"
+    },
+    {
+      "case": "acb-tests-bac",
+      "journal_sha256": "20378d432b4128110813ddeed9307d89729f5a0f4115089aed7737cbbd940725",
+      "test_receipts_sha256": "a4d1409867f7a466a6d5179397dd901707516934e9b8daaf5f03565ccb8b1904",
+      "epf_sha256": "aa7e803cfc9a66019a193c1db8c2e57acd8edf5f4b21a83bac0e9bf63550fe14",
+      "result_sha256": "211ec5b7d58cc86266afb5d63385724887f9b75b18efd4b20a02a1d789132299"
+    },
+    {
+      "case": "acb-tests-bca",
+      "journal_sha256": "eb561fdcc5d1c88d29704fccdbf7da00fb5d5dc944d429c2f6c06c3383ba2d5b",
+      "test_receipts_sha256": "1fabe684f58985771bf9829b3fb6d7e5987e31e830647cc8839ae7bfe54517e1",
+      "epf_sha256": "9d07fc041f383ef9f5914fdcd6269da21cb0360caff869e0bee9b2806e5cecd5",
+      "result_sha256": "db6857407be1798d2ae039865c310bf540c4fb00994b9a251fa593f9e96cd3e5"
+    },
+    {
+      "case": "acb-tests-cab",
+      "journal_sha256": "bd643c652b501b819ed65d8b4e8c5eb05a84acf4894827d18d6d8f36d6103508",
+      "test_receipts_sha256": "e678049634f4865c6b750c27dc904fc2168053b1c6b3434b154d4f47743535d7",
+      "epf_sha256": "6557926461c517ad2ce6448b0d6d1389beb2059db6ef426a15edd32e6bc441d2",
+      "result_sha256": "4d1bcadf1f9c92ee395b43886219b0ac0b5d1ffda9dbb199f3604bced54a8e0f"
+    },
+    {
+      "case": "acb-tests-cba",
+      "journal_sha256": "be6457fcfbe07cca072619f5839cf89cc91c0cc67c6c689dbfbc1d2e161756c6",
+      "test_receipts_sha256": "221d1b2ee1f25cf467e6e0aa1481e8c2b4a32e35533e5cafcf778a7dc408f34b",
+      "epf_sha256": "08a45949607b0a37eb038dd2318992ea2216f0c18ca100e235bd2cb1993f0bb3",
+      "result_sha256": "6983c1c5d1590a7ff11e8ea9d9cd9d7e23c2c0df034642fbbc38f5e7706da72c"
+    },
+    {
+      "case": "bac-tests-abc",
+      "journal_sha256": "a3550f5cdf2a3e654f05d89ea078853b2a1d74cf4772aa87ba67e1b33ed8df53",
+      "test_receipts_sha256": "655bc8564ca012623213b0fd3d40052ca8d1ce0212a4e593ca4c611b9913f861",
+      "epf_sha256": "4ec88af7500baf65ba3226ed7f244303397df7bde7a53ba9b5b71a8643730be6",
+      "result_sha256": "a549a86472aa7f5b3b8879d219de0c63a7002a2f93da92d7d7d4ffb878245278"
+    },
+    {
+      "case": "bac-tests-acb",
+      "journal_sha256": "43c0b218819dffa55fbbc34ed3646844ff8233c2a8440154d7be01d1d5bbb4b1",
+      "test_receipts_sha256": "102ced8ba0930a54c7bbe14b6c86ef6709738831e4b10274efa17ef864d72c09",
+      "epf_sha256": "55f8fc8373816e963fd90bc88a0ea9241d73bdc627c7ade5196a4cfb0dae8e08",
+      "result_sha256": "8789264b679593263744f2e35608fd56b58504fba1745438a8cf072c9ec4fff8"
+    },
+    {
+      "case": "bac-tests-bac",
+      "journal_sha256": "80a5ba5869c228ada9c648e9510bf5f3f25fc65a8f7e570c00bfa20e955e9768",
+      "test_receipts_sha256": "3a0311f70e26d6bb1e747ca2a35c80f26f96ee7969ad72a7bad79593bed6a716",
+      "epf_sha256": "3273de654582b1e7f8a8349d7f0107e1b9c245dcfe3085f66e7cdcc94a81ef63",
+      "result_sha256": "ce5b5396646f067bf1338dad00a89bdf6073c41fba1386a192d5dfe5a3aee202"
+    },
+    {
+      "case": "bac-tests-bca",
+      "journal_sha256": "d57b9a9a8293ed39c1916225fc09e5c1acdf41da2e4d9b2af8107be80fe3416c",
+      "test_receipts_sha256": "fb08e19f5a182e4c0d46af23a3a47b485f50bb5354e54d18d6f75ef167f47edd",
+      "epf_sha256": "901dd73fa28a945a7cce0ff847019ca5aae0dbb6cbfea96f587c9b9570391595",
+      "result_sha256": "030091a36b895303548f9d93801c73887f9cb0f56331997494d9adb2e7fb4717"
+    },
+    {
+      "case": "bac-tests-cab",
+      "journal_sha256": "982e1b3d0756f048bd1b99769e409d2ced2461f25301542ebd44e6d8943b7126",
+      "test_receipts_sha256": "21edd681316ce522777837a83f89582db382bec4bcd02736ee39dbfacf0fe2da",
+      "epf_sha256": "1c89f145e3f7f965a74682fbd5ef52980f52202d32a13a608653015cc05be7f6",
+      "result_sha256": "70bc90a20205fcd22abbd7a953fd49ababc4af3929819999ef9627aa17463c90"
+    },
+    {
+      "case": "bac-tests-cba",
+      "journal_sha256": "9790fa07c2dbb92c8994ff30d2474e3ee6161dc9b7ec6e0283570affc6ca4797",
+      "test_receipts_sha256": "07e152f0e68534e9e34dfe3921a29042ec753485904b0d1ef7a1b0ec45bd974a",
+      "epf_sha256": "0e432f147f05d4d4f0e2c6086a33dce24bf3a9931ccae946ae6f7ca9af73f499",
+      "result_sha256": "82e1816cc4a1471513d85eca011b578fefa7c9ceb5f78330192f902ba85a0433"
+    },
+    {
+      "case": "bca-tests-abc",
+      "journal_sha256": "74027d9ba63a8977dc8a6e2b7c0c7450e7fde4d367328db2bbf55dac0d9bd60f",
+      "test_receipts_sha256": "a6c7f6bcbabd334386fe3498d2f5079677385b4ac4e2ce3f7ec75746e26084ff",
+      "epf_sha256": "5f58bc1442318f8f1d204d28c36416348f723e2df2ca339d51b4b222ca2f8d35",
+      "result_sha256": "94781332a0229de363eebf477fb547e728cbb4931e9fbed87cf9e88cc78cad0a"
+    },
+    {
+      "case": "bca-tests-acb",
+      "journal_sha256": "106476c485fe962bfb1b7efc40fb0d829faea2da64be16f5e21b24088c47ed1c",
+      "test_receipts_sha256": "24022243c26172709ca776a47b77daa3e0ece24624559842157244e199d7949a",
+      "epf_sha256": "a9eaeb83ac4febdfb9012c0f3301df1dcd6afb17e33fc992c197e078976379d0",
+      "result_sha256": "90cd524201f25b767a4644bba3f015afd10c25b23e453c4d2891cc6a838b8374"
+    },
+    {
+      "case": "bca-tests-bac",
+      "journal_sha256": "0180924950da09d6299774b5e1af991e5e175ba6753e9a4742bcb32d96380a84",
+      "test_receipts_sha256": "54bef0fb8fd5a4c1f204830a097e1ef44bc4df2fd064c3e7119f5f18d2904075",
+      "epf_sha256": "12fdccb4f60d0f3116961c1e70e3074782e501950f4dd6fb33c21fdc66738240",
+      "result_sha256": "a3caddfaebc07c643941561dd9a4f8b2d8ecb7292be36753dec5dc9f6a7bd2b7"
+    },
+    {
+      "case": "bca-tests-bca",
+      "journal_sha256": "fd7d74d22a38c65150b0dd8735de2db48b8dccebc5b62f8bb89f6f6be3664590",
+      "test_receipts_sha256": "2502750e1cdce36a3a546bb00c4a25d2b2e893991b6071e5b59744444407b6b0",
+      "epf_sha256": "2da4184c21a86c326ca1b9b7df5efa7936fc46b6d010a74c4a0d5d84d2f06a92",
+      "result_sha256": "6af725eb84333403b155aac37632c2106036b54e3584522dbe10096f5a2d59fb"
+    },
+    {
+      "case": "bca-tests-cab",
+      "journal_sha256": "47c163371b195fc6b9690dd84d438b8d71055bd971997eb67e7040f2456c71c9",
+      "test_receipts_sha256": "d0da5794f6980fcb378243ded2e0d261a61a3a74e1396763997c70e650ae0f38",
+      "epf_sha256": "c984d00ceec7554538193aa20d5eaba9128d02c0df026b808625140dc48c5654",
+      "result_sha256": "72031933087f9a510d2906e52b1deea03bb39933791421db8586b70ec0bc703d"
+    },
+    {
+      "case": "bca-tests-cba",
+      "journal_sha256": "278adbede2c0cacd395a1eb9dad2fd1aa62eee6729aff45b544e4619c8f6e7dc",
+      "test_receipts_sha256": "494da7c9b2ef467e99c44e8bd9a6b8cd80d4cf5bc205e298f253e0ab6a4ca6fd",
+      "epf_sha256": "3d25f4f9049a4d81132315458634c56664f66134f50a89b8f8e5b0164de88653",
+      "result_sha256": "96d43e28d3a01272091b70e43e3704a3a300d7c36e8bf9f463f5c1626d3f6ed0"
+    },
+    {
+      "case": "cab-tests-abc",
+      "journal_sha256": "05b7395989d59d65919118e4e0468ad12cb34da5b5ecedf40b867b32232f519d",
+      "test_receipts_sha256": "f9ecf0787a2f5ab23772dea0a2e21926dd9dd0d72a59626a6a5a4b94a7339f48",
+      "epf_sha256": "52f056a92f8b3cfda1afded636c39ca35ed2e248a95e1929d01095384bb0b582",
+      "result_sha256": "f348b255ac3fa1da56486cb9e290c2c23f3eacc84010e10bf455b2717e1cfc73"
+    },
+    {
+      "case": "cab-tests-acb",
+      "journal_sha256": "e7ae2f1775db42b2864ee2f27bf0a37a8ab06662f19120f0dfa00f9ac2e22700",
+      "test_receipts_sha256": "3e7ff241691c63acb4cb2083ea72e1fb267f171ef6a9e787c6c685048c6af60f",
+      "epf_sha256": "f613ac5a031d1d4547631dccfb684f1314ef8668bf4e377a901287518b443943",
+      "result_sha256": "8c6973b5a03581ce0686594622dc7ee2a11e42436556a49426471d796aabd958"
+    },
+    {
+      "case": "cab-tests-bac",
+      "journal_sha256": "1706dc22a89effe278ad9887600cb114e41934d17e9182e12a1fdc43bcd82bf4",
+      "test_receipts_sha256": "b91ec76d368a7ce8483b88338481208f45b9486ba6f32d290f9efbdd623747b4",
+      "epf_sha256": "545cfc4d6b460662f246ab0995644d953d3ed482ff1ab1ea90e996c58596d47f",
+      "result_sha256": "432715a0ff65990016c86468d0155c1ddf55003acb70c80a3a77440201d9997f"
+    },
+    {
+      "case": "cab-tests-bca",
+      "journal_sha256": "08efee1cf069bcf4b62608d3d034df7040fa40a14251168c3bf2eeb5883807d1",
+      "test_receipts_sha256": "ab00ab61e0ca9d63e52fa62c8ab9a94d1975885353b076dd4bdcc620955e7285",
+      "epf_sha256": "39ed0b4129bcbf7734d8752e149f61752afd019a70a10e59dd442389aa1c220a",
+      "result_sha256": "433704ea5f2ea1aac205c5a1c5d436cff09aad4a2f0639e53783840966155751"
+    },
+    {
+      "case": "cab-tests-cab",
+      "journal_sha256": "6441691511b6de7b915cfdbeb74fb63fbf81c23a5a2df9690c1575d169bd018e",
+      "test_receipts_sha256": "fcd11c13e36d2549eb8b7fe0044841c2fda5ac8f69eec1780cf7e94c8e4347b1",
+      "epf_sha256": "f65fa46a3ae76f72132872679cba7c934b7f0330d779e8a2a79f52ce2456c80e",
+      "result_sha256": "19801e9463d1253c17024cf58be5104b0bf79b0d07faaef183b1299624e36b40"
+    },
+    {
+      "case": "cab-tests-cba",
+      "journal_sha256": "c2c0e2398c00d7b5044002b8a9806a35a33a734d2fa603a2c8ef494773479b86",
+      "test_receipts_sha256": "221d1b2ee1f25cf467e6e0aa1481e8c2b4a32e35533e5cafcf778a7dc408f34b",
+      "epf_sha256": "419d57cc4fef9ddee516ee7557cceb5c85e8673b3dcf61742df930dc9f188f98",
+      "result_sha256": "006287e178672bb67caf45db0f3efc47937b38439ee2761084d4a0bf2ea09039"
+    },
+    {
+      "case": "cba-tests-abc",
+      "journal_sha256": "6884df5ea147c594c7a6b023c5965c57a6f08c6d2c8c28d7220a0f24d8eacdca",
+      "test_receipts_sha256": "fa26eac281b5038423e50c6269e9e0d765e34cf6ba29f87bb8a97ce9abe2403d",
+      "epf_sha256": "e052b7a03faa01e969be5355d0b19705c691fabc76187c3d0117da031548fde6",
+      "result_sha256": "d03b127574a55d1296ae076be4d3a3c6cc343a03807d0ec8ea394b80b40e9a87"
+    },
+    {
+      "case": "cba-tests-acb",
+      "journal_sha256": "4f5df5f25aeb1dc54e66a084a2b84832fbdce66a04b1b0c46eb38554187ad7e7",
+      "test_receipts_sha256": "96bd922f0742ac8cd289515e26d5b949a33410091b31158ab52c309f01670e84",
+      "epf_sha256": "394f3a55c7df60e15bc13f3683f126bc5e0a32b35e79268b7b62ab823f35cd76",
+      "result_sha256": "f4c4e39c5ea5b745065b50962dcaf4b8c1265fc7b570ca914244e4606cede6e3"
+    },
+    {
+      "case": "cba-tests-bac",
+      "journal_sha256": "f81068494a85285cd176324f784f43a5d5ef8ab6cb35c9d489a8a4e346e23064",
+      "test_receipts_sha256": "b18e6a487f4307e78ad95f811a2f62ff58834d7cebaeaa05b706bfe3c3f26cd4",
+      "epf_sha256": "b21f856c2f300f44bb5b09454ee125851a7487b45d977a7f60813e7a656a16d5",
+      "result_sha256": "661fa1187f3f889ca38a6241fa974fe517439980288d34f97c06d23b4d33d68f"
+    },
+    {
+      "case": "cba-tests-bca",
+      "journal_sha256": "4eb75c7b76421c2cff95d922fdf53828087c7d7c49b81b13dccdc58e6c970246",
+      "test_receipts_sha256": "b8088a092da61b49fe061c3181dec034c9b25ece0c9b06be0a4f4ff67af5390b",
+      "epf_sha256": "43e888c183848c85e2c472974fc55b4bfe6f4705a5b86300b0d9887d12cfb30f",
+      "result_sha256": "57f0339bd7d932186a39d34dd77a2695e1f012e1c970bc5193bb255a85d221ab"
+    },
+    {
+      "case": "cba-tests-cab",
+      "journal_sha256": "c1942557793c173922611596b23c86f34434f4560a7881e53f5f5cd00750f31c",
+      "test_receipts_sha256": "54493089350d211fde2ee26db24ae2728ec41c088a5264c280c1bad2dd284072",
+      "epf_sha256": "18b920fbddb7d35d7e85be125a53da39153a1dd24786f431d34d3bc6b247c961",
+      "result_sha256": "4fba0e8d8df2e3f55b0fba73fd317d5b3a08b5b88fd06018c89c4967395fb2ba"
+    },
+    {
+      "case": "cba-tests-cab-fail-test-0-reject-0",
+      "journal_sha256": "4d76c45d83b441238ffe1186f80f8e6dcb1ac78a71027a81ea6344273a61a33b",
+      "test_receipts_sha256": "2fd51d3330e7c89ecf17089710d45b6ae7e10c361e5c439c8aa434b6af220228",
+      "epf_sha256": "d4feed69506ad4f399d156e8fcbca0eb4cc6eabd477af8b939a9cbfc0a41fdc6",
+      "result_sha256": "140d631f95c6cd2b5bd1e67b9eb1c77320ee0c658bbc3257318b2f9b682668a8",
+      "retest": {
+        "service": "microservice_c",
+        "rejected_repair_reviews": 0,
+        "original_candidate": 4,
+        "original_review": 6,
+        "original_test": 9,
+        "approved_repair": 11,
+        "fresh_review": 14,
+        "successful_test": 16
+      }
+    },
+    {
+      "case": "cba-tests-cab-fail-test-0-reject-2",
+      "journal_sha256": "c5ff64159d0b9396517b232edafc1594d7f78133080a0da68488ab10a984abf4",
+      "test_receipts_sha256": "ad02690926faf506eb1d0e83b6c611e2105093d6cb714fac84b5848482181708",
+      "epf_sha256": "2189ba71737a1b86be6fa881d0e4114d9b021e4142559e84c681d8e77411595b",
+      "result_sha256": "6af2ce84178d34d798da37d1139815d9d74e3d7f9b4b8874efda2784a56c2834",
+      "retest": {
+        "service": "microservice_c",
+        "rejected_repair_reviews": 2,
+        "original_candidate": 4,
+        "original_review": 6,
+        "original_test": 9,
+        "approved_repair": 16,
+        "fresh_review": 17,
+        "successful_test": 18
+      }
+    },
+    {
+      "case": "cba-tests-cab-fail-test-1-reject-0",
+      "journal_sha256": "47d4dd558bd6b13d57290ebdd97e1f2e138c5ec7e67ca32ce5f70c7afc4f5ab9",
+      "test_receipts_sha256": "fb3ffd59915472b16dafc755afe6c407a823ba777ad9affc170cf21a698f0ac6",
+      "epf_sha256": "ca1410d6b411350ab087900287a9d2b93a01d79f0cb386bdd6618048cc6fa678",
+      "result_sha256": "9f626dccb95762126716e229be9d2ed5455a21f0c20f9bdb7059c141b2f25fd3",
+      "retest": {
+        "service": "microservice_a",
+        "rejected_repair_reviews": 0,
+        "original_candidate": 2,
+        "original_review": 11,
+        "original_test": 12,
+        "approved_repair": 13,
+        "fresh_review": 15,
+        "successful_test": 16
+      }
+    },
+    {
+      "case": "cba-tests-cab-fail-test-1-reject-2",
+      "journal_sha256": "b51ae28bc7eb83881972ad5983cbf3e7841707fbbbf4a606aa7bc80bc50e3d57",
+      "test_receipts_sha256": "94e2f5fa46df424b9013f54fb37d9ef3e5daeeed3b08bce66f02f52b42f3500e",
+      "epf_sha256": "97eaa0c4cea7b771a43870de3755b9e9c8571e5ffaff9e96953486033a24b284",
+      "result_sha256": "afceb2b70e5e051140a138e38ea9ec8ccab40c1c29eaa1f77e2b8d19e77e7ed2",
+      "retest": {
+        "service": "microservice_a",
+        "rejected_repair_reviews": 2,
+        "original_candidate": 2,
+        "original_review": 11,
+        "original_test": 12,
+        "approved_repair": 17,
+        "fresh_review": 18,
+        "successful_test": 19
+      }
+    },
+    {
+      "case": "cba-tests-cab-fail-test-2-reject-0",
+      "journal_sha256": "dfd8941b9eb080c32876d9cd16bd6e2167245fb5ab0881e1c4dcddf197276389",
+      "test_receipts_sha256": "cef95153046ecdfeacfc9f915ec257b508b777f7339b4b53ad9d90c426bffbcc",
+      "epf_sha256": "6363c5adb1e1ea232bb90a248801944f638145fcfd9edc5e2ae35cf0bcfcfcb7",
+      "result_sha256": "6415fc0dc73fa3b198a36ca74da19a146ee566c1700d56bbab55742d3387bbcb",
+      "retest": {
+        "service": "microservice_b",
+        "rejected_repair_reviews": 0,
+        "original_candidate": 3,
+        "original_review": 8,
+        "original_test": 13,
+        "approved_repair": 14,
+        "fresh_review": 15,
+        "successful_test": 16
+      }
+    },
+    {
+      "case": "cba-tests-cab-fail-test-2-reject-2",
+      "journal_sha256": "beef07d10493ad9f49964f037c841318ea4495d559367232507d5dab919471e0",
+      "test_receipts_sha256": "90441d7907e4b97156c8d05cf011756d982e03c2f89f22cd147bb5e1dd4539bb",
+      "epf_sha256": "23df506d38576b2f662cd0fda92b62177dace9cff78de5ef79ddbee428a7d806",
+      "result_sha256": "f3585f73ea6b61102a0a4b344f77a754c4b85f4afb93104e6a2d5b440d619db1",
+      "retest": {
+        "service": "microservice_b",
+        "rejected_repair_reviews": 2,
+        "original_candidate": 3,
+        "original_review": 8,
+        "original_test": 13,
+        "approved_repair": 18,
+        "fresh_review": 19,
+        "successful_test": 20
+      }
+    },
+    {
+      "case": "cba-tests-cba",
+      "journal_sha256": "9e09948adef2f93e98106abe5f2451a9f624d4b5f1c8c45720fdfe2adf71889c",
+      "test_receipts_sha256": "f6fd011123c2e885347cd3201dfd1519e7af9d8e0ba5a84d34c6da0aaacf1337",
+      "epf_sha256": "1ba9e01948406c9b7009daf5ef73ea9492e789048e9dab60ebdbeb5c5489a153",
+      "result_sha256": "42ace4f957d27c2b6ed6d3faa80579452b858a7a6922f88cae927743ea1205e3"
+    }
+  ]
+}

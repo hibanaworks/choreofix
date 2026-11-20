@@ -77,6 +77,16 @@ async fn run_wash_order(
     let name = format!("{}-tests-{}", initials(order), initials(test_order));
     let failed_test = recovery.map(|(index, _)| index);
     let rejected_reviews = recovery.map_or(0, |(_, count)| count);
+    let mut suites = test_order.to_vec();
+    if let Some((failed, rejected)) = recovery {
+        let index = failed as usize;
+        let retry_at = if rejected == 0 {
+            suites.len()
+        } else {
+            index + 1
+        };
+        suites.insert(retry_at, test_order[index]);
+    }
     let name = match recovery {
         Some((index, count)) => format!("{name}-fail-test-{index}-reject-{count}"),
         None => name,
@@ -93,7 +103,7 @@ async fn run_wash_order(
     let artifact = projection::archive(&runtime, &output, "4H")?;
     save(
         &output.join("case.json"),
-        &json!({"task":"4H","scope":"preparation_tests_and_schema","migration_order":order,"test_order":test_order,"failed_test_index":failed_test,"rejected_repair_reviews":rejected_reviews,"depth":0,"delay_multiplier":0.01,
+        &json!({"task":"4H","scope":"preparation_tests_and_schema","migration_order":order,"test_order":suites,"failed_test_index":failed_test,"rejected_repair_reviews":rejected_reviews,"depth":0,"delay_multiplier":0.01,
        "model_calls":0,"scored_benchmark":false,"runtime_binary_sha256":digest(&runtime)?,"guest_wasm_sha256":digest(wasm)?,
        "compiled_projection_sha256":digest(&output.join("projection.json"))?,"harness_binary_sha256":digest(&std::env::current_exe()?)?,
        "harness_source_sha256":digest(Path::new("tools/runner/src/microservice_migration_boundary.rs"))?}),
@@ -173,6 +183,9 @@ async fn run_wash_order(
                             assert_eq!(review["data"]["candidate"],fixed["data"]["receipt"]);
                             prior = fixed;
                         }
+                        let retested=response(peer.command(name,"cat /service/test_result".into()).await?)?;
+                        assert_eq!(retested["success"],true);
+                        assert_eq!(retested["data"]["candidate"],prior["data"]["receipt"]);
                     }
                     assert_eq!(peer.command(name,"exit 0".into()).await?["exit_status"],0);
                 };
@@ -208,11 +221,17 @@ async fn run_wash_order(
                     }
                 }
             }
+            if let Some(index) = failed_test {
+                let service = test_order[index as usize];
+                let passed = response(guest.command("REVIEWER",format!("cat /service/candidate/{service}")).await?)?;
+                assert_eq!(passed["data"]["service"], service);
+                assert_eq!(passed["data"]["status"], "tests passed");
+            }
             assert_eq!(guest.command("REVIEWER","exit 0".into()).await?["exit_status"],0);
             Ok(())
         };
         async {
-            for (index, service) in test_order.into_iter().enumerate() {
+            for (index, service) in suites.iter().copied().enumerate() {
                 let approval=response(guest.command("TESTER",format!("cat /service/candidate/{service}")).await?)?;
                 if service=="microservice_c" {
                     let bad=guest.command("TESTER",r#"echo '{"suite":"microservice_b"}' > /service/run_tests/microservice_c"#.into()).await?;
@@ -226,6 +245,11 @@ async fn run_wash_order(
                 assert_eq!(tested["data"]["review"],approval["data"]["receipt"]);
                 assert_eq!(tested["data"]["candidate"],approval["data"]["candidate"]);
                 assert_eq!(tested["data"]["plan"],approval["data"]["plan"]);
+                if tested["success"] == false {
+                    let early = guest.command("TESTER",format!("echo '{args}' | dd of=/service/run_tests/{service} oflag=nonblock")).await?;
+                    let text = early["stdout"].as_str().ok_or("missing retest refusal")?;
+                    assert!(text.contains("Permission denied") || text.contains("Resource temporarily unavailable"), "{early}");
+                }
             }
             assert_eq!(guest.command("TESTER","exit 0".into()).await?["exit_status"],0);
             Ok(())
@@ -244,14 +268,17 @@ async fn run_wash_order(
         .ok_or("score lacks effects")?;
     assert_eq!(
         effects.len(),
-        13 + recovery.map_or(0, |(_, rejected)| 2 * (1 + rejected as usize))
+        13 + recovery.map_or(0, |(_, rejected)| 3 + 2 * rejected as usize)
     );
-    let suites: Vec<_> = effects
+    let observed_suites: Vec<_> = effects
         .iter()
         .filter(|e| e["tool"] == "run_tests")
         .map(|e| e["result"]["suite"].as_str())
         .collect();
-    assert_eq!(suites, test_order.map(Some));
+    assert_eq!(
+        observed_suites,
+        suites.iter().copied().map(Some).collect::<Vec<_>>()
+    );
     let actual = effects
         .iter()
         .filter(|e| e["tool"] == "migrate_schema")
@@ -325,6 +352,69 @@ async fn run_wash_order(
         let developer = role(format!("DEVELOPER_{suffix}"))?;
         let developer_file = role(format!("DEVELOPER_{suffix}_FILE"))?;
         let tester = role(format!("TESTER_{suffix}"))?;
+        let file = role("TEST_FILE".to_owned())?;
+        let owner = role("ENV_OWNER".to_owned())?;
+        let environment = role("TEST_ENV".to_owned())?;
+        let test_vm = role("TEST_VM".to_owned())?;
+        let review = journal::one(history.calls.values().filter(|previous| {
+            previous.tool().ok() == Some("code_review")
+                && previous
+                    .result()
+                    .is_ok_and(|(_, result)| result["data"]["receipt"] == value["data"]["review"])
+        }))?;
+        let (reviewed_at, approved) = review.result()?;
+        assert_eq!(approved["success"], true);
+        assert_eq!(approved["data"]["candidate"], value["data"]["candidate"]);
+        let (&approval, notice) = journal::one(history.frames.iter().filter(|(_, f)| {
+            f.direction(service, file)
+                && f.logical_label as u64 == service
+                && reviewed_at < f.sent
+                && f.value().is_ok_and(|v| v == *approved)
+        }))?;
+        let admitted = notice.received()?;
+        let arguments = &call.request["arguments"];
+        assert_eq!(arguments, &json!({"suite":value["data"]["service"]}));
+        let (&command, request) = journal::one(history.frames.iter().filter(|(_, f)| {
+            f.direction(file, owner)
+                && f.logical_label as u64 == tester
+                && admitted < f.sent
+                && f.received.is_some_and(|r| r < call.emitted)
+                && f.value().is_ok_and(|v| v == *arguments)
+        }))?;
+        let accepted = request.received()?;
+        let (&forward, forwarded) = journal::one(history.frames.iter().filter(|(_, f)| {
+            f.direction(environment, tester)
+                && f.logical_label as u64 == tester
+                && accepted < f.sent
+                && f.received.is_some_and(|r| r < call.emitted)
+                && f.value().is_ok_and(|v| v == *arguments)
+        }))?;
+        let is_environment = |f: &journal::Frame| {
+            f.logical_label == 47 && f.bytes.len() == 3 && f.bytes[0] as u64 == environment
+        };
+        let (&checkout, grant) = journal::one(history.frames.iter().filter(|(_, f)| {
+            is_environment(f)
+                && f.direction(owner, tester)
+                && forwarded.sent < f.sent
+                && f.received.is_some_and(|r| r < call.emitted)
+        }))?;
+        assert!(forwarded.received()? < grant.received()?);
+        assert_eq!(receipts[&command]["send_actor"], test_vm);
+        assert_eq!(receipts[&forward]["send_actor"], owner);
+        assert_eq!(receipts[&forward]["receive_commit"]["actor"], tester);
+        let (&reply, shell_reply) = journal::one(history.frames.iter().filter(|(_, f)| {
+            f.direction(owner, file)
+                && f.logical_label as u64 == tester
+                && completed < f.sent
+                && f.value().is_ok_and(|v| v == *value)
+        }))?;
+        let (&returned, _) = journal::one(history.frames.iter().filter(|(_, f)| {
+            is_environment(f)
+                && f.direction(tester, owner)
+                && completed < f.sent
+                && f.received.is_some_and(|r| r < shell_reply.sent)
+        }))?;
+        assert_eq!(receipts[&reply]["receive_commit"]["actor"], test_vm);
         let positive = value["success"].as_bool().ok_or("missing test success")?;
         let (&tested, result_frame) = journal::one(history.frames.iter().filter(|(_, f)| {
             f.direction(service, developer)
@@ -343,8 +433,10 @@ async fn run_wash_order(
             receipts[&reported]["receive_commit"]["actor"],
             role(format!("{suffix}_VM"))?
         );
-        let mut entry =
-            json!({"test":value, "outcome":receipts[&tested], "shell_read":receipts[&reported]});
+        let mut entry = json!({"test":value, "approval_read":receipts[&approval],
+                "test_command":receipts[&command], "environment_request":receipts[&forward],
+                "environment_loan":receipts[&checkout], "environment_return":receipts[&returned],
+                "tester_read":receipts[&reply], "outcome":receipts[&tested], "shell_read":receipts[&reported]});
         let review_file = role("REVIEW_FILE".to_owned())?;
         let reviewer_vm = role("REVIEW_VM".to_owned())?;
         let reviewer = role(format!("REVIEWER_{suffix}"))?;
@@ -460,7 +552,7 @@ async fn run_wash_order(
         }
         test_results.push(entry);
     }
-    assert_eq!(test_results.len(), 3);
+    assert_eq!(test_results.len(), suites.len());
     assert_eq!(
         test_results
             .iter()

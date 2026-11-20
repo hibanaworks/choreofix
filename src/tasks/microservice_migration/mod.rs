@@ -49,8 +49,6 @@ service_c:SERVICE_C,
 tester_c:TESTER_C,
 env_owner:ENV_OWNER,
 environment:TEST_ENV,
-command:TEST_COMMAND,
-command_data:TEST_COMMAND_DATA,
 architect_file:ARCHITECT_FILE,
 architect_data:ARCHITECT_DATA,
 architect_vm:ARCHITECT_VM,
@@ -119,7 +117,6 @@ pub(super) async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             DEVELOPER_C_FILE,
             REVIEW_FILE,
             TEST_FILE,
-            TEST_COMMAND,
             DEVOPS_FILE,
         ]
         .map(|role| (session, role)),
@@ -151,7 +148,6 @@ pub(super) async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             let mut tester_c = rv.enter(session, &programs.tester_c)?;
             let mut env_owner = rv.enter(session, &programs.env_owner)?;
             let environment = rv.enter(session, &programs.environment)?;
-            let mut command_data = rv.enter(session, &programs.command_data)?;
             let mut architect_data = rv.enter(session, &programs.architect_data)?;
             let architect_vm = rv.enter(session, &programs.architect_vm)?;
             let mut architect_io = rv.enter(session, &programs.architect_io)?;
@@ -177,7 +173,6 @@ pub(super) async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             let c_file = rv.enter(session, &programs.c_file)?;
             let review_file = rv.enter(session, &programs.review_file)?;
             let test_file = rv.enter(session, &programs.test_file)?;
-            let command = rv.enter(session, &programs.command)?;
             let mut schema_side = rv.enter(session, &programs.schemas)?;
             let mut devops_data = rv.enter(session, &programs.devops_data)?;
             let devops_file = rv.enter(session, &programs.devops_file)?;
@@ -253,22 +248,7 @@ pub(super) async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
                 .await
             };
             async { review_guest(wash, review_vm).await };
-            async {
-                file_metadata::run(
-                    &mut test_data,
-                    test_file,
-                    [TEST_FILES[0], TEST_FILES[1], TEST_FILES[2]],
-                )
-                .await
-            };
-            async {
-                file_metadata::run(
-                    &mut command_data,
-                    command,
-                    [TEST_FILES[3], TEST_FILES[4], TEST_FILES[5]],
-                )
-                .await
-            };
+            async { file_metadata::run(&mut test_data, test_file, TEST_FILES).await };
             async {
                 private_io::run(
                     &mut test_io,
