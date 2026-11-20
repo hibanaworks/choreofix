@@ -8,7 +8,7 @@
 \lstset{basicstyle=\ttfamily\footnotesize,breaklines=true,columns=fullflexible,keepspaces=true,frame=single}
 \title{ChoreoFix: Enforcing Multi-Agent Coordination from Global Protocols}
 \author{Hayato Ohhashi}
-\date{19 November 2026\\Research draft, comparative evaluation incomplete}
+\date{20 November 2026\\Research draft, comparative evaluation incomplete}
 \begin{document}
 \maketitle
 \begin{abstract}
@@ -311,6 +311,29 @@ audit matched twelve effects and 4,957 protocol observations, and the common
 simulator scored completion with zero violations. This unscored result shows
 that the port preserves the choice of winner in these runs. It does not
 measure fairness under simultaneous requests.
+
+Can the agent choose again after a failure? In two five-guest Wasm runs of
+10M, the same executable built modules A, B and C in that order. All three
+needed another build. We held the failure injections and initial build order
+fixed and varied only the scripted integrator's preference among eligible
+modules. The simulator observed rebuilds A,A,B,C in one run and C,C,B,A in
+the other. Both linked successfully with zero violations. The effect audit
+matched all 15 operations in each run to their typed requests. EPF checked
+48,589 and 46,070 observations, respectively. These are reachability tests
+with scripted shells. Agent preferences were not measured.
+
+In 4H, nine seven-guest Wasm runs tested whether one service could start
+testing before all three code reviews finished. The test
+of C consumed C's completed review in every run. It began during B's review
+and before A's review started. The guests exercised preparation and, in
+three runs with an injected test failure, reimplementation of the affected
+service. The common simulator scored all nine migrations incomplete. We assessed the later deployment and registration
+orders separately in the common simulator. Given reviewed, tested candidates
+and completed schema migrations, 720 of 2,250 graph/order pairs completed
+without a violation across all 25 acyclic three-service dependency graphs.
+Requiring every deployment to finish before the first registration would
+exclude 432 of those 720 legal pairs. This count specifies behavior to
+preserve when projecting the rest of the migration.
 
 For each proposed mechanism comparison, we will first exercise alternate first
 contenders, independent acquisitions, and an early request followed by a valid

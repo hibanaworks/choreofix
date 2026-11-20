@@ -220,6 +220,8 @@ We tested all six orders of the three schema migrations using seven real wash gu
 
 These are scripted depth-zero runs through the preparation part of 4H. The original task allows the migration orders; this experiment establishes that all six remain available. The upstream 9E comparison above measures a strict extension of a task's visible behavior. The full 4H task still requires deployment, registration and recovery.
 
+The [nine seven-guest recovery runs](../output/verification/4h-test-recovery-20261119/summary.json) also show when testing could start. In each run the common simulator recorded C's test after C's review completed, during B's review and before A's review started. We matched C's candidate and review receipt across the two calls before comparing their start and completion times. In two of the three injected-failure runs, the developer started rebuilding the failed service while another service still had a test outstanding. The third injection hit the last test. These scripts chose C to test first in every run. The nine results establish an executable path through this prefix; none completed deployment and registration. The summary and its individual result hashes are identified by SHA-256 `d14de3700374a0818f45a3c496cfad8ddeaf7369f532e00dfd9fc5f8a651a0a9`.
+
 ### Deployment and registration in the common simulator
 
 Can DevOps register A while B and C still await deployment? We tested the common simulator with three services whose reviews, tests and schema migrations had succeeded. For each of the 25 acyclic dependency graphs an architect can declare on these services, we tried all 90 orders of the six remaining actions in which each deployment precedes its own registration. We injected no failures. Across the 2,250 graph/order pairs, 720 completed with zero violations. The other 1,530 recorded violations. The zero-violation cases were exactly those where every declared dependency had already deployed when its dependent service deployed.
@@ -246,12 +248,19 @@ cargo +stable test --locked --manifest-path tools/runner/Cargo.toml \
 
 Two scripted, five-guest Wasm runs began with the same A, B, C build order. Each used the same executable, shell module, depth, delay, invalid-input probes and injection settings. The first test of A found unavailable inputs. The first tests of B and C failed by injection. All three modules were therefore eligible for reconsideration. The integrator chose a module by writing its name to the projected `/service/rebuild` file. The next fresh assessment also failed by injection.
 
-| Guest preference among eligible modules | Actual rebuilds after the initial three | Matched effects | EPF records | Common score violations |
-| --- | --- | ---: | ---: | ---: |
-| A, B, C | A, A, B, C | 15 | 48,589 | 0 |
-| C, B, A | C, C, B, A | 15 | 46,070 | 0 |
+The other five injection cases varied the initial build order as well. The table lists the actual order of simulator effects. Every trial reached the final link with zero violations.
 
-Both trials reached the final link. In both, the effect auditor rejected a coherent substitution of another module name in the recorded shell choice. This checks whether the auditor can distinguish the choice from the module actually rebuilt. The trials used no model calls. They establish that a fixed initial build order permits more than one subsequent repair order on this executable.
+| Initial builds | Guest preference among eligible modules | Actual rebuilds | Matched effects | EPF records |
+| --- | --- | --- | ---: | ---: |
+| ABC | ABC | AABC | 15 | 48,589 |
+| ABC | CBA | CCBA | 15 | 46,070 |
+| ACB | CAB | CCAB | 15 | 47,049 |
+| BAC | BCA | BBCA | 15 | 46,884 |
+| BCA | BAC | BBAC | 15 | 48,633 |
+| CAB | ACB | AACB | 15 | 46,246 |
+| CBA | ABC | AABC | 15 | 46,576 |
+
+Every module was rebuilt first in at least one trial. The first two rows also isolate the effect of changing the guest's preference with the initial order held fixed. In both, the effect auditor rejected a coherent substitution of another module name in the recorded shell choice. This checks whether the auditor can distinguish the choice from the module actually rebuilt. All seven trials used scripted guests and zero model calls.
 
 The runtime SHA-256 was `a6a95a2f92881be1a91dcc9a623f96a66783fedee928a66df66e01f6c50fdc3d`. The journals have SHA-256 `106d0ad5ed6be29a3c21b043ba8f685027dc88ed2dd6a9cac0a2cad065f4930d` and `6d19548df1247ad3c67d2f2e309209a5ca44256ea58b9a3392d27a28b638e5aa`. The [Wasm regression](../tools/runner/src/cascading_build_boundary.rs) includes these two conditions in the `cascading_build_boundary::` qualification.
 
