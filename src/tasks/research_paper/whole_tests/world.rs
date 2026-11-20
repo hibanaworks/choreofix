@@ -584,9 +584,7 @@ fn reject_receipt_mutations(
 #[hibana_runtime::main]
 #[test]
 async fn all_effects_use_the_real_common_world_under_the_whole_source() -> ShellResult<()> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .canonicalize()?;
+    let root = super::repository_root()?;
     let mut qualified = Vec::new();
     for (depth, starts) in [
         (0, [0, 3, 6]),

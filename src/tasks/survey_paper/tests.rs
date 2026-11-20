@@ -94,7 +94,8 @@ async fn deliver_review<'r, const SECTION: u8>(
 
 pub(super) fn editor_fixture() -> ShellResult<Vec<u8>> {
     let guest_source = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../src/tasks/survey_paper/editor_fixture.rs");
+        .join(file!())
+        .with_file_name("editor_fixture.rs");
     let guest_file = std::env::temp_dir().join(format!(
         "choreofix-editor-fixture-{}-{}.wasm",
         std::process::id(),

@@ -1,5 +1,6 @@
 # 6E review requests and simulator effects
 
+The tested ChoreoFix source is [2e39c88](https://github.com/hibanaworks/choreofix/commit/2e39c88).
 On November 20, all 34 scripted real-Wasm conditions completed on the same
 host binary. EPF checked 158,572 producer records. The separate effect audit
 matched 316 simulator calls, and all 34 simulator scores completed with zero

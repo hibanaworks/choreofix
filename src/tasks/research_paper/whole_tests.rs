@@ -560,9 +560,7 @@ async fn exercise(
     let checkpoint = observations.checkpoint();
     hibana_epf::Capture::new(&rows, checkpoint)
         .map_err(|e| ShellError::message(format!("incomplete native capture: {e:?}")))?;
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .canonicalize()?;
+    let root = repository_root()?;
     let directory = root
         .join("output/experiments/research-paper-3M-development-v1/whole-native-runs")
         .join(format!(
@@ -746,3 +744,12 @@ async fn whole_source_rejects_early_archival_stale_reviews_and_missing_custody()
 }
 
 mod world;
+
+fn repository_root() -> std::io::Result<std::path::PathBuf> {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(file!())
+        .parent()
+        .expect("research paper test source directory")
+        .join("../../..")
+        .canonicalize()
+}

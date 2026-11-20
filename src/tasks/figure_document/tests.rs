@@ -324,8 +324,8 @@ pub(super) fn wasm_fixture(name: &str) -> ShellResult<Vec<u8>> {
         ])
         .arg(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../src/tasks/figure_document")
-                .join(name),
+                .join(file!())
+                .with_file_name(name),
         )
         .arg("-o")
         .arg(&artifact)
