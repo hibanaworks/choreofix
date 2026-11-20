@@ -72,97 +72,101 @@ fn all_authored_dependency_graphs_are_checked_without_selecting_an_order() {
 #[derive(Default)]
 struct Journal(Cell<Vec<(&'static str, &'static str, Value)>>);
 
-impl Domain for Journal {
-    async fn execute(
-        &self,
-        agent: &'static str,
-        tool: &'static str,
-        arguments: Value,
-    ) -> Result<Value, String> {
-        let mut entries = self.0.take();
-        if tool == "run_tests" {
-            let suite = &arguments["suite"];
-            let candidate = entries
+impl ReceivedEffects for Journal {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        received: ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+        let arguments = decode(received.as_bytes());
+        async move {
+            let arguments = arguments?;
+            let (agent, tool) = P::RPC;
+            let mut entries = self.0.take();
+            if tool == "run_tests" {
+                let suite = &arguments["suite"];
+                let candidate = entries
+                    .iter()
+                    .rposition(|(_, name, args)| {
+                        *name == "implement_feature" && args["feature_name"] == *suite
+                    })
+                    .unwrap()
+                    + 1;
+                let review = entries
+                    .iter()
+                    .rposition(|(_, name, args)| *name == "code_review" && args["pr_id"] == *suite)
+                    .unwrap()
+                    + 1;
+                entries.push((agent, tool, arguments.clone()));
+                let receipt = entries.len();
+                self.0.set(entries);
+                let success = *suite != SERVICES[1];
+                return Ok(json!({"tool_name":tool,"success":success,"data":{
+                    "agent":agent, "suite":suite, "service":suite, "candidate":candidate,
+                    "review":review, "plan":1, "receipt":receipt,
+                    "status":if success {"tests passed"} else {"tests_failed"}
+                }}));
+            }
+            let candidate = entries.iter().rposition(|(_, tool, args)| {
+                *tool == "implement_feature" && args["feature_name"] == arguments["pr_id"]
+            });
+            let prior_reviews = entries
                 .iter()
-                .rposition(|(_, name, args)| {
-                    *name == "implement_feature" && args["feature_name"] == *suite
+                .filter(|(_, tool, args)| {
+                    *tool == "code_review" && args["pr_id"] == arguments["pr_id"]
                 })
-                .unwrap()
-                + 1;
-            let review = entries
-                .iter()
-                .rposition(|(_, name, args)| *name == "code_review" && args["pr_id"] == *suite)
-                .unwrap()
-                + 1;
+                .count();
             entries.push((agent, tool, arguments.clone()));
             let receipt = entries.len();
             self.0.set(entries);
-            let success = *suite != SERVICES[1];
-            return Ok(json!({"tool_name":tool,"success":success,"data":{
-                "agent":agent, "suite":suite, "service":suite, "candidate":candidate,
-                "review":review, "plan":1, "receipt":receipt,
-                "status":if success {"tests passed"} else {"tests_failed"}
-            }}));
-        }
-        let candidate = entries.iter().rposition(|(_, tool, args)| {
-            *tool == "implement_feature" && args["feature_name"] == arguments["pr_id"]
-        });
-        let prior_reviews = entries
-            .iter()
-            .filter(|(_, tool, args)| *tool == "code_review" && args["pr_id"] == arguments["pr_id"])
-            .count();
-        entries.push((agent, tool, arguments.clone()));
-        let receipt = entries.len();
-        self.0.set(entries);
-        if tool == "design_proposal" {
-            let expected = dependencies(arguments.get("dependencies"))
-                .map_err(|error| format!("{error:?}"))?;
-            return Ok(json!({"tool_name":tool,"success":true,"data":{
-                "agent":agent,"title":arguments["title"],"status":"proposed",
-                "receipt":receipt,"dependencies":expected,
-            }}));
-        }
-        if tool == "migrate_schema" {
-            let name = arguments["migration_name"].as_str().unwrap();
-            return Ok(json!({"tool_name":tool,"success":true,"data":{
-                "agent":agent,"migration_name":name,"service":name.strip_suffix("_schema").unwrap(),
-                "status":"migrated","receipt":receipt,"plan":1,
-            }}));
-        }
-        if tool == "code_review" {
-            let rejected = arguments["pr_id"] == SERVICES[0] && prior_reviews < 2;
-            let status = if rejected {
-                "changes_requested"
-            } else {
-                "reviewed"
-            };
-            return Ok(json!({"tool_name":tool,"success":!rejected,"data":{
-                "agent":agent,"pr_id":arguments["pr_id"],"service":arguments["pr_id"],
-                "status":status,"receipt":receipt,"plan":1,
-                "candidate":candidate.expect("review after actual build") + 1,
-            }}));
-        }
-        assert_eq!(tool, "implement_feature");
-        // Simulated work completes only once all three independent effects start.
-        poll_fn(|cx| {
-            let entries = self.0.take();
-            let started = entries
-                .iter()
-                .filter(|entry| entry.1 == "implement_feature")
-                .count();
-            self.0.set(entries);
-            if started >= 3 {
-                Poll::Ready(())
-            } else {
-                cx.waker().wake_by_ref();
-                Poll::Pending
+            if tool == "design_proposal" {
+                let expected = dependencies(arguments.get("dependencies"))?;
+                return Ok(json!({"tool_name":tool,"success":true,"data":{
+                    "agent":agent,"title":arguments["title"],"status":"proposed",
+                    "receipt":receipt,"dependencies":expected,
+                }}));
             }
-        })
-        .await;
-        Ok(json!({"tool_name":tool,"success":true,"data":{
-            "agent":agent,"feature_name":arguments["feature_name"],"service":arguments["feature_name"],
-            "status":"implemented","receipt":receipt,"plan":1,
-        }}))
+            if tool == "migrate_schema" {
+                let name = arguments["migration_name"].as_str().unwrap();
+                return Ok(json!({"tool_name":tool,"success":true,"data":{
+                    "agent":agent,"migration_name":name,"service":name.strip_suffix("_schema").unwrap(),
+                    "status":"migrated","receipt":receipt,"plan":1,
+                }}));
+            }
+            if tool == "code_review" {
+                let rejected = arguments["pr_id"] == SERVICES[0] && prior_reviews < 2;
+                let status = if rejected {
+                    "changes_requested"
+                } else {
+                    "reviewed"
+                };
+                return Ok(json!({"tool_name":tool,"success":!rejected,"data":{
+                    "agent":agent,"pr_id":arguments["pr_id"],"service":arguments["pr_id"],
+                    "status":status,"receipt":receipt,"plan":1,
+                    "candidate":candidate.expect("review after actual build") + 1,
+                }}));
+            }
+            assert_eq!(tool, "implement_feature");
+            // Simulated work completes only once all three independent effects start.
+            poll_fn(|cx| {
+                let entries = self.0.take();
+                let started = entries
+                    .iter()
+                    .filter(|entry| entry.1 == "implement_feature")
+                    .count();
+                self.0.set(entries);
+                if started >= 3 {
+                    Poll::Ready(())
+                } else {
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                }
+            })
+            .await;
+            Ok(json!({"tool_name":tool,"success":true,"data":{
+                "agent":agent,"feature_name":arguments["feature_name"],"service":arguments["feature_name"],
+                "status":"implemented","receipt":receipt,"plan":1,
+            }}))
+        }
     }
 }
 

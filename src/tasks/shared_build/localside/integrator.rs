@@ -1,9 +1,12 @@
 //! Both actual current objects and the file request precede the link effect.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::Endpoint;
 #[hibana_runtime::scope]
-pub async fn run(endpoint: &mut Endpoint<INTEGRATOR>, domain: &impl Domain) -> ShellResult<()> {
+pub async fn run(
+    endpoint: &mut Endpoint<INTEGRATOR>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()> {
     drop(endpoint.offer().await?);
     let (a, b) = async {
         let [mut a, mut b] = endpoint.par()?;
@@ -15,16 +18,13 @@ pub async fn run(endpoint: &mut Endpoint<INTEGRATOR>, domain: &impl Domain) -> S
         imp::compiled(&a, "BUILDER_A", "module_a")?,
         imp::compiled(&b, "BUILDER_B", "module_b")?,
     ];
-    let arguments = endpoint.recv::<Link>().await?.into_value();
+    let request = endpoint.recv::<Link>().await?;
     if objects[0]["inputs"]["SHARED_TYPES"] != objects[1]["inputs"]["SHARED_TYPES"] {
         return Err(ShellError::message(
             "current objects were built against different types",
         ));
     }
-    let result = domain
-        .execute("INTEGRATOR", "link_modules", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let result = effects.apply(request).await?;
     imp::linked(&result, &objects)?;
     let bytes = imp::encode(&result)?;
     endpoint.send::<Linked>(&bytes.as_slice()).await?;

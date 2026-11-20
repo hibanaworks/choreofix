@@ -1,11 +1,11 @@
 //! Direct file admission, actual resource requests, effect and object handoff.
-use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use super::super::{global::*, imp, wire::Arguments};
+use crate::shell::{ShellError, ShellResult, imp::service::PairedEffects};
 use hibana::{Endpoint, g::Message};
 #[hibana_runtime::scope]
 pub async fn run<const ROLE: u8>(
     endpoint: &mut Endpoint<ROLE>,
-    domain: &impl Domain,
+    effects: &impl PairedEffects,
 ) -> ShellResult<()> {
     let (agent, module) = match ROLE {
         BUILDER_A => ("BUILDER_A", "module_a"),
@@ -16,10 +16,10 @@ pub async fn run<const ROLE: u8>(
         let incoming = endpoint.offer().await?;
         let admitted = match incoming.label() {
             CompileA::LOGICAL_LABEL if ROLE == BUILDER_A => {
-                incoming.recv::<CompileA>().await?.into_value()
+                imp::decode(incoming.recv::<CompileA>().await?.as_bytes())?
             }
             CompileB::LOGICAL_LABEL if ROLE == BUILDER_B => {
-                incoming.recv::<CompileB>().await?.into_value()
+                imp::decode(incoming.recv::<CompileB>().await?.as_bytes())?
             }
             _ => return Err(ShellError::message("unexpected builder request")),
         };
@@ -30,31 +30,33 @@ pub async fn run<const ROLE: u8>(
         }
         .await?;
         let bytes = imp::encode(&admitted)?;
-        let (library, definitions) = async {
+        let request = Arguments::<ROLE, true>::from_bytes(&bytes)?;
+        let result = {
             let [mut a, mut b] = endpoint.par()?;
-            async {
+            let (library, definitions) = async {
                 async {
-                    core.send::<CompileCore>(&bytes.as_slice()).await?;
+                    async {
+                        core.send::<CompileCore<ROLE>>(&request).await?;
+                    };
+                    a.recv::<CompileCore<ROLE>>().await
                 };
-                imp::decode(a.recv::<CompileCore>().await?)
-            };
-            async {
                 async {
-                    types.send::<CompileTypes>(&bytes.as_slice()).await?;
+                    async {
+                        types.send::<CompileTypes<ROLE>>(&request).await?;
+                    };
+                    b.recv::<CompileTypes<ROLE>>().await
                 };
-                imp::decode(b.recv::<CompileTypes>().await?)
-            };
-        }
-        .await?;
-        if library != admitted || definitions != admitted {
-            return Err(ShellError::message(
-                "compile resources differ from admitted arguments",
-            ));
-        }
-        let result = domain
-            .execute(agent, "compile_module", admitted)
-            .await
-            .map_err(ShellError::message)?;
+            }
+            .await?;
+            if imp::decode(library.as_bytes())? != admitted
+                || imp::decode(definitions.as_bytes())? != admitted
+            {
+                return Err(ShellError::message(
+                    "compile resources differ from admitted arguments",
+                ));
+            }
+            effects.apply_pair(library, definitions).await?
+        };
         imp::compiled(&result, agent, module)?;
         let bytes = imp::encode(&result)?;
         async {

@@ -3,7 +3,10 @@ use crate::{
     shell::{
         ShellError, ShellResult,
         global::Loan,
-        imp::{review_reply::ReviewReply, service::Domain},
+        imp::{
+            review_reply::ReviewReply,
+            service::{ReceivedEffects, SimulatorOperation},
+        },
     },
 };
 use hibana::{
@@ -66,11 +69,12 @@ type Failed<'a> = g::Msg<94, ReviewReply<'a, false>>;
 pub(super) type TestReport<'a> = g::Msg<95, &'a [u8]>;
 
 pub(super) type RunTests<const TESTER: u8> = g::Msg<TESTER, Arguments<TESTER>>;
+type EnvironmentRequest<const TESTER: u8> = g::Msg<TESTER, Arguments<TESTER, true>>;
 pub(super) type Tested<'a, const TESTER: u8> = g::Msg<TESTER, &'a [u8]>;
 
-pub(super) struct Arguments<const OPERATION: u8>(Vec<u8>);
+pub(super) struct Arguments<const OPERATION: u8, const FROM_ENV: bool = false>(Vec<u8>);
 
-impl<const OPERATION: u8> WireEncode for Arguments<OPERATION> {
+impl<const OPERATION: u8, const FROM_ENV: bool> WireEncode for Arguments<OPERATION, FROM_ENV> {
     fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
         output
             .get_mut(..self.0.len())
@@ -80,9 +84,9 @@ impl<const OPERATION: u8> WireEncode for Arguments<OPERATION> {
     }
 }
 
-impl<const OPERATION: u8> WirePayload for Arguments<OPERATION> {
-    const SCHEMA_ID: u32 = 0xac04_4800 | OPERATION as u32;
-    type Decoded<'a> = Self;
+impl<const OPERATION: u8, const FROM_ENV: bool> WirePayload for Arguments<OPERATION, FROM_ENV> {
+    const SCHEMA_ID: u32 = 0xac04_4800 | ((FROM_ENV as u32) << 8) | OPERATION as u32;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
 
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
         let value: Value =
@@ -120,9 +124,24 @@ impl<const OPERATION: u8> WirePayload for Arguments<OPERATION> {
         Ok(())
     }
 
-    fn decode_validated_payload(input: ReceivedPayload<'_, Self>) -> Self {
-        Self(input.as_bytes().to_vec())
+    fn decode_validated_payload(input: ReceivedPayload<'_, Self>) -> Self::Decoded<'_> {
+        input
     }
+}
+
+impl<const OPERATION: u8, const FROM_ENV: bool> SimulatorOperation
+    for Arguments<OPERATION, FROM_ENV>
+{
+    const RPC: (&'static str, &'static str) = match (FROM_ENV, OPERATION) {
+        (false, PLAN) => ("ARCHITECT", "design_proposal"),
+        (false, SCHEMA_A | SCHEMA_B | SCHEMA_C) => ("DEVOPS", "migrate_schema"),
+        (false, DEVELOPER_A) => ("DEVELOPER_A", "implement_feature"),
+        (false, DEVELOPER_B) => ("DEVELOPER_B", "implement_feature"),
+        (false, DEVELOPER_C) => ("DEVELOPER_C", "implement_feature"),
+        (false, SERVICE_A | SERVICE_B | SERVICE_C) => ("REVIEWER", "code_review"),
+        (true, TESTER_A | TESTER_B | TESTER_C) => ("TESTER", "run_tests"),
+        _ => panic!("not a physical migration request"),
+    };
 }
 
 /// Keep the authored dependencies and expand omitted services to empty lists.
@@ -227,7 +246,7 @@ fn test_session<const SERVICE: u8, const TESTER: u8>() -> impl Projectable + Cop
     g::seq(
         g::send::<TEST_COMMAND, TEST_ENV, RunTests<TESTER>>(),
         g::seq(
-            g::send::<TEST_ENV, SERVICE, RunTests<TESTER>>(),
+            g::send::<TEST_ENV, SERVICE, EnvironmentRequest<TESTER>>(),
             g::seq(
                 g::send::<ENV_OWNER, TESTER, Loan<TEST_ENV>>(),
                 g::seq(
@@ -350,14 +369,12 @@ pub(super) fn preparation() -> impl Projectable {
 pub(super) async fn architect<'run>(
     endpoint: &mut Endpoint<'run, ARCHITECT>,
     staging: Endpoint<'run, STAGING_ENV>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
-    let arguments = decode(&endpoint.recv::<Propose>().await?.0)?;
+    let received = endpoint.recv::<Propose>().await?;
+    let arguments = decode(received.as_bytes())?;
     let expected = Value::Object(dependencies(arguments.get("dependencies"))?);
-    let result = domain
-        .execute("ARCHITECT", "design_proposal", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let result = effects.apply(received).await?;
     let data = &result["data"];
     if result["tool_name"] != "design_proposal"
         || result["success"] != true
@@ -422,7 +439,7 @@ fn checked_migration(result: &Value, service: &str, name: &Value, plan: &Value) 
 
 pub(super) async fn schemas(
     endpoint: &mut Endpoint<'_, SCHEMAS>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     let authored = endpoint.recv::<Proposed<SCHEMAS>>().await?.to_vec();
     let plan = decode(&authored)?["data"]["receipt"].clone();
@@ -434,36 +451,30 @@ pub(super) async fn schemas(
         let request = staging.offer().await?;
         match request.label() {
             SCHEMA_A => {
-                let args = decode(&request.recv::<Migrate<SCHEMA_A>>().await?.0)?;
+                let received = request.recv::<Migrate<SCHEMA_A>>().await?;
+                let args = decode(received.as_bytes())?;
                 let name = args["migration_name"].clone();
-                let result = domain
-                    .execute("DEVOPS", "migrate_schema", args)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(received).await?;
                 checked_migration(&result, SERVICES[0], &name, &plan)?;
                 staging
                     .send::<Migrated<SCHEMA_A>>(&encode(&result)?.as_slice())
                     .await?;
             }
             SCHEMA_B => {
-                let args = decode(&request.recv::<Migrate<SCHEMA_B>>().await?.0)?;
+                let received = request.recv::<Migrate<SCHEMA_B>>().await?;
+                let args = decode(received.as_bytes())?;
                 let name = args["migration_name"].clone();
-                let result = domain
-                    .execute("DEVOPS", "migrate_schema", args)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(received).await?;
                 checked_migration(&result, SERVICES[1], &name, &plan)?;
                 staging
                     .send::<Migrated<SCHEMA_B>>(&encode(&result)?.as_slice())
                     .await?;
             }
             SCHEMA_C => {
-                let args = decode(&request.recv::<Migrate<SCHEMA_C>>().await?.0)?;
+                let received = request.recv::<Migrate<SCHEMA_C>>().await?;
+                let args = decode(received.as_bytes())?;
                 let name = args["migration_name"].clone();
-                let result = domain
-                    .execute("DEVOPS", "migrate_schema", args)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(received).await?;
                 checked_migration(&result, SERVICES[2], &name, &plan)?;
                 staging
                     .send::<Migrated<SCHEMA_C>>(&encode(&result)?.as_slice())
@@ -497,7 +508,7 @@ fn checked_build(result: &Value, agent: &str, service: &str, plan: &Value) -> Sh
 pub(super) async fn developer<'run, const DEVELOPER: u8, const SERVICE: u8>(
     endpoint: &mut Endpoint<'run, DEVELOPER>,
     mut candidate: Endpoint<'run, SERVICE>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     let (agent, service) = match DEVELOPER {
         DEVELOPER_A => ("DEVELOPER_A", SERVICES[0]),
@@ -507,11 +518,8 @@ pub(super) async fn developer<'run, const DEVELOPER: u8, const SERVICE: u8>(
     };
     let plan = decode(endpoint.recv::<Proposed<DEVELOPER>>().await?)?;
     loop {
-        let arguments = decode(&candidate.recv::<Implement<DEVELOPER>>().await?.0)?;
-        let result = domain
-            .execute(agent, "implement_feature", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let received = candidate.recv::<Implement<DEVELOPER>>().await?;
+        let result = effects.apply(received).await?;
         checked_build(&result, agent, service, &plan)?;
         let implemented = encode(&result)?;
         candidate
@@ -540,11 +548,8 @@ pub(super) async fn developer<'run, const DEVELOPER: u8, const SERVICE: u8>(
                         endpoint.send::<TestReport>(&result.as_slice()).await?;
                         let failed = decode(&result)?;
                         let mut returned = endpoint.recv::<Loan<SERVICE>>().await?;
-                        let args = decode(&returned.recv::<Implement<DEVELOPER>>().await?.0)?;
-                        let repair = domain
-                            .execute(agent, "implement_feature", args)
-                            .await
-                            .map_err(ShellError::message)?;
+                        let received = returned.recv::<Implement<DEVELOPER>>().await?;
+                        let repair = effects.apply(received).await?;
                         checked_build(&repair, agent, service, &plan)?;
                         if repair["data"]["receipt"] == failed["data"]["candidate"] {
                             return Err(ShellError::message("repair reused the failed candidate"));
@@ -571,7 +576,7 @@ pub(super) async fn developer<'run, const DEVELOPER: u8, const SERVICE: u8>(
 
 pub(super) async fn reviewer<const REVIEWER: u8, const DEVELOPER: u8, const SERVICE: u8>(
     endpoint: &mut Endpoint<'_, REVIEWER>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
     loop {
         let mut service = endpoint.recv::<Loan<SERVICE>>().await?;
@@ -580,13 +585,11 @@ pub(super) async fn reviewer<const REVIEWER: u8, const DEVELOPER: u8, const SERV
         service
             .send::<Candidate<SERVICE>>(&bytes.as_slice())
             .await?;
-        let arguments = decode(&service.recv::<Review<SERVICE>>().await?.0)?;
+        let received = service.recv::<Review<SERVICE>>().await?;
+        let arguments = decode(received.as_bytes())?;
         let pr = arguments["pr_id"].clone();
         same(&pr, &candidate["data"]["service"])?;
-        let result = domain
-            .execute("REVIEWER", "code_review", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let result = effects.apply(received).await?;
         let data = &result["data"];
         if result["tool_name"] != "code_review"
             || data["agent"] != "REVIEWER"
@@ -632,7 +635,7 @@ pub(super) async fn reviewer<const REVIEWER: u8, const DEVELOPER: u8, const SERV
 
 pub(super) async fn tester<'run, const TESTER: u8, const SERVICE: u8>(
     endpoint: &mut Endpoint<'run, TESTER>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<Value> {
     let approval = endpoint.recv::<TestCandidate<SERVICE>>().await?.to_vec();
     let mut service = endpoint.recv::<Loan<SERVICE>>().await?;
@@ -640,13 +643,11 @@ pub(super) async fn tester<'run, const TESTER: u8, const SERVICE: u8>(
         .send::<TestCandidate<SERVICE>>(&ReviewReply::from_bytes(&approval)?)
         .await?;
     let reviewed = decode(&approval)?;
-    let arguments = decode(&service.recv::<RunTests<TESTER>>().await?.0)?;
+    let received = service.recv::<EnvironmentRequest<TESTER>>().await?;
+    let arguments = decode(received.as_bytes())?;
     same(&arguments["suite"], &reviewed["data"]["service"])?;
     let mut environment = endpoint.recv::<Loan<TEST_ENV>>().await?;
-    let result = domain
-        .execute("TESTER", "run_tests", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let result = effects.apply(received).await?;
     let data = &result["data"];
     if result["tool_name"] != "run_tests"
         || data["agent"] != "TESTER"
@@ -691,16 +692,34 @@ pub(super) async fn test_environment<'run>(
         let request = environment.offer().await?;
         match request.label() {
             TESTER_A => {
-                let arguments = request.recv::<RunTests<TESTER_A>>().await?;
-                environment.send::<RunTests<TESTER_A>>(&arguments).await?;
+                let arguments = request
+                    .recv::<RunTests<TESTER_A>>()
+                    .await?
+                    .as_bytes()
+                    .to_vec();
+                environment
+                    .send::<EnvironmentRequest<TESTER_A>>(&Arguments(arguments))
+                    .await?;
             }
             TESTER_B => {
-                let arguments = request.recv::<RunTests<TESTER_B>>().await?;
-                environment.send::<RunTests<TESTER_B>>(&arguments).await?;
+                let arguments = request
+                    .recv::<RunTests<TESTER_B>>()
+                    .await?
+                    .as_bytes()
+                    .to_vec();
+                environment
+                    .send::<EnvironmentRequest<TESTER_B>>(&Arguments(arguments))
+                    .await?;
             }
             TESTER_C => {
-                let arguments = request.recv::<RunTests<TESTER_C>>().await?;
-                environment.send::<RunTests<TESTER_C>>(&arguments).await?;
+                let arguments = request
+                    .recv::<RunTests<TESTER_C>>()
+                    .await?
+                    .as_bytes()
+                    .to_vec();
+                environment
+                    .send::<EnvironmentRequest<TESTER_C>>(&Arguments(arguments))
+                    .await?;
             }
             _ => return Err(ShellError::message("unknown migration test suite")),
         }

@@ -28,8 +28,8 @@ pub type CoreLoan<'r> = g::Msg<1, Endpoint<'r, CORE_LIB>>;
 pub type TypesLoan<'r> = g::Msg<2, Endpoint<'r, SHARED_TYPES>>;
 pub type CompileA = g::Msg<3, Arguments<BUILDER_A>>;
 pub type CompileB = g::Msg<4, Arguments<BUILDER_B>>;
-pub type CompileCore<'a> = g::Msg<5, &'a [u8]>;
-pub type CompileTypes<'a> = g::Msg<6, &'a [u8]>;
+pub type CompileCore<const ROLE: u8> = g::Msg<5, Arguments<ROLE, true>>;
+pub type CompileTypes<const ROLE: u8> = g::Msg<6, Arguments<ROLE, true>>;
 pub type CoreCompiled<'a> = g::Msg<7, &'a [u8]>;
 pub type TypesCompiled<'a> = g::Msg<8, &'a [u8]>;
 pub type ReturnCore<'r> = g::Msg<9, Endpoint<'r, CORE_LIB>>;
@@ -68,8 +68,8 @@ pub const FILES: [hibana_wasip1_runtime::choreofs::ChoreoFsObject<'static>; 3] =
 fn build_a() -> impl Projectable {
     g::seq(
         g::par(
-            g::send::<CORE_LIB, BUILDER_A, CompileCore>(),
-            g::send::<SHARED_TYPES, BUILDER_A, CompileTypes>(),
+            g::send::<CORE_LIB, BUILDER_A, CompileCore<BUILDER_A>>(),
+            g::send::<SHARED_TYPES, BUILDER_A, CompileTypes<BUILDER_A>>(),
         ),
         g::seq(
             g::par(
@@ -83,8 +83,8 @@ fn build_a() -> impl Projectable {
 fn build_b() -> impl Projectable {
     g::seq(
         g::par(
-            g::send::<CORE_LIB, BUILDER_B, CompileCore>(),
-            g::send::<SHARED_TYPES, BUILDER_B, CompileTypes>(),
+            g::send::<CORE_LIB, BUILDER_B, CompileCore<BUILDER_B>>(),
+            g::send::<SHARED_TYPES, BUILDER_B, CompileTypes<BUILDER_B>>(),
         ),
         g::seq(
             g::par(
@@ -237,8 +237,8 @@ impl Programs {
             ("TypesLoan", TypesLoan::LOGICAL_LABEL),
             ("CompileA", CompileA::LOGICAL_LABEL),
             ("CompileB", CompileB::LOGICAL_LABEL),
-            ("CompileCore", CompileCore::LOGICAL_LABEL),
-            ("CompileTypes", CompileTypes::LOGICAL_LABEL),
+            ("CompileCore", CompileCore::<BUILDER_A>::LOGICAL_LABEL),
+            ("CompileTypes", CompileTypes::<BUILDER_A>::LOGICAL_LABEL),
             ("CoreCompiled", CoreCompiled::LOGICAL_LABEL),
             ("TypesCompiled", TypesCompiled::LOGICAL_LABEL),
             ("ReturnCore", ReturnCore::LOGICAL_LABEL),

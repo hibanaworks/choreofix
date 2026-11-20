@@ -1,16 +1,20 @@
 use super::{global::*, imp, localside, wire::Arguments};
 use crate::shell::{
     ShellError, ShellResult,
-    imp::{bus::Bus, service::Domain},
+    imp::{
+        bus::Bus,
+        service::{PairedEffects, ReceivedEffects, SimulatorOperation},
+    },
 };
+use hibana::runtime::wire::ReceivedPayload;
 use hibana::runtime::{SessionKitStorage, ids::SessionId};
 use hibana_wasip1_runtime::protocol;
 use serde_json::{Value, json};
 use std::cell::Cell;
 // Native material fixture. Actual Wasm and model runs use the neutral world.
 struct BuildData(Cell<Vec<Value>>);
-impl Domain for BuildData {
-    async fn execute(
+impl BuildData {
+    fn material_result(
         &self,
         agent: &'static str,
         tool: &'static str,
@@ -54,6 +58,32 @@ impl Domain for BuildData {
         journal.push(result.clone());
         self.0.set(journal);
         Ok(result)
+    }
+}
+impl ReceivedEffects for BuildData {
+    fn apply<'io, P: SimulatorOperation>(
+        &'io self,
+        received: ReceivedPayload<'_, P>,
+    ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+        let value = imp::decode(received.as_bytes());
+        async move {
+            self.material_result(P::RPC.0, P::RPC.1, value?)
+                .map_err(ShellError::message)
+        }
+    }
+}
+impl PairedEffects for BuildData {
+    async fn apply_pair<P: SimulatorOperation<2>>(
+        &self,
+        first: ReceivedPayload<'_, P>,
+        second: ReceivedPayload<'_, P>,
+    ) -> ShellResult<Value> {
+        let value = imp::decode(first.as_bytes())?;
+        if value != imp::decode(second.as_bytes())? {
+            return Err(ShellError::message("compile inputs disagree"));
+        }
+        self.material_result(P::RPC.0, P::RPC.1, value)
+            .map_err(ShellError::message)
     }
 }
 #[test]
@@ -437,20 +467,18 @@ async fn a_stale_object_is_rejected_by_the_actual_link_receiver_before_any_link_
     use hibana::{g, runtime::program::project};
     let effects = BuildData(Cell::new(Vec::new()));
     let b = effects
-        .execute(
+        .material_result(
             "BUILDER_B",
             "compile_module",
             json!({"module_name":"module_b"}),
         )
-        .await
         .map_err(ShellError::message)?;
     let a = effects
-        .execute(
+        .material_result(
             "BUILDER_A",
             "compile_module",
             json!({"module_name":"module_a"}),
         )
-        .await
         .map_err(ShellError::message)?;
     let global = g::seq(
         g::par(
