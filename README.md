@@ -8,8 +8,8 @@ endpoints. In review (6E), API development (8E) and CI/CD (16E), each
 simulator effect consumes the typed request received from an Endpoint. The
 [6E](analysis/review-receipts.md), [8E](analysis/8e-received-effects.json)
 and [16E](analysis/cicd-receipts.md) trials exercised this path with wash and
-live agents. Eight qualified tasks still have receivers that can select a
-simulator tool and supply its arguments directly. We check the
+live agents. Six qualified tasks (13E/M/H and 14E/M/H) still have receivers
+that can select a simulator tool and supply its arguments directly. We check the
 protocol execution with EPF, match admitted requests to actual simulator effects,
 and score the business outcome. Whether this design preserves the original
 choices or makes a workflow cheaper to change is an empirical question.

@@ -231,7 +231,10 @@ Three live participants completed the depth-two task on the same binary after
 two rejected reviews. The EPF audit checked 5,834 capture records and the effect
 audit matched all 13 simulator calls. This rerun adds evidence for an existing
 task in the cohort. Six production tasks still use the caller-selected simulator
-API (13E/M/H and 14E/M/H, 85 call sites).
+API (13E/M/H and 14E/M/H, 85 call sites). Those six tasks account for eight
+of the original 43 selected conditions and 149 recorded simulator calls in
+total. The archived events, audit and simulator result for each of the 43
+conditions match their SHA-256 digests in `verified-conditions.json`.
 
 The [11M component results](11m-received-effects.json) cover 30 cabinet
 schedules and 24 inspection/rework runs after the receivers switched to typed
