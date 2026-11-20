@@ -678,6 +678,16 @@ the trial. This run used the ordinary world and delays, with no injected
 business failure.
 \path{output/verification/7h-terminal-outcome-20261120/verified-results.json}.
 
+In a later seven-agent 7H trial, the reviewer requested a major Part~I
+revision, inspected the new fact check and approved the manuscript. The
+editor published it. The common simulator recorded 36 effects and zero
+violations. Two of the editor's shell calls had been interrupted. The model
+connection acknowledged the recovered output of the first. The second
+output remained uncollected when the editor's turn ended, and the runner
+stopped before the final capture checkpoint. The trial therefore has a
+positive business score and an unsuccessful end-to-end audit.
+\path{analysis/7h-review-inbox.json}.
+
 These are integration observations from development, not random samples or
 paired baseline trials. They cannot estimate a comparative completion rate,
 latency advantage, or maintenance saving. Earlier failed and interrupted

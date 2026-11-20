@@ -1,0 +1,90 @@
+{
+  "task": "7H",
+  "depth": 0,
+  "scored_benchmark": false,
+  "live_qualified": false,
+  "archive": "output/verification/7h-current-custody-20261121.OQvo41",
+  "source": {
+    "checkout": "64b3673f88355b6c6641d0fb420e09edb25f667e",
+    "application_dirty_patch_sha256": "03c75b0ba9721f0ba752b23b22e1078af8501292308b5eb1a8b8491f9dca4edd",
+    "runtime_source_manifest_sha256": "6617adc62b578b14da13f176963573eb8e9ebb9460a4e6abd3f7b30ba1730353",
+    "build_receipt_sha256": "ca5e3441c80e6656aef4f246c18385f87e28f4ce0c10282fdc63989e9674f125",
+    "dependencies": {
+      "hibana": "331afd6e4b6315e103ce9cb9311f9d9140fc0e57",
+      "hibana-epf": "f966c2817c68994315033fa65fbf72390fa107b4",
+      "hibana-runtime": "4e29a837eaf72247a6803ffbbff0c257519df0a5",
+      "hibana-wasip1-runtime": "94ed8a88026f3f1c58e8b35e3766d8b9a83cb334"
+    },
+    "binaries_sha256": {
+      "runner": "a56c1576b5fa5431afb03c0c9aa1eb95706d10678b214f8582f31018a906711f",
+      "runtime": "d27f50cf8b8470175a4635db81cfdbd7cdb433aa37ad7200480f98bd1a3a4d2a",
+      "wash.wasm": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca"
+    }
+  },
+  "real_wasm_without_model": {
+    "passing_conditions": 17,
+    "passing_effects": 526,
+    "passing_capture_records": 254128,
+    "violations_in_passing_conditions": 0,
+    "blocking_read": {
+      "case": "repeated-major-before-part-i",
+      "command": "cat /service/inbox",
+      "role": "REVIEWER",
+      "terminal_reply": false,
+      "case_deadline_seconds": 50,
+      "events_sha256": "c2e22a9f27c6d18d4289c40478f660ae1306dcd0083f0c1056578b5352a7a5af",
+      "audit_status": "incomplete",
+      "repeated_events_sha256": "fd7168e88b62ffab4264a8e45080ee579ab66a16362254ad12e465b4746d7779"
+    },
+    "nonblocking_read": {
+      "case": "repeated-major-nonblocking-review",
+      "command": "dd if=/service/inbox iflag=nonblock",
+      "role": "REVIEWER",
+      "terminal": "wash: nonblocking read /service/inbox: Resource temporarily unavailable (os error 6)",
+      "effects": 39,
+      "capture_records": 18729,
+      "common_world_complete": true,
+      "violations": 0,
+      "audit_sha256": "821f96d12dda350f9bc3a75b61afb3403f6d094794de58f69da4662b2ec873be",
+      "events_sha256": "65385ec2ea607d716cedbbcc75b08fa796c76cf0cbc7b86806db4529687d2084"
+    },
+    "total_conditions": 18,
+    "test_source_sha256": "f10fff01b5a1bc80fb29af797472d6730304ba887e6dcbe326a18c6091e0cdd1"
+  },
+  "live": {
+    "participants": 7,
+    "elapsed_seconds": 788.704312917,
+    "events_sha256": "df82c4a8f8b25686f7dce38942c73ac49f316f8791b8a7d65090176dfe8ad767",
+    "model_connection_events_sha256": "3099753e26842bdde4f5c1afa48a242e01f6c49d63004bdf68279832ae8600c6",
+    "result_sha256": "b7be2948061f9e6179d0136805fa14bc14770b735a37deb91b131e787c4f0949",
+    "simulator_effects": 36,
+    "common_world_complete": true,
+    "common_world_violations": [],
+    "observed_guest_exits": 6,
+    "protocol_completion": null,
+    "model_reports": {
+      "completed": 3,
+      "harness_error": 4
+    },
+    "editor_interrupted_calls": [
+      {
+        "command": "cat /service/material",
+        "rpc_id": 19
+      },
+      {
+        "command": "ls /work; dd if=/service/material iflag=nonblock",
+        "rpc_id": 136
+      }
+    ],
+    "editor_recovered_rpc_ids": [
+      19
+    ],
+    "outstanding_rpc_ids": [
+      136
+    ],
+    "run_audit_error": "Error: \"failed or altered case result\"",
+    "effect_audit_error": "Error: \"incomplete protocol capture inventory\"",
+    "uncollected_guest_output": "Permission denied (os error 2)",
+    "uncollected_guest_command_id": 135
+  }
+}

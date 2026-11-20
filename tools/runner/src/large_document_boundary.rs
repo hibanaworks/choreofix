@@ -133,6 +133,14 @@ async fn authors_receive_the_completed_chapters_their_work_depends_on() -> Resul
             false,
         ),
         (
+            "repeated-major-nonblocking-review",
+            0,
+            false,
+            [0, 0, 0, 0, 0],
+            &[][..],
+            false,
+        ),
+        (
             "repeated-major-before-part-i",
             0,
             false,
@@ -195,9 +203,13 @@ async fn publication_case(
         .copied()
         .partition(|chapter| matches!(*chapter, "CHAPTER_3" | "CHAPTER_4"));
     let reject_amended_part_i = case == "part-i-amendment-fact-repair";
-    let major_then_accept = matches!(case, "major-then-accept" | "repeated-major-before-part-i");
+    let repeated_major = matches!(
+        case,
+        "repeated-major-before-part-i" | "repeated-major-nonblocking-review"
+    );
+    let major_then_accept = case == "major-then-accept" || repeated_major;
     let major_first = major_then_accept || case == "major-then-two-amendments";
-    let part_ii_major_reviews_per_chapter = if case == "repeated-major-before-part-i" {
+    let part_ii_major_reviews_per_chapter = if repeated_major {
         2
     } else {
         usize::from(repair_part_ii)
@@ -671,9 +683,18 @@ async fn publication_case(
                     .as_str().ok_or("reviewed introduction")?
                     .contains("Align the introduction terminology");
             if major_then_accept && !request_major {
-                let early = guest.command("REVIEWER", "cat /service/inbox".into()).await?;
-                let text = early["stdout"].as_str().ok_or("blocking read before renewed review")?;
-                assert!(text.contains("Permission denied"), "{text}");
+                let probe = if case == "repeated-major-nonblocking-review" {
+                    "dd if=/service/inbox iflag=nonblock"
+                } else {
+                    "cat /service/inbox"
+                };
+                let early = guest.command("REVIEWER", probe.into()).await?;
+                let text = early["stdout"].as_str().ok_or("read before renewed review")?;
+                if case == "repeated-major-nonblocking-review" {
+                    assert!(text.contains("Permission denied") || text.contains("Resource temporarily unavailable"), "{text}");
+                } else {
+                    assert!(text.contains("Permission denied"), "{text}");
+                }
             }
             let refused = guest.command("REVIEWER", r#"echo '{"section_name":"CHAPTERS_1_2","decision":"minor","minor_edits":[]}' > /service/review_sections/CHAPTERS_1_2"#.into()).await?;
             let text = refused["stdout"].as_str().ok_or("malformed minor edits response")?;
