@@ -7,11 +7,14 @@ business operation. The task global determines when the corresponding request
 and resource Endpoint can be used.
 
 A physical effect updates the versioned common simulator. In 6E (review),
-6M (feature delivery), 16E (CI/CD) and 7H (collaborative writing), the resource receiver passes the
-actual Hibana `ReceivedPayload` to `ReceivedEffects::apply`. Its type fixes the
+6M (feature delivery), 7H (collaborative writing), 11E (machine jobs) and
+16E (CI/CD), the resource receiver passes the actual Hibana `ReceivedPayload` to `ReceivedEffects::apply`. Its type fixes the
 participant and operation. Its bytes supply the arguments, and passing it
 consumes that receive. In 6M the submitted merge can be forwarded. Only the
 repository-side request type authorizes the corresponding simulator operation.
+In 11E the file submission can be forwarded to the machine. The technician
+compares the returned machine request with that submission, then consumes
+the machine request to execute the job.
 In 7H the two figure-lookup messages carry data. The
 document owner compares the figure store's confirmation with the original
 lookup before consuming the confirmation to insert the figure. The two final

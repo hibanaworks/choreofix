@@ -1,10 +1,13 @@
 //! Actual machine-result deliveries, the actual file request, then report I/O.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{Endpoint, g::Message};
 
 #[hibana_runtime::scope]
-pub async fn run(endpoint: &mut Endpoint<SUPERVISOR>, domain: &impl Domain) -> ShellResult<()> {
+pub async fn run(
+    endpoint: &mut Endpoint<SUPERVISOR>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()> {
     let (lathe, mill) = async {
         let [mut lathe, mut mill] = endpoint.par()?;
         async {
@@ -37,11 +40,8 @@ pub async fn run(endpoint: &mut Endpoint<SUPERVISOR>, domain: &impl Domain) -> S
     .await?;
     let receipts = lathe.into_iter().chain(mill).collect::<Vec<_>>();
     let expected = imp::completed_jobs(&receipts)?;
-    let arguments = endpoint.recv::<CollectReports>().await?.into_value();
-    let result = domain
-        .execute("SUPERVISOR", "collect_reports", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let arguments = endpoint.recv::<CollectReports>().await?;
+    let result = effects.apply(arguments).await?;
     imp::report_result(&expected, &result)?;
     let bytes = imp::encode(&result)?;
     endpoint.send::<Reports>(&bytes.as_slice()).await?;

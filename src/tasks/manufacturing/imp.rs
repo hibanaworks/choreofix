@@ -1,11 +1,21 @@
 //! Exact request data and validation of real job/report results.
-use crate::shell::{ShellError, ShellResult};
+use crate::shell::{ShellError, ShellResult, imp::service::SimulatorOperation};
 use hibana::runtime::wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload};
 use serde_json::{Value, json};
 pub const JOBS: [&str; 4] = ["lathe_job_a", "lathe_job_b", "mill_job_a", "mill_job_b"];
 
 #[derive(Debug)]
-pub struct Arguments<const OPERATION: u8>(Vec<u8>);
+pub struct Arguments<const OPERATION: u8, const SUBMISSION: bool = false>(Vec<u8>);
+
+impl<const OPERATION: u8> SimulatorOperation for Arguments<OPERATION> {
+    const RPC: (&'static str, &'static str) = match OPERATION {
+        0 | 2 => ("TECHNICIAN_A", "do_job"),
+        1 | 3 => ("TECHNICIAN_B", "do_job"),
+        4 => ("SUPERVISOR", "collect_reports"),
+        _ => panic!("unknown manufacturing operation"),
+    };
+}
+
 impl<const OPERATION: u8> Arguments<OPERATION> {
     #[cfg(test)]
     pub fn from_bytes(bytes: &[u8]) -> ShellResult<Self> {
@@ -17,7 +27,7 @@ impl<const OPERATION: u8> Arguments<OPERATION> {
         serde_json::from_slice(&self.0).expect("validated manufacturing arguments")
     }
 }
-impl<const OPERATION: u8> WireEncode for Arguments<OPERATION> {
+impl<const OPERATION: u8, const SUBMISSION: bool> WireEncode for Arguments<OPERATION, SUBMISSION> {
     fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
         output
             .get_mut(..self.0.len())
@@ -28,7 +38,7 @@ impl<const OPERATION: u8> WireEncode for Arguments<OPERATION> {
 }
 impl<const OPERATION: u8> WirePayload for Arguments<OPERATION> {
     const SCHEMA_ID: u32 = 0xac11_0000 | OPERATION as u32;
-    type Decoded<'a> = Self;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
         let value: Value =
             serde_json::from_slice(input.as_bytes()).map_err(|_| CodecError::Malformed)?;
@@ -42,8 +52,22 @@ impl<const OPERATION: u8> WirePayload for Arguments<OPERATION> {
         }
         Ok(())
     }
-    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
-        Self(input.as_bytes().to_vec())
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
+        input
+    }
+}
+
+// A file submission supplies the job to send on the machine Endpoint.
+impl<const OPERATION: u8> WirePayload for Arguments<OPERATION, true> {
+    const SCHEMA_ID: u32 = 0xac11_0100 | OPERATION as u32;
+    type Decoded<'a> = Arguments<OPERATION>;
+
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        Arguments::<OPERATION>::validate_payload(input)
+    }
+
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
+        Arguments(input.as_bytes().to_vec())
     }
 }
 pub fn decode(bytes: &[u8]) -> ShellResult<Value> {

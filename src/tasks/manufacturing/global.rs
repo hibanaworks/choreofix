@@ -31,10 +31,10 @@ pub const SUPERVISOR_DATA: u8 = 52;
 pub const SESSION: u32 = 111;
 pub use crate::shell::global::{FileExit, Loan};
 
-pub type RequestLatheA = g::Msg<1, Arguments<0>>;
-pub type RequestLatheB = g::Msg<2, Arguments<1>>;
-pub type RequestMillA = g::Msg<3, Arguments<2>>;
-pub type RequestMillB = g::Msg<4, Arguments<3>>;
+pub type RequestLatheA = g::Msg<1, Arguments<0, true>>;
+pub type RequestLatheB = g::Msg<2, Arguments<1, true>>;
+pub type RequestMillA = g::Msg<3, Arguments<2, true>>;
+pub type RequestMillB = g::Msg<4, Arguments<3, true>>;
 pub type LatheLoan<'r> = g::Msg<5, Endpoint<'r, LATHE>>;
 pub type MillLoan<'r> = g::Msg<6, Endpoint<'r, MILL>>;
 pub type LatheJobA = g::Msg<7, Arguments<0>>;

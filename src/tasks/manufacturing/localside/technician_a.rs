@@ -1,10 +1,13 @@
 //! Both independent jobs retain their actual file request and machine Endpoint.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::Endpoint;
 
 #[hibana_runtime::scope]
-pub async fn run(endpoint: &mut Endpoint<TECHNICIAN_A>, domain: &impl Domain) -> ShellResult<()> {
+pub async fn run(
+    endpoint: &mut Endpoint<TECHNICIAN_A>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()> {
     let [mut lathe_work, mut mill_work] = endpoint.par()?;
     async {
         let admitted = lathe_work.recv::<RequestLatheA>().await?;
@@ -17,15 +20,12 @@ pub async fn run(endpoint: &mut Endpoint<TECHNICIAN_A>, domain: &impl Domain) ->
         }
         .await?;
         let admitted = admitted.into_value();
-        if actual.into_value() != admitted {
+        if imp::decode(actual.as_bytes())? != admitted {
             return Err(ShellError::message(
                 "lathe resource differs from admitted file request",
             ));
         }
-        let result = domain
-            .execute("TECHNICIAN_A", "do_job", admitted.clone())
-            .await
-            .map_err(ShellError::message)?;
+        let result = effects.apply(actual).await?;
         imp::completed(&result, "TECHNICIAN_A", "LATHE", &admitted)?;
         let bytes = imp::encode(&result)?;
         async {
@@ -67,15 +67,12 @@ pub async fn run(endpoint: &mut Endpoint<TECHNICIAN_A>, domain: &impl Domain) ->
         }
         .await?;
         let admitted = admitted.into_value();
-        if actual.into_value() != admitted {
+        if imp::decode(actual.as_bytes())? != admitted {
             return Err(ShellError::message(
                 "mill resource differs from admitted file request",
             ));
         }
-        let result = domain
-            .execute("TECHNICIAN_A", "do_job", admitted.clone())
-            .await
-            .map_err(ShellError::message)?;
+        let result = effects.apply(actual).await?;
         imp::completed(&result, "TECHNICIAN_A", "MILL", &admitted)?;
         let bytes = imp::encode(&result)?;
         async {
