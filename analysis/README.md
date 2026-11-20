@@ -289,3 +289,32 @@ participant traces. All 2,466 shell calls have a subsequent server completion
 whose call ID, arguments and returned contents match the exchange.
 The separate 7H cancellation record is in
 `output/verification/7h-schema-guide-20261119.FTJvex/material-delivery-depth-0.json`.
+
+
+### 4H service migration before deployment
+
+The [4H effect table](4h-preparation-effects.csv) identifies the shell request,
+effect-bearing Endpoint receive and shell reply for each of the 576 simulator
+calls in the [42 archived seven-guest Wasm trials](4h-staging-custody.json).
+Frame identifiers are local to each trial. EPF checked 233,130 records from
+those executions. The simulator recorded 42 design proposals, 138 builds,
+138 reviews, 132 tests and 126 schema migrations. All 42 scores were incomplete
+with zero violations. No deployments or registrations were executed.
+
+In 14 trials DevOps read a passing test for a service with no declared
+dependencies after one schema migration had returned and before either of
+the remaining two requests reached staging. This occurred for B in four trials
+and C in ten. Waiting for every schema would delay staging an eligible service.
+The [audit results](4h-preparation-effects.json) identify the exact read for
+each observation and the six fresh scripted repair trials. At ten of these
+handoffs the simulator had no outstanding calls. In ten separate common-world
+runs, replaying those prefixes with zero delay reproduced all 94 preceding
+effect results. The unchanged simulator then accepted a deployment of C at
+each handoff using the same test receipt, with zero violations. The four
+remaining handoffs had an in-flight effect and were excluded from this probe.
+The Wasm guests did not initiate these deployments.
+
+In the repeated
+test case the auditor rejected a retry moved before its own committed request.
+It also rejected removal of a failed test RPC and its score entry while the
+shell and resource records remained. These checks used no model calls.

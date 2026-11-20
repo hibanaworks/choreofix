@@ -1,0 +1,321 @@
+{
+  "task": "4H",
+  "scope": "Source-bound preparation effects. All archived participants are scripted Wasm guests. Deployment, rollback, service registration and full task completion remain open.",
+  "source_inventory": "analysis/4h-staging-custody.json",
+  "runtime_sha256": "642580e48a0211626ae66920008580ad001262eea421c28268480e601ae621bc",
+  "source_manifest_sha256": "690d3c3596e83e1b6cce3e7aa1c39b27b1b9d8dfc4935ecf22036f63239e892b",
+  "wasm_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+  "auditor_sha256": "4e567b937c9aac13b1ee993ff7f59f718297c98f4d14f45d89ecba34646fbaa9",
+  "auditor_source_sha256": "2ec3a88637394447ff4a8512918d21645a67ef7be07bd2e9804fe53ca5924dbf",
+  "public_effect_table": "analysis/4h-preparation-effects.csv",
+  "effect_table_sha256": "6936d95dd680e07708e7f70115daef3030e762dba91f43f3dbdfc6ccdddabd18",
+  "archived_trials": 42,
+  "epf_records": 233130,
+  "effects_by_tool": {
+    "code_review": 138,
+    "design_proposal": 42,
+    "implement_feature": 138,
+    "migrate_schema": 126,
+    "run_tests": 132
+  },
+  "effects": 576,
+  "audit_violations": 0,
+  "scored_runs": 0,
+  "model_calls": 0,
+  "opportunities_before_last_two_schemas": [
+    {
+      "case": "bac-tests-bac",
+      "service": "microservice_b",
+      "test_receipt": 8,
+      "handoff_read_row": 4069
+    },
+    {
+      "case": "bac-tests-bca",
+      "service": "microservice_b",
+      "test_receipt": 8,
+      "handoff_read_row": 4069
+    },
+    {
+      "case": "bca-tests-bac",
+      "service": "microservice_b",
+      "test_receipt": 8,
+      "handoff_read_row": 4069
+    },
+    {
+      "case": "bca-tests-bca",
+      "service": "microservice_b",
+      "test_receipt": 8,
+      "handoff_read_row": 4069
+    },
+    {
+      "case": "cab-tests-cab",
+      "service": "microservice_c",
+      "test_receipt": 8,
+      "handoff_read_row": 3761
+    },
+    {
+      "case": "cab-tests-cba",
+      "service": "microservice_c",
+      "test_receipt": 8,
+      "handoff_read_row": 3761
+    },
+    {
+      "case": "cba-tests-cab",
+      "service": "microservice_c",
+      "test_receipt": 8,
+      "handoff_read_row": 3761
+    },
+    {
+      "case": "cba-tests-cab-fail-test-0-reject-0",
+      "service": "microservice_c",
+      "test_receipt": 14,
+      "handoff_read_row": 6539
+    },
+    {
+      "case": "cba-tests-cab-fail-test-0-reject-2",
+      "service": "microservice_c",
+      "test_receipt": 16,
+      "handoff_read_row": 6730
+    },
+    {
+      "case": "cba-tests-cab-fail-test-1-reject-0",
+      "service": "microservice_c",
+      "test_receipt": 8,
+      "handoff_read_row": 3761
+    },
+    {
+      "case": "cba-tests-cab-fail-test-1-reject-2",
+      "service": "microservice_c",
+      "test_receipt": 8,
+      "handoff_read_row": 3761
+    },
+    {
+      "case": "cba-tests-cab-fail-test-2-reject-0",
+      "service": "microservice_c",
+      "test_receipt": 8,
+      "handoff_read_row": 3761
+    },
+    {
+      "case": "cba-tests-cab-fail-test-2-reject-2",
+      "service": "microservice_c",
+      "test_receipt": 8,
+      "handoff_read_row": 3761
+    },
+    {
+      "case": "cba-tests-cba",
+      "service": "microservice_c",
+      "test_receipt": 8,
+      "handoff_read_row": 3816
+    }
+  ],
+  "fresh_wasm_repair_cases": [
+    {
+      "case": "cba-tests-cab-fail-test-0-reject-0",
+      "raw_sha256": "eb5cd1f0625aa0a145ecc56fe6295dbf1c449bcc93662f3f4a00dec00dc2ac56",
+      "effect_report_sha256": "d2da21b775d26bf3fe2189987e28452474e04186a09cb8e7c59855382dee9ccd",
+      "effects": 16,
+      "epf_records": 6383
+    },
+    {
+      "case": "cba-tests-cab-fail-test-0-reject-2",
+      "raw_sha256": "6c0d7fed95b2828ec1bb3924869c26a1aae95592575b5c230ffcd2478f62f703",
+      "effect_report_sha256": "0b302ee1414ac4bf97677286cbe5583c23861b18da62ca9b5105e7336818bb0c",
+      "effects": 20,
+      "epf_records": 7391
+    },
+    {
+      "case": "cba-tests-cab-fail-test-1-reject-0",
+      "raw_sha256": "6e6b0242234895c12507fac5a1610cbd29f542fa46f4fd4f069075703f98f406",
+      "effect_report_sha256": "24ca02fba216ac564bf4e80b87d97ad68a7f149f76809d680587e782b1daa109",
+      "effects": 16,
+      "epf_records": 6284
+    },
+    {
+      "case": "cba-tests-cab-fail-test-1-reject-2",
+      "raw_sha256": "c8c00877b81b8e5edfa311cbb5796b54817a26066d017d1e7ced0773001437cb",
+      "effect_report_sha256": "cb5c0ee6f56ef47670962507560b65b0befbbe225c5c2c1ce5388835fb0f2a42",
+      "effects": 20,
+      "epf_records": 7292
+    },
+    {
+      "case": "cba-tests-cab-fail-test-2-reject-0",
+      "raw_sha256": "1604e2abc6787775d7adb1c7000e393f69c8e1d54f8948496836512a4274ca3f",
+      "effect_report_sha256": "d1ae49026cf0d1e495b758aac25f50f9e4d0aa23157784679d5c5f87a69aeabb",
+      "effects": 16,
+      "epf_records": 6284
+    },
+    {
+      "case": "cba-tests-cab-fail-test-2-reject-2",
+      "raw_sha256": "5cd1959ebdc1635821e6316b4143a2aee5fa28a5a302c2e7f5eca0b7406fcea1",
+      "effect_report_sha256": "6be9c3585862d37e58511e765eb8c82ed6c56ef3e8daf6e4bc7908afea018bd5",
+      "effects": 20,
+      "epf_records": 7292
+    }
+  ],
+  "fresh_wasm_negative_checks": {
+    "case": "cba-tests-cab-fail-test-1-reject-2",
+    "rejections": [
+      "repeat test effect issued before its own committed TEST_ENV request",
+      "failed test effect and matching score entry removed while the requests and replies remain"
+    ]
+  },
+  "local_evidence": "output/verification/4h-request-effects-20261121.6BaVGK",
+  "neutral_simulator_probe": {
+    "scope": "Separate neutral-simulator executions at the ten handoffs with no in-flight simulator calls. Prior arguments, issue order and failure choices came from the archived seven-guest Wasm histories. All prior result data, messages and verdicts matched. Replay uses zero delay. Deployment was invoked only in the common simulator. Four handoffs with an in-flight effect were excluded.",
+    "model_calls": 0,
+    "choreofix_deployments": 0,
+    "violations": 0,
+    "cases": [
+      {
+        "case": "cab-tests-cab",
+        "handoff_read_row": 3761,
+        "matched_prefix_effects": 8,
+        "deployment": {
+          "service": "microservice_c",
+          "agent": "DEVOPS",
+          "receipt": 9,
+          "plan": 1,
+          "candidate": 2,
+          "test": 8,
+          "dependencies": {},
+          "status": "deployed"
+        }
+      },
+      {
+        "case": "cab-tests-cba",
+        "handoff_read_row": 3761,
+        "matched_prefix_effects": 8,
+        "deployment": {
+          "service": "microservice_c",
+          "agent": "DEVOPS",
+          "receipt": 9,
+          "plan": 1,
+          "candidate": 2,
+          "test": 8,
+          "dependencies": {},
+          "status": "deployed"
+        }
+      },
+      {
+        "case": "cba-tests-cab",
+        "handoff_read_row": 3761,
+        "matched_prefix_effects": 8,
+        "deployment": {
+          "service": "microservice_c",
+          "agent": "DEVOPS",
+          "receipt": 9,
+          "plan": 1,
+          "candidate": 4,
+          "test": 8,
+          "dependencies": {},
+          "status": "deployed"
+        }
+      },
+      {
+        "case": "cba-tests-cab-fail-test-0-reject-0",
+        "handoff_read_row": 6539,
+        "matched_prefix_effects": 14,
+        "deployment": {
+          "service": "microservice_c",
+          "agent": "DEVOPS",
+          "receipt": 15,
+          "plan": 1,
+          "candidate": 10,
+          "test": 14,
+          "dependencies": {},
+          "status": "deployed"
+        }
+      },
+      {
+        "case": "cba-tests-cab-fail-test-0-reject-2",
+        "handoff_read_row": 6730,
+        "matched_prefix_effects": 16,
+        "deployment": {
+          "service": "microservice_c",
+          "agent": "DEVOPS",
+          "receipt": 17,
+          "plan": 1,
+          "candidate": 14,
+          "test": 16,
+          "dependencies": {},
+          "status": "deployed"
+        }
+      },
+      {
+        "case": "cba-tests-cab-fail-test-1-reject-0",
+        "handoff_read_row": 3761,
+        "matched_prefix_effects": 8,
+        "deployment": {
+          "service": "microservice_c",
+          "agent": "DEVOPS",
+          "receipt": 9,
+          "plan": 1,
+          "candidate": 3,
+          "test": 8,
+          "dependencies": {},
+          "status": "deployed"
+        }
+      },
+      {
+        "case": "cba-tests-cab-fail-test-1-reject-2",
+        "handoff_read_row": 3761,
+        "matched_prefix_effects": 8,
+        "deployment": {
+          "service": "microservice_c",
+          "agent": "DEVOPS",
+          "receipt": 9,
+          "plan": 1,
+          "candidate": 4,
+          "test": 8,
+          "dependencies": {},
+          "status": "deployed"
+        }
+      },
+      {
+        "case": "cba-tests-cab-fail-test-2-reject-0",
+        "handoff_read_row": 3761,
+        "matched_prefix_effects": 8,
+        "deployment": {
+          "service": "microservice_c",
+          "agent": "DEVOPS",
+          "receipt": 9,
+          "plan": 1,
+          "candidate": 2,
+          "test": 8,
+          "dependencies": {},
+          "status": "deployed"
+        }
+      },
+      {
+        "case": "cba-tests-cab-fail-test-2-reject-2",
+        "handoff_read_row": 3761,
+        "matched_prefix_effects": 8,
+        "deployment": {
+          "service": "microservice_c",
+          "agent": "DEVOPS",
+          "receipt": 9,
+          "plan": 1,
+          "candidate": 4,
+          "test": 8,
+          "dependencies": {},
+          "status": "deployed"
+        }
+      },
+      {
+        "case": "cba-tests-cba",
+        "handoff_read_row": 3816,
+        "matched_prefix_effects": 8,
+        "deployment": {
+          "service": "microservice_c",
+          "agent": "DEVOPS",
+          "receipt": 9,
+          "plan": 1,
+          "candidate": 4,
+          "test": 8,
+          "dependencies": {},
+          "status": "deployed"
+        }
+      }
+    ]
+  }
+}

@@ -63,6 +63,7 @@ mod manufacturing_boundary;
 mod medical_audit;
 #[cfg(test)]
 mod medical_boundary;
+mod microservice_migration_audit;
 #[cfg(test)]
 mod microservice_migration_boundary;
 mod model;
@@ -957,6 +958,7 @@ async fn main() -> Result<()> {
         [mode, events] if mode == "--audit-critical-care" => println!("{}", serde_json::to_string_pretty(&critical_care_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-critical-care-mutants" => println!("{}", serde_json::to_string_pretty(&critical_care_audit::check_mutants(Path::new(events),Path::new(output))?)?),
         [mode, events, output] if mode == "--check-multi-specialty-mutants" => println!("{}", serde_json::to_string_pretty(&multi_specialty_audit::check_mutants(Path::new(events),Path::new(output))?)?),
+        [mode, events] if mode == "--audit-migration" => println!("{}", serde_json::to_string_pretty(&microservice_migration_audit::audit(Path::new(events))?)?),
         [mode, events] if mode == "--audit-report" => println!("{}", serde_json::to_string_pretty(&report_audit::audit(Path::new(events))?)?),
         [mode, events] if mode == "--audit-research-paper" => println!("{}", serde_json::to_string_pretty(&research_paper_audit::audit(Path::new(events))?)?),
         [mode, events] if mode == "--audit-survey-paper" => println!("{}", serde_json::to_string_pretty(&survey_paper_audit::audit(Path::new(events))?)?),
@@ -1039,7 +1041,7 @@ async fn main() -> Result<()> {
         }
         _ => return Err(concat!(
             "usage: choreofix-experiments 1E|1M|1H|2E|2M|2H|3E|3M|3H|4E|4M|5E|5M|5H|6E|6M|6H|7E|7M|7H|8E|8M|9E|9M|9H|10E|10M|11E|12E|13E|13M|13H|14E|14M|14H|16E|16M DEPTH OUTPUT\n",
-            "       --audit-api|--audit-review|--audit-report|--audit-document|--audit-coordination|--audit-writing|--audit-cicd|--audit-cicd-pipeline|--audit-philosophers|--audit-lab|--audit-lab-quality|--audit EVENTS\n",
+            "       --audit-api|--audit-review|--audit-migration|--audit-report|--audit-document|--audit-coordination|--audit-writing|--audit-cicd|--audit-cicd-pipeline|--audit-philosophers|--audit-lab|--audit-lab-quality|--audit EVENTS\n",
             "       --audit-protocol EVENTS\n",
             "       --check-api-mutants|--check-review-mutants|--check-report-mutants|--check-document-mutants|--check-writing-mutants|--check-cicd-mutants|--check-philosophers-mutants|--check-protocol-mutants EVENTS NEW_OUTPUT\n",
             "       --audit-run RUN\n",

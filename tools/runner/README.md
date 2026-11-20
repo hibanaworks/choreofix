@@ -522,3 +522,12 @@ The saved QC captures can be checked without another model or Wasm run using
 `--audit-lab-quality EVENTS` and `--check-lab-quality-mutants EVENTS REPORT`.
 The latter checks nine scientific effect-record counterexamples against the
 same captured baseline; these are audit mutations, not runtime attacks.
+
+
+For the 4H migration preparation trials, run
+`choreofix-experiments --audit-migration PATH/TO/events.jsonl` alongside the
+saved projection and build-linked case receipt. The command checks the EPF
+capture and joins each shell request to its effect, result and score entry.
+The frame IDs in the output refer to the supplied journal. This scope ends
+after schema migration and successful service tests; the common task score
+is still incomplete.

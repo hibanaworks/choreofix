@@ -329,6 +329,56 @@ async fn run_wash_order(
     let mut history = journal::read(&rows, &headers, actors)?;
     let receipts = history.bind_receives(&audit)?;
     let roles = &artifact["compiled"]["roles"];
+    let effects = crate::microservice_migration_audit::preparation(&history, &receipts, roles)?;
+    save(&output.join("effect-receipts.json"), &effects)?;
+    if recovery == Some((1, 2)) {
+        let failed = journal::one(history.calls.iter().filter(|(_, c)| {
+            c.tool().is_ok_and(|tool| tool == "run_tests")
+                && c.result().is_ok_and(|(_, r)| r["success"] == false)
+        }))?;
+        let (&retry_id, retry) = journal::one(history.calls.iter().filter(|(_, c)| {
+            c.tool().is_ok_and(|tool| tool == "run_tests")
+                && c.request["arguments"] == failed.1.request["arguments"]
+                && c.emitted > failed.1.emitted
+        }))?;
+        let correspondence = effects["effects"].as_array().ok_or("4H effect receipts")?;
+        let tested = journal::one(correspondence.iter().filter(|c| c["rpc"] == retry_id))?;
+        let forward = tested["effect_request"]
+            .as_u64()
+            .ok_or("4H test environment request")?;
+        let ready = history.frames[&forward].received()?;
+        let mut premature = rows.clone();
+        let rpc = premature.remove(retry.emitted);
+        premature.insert(ready, rpc);
+        let err = crate::microservice_migration_audit::check(&premature, &artifact)
+            .expect_err("a previous test request cannot admit a premature retry");
+        assert!(err.to_string().contains("missing matching frame"), "{err}");
+        drop(premature);
+
+        let mut missing = rows.clone();
+        missing.retain(|row| {
+            !(row["message"]["id"] == *failed.0
+                && (row["message"]["type"] == "execute"
+                    || row["message"]["type"] == "simulator_result"
+                    || row["direction"] == "domain_end"))
+        });
+        let (_, outcome) = failed.1.result()?;
+        let score =
+            journal::one(missing.iter_mut().filter(|row| {
+                row["direction"] == "simulator" && row["message"]["type"] == "score"
+            }))?;
+        score["message"]["events"]
+            .as_array_mut()
+            .ok_or("score events")?
+            .retain(|e| e["result"]["receipt"] != outcome["data"]["receipt"]);
+        let err = crate::microservice_migration_audit::check(&missing, &artifact)
+            .expect_err("a dropped RPC and score must leave an unmatched request");
+        assert!(
+            err.to_string().contains("multiple matching frames")
+                || err.to_string().contains("unmatched 4H"),
+            "{err}"
+        );
+    }
     let file = roles["DEVOPS_FILE"].as_u64().ok_or("DevOps file role")?;
     let schemas = roles["DEVOPS"].as_u64().ok_or("schema effect role")?;
     let staging = roles["STAGING_ENV"].as_u64().ok_or("staging resource")?;
