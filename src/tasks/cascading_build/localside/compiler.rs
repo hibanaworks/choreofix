@@ -2,20 +2,20 @@
 use super::super::{global::*, imp};
 use crate::shell::{
     ShellError, ShellResult,
-    imp::{review_reply::ReviewReply, service::Domain},
+    imp::{review_reply::ReviewReply, service::PairedEffects},
 };
 use hibana::{Endpoint, g::Message};
 use serde_json::Value;
 
 #[hibana_runtime::scope]
-pub async fn run<'r, D: Domain>(
+pub async fn run<'r>(
     endpoint: &mut Endpoint<'r, COMPILER>,
     (mut core, mut config, mut models): (
         Endpoint<'r, CORE>,
         Endpoint<'r, CONFIG>,
         Endpoint<'r, MODELS>,
     ),
-    domain: &D,
+    effects: &impl PairedEffects,
 ) -> ShellResult<()> {
     let mut builds = [Value::Null, Value::Null, Value::Null];
     let (objects, tests) = loop {
@@ -35,21 +35,22 @@ pub async fn run<'r, D: Domain>(
                 }
                 .await?;
                 let admitted = imp::arguments(imp::decode(endpoint.recv::<CompileA>().await?)?, 0)?;
-                let (library, configuration) = async {
+                let result = {
                     let [mut library, mut configuration] = endpoint.par()?;
-                    async { imp::decode(library.recv::<CompileCore>().await?) };
-                    async { imp::decode(configuration.recv::<CompileConfig>().await?) };
-                }
-                .await?;
-                if library != admitted || configuration != admitted {
-                    return Err(ShellError::message(
-                        "compile resources differ from admitted module A input",
-                    ));
-                }
-                let result = domain
-                    .execute("BUILDER_A", "compile_module", admitted)
-                    .await
-                    .map_err(ShellError::message)?;
+                    let (first, second) = async {
+                        async { library.recv::<CompileCore<A>>().await };
+                        async { configuration.recv::<CompileConfig<A>>().await };
+                    }
+                    .await?;
+                    if imp::decode(first.as_bytes())? != admitted
+                        || imp::decode(second.as_bytes())? != admitted
+                    {
+                        return Err(ShellError::message(
+                            "compile resources differ from admitted module A input",
+                        ));
+                    }
+                    effects.apply_pair(first, second).await?
+                };
                 imp::object(&result, 0)?;
                 builds[0] = result.clone();
                 let bytes = imp::encode(&result)?;
@@ -98,21 +99,22 @@ pub async fn run<'r, D: Domain>(
                 }
                 .await?;
                 let admitted = imp::arguments(imp::decode(endpoint.recv::<CompileB>().await?)?, 1)?;
-                let (library, definitions) = async {
+                let result = {
                     let [mut library, mut definitions] = endpoint.par()?;
-                    async { imp::decode(library.recv::<CompileCore>().await?) };
-                    async { imp::decode(definitions.recv::<CompileModels>().await?) };
-                }
-                .await?;
-                if library != admitted || definitions != admitted {
-                    return Err(ShellError::message(
-                        "compile resources differ from admitted module B input",
-                    ));
-                }
-                let result = domain
-                    .execute("BUILDER_B", "compile_module", admitted)
-                    .await
-                    .map_err(ShellError::message)?;
+                    let (first, second) = async {
+                        async { library.recv::<CompileCore<B>>().await };
+                        async { definitions.recv::<CompileModels<B>>().await };
+                    }
+                    .await?;
+                    if imp::decode(first.as_bytes())? != admitted
+                        || imp::decode(second.as_bytes())? != admitted
+                    {
+                        return Err(ShellError::message(
+                            "compile resources differ from admitted module B input",
+                        ));
+                    }
+                    effects.apply_pair(first, second).await?
+                };
                 imp::object(&result, 1)?;
                 builds[1] = result.clone();
                 let bytes = imp::encode(&result)?;
@@ -161,21 +163,22 @@ pub async fn run<'r, D: Domain>(
                 }
                 .await?;
                 let admitted = imp::arguments(imp::decode(endpoint.recv::<CompileC>().await?)?, 2)?;
-                let (configuration, definitions) = async {
+                let result = {
                     let [mut configuration, mut definitions] = endpoint.par()?;
-                    async { imp::decode(configuration.recv::<CompileConfig>().await?) };
-                    async { imp::decode(definitions.recv::<CompileModels>().await?) };
-                }
-                .await?;
-                if configuration != admitted || definitions != admitted {
-                    return Err(ShellError::message(
-                        "compile resources differ from admitted module C input",
-                    ));
-                }
-                let result = domain
-                    .execute("BUILDER_C", "compile_module", admitted)
-                    .await
-                    .map_err(ShellError::message)?;
+                    let (first, second) = async {
+                        async { configuration.recv::<CompileConfig<C>>().await };
+                        async { definitions.recv::<CompileModels<C>>().await };
+                    }
+                    .await?;
+                    if imp::decode(first.as_bytes())? != admitted
+                        || imp::decode(second.as_bytes())? != admitted
+                    {
+                        return Err(ShellError::message(
+                            "compile resources differ from admitted module C input",
+                        ));
+                    }
+                    effects.apply_pair(first, second).await?
+                };
                 imp::object(&result, 2)?;
                 builds[2] = result.clone();
                 let bytes = imp::encode(&result)?;
@@ -289,11 +292,8 @@ pub async fn run<'r, D: Domain>(
         Ok::<(), ShellError>(())
     }
     .await?;
-    let arguments = imp::link_arguments(imp::decode(endpoint.recv::<Link>().await?)?)?;
-    let result = domain
-        .execute("INTEGRATOR", "link_modules", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let received = endpoint.recv::<Link>().await?;
+    let result = effects.apply(received).await?;
     imp::linked(&result, &objects, &tests)?;
     let bytes = imp::encode(&result)?;
     endpoint.send::<Linked>(&bytes.as_slice()).await?;

@@ -1,5 +1,5 @@
 //! One source for all initial builder orders and unbounded data-driven repairs.
-use super::wire::Arguments;
+use super::wire::{Arguments, BuildRequest};
 use crate::shell::imp::review_reply::ReviewReply;
 use hibana::{
     Endpoint, g,
@@ -53,9 +53,9 @@ pub type ReturnModels<'r> = g::Msg<9, Endpoint<'r, MODELS>>;
 pub type CompileA<'a> = g::Msg<10, &'a [u8]>;
 pub type CompileB<'a> = g::Msg<11, &'a [u8]>;
 pub type CompileC<'a> = g::Msg<12, &'a [u8]>;
-pub type CompileCore<'a> = g::Msg<13, &'a [u8]>;
-pub type CompileConfig<'a> = g::Msg<14, &'a [u8]>;
-pub type CompileModels<'a> = g::Msg<15, &'a [u8]>;
+pub type CompileCore<'a, const ROLE: u8> = g::Msg<13, BuildRequest<'a, ROLE>>;
+pub type CompileConfig<'a, const ROLE: u8> = g::Msg<14, BuildRequest<'a, ROLE>>;
+pub type CompileModels<'a, const ROLE: u8> = g::Msg<15, BuildRequest<'a, ROLE>>;
 pub type CoreBuilt<'a> = g::Msg<16, &'a [u8]>;
 pub type ConfigBuilt<'a> = g::Msg<17, &'a [u8]>;
 pub type ModelsBuilt<'a> = g::Msg<18, &'a [u8]>;
@@ -67,9 +67,9 @@ pub type TestObjectC<'a> = g::Msg<24, &'a [u8]>;
 pub type UpdateA<'a> = g::Msg<25, &'a [u8]>;
 pub type UpdateB<'a> = g::Msg<26, &'a [u8]>;
 pub type UpdateC<'a> = g::Msg<27, &'a [u8]>;
-pub type TestA<'a> = g::Msg<28, &'a [u8]>;
-pub type TestB<'a> = g::Msg<29, &'a [u8]>;
-pub type TestC<'a> = g::Msg<30, &'a [u8]>;
+pub type TestA<'a> = g::Msg<28, BuildRequest<'a, TESTER>>;
+pub type TestB<'a> = g::Msg<29, BuildRequest<'a, TESTER>>;
+pub type TestC<'a> = g::Msg<30, BuildRequest<'a, TESTER>>;
 pub type Tested<'a> = g::Msg<31, &'a [u8]>;
 pub type Feedback<'a> = g::Msg<32, &'a [u8]>;
 pub type AllForCompiler<'a> = g::Msg<34, &'a [u8]>;
@@ -83,7 +83,7 @@ pub type FinishChecks<'a> = g::Msg<41, ReviewReply<'a, true>>;
 pub type FrozenCore<'r> = g::Msg<42, Endpoint<'r, CORE>>;
 pub type FrozenConfig<'r> = g::Msg<43, Endpoint<'r, CONFIG>>;
 pub type FrozenModels<'r> = g::Msg<44, Endpoint<'r, MODELS>>;
-pub type Link<'a> = g::Msg<45, &'a [u8]>;
+pub type Link<'a> = g::Msg<45, BuildRequest<'a, INTEGRATOR>>;
 pub type Linked<'a> = g::Msg<46, &'a [u8]>;
 pub type FinishedA<'a> = g::Msg<47, &'a [u8]>;
 pub type FinishedB<'a> = g::Msg<48, &'a [u8]>;
@@ -161,8 +161,8 @@ fn build_a() -> impl Projectable {
             g::send::<A, COMPILER, CompileA>(),
             g::seq(
                 g::par(
-                    g::send::<CORE, COMPILER, CompileCore>(),
-                    g::send::<CONFIG, COMPILER, CompileConfig>(),
+                    g::send::<CORE, COMPILER, CompileCore<A>>(),
+                    g::send::<CONFIG, COMPILER, CompileConfig<A>>(),
                 ),
                 g::seq(
                     g::par(
@@ -191,8 +191,8 @@ fn build_b() -> impl Projectable {
             g::send::<B, COMPILER, CompileB>(),
             g::seq(
                 g::par(
-                    g::send::<CORE, COMPILER, CompileCore>(),
-                    g::send::<MODELS, COMPILER, CompileModels>(),
+                    g::send::<CORE, COMPILER, CompileCore<B>>(),
+                    g::send::<MODELS, COMPILER, CompileModels<B>>(),
                 ),
                 g::seq(
                     g::par(
@@ -221,8 +221,8 @@ fn build_c() -> impl Projectable {
             g::send::<C, COMPILER, CompileC>(),
             g::seq(
                 g::par(
-                    g::send::<CONFIG, COMPILER, CompileConfig>(),
-                    g::send::<MODELS, COMPILER, CompileModels>(),
+                    g::send::<CONFIG, COMPILER, CompileConfig<C>>(),
+                    g::send::<MODELS, COMPILER, CompileModels<C>>(),
                 ),
                 g::seq(
                     g::par(
@@ -758,9 +758,9 @@ impl Programs {
             ("CompileA", CompileA::LOGICAL_LABEL),
             ("CompileB", CompileB::LOGICAL_LABEL),
             ("CompileC", CompileC::LOGICAL_LABEL),
-            ("CompileCore", CompileCore::LOGICAL_LABEL),
-            ("CompileConfig", CompileConfig::LOGICAL_LABEL),
-            ("CompileModels", CompileModels::LOGICAL_LABEL),
+            ("CompileCore", CompileCore::<A>::LOGICAL_LABEL),
+            ("CompileConfig", CompileConfig::<A>::LOGICAL_LABEL),
+            ("CompileModels", CompileModels::<B>::LOGICAL_LABEL),
             ("CoreBuilt", CoreBuilt::LOGICAL_LABEL),
             ("ConfigBuilt", ConfigBuilt::LOGICAL_LABEL),
             ("ModelsBuilt", ModelsBuilt::LOGICAL_LABEL),

@@ -1,4 +1,5 @@
 //! Direct operation files and actual affine resource requests.
+use super::super::wire::BuildRequest;
 use super::super::{global::*, imp};
 use crate::shell::{ShellError, ShellResult};
 use hibana::{Endpoint, g::Message};
@@ -27,11 +28,13 @@ pub async fn run<const ROLE: u8>(endpoint: &mut Endpoint<ROLE>) -> ShellResult<(
                 endpoint.send::<CompileA>(&bytes.as_slice()).await?;
                 let (first, second) = async {
                     async {
-                        core.send::<CompileCore>(&bytes.as_slice()).await?;
+                        core.send::<CompileCore<A>>(&BuildRequest(&bytes)).await?;
                         imp::decode(core.recv::<CoreBuilt>().await?)
                     };
                     async {
-                        config.send::<CompileConfig>(&bytes.as_slice()).await?;
+                        config
+                            .send::<CompileConfig<A>>(&BuildRequest(&bytes))
+                            .await?;
                         imp::decode(config.recv::<ConfigBuilt>().await?)
                     };
                 }
@@ -70,11 +73,13 @@ pub async fn run<const ROLE: u8>(endpoint: &mut Endpoint<ROLE>) -> ShellResult<(
                 endpoint.send::<CompileB>(&bytes.as_slice()).await?;
                 let (first, second) = async {
                     async {
-                        core.send::<CompileCore>(&bytes.as_slice()).await?;
+                        core.send::<CompileCore<B>>(&BuildRequest(&bytes)).await?;
                         imp::decode(core.recv::<CoreBuilt>().await?)
                     };
                     async {
-                        models.send::<CompileModels>(&bytes.as_slice()).await?;
+                        models
+                            .send::<CompileModels<B>>(&BuildRequest(&bytes))
+                            .await?;
                         imp::decode(models.recv::<ModelsBuilt>().await?)
                     };
                 }
@@ -113,11 +118,15 @@ pub async fn run<const ROLE: u8>(endpoint: &mut Endpoint<ROLE>) -> ShellResult<(
                 endpoint.send::<CompileC>(&bytes.as_slice()).await?;
                 let (first, second) = async {
                     async {
-                        config.send::<CompileConfig>(&bytes.as_slice()).await?;
+                        config
+                            .send::<CompileConfig<C>>(&BuildRequest(&bytes))
+                            .await?;
                         imp::decode(config.recv::<ConfigBuilt>().await?)
                     };
                     async {
-                        models.send::<CompileModels>(&bytes.as_slice()).await?;
+                        models
+                            .send::<CompileModels<C>>(&BuildRequest(&bytes))
+                            .await?;
                         imp::decode(models.recv::<ModelsBuilt>().await?)
                     };
                 }

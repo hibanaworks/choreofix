@@ -2,7 +2,10 @@
 use super::{global::*, imp, localside};
 use crate::shell::{
     ShellError, ShellResult,
-    imp::{bus::Bus, service::Domain},
+    imp::{
+        bus::Bus,
+        service::{PairedEffects, ReceivedEffects, ResourceReceipt, SimulatorOperation},
+    },
 };
 use hibana::runtime::{SessionKitStorage, ids::SessionId, resolver::DecisionArm};
 use serde_json::{Value, json};
@@ -130,17 +133,35 @@ fn typed_files_reject_wrong_modules_and_unbound_fields() {
 #[test]
 async fn actual_compiler_rejects_changed_resource_arguments_before_any_effect() -> ShellResult<()> {
     struct Effects(Cell<usize>);
-    impl Domain for Effects {
-        async fn execute(
-            &self,
-            _agent: &'static str,
-            _tool: &'static str,
-            _arguments: Value,
-        ) -> Result<Value, String> {
-            self.0.set(self.0.get() + 1);
-            Err("unexpected effect".into())
+    impl ReceivedEffects for Effects {
+        fn apply<'io, P: SimulatorOperation>(
+            &'io self,
+            _: hibana::runtime::wire::ReceivedPayload<'_, P>,
+        ) -> impl Future<Output = ShellResult<Value>> + use<'io, P> {
+            async move {
+                self.0.set(self.0.get() + 1);
+                Err(ShellError::message("unexpected effect"))
+            }
         }
     }
+    impl PairedEffects for Effects {
+        async fn apply_pair<'a, 'b, P: SimulatorOperation<2>>(
+            &self,
+            _: impl Into<ResourceReceipt<'a, P>>,
+            _: impl Into<ResourceReceipt<'b, P>>,
+        ) -> ShellResult<Value> {
+            self.0.set(self.0.get() + 1);
+            Err(ShellError::message("unexpected compile effect"))
+        }
+    }
+    // The wrong builder is already rejected by the resource payload codec. The
+    // real receiver below also rejects different bytes valid for the same builder.
+    assert!(
+        <super::wire::BuildRequest<A> as hibana::runtime::wire::WirePayload>::validate_payload(
+            hibana::runtime::wire::Payload::new(br#"{"module_name":"module_b"}"#),
+        )
+        .is_err()
+    );
     let p = programs();
     let session = SessionId::new(SESSION);
     let (bus, _io, _terminals) = Bus::open(
@@ -245,11 +266,14 @@ async fn actual_compiler_rejects_changed_resource_arguments_before_any_effect() 
                     a.send::<CompileA>(&bytes.as_slice()).await?;
                     async {
                         async {
-                            core.send::<CompileCore>(&bytes.as_slice()).await?;
+                            core.send::<CompileCore<A>>(&super::wire::BuildRequest(&bytes))
+                                .await?;
                         };
                         async {
                             config
-                                .send::<CompileConfig>(&br#"{"module_name":"module_b"}"#.as_slice())
+                                .send::<CompileConfig<A>>(&super::wire::BuildRequest(
+                                    br#"{"module_name":"MODULE A"}"#,
+                                ))
                                 .await?;
                         };
                         Ok::<(), ShellError>(())

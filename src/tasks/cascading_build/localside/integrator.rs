@@ -1,4 +1,5 @@
 //! Candidate data selects repair; the model owns the actual link request.
+use super::super::wire::BuildRequest;
 use super::super::{global::*, imp};
 use crate::shell::{ShellError, ShellResult, imp::review_reply::ReviewReply};
 use core::cell::Cell;
@@ -116,7 +117,7 @@ pub async fn run(endpoint: &mut Endpoint<INTEGRATOR>, input: &Cell<Value>) -> Sh
         .await?;
     let arguments = endpoint.recv::<LinkFile>().await?.into_value();
     let bytes = imp::encode(&arguments)?;
-    endpoint.send::<Link>(&bytes.as_slice()).await?;
+    endpoint.send::<Link>(&BuildRequest(&bytes)).await?;
     let result = imp::decode(endpoint.recv::<Linked>().await?)?;
     imp::linked(&result, &objects, &tests)?;
     let bytes = imp::encode(&result)?;

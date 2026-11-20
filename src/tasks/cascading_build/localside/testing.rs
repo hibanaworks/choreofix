@@ -1,32 +1,31 @@
 //! The single physical worker returns actual input-bound test receipts.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{Endpoint, g::Message};
 use serde_json::Value;
 
 #[hibana_runtime::scope]
-pub async fn run<D: Domain>(endpoint: &mut Endpoint<TEST_SERVICE>, domain: &D) -> ShellResult<()> {
+pub async fn run(
+    endpoint: &mut Endpoint<TEST_SERVICE>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()> {
     let mut results = [Value::Null, Value::Null, Value::Null];
     // Three initial tests precede a known aggregate send outside that choice.
     for _ in 0..3 {
         let branch = endpoint.offer().await?;
-        let (index, request) = match branch.label() {
-            TestA::LOGICAL_LABEL => (0, imp::decode(branch.recv::<TestA>().await?)?),
-            TestB::LOGICAL_LABEL => (1, imp::decode(branch.recv::<TestB>().await?)?),
-            TestC::LOGICAL_LABEL => (2, imp::decode(branch.recv::<TestC>().await?)?),
+        let (index, received) = match branch.label() {
+            TestA::LOGICAL_LABEL => (0, branch.recv::<TestA>().await?),
+            TestB::LOGICAL_LABEL => (1, branch.recv::<TestB>().await?),
+            TestC::LOGICAL_LABEL => (2, branch.recv::<TestC>().await?),
             _ => return Err(ShellError::message("unexpected initial test request")),
         };
-        if request.as_object().is_none_or(|fields| fields.len() != 2) {
+        let request = imp::decode(received.as_bytes())?;
+        if request["object"]["module"] != imp::MODULES[index] {
             return Err(ShellError::message(
-                "test needs arguments and an actual input object",
+                "test message differs from its input module",
             ));
         }
-        let arguments = imp::arguments(request["arguments"].clone(), index)?;
-        imp::validate_object(&request["object"], index)?;
-        let result = domain
-            .execute("TEST_RUNNER", "run_build_tests", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let result = effects.apply(received).await?;
         imp::test_result(&result, index)?;
         if result["data"]["input_object"] != request["object"] {
             return Err(ShellError::message(
@@ -51,10 +50,10 @@ pub async fn run<D: Domain>(endpoint: &mut Endpoint<TEST_SERVICE>, domain: &D) -
     endpoint.send::<AllForCompiler>(&bytes.as_slice()).await?;
     loop {
         let branch = endpoint.offer().await?;
-        let (index, request) = match branch.label() {
-            TestA::LOGICAL_LABEL => (0, imp::decode(branch.recv::<TestA>().await?)?),
-            TestB::LOGICAL_LABEL => (1, imp::decode(branch.recv::<TestB>().await?)?),
-            TestC::LOGICAL_LABEL => (2, imp::decode(branch.recv::<TestC>().await?)?),
+        let (index, received) = match branch.label() {
+            TestA::LOGICAL_LABEL => (0, branch.recv::<TestA>().await?),
+            TestB::LOGICAL_LABEL => (1, branch.recv::<TestB>().await?),
+            TestC::LOGICAL_LABEL => (2, branch.recv::<TestC>().await?),
             FinishedService::LOGICAL_LABEL => {
                 let result = imp::decode(branch.recv::<FinishedService>().await?)?;
                 if result["tool_name"] != "link_modules"
@@ -69,17 +68,13 @@ pub async fn run<D: Domain>(endpoint: &mut Endpoint<TEST_SERVICE>, domain: &D) -
             }
             _ => return Err(ShellError::message("unexpected test-worker continuation")),
         };
-        if request.as_object().is_none_or(|fields| fields.len() != 2) {
+        let request = imp::decode(received.as_bytes())?;
+        if request["object"]["module"] != imp::MODULES[index] {
             return Err(ShellError::message(
-                "test needs arguments and an actual input object",
+                "test message differs from its input module",
             ));
         }
-        let arguments = imp::arguments(request["arguments"].clone(), index)?;
-        imp::validate_object(&request["object"], index)?;
-        let result = domain
-            .execute("TEST_RUNNER", "run_build_tests", arguments)
-            .await
-            .map_err(ShellError::message)?;
+        let result = effects.apply(received).await?;
         imp::test_result(&result, index)?;
         if result["data"]["input_object"] != request["object"] {
             return Err(ShellError::message(

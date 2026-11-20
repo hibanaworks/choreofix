@@ -1,4 +1,5 @@
 //! Each test consumes the actual received object and a typed file request.
+use super::super::wire::BuildRequest;
 use super::super::{global::*, imp};
 use crate::shell::{ShellError, ShellResult};
 use hibana::{Endpoint, g::Message};
@@ -29,9 +30,9 @@ pub async fn run(endpoint: &mut Endpoint<TESTER>) -> ShellResult<()> {
         };
         let bytes = imp::encode(&json!({"arguments":arguments,"object":object}))?;
         match index {
-            0 => endpoint.send::<TestA>(&bytes.as_slice()).await?,
-            1 => endpoint.send::<TestB>(&bytes.as_slice()).await?,
-            _ => endpoint.send::<TestC>(&bytes.as_slice()).await?,
+            0 => endpoint.send::<TestA>(&BuildRequest(&bytes)).await?,
+            1 => endpoint.send::<TestB>(&BuildRequest(&bytes)).await?,
+            _ => endpoint.send::<TestC>(&BuildRequest(&bytes)).await?,
         }
         let result = imp::decode(endpoint.recv::<Tested>().await?)?;
         imp::test_result(&result, index)?;
