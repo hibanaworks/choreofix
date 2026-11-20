@@ -12,6 +12,9 @@ use std::{
 struct Interval {
     id: u64,
     agent: String,
+    tool: String,
+    arguments: Option<Value>,
+    success: Option<bool>,
     start: u64,
     end: u64,
 }
@@ -69,16 +72,17 @@ fn measure(run: &Value) -> Result<(Value, usize, usize)> {
                 let agent = msg["agent"].as_str().ok_or("domain participant")?;
                 let tool = msg["tool"].as_str().ok_or("domain tool")?;
                 if row["direction"] == "domain_start" {
+                    let arguments = msg.get("arguments").cloned();
                     if msg["type"] != "execute"
                         || starts
-                            .insert(id, (agent.to_owned(), tool.to_owned()))
+                            .insert(id, (agent.to_owned(), tool.to_owned(), arguments))
                             .is_some()
                     {
                         return Err(format!("invalid or duplicate domain start {id}").into());
                     }
                 } else if !starts
                     .get(&id)
-                    .is_some_and(|(actor, name)| actor == agent && name == tool)
+                    .is_some_and(|(actor, name, _)| actor == agent && name == tool)
                     || ends
                         .insert(
                             id,
@@ -102,9 +106,13 @@ fn measure(run: &Value) -> Result<(Value, usize, usize)> {
                 if start > end || msg["clock"] != "runner monotonic elapsed" {
                     return Err(format!("invalid simulator clock for {id}").into());
                 }
+                let (agent, tool, arguments) = starts.get(&id).ok_or("missing request")?;
                 intervals.push(Interval {
                     id,
-                    agent: starts.get(&id).ok_or("missing request")?.0.clone(),
+                    agent: agent.clone(),
+                    tool: tool.clone(),
+                    arguments: arguments.clone(),
+                    success: msg["result"]["success"].as_bool(),
                     start,
                     end,
                 });
@@ -122,12 +130,31 @@ fn measure(run: &Value) -> Result<(Value, usize, usize)> {
     }
     intervals.sort_by_key(|c| (c.start, c.id));
     let (pairs, peak) = overlaps(&intervals);
+    let mut negative_outcomes = Vec::new();
+    for (index, call) in intervals
+        .iter()
+        .enumerate()
+        .filter(|(_, call)| call.success == Some(false))
+    {
+        let next = intervals[index + 1..].iter().find(|other| {
+            other.start > call.end && other.agent == call.agent && other.tool == call.tool
+        });
+        negative_outcomes.push(json!({
+            "id":call.id, "agent":call.agent, "tool":call.tool,
+            "next_same_operation":next.map(|other|json!({
+                "id":other.id, "success":other.success,
+                "same_arguments":other.arguments.as_ref().zip(call.arguments.as_ref()).map(|(a,b)|a == b)
+            }))
+        }));
+    }
     Ok((
         json!({
             "task":run["task"], "depth":run["depth"], "directory":directory, "events_sha256":run["events_sha256"],
             "audit_sha256":run["audit_sha256"], "result_sha256":run["result_sha256"],
             "intervals":intervals.iter().map(|c|json!({"id":c.id,"agent":c.agent,"start_ns":c.start,"end_ns":c.end})).collect::<Vec<_>>(),
             "overlapping_call_ids":pairs, "peak_distinct_participants":peak,
+            "calls_with_boolean_outcome":intervals.iter().filter(|call| call.success.is_some()).count(),
+            "negative_outcomes":negative_outcomes,
         }),
         intervals.len(),
         pairs.len(),
@@ -193,6 +220,9 @@ mod tests {
         .map(|(id, agent, start, end)| Interval {
             id,
             agent: agent.into(),
+            tool: String::from("fixture"),
+            arguments: None,
+            success: None,
             start,
             end,
         });

@@ -1,0 +1,974 @@
+{
+  "scope": "Selected source-bound development trials. Each later call is the first call by the same participant to the same simulator tool starting strictly after the earlier call finished.",
+  "cohort_sha256": "5e194d56bb8d1dbf418049ad5c66eaa9857e79f7375f13bbe995878796f40ea9",
+  "analysis_sha256": "d9e941b91cad9fbba1d0a01649f83f0415e95671bf05cb09f4bda0ae5416de71",
+  "conditions": 43,
+  "tasks": 36,
+  "calls": 732,
+  "calls_with_boolean_outcome": 732,
+  "conditions_with_negative_outcome": 20,
+  "tasks_with_negative_outcome": 17,
+  "outcomes": {
+    "negative": 112,
+    "no_later_call": 10,
+    "same_arguments": {
+      "positive": 42,
+      "negative": 34
+    },
+    "changed_arguments": {
+      "positive": 12,
+      "negative": 14
+    }
+  },
+  "cases": [
+    {
+      "task": "1E",
+      "depth": 0,
+      "events_sha256": "d59369cf08bce88e52b76e43bb5ea11a9851dea2fc94141e988218dbd30d3076",
+      "calls": 12,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "1H",
+      "depth": 2,
+      "events_sha256": "7051dc16b9f77c58b682b48189e47257d2817ab54a03d8a9bc4dccc45ee0e169",
+      "calls": 70,
+      "negative_ids": [
+        68,
+        71,
+        76,
+        77,
+        79,
+        81,
+        98,
+        112,
+        114,
+        117,
+        140,
+        143,
+        144,
+        146
+      ],
+      "outcomes": {
+        "negative": 14,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 7,
+          "negative": 7
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "1M",
+      "depth": 0,
+      "events_sha256": "a971a33528f200d7df5851ed1f53ff838ffe3a4a94ad27f0d54e65383709e9a3",
+      "calls": 20,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "2E",
+      "depth": 0,
+      "events_sha256": "2d118bc8b43fd096e643fa98a1a984145a511150c28ae12548ff727d724b61bf",
+      "calls": 12,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "2H",
+      "depth": 0,
+      "events_sha256": "d5a76c842d8d2662d5684488dfba271bb49ecd28af7d9a1caf70128291069898",
+      "calls": 28,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "2M",
+      "depth": 0,
+      "events_sha256": "366a4fc24cdde4b591c32a6b205b61ffb71ee304e4171dfb8fa7a341504c12b8",
+      "calls": 20,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "3E",
+      "depth": 2,
+      "events_sha256": "3b794f2c9f72affd962e1416b9837ee73ef372f4d3b752900a4f895fc135aa66",
+      "calls": 13,
+      "negative_ids": [
+        25,
+        29
+      ],
+      "outcomes": {
+        "negative": 2,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 1,
+          "negative": 1
+        }
+      }
+    },
+    {
+      "task": "3H",
+      "depth": 2,
+      "events_sha256": "3c7b810b6a194c7ae6ac6e32307bd6dbb30b7974026e77a44fa2a9a3a93ace5a",
+      "calls": 30,
+      "negative_ids": [
+        69,
+        84
+      ],
+      "outcomes": {
+        "negative": 2,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 1,
+          "negative": 1
+        }
+      }
+    },
+    {
+      "task": "3M",
+      "depth": 2,
+      "events_sha256": "5f9385df0daa83c8339c347e7e5e64f66e552c1721135f9ccb3b4a8c7712effb",
+      "calls": 26,
+      "negative_ids": [
+        47,
+        52,
+        79,
+        84
+      ],
+      "outcomes": {
+        "negative": 4,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 2,
+          "negative": 2
+        }
+      }
+    },
+    {
+      "task": "4E",
+      "depth": 0,
+      "events_sha256": "05e46b2fa2e9880c91036818b7ff34ce18f9274badd5be2fe317618ac411f5b9",
+      "calls": 4,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "4M",
+      "depth": 0,
+      "events_sha256": "eb8d5eeefcb26fa855f2f3a07379272c786708174774970e6857f225968acd4f",
+      "calls": 12,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "5E",
+      "depth": 0,
+      "events_sha256": "b9d582f9c429dbaf99f08b6fc0a9282b6c71dbdb9842471e9cd2ebe855fc6be1",
+      "calls": 6,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "5H",
+      "depth": 0,
+      "events_sha256": "49c3f47cb6e806c511aa93b0cf3abfabc4fa756e827f859a3cb1ce69e11f816f",
+      "calls": 16,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "5M",
+      "depth": 0,
+      "events_sha256": "7d9a641a561d74329c1787a06b06014b4d1946dc484c54a8462886365885c2e3",
+      "calls": 12,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "6E",
+      "depth": 2,
+      "events_sha256": "cf95155dec2c3b8a3b426ae5d74abde5d9d158adc03c2b1b54c02ad5e4284fae",
+      "calls": 10,
+      "negative_ids": [
+        11,
+        18
+      ],
+      "outcomes": {
+        "negative": 2,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 1,
+          "negative": 1
+        }
+      }
+    },
+    {
+      "task": "6H",
+      "depth": 2,
+      "events_sha256": "25b996f48f489d6855fb0ba85196ded931b0f6758ae382144e857e9567235587",
+      "calls": 53,
+      "negative_ids": [
+        33,
+        54,
+        82,
+        133,
+        172,
+        213
+      ],
+      "outcomes": {
+        "negative": 6,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 2,
+          "negative": 2
+        },
+        "changed_arguments": {
+          "positive": 1,
+          "negative": 1
+        }
+      }
+    },
+    {
+      "task": "6M",
+      "depth": 2,
+      "events_sha256": "a99625f3ad61307254c89b8135a0ec874649c02cc6bfa998d6046c251fe9a81a",
+      "calls": 26,
+      "negative_ids": [
+        35,
+        40,
+        118,
+        143
+      ],
+      "outcomes": {
+        "negative": 4,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 1,
+          "negative": 1
+        },
+        "changed_arguments": {
+          "positive": 1,
+          "negative": 1
+        }
+      }
+    },
+    {
+      "task": "7E",
+      "depth": 2,
+      "events_sha256": "13b390393339109154353be78af43c6ad0bb4a2bafc41128c4e2e90944515ec0",
+      "calls": 10,
+      "negative_ids": [
+        25,
+        26
+      ],
+      "outcomes": {
+        "negative": 2,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 1,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 1,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "7M",
+      "depth": 1,
+      "events_sha256": "932aa762b48797dc4bc186a9c24fa2a6d581f50c90c2c3914b6f1d66694c5f51",
+      "calls": 27,
+      "negative_ids": [
+        19,
+        22,
+        24,
+        67,
+        80
+      ],
+      "outcomes": {
+        "negative": 5,
+        "no_later_call": 1,
+        "same_arguments": {
+          "positive": 1,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 2,
+          "negative": 1
+        }
+      }
+    },
+    {
+      "task": "8E",
+      "depth": 0,
+      "events_sha256": "5f90aa0fb70991d6a11b778879abddda6a46d877f5eadc2ee0f5d04a5d52bd86",
+      "calls": 3,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "8E",
+      "depth": 2,
+      "events_sha256": "6b952b46f41cbd39bdd7094889e155736131e2ca1d22d10df96ea6d58199c8a9",
+      "calls": 3,
+      "negative_ids": [
+        11
+      ],
+      "outcomes": {
+        "negative": 1,
+        "no_later_call": 1,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "8M",
+      "depth": 0,
+      "events_sha256": "b709ec71a832e6531dc0ae7eadac36b0a1751df87c9e5d25dfc3ce88859e9360",
+      "calls": 7,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "8M",
+      "depth": 1,
+      "events_sha256": "f0bac1c8b91344d9a1e09b8125ebd745553efff2f8e6dfb2d8dcb30b778f329f",
+      "calls": 12,
+      "negative_ids": [
+        41,
+        71
+      ],
+      "outcomes": {
+        "negative": 2,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 2,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "8M",
+      "depth": 2,
+      "events_sha256": "9e3e5dfb835849e6f990674884fb703c97b9e79532b7445fee8e6d8b9039ffde",
+      "calls": 17,
+      "negative_ids": [
+        31,
+        40,
+        59,
+        78
+      ],
+      "outcomes": {
+        "negative": 4,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 2,
+          "negative": 2
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "9E",
+      "depth": 0,
+      "events_sha256": "190f82af0b966f68c82144e34625aa4f51cdb1a5146faf68de738f5fb9d7374a",
+      "calls": 6,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "9H",
+      "depth": 0,
+      "events_sha256": "a0acfb2075d04b0d5a40e50756b74789e272f08a7ad7444dbed10275e3959a6f",
+      "calls": 14,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "9M",
+      "depth": 0,
+      "events_sha256": "f6fad5345a82f64b6ede73358dd19f8ff1a4ef5edfb78ef2d9197ec6eba4694d",
+      "calls": 10,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "10E",
+      "depth": 0,
+      "events_sha256": "36d5e7026059663cd319172750d0e0ed1ba50346c8d32634b7f0923a2a02319c",
+      "calls": 4,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "10M",
+      "depth": 2,
+      "events_sha256": "7731e1a4c8f3a31d9a6afd9c88df39e55702191fadbef60ee45ed8ee6a3eff72",
+      "calls": 13,
+      "negative_ids": [
+        28,
+        43,
+        56
+      ],
+      "outcomes": {
+        "negative": 3,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 1,
+          "negative": 2
+        }
+      }
+    },
+    {
+      "task": "11E",
+      "depth": 0,
+      "events_sha256": "03a5596e7b97bf416b61f48afdf89fac1ab6e1386f48dca5aa2cccee0444ac1c",
+      "calls": 5,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "12E",
+      "depth": 0,
+      "events_sha256": "203270446c6b945c4f6f9e9f8ee873cf10be5743612cc5eb3232c5716fca2778",
+      "calls": 9,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "13E",
+      "depth": 0,
+      "events_sha256": "a4451eb8b5fe1eab7a1d9f579aa31ef67bf0335c51df0b9e9d35a508c918c39a",
+      "calls": 8,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "13H",
+      "depth": 0,
+      "events_sha256": "4add1d57439b660d1a7437e255cf11e224dd84635a2a9c9772d38baab2e097a6",
+      "calls": 12,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "13H",
+      "depth": 1,
+      "events_sha256": "3aaa216129c9c32f547c54683c9218ad63390c78e337f1f10e836448f66cb7ec",
+      "calls": 19,
+      "negative_ids": [
+        16,
+        54
+      ],
+      "outcomes": {
+        "negative": 2,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 2,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "13H",
+      "depth": 2,
+      "events_sha256": "826db827ef19ce5b4dc2fc949ea887f34e66a7a55cc9bb94e99992196b5cafe4",
+      "calls": 14,
+      "negative_ids": [
+        18,
+        37,
+        68,
+        75
+      ],
+      "outcomes": {
+        "negative": 4,
+        "no_later_call": 2,
+        "same_arguments": {
+          "positive": 1,
+          "negative": 1
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "13M",
+      "depth": 2,
+      "events_sha256": "123d1cfb41452a041545f9102bacf0fda17209c85fe5c6b8738c455dd8297ff1",
+      "calls": 17,
+      "negative_ids": [
+        20,
+        23,
+        25,
+        34
+      ],
+      "outcomes": {
+        "negative": 4,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 1,
+          "negative": 1
+        },
+        "changed_arguments": {
+          "positive": 1,
+          "negative": 1
+        }
+      }
+    },
+    {
+      "task": "14E",
+      "depth": 0,
+      "events_sha256": "58037ecdd7a7377c9d11239927812e0cdb2802e335086ec0cfe8c6436063c2eb",
+      "calls": 13,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "14H",
+      "depth": 2,
+      "events_sha256": "ae19d926def802bf25269366f95014432fdb30b2bb80c443948bc9badafabf8f",
+      "calls": 34,
+      "negative_ids": [
+        18,
+        20,
+        26,
+        27,
+        47,
+        50,
+        58,
+        63,
+        68,
+        72,
+        77,
+        80,
+        89,
+        91,
+        107,
+        113,
+        120,
+        122
+      ],
+      "outcomes": {
+        "negative": 18,
+        "no_later_call": 3,
+        "same_arguments": {
+          "positive": 5,
+          "negative": 7
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 3
+        }
+      }
+    },
+    {
+      "task": "14M",
+      "depth": 2,
+      "events_sha256": "bffd61663f9d15d8ddf44ca9af954f1772c0cf1e2515abfacf48834c4a8f7bb6",
+      "calls": 32,
+      "negative_ids": [
+        13,
+        17,
+        19,
+        26,
+        37,
+        45,
+        49,
+        52,
+        53,
+        57,
+        64,
+        66,
+        75,
+        95
+      ],
+      "outcomes": {
+        "negative": 14,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 7,
+          "negative": 7
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "16E",
+      "depth": 0,
+      "events_sha256": "1ee39f15cebd6f52142e8f23890db578c1b01c7ddec977b474782cfe1a950b39",
+      "calls": 3,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "16M",
+      "depth": 0,
+      "events_sha256": "f772977bd148f8712be84d0a224d777e419efc33338f061cde85d5b97d995490",
+      "calls": 14,
+      "negative_ids": [],
+      "outcomes": {
+        "negative": 0,
+        "no_later_call": 0,
+        "same_arguments": {
+          "positive": 0,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "16M",
+      "depth": 1,
+      "events_sha256": "a559ceb06378f21d2eb95d07e7055c5be6c631a37f248ba0e5147b82cd950651",
+      "calls": 26,
+      "negative_ids": [
+        13,
+        16,
+        24,
+        43,
+        67,
+        72,
+        130
+      ],
+      "outcomes": {
+        "negative": 7,
+        "no_later_call": 1,
+        "same_arguments": {
+          "positive": 6,
+          "negative": 0
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    },
+    {
+      "task": "16M",
+      "depth": 2,
+      "events_sha256": "498bcb7cbedb4ddeb402e9d7b371aa9c53b867734c2f57ac91931f924fc146c6",
+      "calls": 30,
+      "negative_ids": [
+        16,
+        19,
+        26,
+        32,
+        38,
+        50,
+        59,
+        67,
+        83,
+        88,
+        122,
+        125
+      ],
+      "outcomes": {
+        "negative": 12,
+        "no_later_call": 2,
+        "same_arguments": {
+          "positive": 4,
+          "negative": 6
+        },
+        "changed_arguments": {
+          "positive": 0,
+          "negative": 0
+        }
+      }
+    }
+  ]
+}

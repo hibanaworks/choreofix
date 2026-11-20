@@ -206,7 +206,12 @@ both with the submitted build arguments before making one simulator call.
 Some ports still select an operation and supply its arguments to a privileged
 simulator connection. For example, the 8E backend reads the submitted file
 contents and supplies the operation name at the call site. Those receivers
-remain part of the trusted boundary.
+remain part of the trusted boundary. We found this interface in the archived
+receiver sources for 3E, 7E, 8E, 13E/M/H and 14E/M/H. Together these nine
+tasks account for 12 of the 43 selected conditions and 178 of their 732
+simulator calls. Their successful run audits establish correspondence for the
+recorded calls. The receiver API in those builds still permits a host caller
+to supply the tool and arguments.
 All trials trust the runtime, codecs, transport, executor and simulator integration. The simulator
 independently records actual domain effects and resource violations.
 
@@ -634,6 +639,18 @@ a domain request through its simulator callback, including any simulated
 delay. Two intervals count as overlapping only if their intersection has
 positive duration. Per-run bounds and request IDs are archived in
 \path{output/verification/paper-36-ports-20261119.CogEVn/effect-overlap.json}.
+
+All 732 simulator callbacks returned a Boolean outcome. In 20 of the
+43 selected conditions, the simulator returned a negative outcome at least
+once, for a total of 112 negative outcomes. For each we located the first
+later call by the same participant to the same tool whose start followed
+the earlier call's end. There were 102 such follow-ups. In 76 the JSON
+arguments were equal; 42 of those calls succeeded and 34 returned another
+negative result. Among the 26 with different arguments, 12 succeeded.
+Ten negative outcomes had no such follow-up. A negative outcome includes,
+for example, a review requesting changes. Matching the tool alone can
+also match work on a different artifact. These counts describe actions
+in the selected runs and do not estimate a recovery probability.
 
 The five-agent CI/CD task (16M) illustrates what the two outcomes measure.
 With no injected failure, the pipeline passed the production smoke test in

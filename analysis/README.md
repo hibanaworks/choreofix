@@ -207,6 +207,13 @@ received a negative common-world score. The separate
 `16m-effect-intervals.json` preserves request IDs and monotonic intervals for
 all 70 simulator calls in the three 16M conditions.
 
+For 3E, 7E, 8E, 13E/M/H and 14E/M/H, the archived task receivers still call
+`Domain::execute` with a participant, tool and JSON arguments. These tasks
+contribute 12 selected conditions and 178 simulator calls. Each condition's
+`directory/source/src/tasks` preserves the receiver, and `build-source.sha256`
+authenticates its contents against that condition's recorded runtime manifest.
+The 178 counts all calls in those conditions. It does not measure bypasses.
+
 The cohort-wide measurement is reproducible from the same source-bound trials.
 From the repository root, supply the verified cohort and a new output file:
 
@@ -219,6 +226,16 @@ simulator callback to one domain request and its completed result. It counts a
 pair when two different participants' intervals share positive time on the same
 runner clock. The report retains both request IDs and measures the peak number
 of distinct participants with calls in progress. Calls include simulated delays.
+
+The same reader records every simulator result with `success: false` and the
+first subsequent start of the same tool by the same participant strictly after
+that call finished. A missing follow-up is recorded explicitly. For a follow-up
+the reader compares the complete JSON arguments and records its actual result.
+This includes decisions such as a requested revision. A later call may address
+a different artifact, and earlier calls can have changed the world even when
+the JSON arguments match. Requests refused before the simulator are outside
+this measurement. Per-trial counts and source hashes are in
+[the simulator outcome summary](pilot-effect-followups.json).
 
 The 43 archived build manifests contain two versions of the Hibana core sources.
 Both differ from the core source set in the 7H terminal-delivery build.

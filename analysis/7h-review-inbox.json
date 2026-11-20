@@ -86,5 +86,70 @@
     "effect_audit_error": "Error: \"incomplete protocol capture inventory\"",
     "uncollected_guest_output": "Permission denied (os error 2)",
     "uncollected_guest_command_id": 135
+  },
+  "live_after_terminal_collection_change": {
+    "archive": "output/verification/7h-terminal-collection-20261121.RlLKJA",
+    "live_qualified": false,
+    "checkout_head": "f414397da683a1be9ebdd3f49e0d2179340322e6",
+    "source_manifest_sha256": "7c3adc140014e31cbfa8fe93f8ec1493834be99c9c5f9922d9a0a7c8282a653e",
+    "runtime_source_manifest_sha256": "d3f4d5f41fdb73da6dda9a1b770b2c0b9c1dfdb6802671fdda602372812b5549",
+    "build_receipt_sha256": "226b08692998d486e8cac279f45dcad5a237d4409c49e800cc3c9d6711b4d73f",
+    "compiled_projection_sha256": "0c5e57587caa95c3400863f11480bd0b17eb541135d6f480c9ed026a3437101e",
+    "binaries_sha256": {
+      "runner": "bf355de4dfe13877e5cc5c29e66561f6f6c18eb82c0e8b1b121fcc6e76509130",
+      "runtime": "d27f50cf8b8470175a4635db81cfdbd7cdb433aa37ad7200480f98bd1a3a4d2a",
+      "wash.wasm": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca"
+    },
+    "result_sha256": "c439de59bb2d76b2b83b6cd4c54f9e609f3b2140436fb3f24ddce0573f706dd4",
+    "events_sha256": "609049ed0dc6783abcc4938a0bb028d3bd276b1620fcf6370bdd9ab253207e3d",
+    "model_connection_events_sha256": "23abddd6ada3ffd406a55b89e98b0082d446267b6bcab007406d000f2df7f8e4",
+    "elapsed_seconds": 1800.154955041,
+    "model_reports": {
+      "FIGURE_CREATOR": "completed",
+      "WRITER_C": "completed",
+      "EDITOR_IN_CHIEF": "completed",
+      "REVIEWER": "completed",
+      "FACT_CHECKER": "completed",
+      "WRITER_A": "completed",
+      "WRITER_B": "timeout"
+    },
+    "protocol_completion": null,
+    "simulator_effects": 36,
+    "common_world_complete": true,
+    "common_world_violations": [],
+    "writer_b": {
+      "outcome_path": "/service/editorial_outcome",
+      "notices_sent": [
+        {
+          "s": 330.534195917,
+          "wire": 109,
+          "lane": 16,
+          "from": 25,
+          "frame": 8357,
+          "a": "send"
+        },
+        {
+          "s": 411.073302833,
+          "wire": 130,
+          "lane": 14,
+          "from": 1,
+          "frame": 11166,
+          "a": "send"
+        }
+      ],
+      "last_notice": {
+        "guest_command_id": 104,
+        "status": "reviewed",
+        "wire_and_delivered_stdout_sha256": "4f95ae62082659bc13bbace1612ca784e78d7eee4103f0385fb1f6dce2c78d86"
+      },
+      "additional_blocking_read": {
+        "guest_command_id": 109,
+        "terminal_reply": false
+      }
+    },
+    "independent_audits": {
+      "audit-run": "Error: \"failed or altered case result\"",
+      "audit-large-document": "Error: \"incomplete protocol capture inventory\""
+    }
   }
 }
