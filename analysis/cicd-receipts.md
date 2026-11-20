@@ -49,3 +49,17 @@ choreofix-experiments --audit-run NEW_LIVE_DIRECTORY
 ```
 
 The original journals and build receipts are retained in the research archive.
+
+## Retest with shared trial reporting
+
+After [trial reporting moved into the stdio owner](https://github.com/hibanaworks/choreofix/commit/d704994),
+the three completion conditions and early-exit case passed again. A new depth-2
+live run with three agents completed in 35.01 seconds and used
+356,715 inclusive tokens. The audit checked 2,555 EPF records and matched
+all three simulator effects. The common score completed with zero violations.
+The journal SHA-256 is `a2c4e821587c631d1842429490388da06cec5c7e6f1852c4cc1c6552e3fc8a0d` and the binary SHA-256 is
+`c637cb99900fcce27a901352cd8bfdbb8e29fd175373b305eb43d45a4365f58b`.
+
+The partial 4H entry point uses the same reporting code. Its six migration
+orders and three injected test failures all retained the
+`preparation_tests_and_schema` scope in the emitted verdict.
