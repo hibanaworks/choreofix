@@ -6,6 +6,7 @@ import itertools
 import unittest
 
 from benchmark.tools import load_tools
+from benchmark.tools.sim_base import FailureSpec
 
 _WORLD = importlib.import_module("benchmark.environments.4H.sim").MicroserviceMigrationSim
 _SERVICES = ("microservice_a", "microservice_b", "microservice_c")
@@ -126,6 +127,44 @@ class MicroserviceMigrationWorld(unittest.IsolatedAsyncioTestCase):
                     qualified += 1
                     early_registrations += any(step == "register" for step, _ in schedule[:3])
         self.assertEqual((acyclic, qualified, early_registrations), (25, 720, 432))
+
+    async def test_a_repaired_service_can_retest_between_any_other_first_tests(self):
+        schedules = set()
+        for order in itertools.permutations(_SERVICES):
+            for failed_index, failed_service in enumerate(order):
+                for retry_index in range(failed_index + 1, len(order) + 1):
+                    schedule = (*order[:retry_index], failed_service, *order[retry_index:])
+                    self.setUp()
+                    self.world._failure_specs = [
+                        FailureSpec(tool_name="run_tests", call_index=failed_index)
+                    ]
+                    self.assertTrue((await self.plan()).success)
+                    for service in order:
+                        self.assertTrue((await self.act("build", service)).success)
+                        self.assertTrue((await self.act("review", service)).success)
+                    for index, service in enumerate(schedule):
+                        tested = await self.act("test", service)
+                        self.assertEqual(tested.success, index != failed_index)
+                        if index == failed_index:
+                            self.assertEqual(tested.data["status"], "tests_failed")
+                            failed_candidate = tested.data["candidate"]
+                        if index + 1 == retry_index:
+                            repair = await self.act("build", failed_service)
+                            reviewed = await self.act("review", failed_service)
+                            self.assertTrue(repair.success and reviewed.success)
+                            self.assertNotEqual(repair.data["receipt"], failed_candidate)
+                            self.assertEqual(reviewed.data["candidate"], repair.data["receipt"])
+                        if index == retry_index:
+                            self.assertEqual(tested.data["candidate"], repair.data["receipt"])
+                            self.assertEqual(tested.data["review"], reviewed.data["receipt"])
+                    for service in order:
+                        for action in ("schema", "stage", "register"):
+                            self.assertTrue((await self.act(action, service)).success)
+                    with self.subTest(schedule=schedule):
+                        self.assertTrue(self.world.is_complete())
+                        self.assertEqual(self.world.violations, [])
+                    schedules.add(schedule)
+        self.assertEqual(len(schedules), 36)
 
     async def test_unsafe_staging_and_cutover_remain_observable_after_repair(self):
         a, b, c = _SERVICES
