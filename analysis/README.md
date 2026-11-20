@@ -231,8 +231,13 @@ Three live participants completed the depth-two task on the same binary after
 two rejected reviews. The EPF audit checked 5,834 capture records and the effect
 audit matched all 13 simulator calls. This rerun adds evidence for an existing
 task in the cohort. Six production tasks still use the caller-selected simulator
-API (13E/M/H and 14E/M/H, 85 call sites). The native-only 11M fixture has seven
-additional calls.
+API (13E/M/H and 14E/M/H, 85 call sites).
+
+The [11M component results](11m-received-effects.json) cover 30 cabinet
+schedules and 24 inspection/rework runs after the receivers switched to typed
+requests. EPF checked all 6,394 records. The controlled world recorded 246
+effects. The six-guest 15E Wasm regression exercised the same simulator reply
+code. Both sets of trials used scripted participants.
 
 The cohort-wide measurement is reproducible from the same source-bound trials.
 From the repository root, supply the verified cohort and a new output file:
