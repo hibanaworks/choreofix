@@ -1,6 +1,10 @@
 //! Final 15E spot checks on a single aligned reference wafer.
-use choreofix::imp::json::{decode, encode};
-use choreofix::shell::{ShellError, ShellResult, global::Loan, imp::service::Domain};
+use choreofix::imp::json::encode;
+use choreofix::shell::{
+    ShellResult,
+    global::Loan,
+    imp::service::{ReceivedEffects, SimulatorOperation},
+};
 use hibana::{
     Endpoint, g,
     runtime::{
@@ -61,7 +65,7 @@ impl<const CHAMBER: u8> WireEncode for SpotCheck<CHAMBER> {
 
 impl<const CHAMBER: u8> WirePayload for SpotCheck<CHAMBER> {
     const SCHEMA_ID: u32 = 0xac15_0000 | CHAMBER as u32;
-    type Decoded<'a> = Self;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
 
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
         let args: Value =
@@ -85,20 +89,24 @@ impl<const CHAMBER: u8> WirePayload for SpotCheck<CHAMBER> {
         }
     }
 
-    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
-        Self(input.as_bytes().to_vec())
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
+        input
     }
+}
+
+impl SimulatorOperation for SpotCheck<DEPOSITION_CHAMBER> {
+    const RPC: (&'static str, &'static str) = ("INTEGRATION_ENGINEER", "run_deposition");
+}
+
+impl SimulatorOperation for SpotCheck<ETCH_CHAMBER> {
+    const RPC: (&'static str, &'static str) = ("INTEGRATION_ENGINEER", "run_etch_process");
 }
 
 pub async fn deposition<'run>(
     endpoint: &mut Endpoint<'run, DEPOSITION_CHAMBER>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
-    let args = endpoint.recv::<Film>().await?;
-    let result = domain
-        .execute("INTEGRATION_ENGINEER", "run_deposition", decode(&args.0)?)
-        .await
-        .map_err(ShellError::message)?;
+    let result = effects.apply(endpoint.recv::<Film>().await?).await?;
     endpoint
         .send::<FilmResult>(&encode(&result)?.as_slice())
         .await?;
@@ -107,13 +115,9 @@ pub async fn deposition<'run>(
 
 pub async fn etching<'run>(
     endpoint: &mut Endpoint<'run, ETCH_CHAMBER>,
-    domain: &impl Domain,
+    effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
-    let args = endpoint.recv::<Uniformity>().await?;
-    let result = domain
-        .execute("INTEGRATION_ENGINEER", "run_etch_process", decode(&args.0)?)
-        .await
-        .map_err(ShellError::message)?;
+    let result = effects.apply(endpoint.recv::<Uniformity>().await?).await?;
     endpoint
         .send::<UniformityResult>(&encode(&result)?.as_slice())
         .await?;
