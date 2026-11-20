@@ -82,10 +82,17 @@ class MicroserviceMigrationWorld(unittest.IsolatedAsyncioTestCase):
             self.assertTrue((await self.act("register", service)).success)
         self.assertTrue(self.world.is_complete())
 
-    async def test_all_service_graphs_and_deployment_orders(self):
+    async def test_all_service_graphs_and_deployment_registration_orders(self):
         edges = tuple(itertools.permutations(_SERVICES, 2))
         orders = tuple(itertools.permutations(_SERVICES))
-        acyclic = qualified = 0
+        actions = tuple(itertools.product(("stage", "register"), _SERVICES))
+        schedules = [
+            schedule for schedule in itertools.permutations(actions)
+            if all(schedule.index(("stage", service)) < schedule.index(("register", service))
+                   for service in _SERVICES)
+        ]
+        self.assertEqual(len(schedules), 90)
+        acyclic = qualified = early_registrations = 0
         for bits in itertools.product((False, True), repeat=len(edges)):
             dependencies = {service: [] for service in _SERVICES}
             for (service, prerequisite), included in zip(edges, bits):
@@ -103,20 +110,22 @@ class MicroserviceMigrationWorld(unittest.IsolatedAsyncioTestCase):
             if not allowed:
                 continue
             acyclic += 1
-            for order in orders:
+            for schedule in schedules:
+                order = tuple(service for step, service in schedule if step == "stage")
                 self.setUp()
-                await self.plan(dependencies=dependencies)
+                self.assertTrue((await self.plan(dependencies=dependencies)).success)
                 for service in reversed(order):
                     await self.prepare(service)
-                    await self.act("schema", service)
-                for service in order:
-                    self.assertTrue((await self.act("stage", service)).success)
-                for service in _SERVICES:
-                    self.assertTrue((await self.act("register", service)).success)
-                self.assertEqual(self.world.is_complete(), order in allowed, (dependencies, order))
-                self.assertEqual(bool(self.world.violations), order not in allowed)
-                qualified += self.world.is_complete()
-        self.assertEqual((acyclic, qualified), (25, 48))
+                    self.assertTrue((await self.act("schema", service)).success)
+                for step, service in schedule:
+                    self.assertTrue((await self.act(step, service)).success)
+                with self.subTest(dependencies=dependencies, schedule=schedule):
+                    self.assertEqual(self.world.is_complete(), order in allowed)
+                    self.assertEqual(bool(self.world.violations), order not in allowed)
+                if self.world.is_complete():
+                    qualified += 1
+                    early_registrations += any(step == "register" for step, _ in schedule[:3])
+        self.assertEqual((acyclic, qualified, early_registrations), (25, 720, 432))
 
     async def test_unsafe_staging_and_cutover_remain_observable_after_repair(self):
         a, b, c = _SERVICES

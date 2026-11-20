@@ -326,12 +326,15 @@ matched all 15 operations in each run to their typed requests. EPF checked
 48,589 and 46,070 observations, respectively. These are reachability tests
 with scripted shells. Agent preferences were not measured.
 
-In 4H, nine seven-guest Wasm runs tested whether one service could start
-testing before all three code reviews finished. The test
-of C consumed C's completed review in every run. It began during B's review
-and before A's review started. The guests exercised preparation and, in
-three runs with an injected test failure, reimplementation of the affected
-service. The common simulator scored all nine migrations incomplete. We assessed the later deployment and registration
+In 4H, seven scripted Wasm guests exercised all 36 combinations of the three
+services' schema migration and test orders on one executable. We also
+injected a failure at each of the three test positions. In 27 of the 39
+runs a test started before another service's review began. In 15 a test
+started during another service's review. Every test named its own candidate
+and a completed review of that candidate. The reviewer's shell received each
+of the three repaired candidates. The runs ended before their second review.
+The simulator recorded 510 effects and zero violations. All 39 task scores were incomplete because this
+executable covered preparation and schema migration. We assessed deployment and registration
 orders separately in the common simulator. Given reviewed, tested candidates
 and completed schema migrations, 720 of 2,250 graph/order pairs completed
 without a violation across all 25 acyclic three-service dependency graphs.

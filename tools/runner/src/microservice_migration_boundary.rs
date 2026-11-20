@@ -29,31 +29,41 @@ async fn wash_runs_independent_schema_migrations_and_all_suites() -> Result<()> 
     const A: &str = "microservice_a";
     const B: &str = "microservice_b";
     const C: &str = "microservice_c";
-    for order in [
+    let orders = [
         [A, B, C],
         [A, C, B],
         [B, A, C],
         [B, C, A],
         [C, A, B],
         [C, B, A],
-    ] {
-        run_wash_order(order, None).await?;
+    ];
+    for migration in orders {
+        for tests in orders {
+            run_wash_order(migration, tests, None).await?;
+        }
     }
     for failure in 0..3 {
-        run_wash_order([C, B, A], Some(failure)).await?;
+        run_wash_order([C, B, A], [C, A, B], Some(failure)).await?;
     }
     Ok(())
 }
 
 #[hibana_runtime::scope]
-async fn run_wash_order(order: [&str; 3], failed_test: Option<u32>) -> Result<()> {
+async fn run_wash_order(
+    order: [&str; 3],
+    test_order: [&str; 3],
+    failed_test: Option<u32>,
+) -> Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()?;
     std::env::set_current_dir(root)?;
-    let name = order
-        .map(|s| s.trim_start_matches("microservice_"))
-        .join("");
+    let initials = |services: [&str; 3]| {
+        services
+            .map(|s| s.trim_start_matches("microservice_"))
+            .join("")
+    };
+    let name = format!("{}-tests-{}", initials(order), initials(test_order));
     let name = match failed_test {
         Some(index) => format!("{name}-fail-test-{index}"),
         None => name,
@@ -70,7 +80,7 @@ async fn run_wash_order(order: [&str; 3], failed_test: Option<u32>) -> Result<()
     let artifact = projection::archive(&runtime, &output, "4H")?;
     save(
         &output.join("case.json"),
-        &json!({"task":"4H","scope":"preparation_tests_and_schema","migration_order":order,"failed_test_index":failed_test,"depth":0,"delay_multiplier":0.01,
+        &json!({"task":"4H","scope":"preparation_tests_and_schema","migration_order":order,"test_order":test_order,"failed_test_index":failed_test,"depth":0,"delay_multiplier":0.01,
        "model_calls":0,"scored_benchmark":false,"runtime_binary_sha256":digest(&runtime)?,"guest_wasm_sha256":digest(wasm)?,
        "compiled_projection_sha256":digest(&output.join("projection.json"))?,"harness_binary_sha256":digest(&std::env::current_exe()?)?,
        "harness_source_sha256":digest(Path::new("tools/runner/src/microservice_migration_boundary.rs"))?}),
@@ -153,11 +163,16 @@ async fn run_wash_order(order: [&str; 3], failed_test: Option<u32>) -> Result<()
                 assert_eq!(reviewed["success"],true);
                 assert_eq!(reviewed["data"]["candidate"],made["data"]["receipt"]);
             }
+            for (index, service) in test_order.into_iter().enumerate() {
+                let next = response(guest.command("REVIEWER",format!("cat /service/candidate/{service}")).await?)?;
+                assert_eq!(next["data"]["service"], service);
+                assert_eq!(next["data"]["status"], if failed_test == Some(index as u32) { "implemented" } else { "tests passed" });
+            }
             assert_eq!(guest.command("REVIEWER","exit 0".into()).await?["exit_status"],0);
             Ok(())
         };
         async {
-            for (index, service) in ["microservice_c","microservice_a","microservice_b"].into_iter().enumerate() {
+            for (index, service) in test_order.into_iter().enumerate() {
                 let approval=response(guest.command("TESTER",format!("cat /service/candidate/{service}")).await?)?;
                 if service=="microservice_c" {
                     let bad=guest.command("TESTER",r#"echo '{"suite":"microservice_b"}' > /service/run_tests/microservice_c"#.into()).await?;
@@ -191,16 +206,9 @@ async fn run_wash_order(order: [&str; 3], failed_test: Option<u32>) -> Result<()
     let suites: Vec<_> = effects
         .iter()
         .filter(|e| e["tool"] == "run_tests")
-        .map(|e| &e["result"]["suite"])
+        .map(|e| e["result"]["suite"].as_str())
         .collect();
-    assert_eq!(
-        suites,
-        json!(["microservice_c", "microservice_a", "microservice_b"])
-            .as_array()
-            .unwrap()
-            .iter()
-            .collect::<Vec<_>>()
-    );
+    assert_eq!(suites, test_order.map(Some));
     let actual = effects
         .iter()
         .filter(|e| e["tool"] == "migrate_schema")
@@ -294,6 +302,8 @@ async fn run_wash_order(order: [&str; 3], failed_test: Option<u32>) -> Result<()
         );
         let mut entry =
             json!({"test":value, "outcome":receipts[&tested], "shell_read":receipts[&reported]});
+        let review_file = role("REVIEW_FILE".to_owned())?;
+        let reviewer_vm = role("REVIEW_VM".to_owned())?;
         if !positive {
             let (&loan_id, loan) = journal::one(history.frames.iter().filter(|(_, f)| {
                 f.direction(tester, developer)
@@ -322,9 +332,33 @@ async fn run_wash_order(order: [&str; 3], failed_test: Option<u32>) -> Result<()
                     && f.value().is_ok_and(|v| v == *fixed)
             }))?;
             reply.received()?;
+            let (&submission_id, submission) =
+                journal::one(history.frames.iter().filter(|(_, f)| {
+                    f.direction(service, review_file)
+                        && u64::from(f.logical_label) == service
+                        && f.sent > finished
+                        && f.value().is_ok_and(|v| v == *fixed)
+                }))?;
+            submission.received()?;
+            assert_eq!(receipts[&submission_id]["send_actor"], developer);
+            assert_eq!(
+                receipts[&submission_id]["receive_commit"]["actor"],
+                reviewer_vm
+            );
             assert_eq!(fixed["data"]["plan"], value["data"]["plan"]);
             assert_ne!(fixed["data"]["receipt"], value["data"]["candidate"]);
-            entry["recovery"] = json!({"returned_service":receipts[&loan_id], "request":receipts[&request_id], "reply":receipts[&reply_id], "new_candidate":fixed});
+            entry["recovery"] = json!({"returned_service":receipts[&loan_id], "request":receipts[&request_id], "reply":receipts[&reply_id], "reviewer_read":receipts[&submission_id], "new_candidate":fixed});
+        } else {
+            let (&id, message) = journal::one(history.frames.iter().filter(|(_, f)| {
+                f.direction(service, review_file)
+                    && u64::from(f.logical_label) == service
+                    && f.sent > completed
+                    && f.value().is_ok_and(|v| v == *value)
+            }))?;
+            message.received()?;
+            assert_eq!(receipts[&id]["send_actor"], tester);
+            assert_eq!(receipts[&id]["receive_commit"]["actor"], reviewer_vm);
+            entry["reviewer_read"] = receipts[&id].clone();
         }
         test_results.push(entry);
     }

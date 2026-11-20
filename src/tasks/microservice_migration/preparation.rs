@@ -262,7 +262,13 @@ fn test_result<const SERVICE: u8, const TESTER: u8, const DEVELOPER: u8, const F
 -> impl Projectable {
     let report = g::send::<DEVELOPER, FILE, TestReport>();
     g::route(
-        g::seq(g::send::<SERVICE, DEVELOPER, Passed>(), report),
+        g::seq(
+            g::send::<SERVICE, DEVELOPER, Passed>(),
+            g::par(
+                report,
+                g::send::<SERVICE, REVIEW_FILE, Candidate<SERVICE>>(),
+            ),
+        ),
         g::seq(
             g::send::<SERVICE, DEVELOPER, Failed>(),
             g::seq(
@@ -271,7 +277,10 @@ fn test_result<const SERVICE: u8, const TESTER: u8, const DEVELOPER: u8, const F
                     g::send::<TESTER, DEVELOPER, Loan<SERVICE>>(),
                     g::seq(
                         g::send::<FILE, SERVICE, Implement<DEVELOPER>>(),
-                        g::send::<SERVICE, FILE, Implemented>(),
+                        g::seq(
+                            g::send::<SERVICE, FILE, Implemented>(),
+                            g::send::<SERVICE, REVIEW_FILE, Candidate<SERVICE>>(),
+                        ),
                     ),
                 ),
             ),
@@ -554,8 +563,10 @@ pub(super) async fn developer<'run, const DEVELOPER: u8, const SERVICE: u8>(
                         if repair["data"]["receipt"] == failed["data"]["candidate"] {
                             return Err(ShellError::message("repair reused the failed candidate"));
                         }
+                        let repaired = encode(&repair)?;
+                        returned.send::<Implemented>(&repaired.as_slice()).await?;
                         returned
-                            .send::<Implemented>(&encode(&repair)?.as_slice())
+                            .send::<Candidate<SERVICE>>(&repaired.as_slice())
                             .await?;
                         return Ok(());
                     }
@@ -674,6 +685,9 @@ pub(super) async fn tester<'run, const TESTER: u8, const SERVICE: u8>(
     if result["success"] == true {
         service
             .send::<Passed>(&ReviewReply::from_bytes(&bytes)?)
+            .await?;
+        service
+            .send::<Candidate<SERVICE>>(&bytes.as_slice())
             .await?;
     } else {
         service

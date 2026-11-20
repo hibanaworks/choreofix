@@ -442,40 +442,50 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
                 same(&tested["data"]["candidate"], &built["data"]["receipt"])
             };
             async {
-                let [mut a, mut b, mut c] = review_file.par()?;
                 async {
-                    for accepted in [false, false, true] {
-                        let candidate = decode(a.recv::<Candidate<SERVICE_A>>().await?)?;
-                        a.send::<Review<SERVICE_A>>(&Arguments(
-                            br#"{"pr_id":"microservice_a"}"#.to_vec(),
+                    let [mut a, mut b, mut c] = review_file.par()?;
+                    async {
+                        for accepted in [false, false, true] {
+                            let candidate = decode(a.recv::<Candidate<SERVICE_A>>().await?)?;
+                            a.send::<Review<SERVICE_A>>(&Arguments(
+                                br#"{"pr_id":"microservice_a"}"#.to_vec(),
+                            ))
+                            .await?;
+                            let review = decode(a.recv::<Reviewed<DEVELOPER_A>>().await?)?;
+                            assert_eq!(review["success"], accepted);
+                            same(&review["data"]["candidate"], &candidate["data"]["receipt"])?;
+                        }
+                        Ok(())
+                    };
+                    async {
+                        let candidate = decode(b.recv::<Candidate<SERVICE_B>>().await?)?;
+                        b.send::<Review<SERVICE_B>>(&Arguments(
+                            br#"{"pr_id":"microservice_b"}"#.to_vec(),
                         ))
                         .await?;
-                        let review = decode(a.recv::<Reviewed<DEVELOPER_A>>().await?)?;
-                        assert_eq!(review["success"], accepted);
-                        same(&review["data"]["candidate"], &candidate["data"]["receipt"])?;
-                    }
-                    Ok(())
-                };
-                async {
-                    let candidate = decode(b.recv::<Candidate<SERVICE_B>>().await?)?;
-                    b.send::<Review<SERVICE_B>>(&Arguments(
-                        br#"{"pr_id":"microservice_b"}"#.to_vec(),
-                    ))
-                    .await?;
-                    let review = decode(b.recv::<Reviewed<DEVELOPER_B>>().await?)?;
-                    assert_eq!(review["success"], true);
-                    same(&review["data"]["candidate"], &candidate["data"]["receipt"])
-                };
-                async {
-                    let candidate = decode(c.recv::<Candidate<SERVICE_C>>().await?)?;
-                    c.send::<Review<SERVICE_C>>(&Arguments(
-                        br#"{"pr_id":"microservice_c"}"#.to_vec(),
-                    ))
-                    .await?;
-                    let review = decode(c.recv::<Reviewed<DEVELOPER_C>>().await?)?;
-                    assert_eq!(review["success"], true);
-                    same(&review["data"]["candidate"], &candidate["data"]["receipt"])
-                };
+                        let review = decode(b.recv::<Reviewed<DEVELOPER_B>>().await?)?;
+                        assert_eq!(review["success"], true);
+                        same(&review["data"]["candidate"], &candidate["data"]["receipt"])
+                    };
+                    async {
+                        let candidate = decode(c.recv::<Candidate<SERVICE_C>>().await?)?;
+                        c.send::<Review<SERVICE_C>>(&Arguments(
+                            br#"{"pr_id":"microservice_c"}"#.to_vec(),
+                        ))
+                        .await?;
+                        let review = decode(c.recv::<Reviewed<DEVELOPER_C>>().await?)?;
+                        assert_eq!(review["success"], true);
+                        same(&review["data"]["candidate"], &candidate["data"]["receipt"])
+                    };
+                    Ok::<(), ShellError>(())
+                }.await?;
+                let repaired = decode(review_file.recv::<Candidate<SERVICE_B>>().await?)?;
+                assert_eq!(repaired["data"]["service"], SERVICES[1]);
+                assert_eq!(repaired["data"]["agent"], "DEVELOPER_B");
+                let a = decode(review_file.recv::<Candidate<SERVICE_A>>().await?)?;
+                let c = decode(review_file.recv::<Candidate<SERVICE_C>>().await?)?;
+                assert_eq!(a["data"]["status"], "tests passed");
+                assert_eq!(c["data"]["status"], "tests passed");
                 Ok(())
             };
             Ok::<(), ShellError>(())
