@@ -1,0 +1,227 @@
+{
+  "task": "4H",
+  "scope": "Test failure, resource return, implementation, and fresh review under scripted wash. Each case stops before retesting or deployment.",
+  "runtime_sha256": "d0c2215a837cd10b34af992785cb74a8ccbb76ab742debe49b3133bdfa75d83e",
+  "source_manifest_sha256": "6be16e7d6cf660b3ab4a4572f459e51c0283626dc2077d89cd77e7979b59ad7b",
+  "harness_sha256": "78533e64c5e53d17436bae26d099256f76304c349e52582d303d7cbf6a0c7032",
+  "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+  "projection_sha256": "6261fcdd30e5952a999b94f7422048caa21c5db87a4c14596721032a6645a499",
+  "model_calls": 0,
+  "scored_runs": 0,
+  "cases": [
+    {
+      "failed_test_index": 0,
+      "service": "microservice_c",
+      "failed_candidate": 4,
+      "revisions": [
+        {
+          "candidate": 12,
+          "review": 14,
+          "status": "reviewed",
+          "request_frame": 838,
+          "reviewer_receive_ordinal": 4498,
+          "reviewer_shell_reply_frame": 879,
+          "developer_shell_reply_frame": 883
+        }
+      ],
+      "effects": 15,
+      "epf_records": 5351,
+      "events_sha256": "e8566c738938ed540b4e5833bef6912e8d080ef41f62a45dded730110cfbe667"
+    },
+    {
+      "failed_test_index": 0,
+      "service": "microservice_c",
+      "failed_candidate": 4,
+      "revisions": [
+        {
+          "candidate": 11,
+          "review": 14,
+          "status": "changes_requested",
+          "request_frame": 838,
+          "reviewer_receive_ordinal": 4498,
+          "reviewer_shell_reply_frame": 877,
+          "developer_shell_reply_frame": 882
+        },
+        {
+          "candidate": 15,
+          "review": 17,
+          "status": "changes_requested",
+          "request_frame": 1011,
+          "reviewer_receive_ordinal": 5411,
+          "reviewer_shell_reply_frame": 1034,
+          "developer_shell_reply_frame": 1037
+        },
+        {
+          "candidate": 18,
+          "review": 19,
+          "status": "reviewed",
+          "request_frame": 1120,
+          "reviewer_receive_ordinal": 5989,
+          "reviewer_shell_reply_frame": 1128,
+          "developer_shell_reply_frame": 1130
+        }
+      ],
+      "effects": 19,
+      "epf_records": 6359,
+      "events_sha256": "a4ee27cfa7eec85a9950f9c8f883bed9f03217d76d031b73503b2c1acec116ad"
+    },
+    {
+      "failed_test_index": 1,
+      "service": "microservice_a",
+      "failed_candidate": 2,
+      "revisions": [
+        {
+          "candidate": 13,
+          "review": 15,
+          "status": "reviewed",
+          "request_frame": 929,
+          "reviewer_receive_ordinal": 4976,
+          "reviewer_shell_reply_frame": 956,
+          "developer_shell_reply_frame": 958
+        }
+      ],
+      "effects": 15,
+      "epf_records": 5351,
+      "events_sha256": "865e87a06a9bbae52c31b4d4b7eefb1d98574ceed6c018704b6b36cd8ac67b69"
+    },
+    {
+      "failed_test_index": 1,
+      "service": "microservice_a",
+      "failed_candidate": 2,
+      "revisions": [
+        {
+          "candidate": 13,
+          "review": 15,
+          "status": "changes_requested",
+          "request_frame": 923,
+          "reviewer_receive_ordinal": 4944,
+          "reviewer_shell_reply_frame": 956,
+          "developer_shell_reply_frame": 959
+        },
+        {
+          "candidate": 16,
+          "review": 17,
+          "status": "changes_requested",
+          "request_frame": 1042,
+          "reviewer_receive_ordinal": 5573,
+          "reviewer_shell_reply_frame": 1050,
+          "developer_shell_reply_frame": 1053
+        },
+        {
+          "candidate": 18,
+          "review": 19,
+          "status": "reviewed",
+          "request_frame": 1136,
+          "reviewer_receive_ordinal": 6079,
+          "reviewer_shell_reply_frame": 1144,
+          "developer_shell_reply_frame": 1146
+        }
+      ],
+      "effects": 19,
+      "epf_records": 6359,
+      "events_sha256": "2983a8cf458cad7ba179df6f608e986ae6865ff3b02905ada85a2566485451bc"
+    },
+    {
+      "failed_test_index": 2,
+      "service": "microservice_b",
+      "failed_candidate": 4,
+      "revisions": [
+        {
+          "candidate": 14,
+          "review": 15,
+          "status": "reviewed",
+          "request_frame": 964,
+          "reviewer_receive_ordinal": 5160,
+          "reviewer_shell_reply_frame": 972,
+          "developer_shell_reply_frame": 974
+        }
+      ],
+      "effects": 15,
+      "epf_records": 5351,
+      "events_sha256": "1a4955b9e11fbfb305aa0f4b4fef03428eae9bc32514d986aa0ae67e6c88a5ce"
+    },
+    {
+      "failed_test_index": 2,
+      "service": "microservice_b",
+      "failed_candidate": 4,
+      "revisions": [
+        {
+          "candidate": 14,
+          "review": 15,
+          "status": "changes_requested",
+          "request_frame": 964,
+          "reviewer_receive_ordinal": 5160,
+          "reviewer_shell_reply_frame": 972,
+          "developer_shell_reply_frame": 975
+        },
+        {
+          "candidate": 16,
+          "review": 17,
+          "status": "changes_requested",
+          "request_frame": 1058,
+          "reviewer_receive_ordinal": 5674,
+          "reviewer_shell_reply_frame": 1066,
+          "developer_shell_reply_frame": 1069
+        },
+        {
+          "candidate": 18,
+          "review": 19,
+          "status": "reviewed",
+          "request_frame": 1152,
+          "reviewer_receive_ordinal": 6169,
+          "reviewer_shell_reply_frame": 1160,
+          "developer_shell_reply_frame": 1162
+        }
+      ],
+      "effects": 19,
+      "epf_records": 6359,
+      "events_sha256": "d17ffd8c98131388b9f16d78bd311a9d4f6f05ea17d8aa1c44797bb36e7b1053"
+    }
+  ],
+  "all_conditions": {
+    "runs": 42,
+    "preparation_completions": 42,
+    "full_task_completions": 0,
+    "effects": 570,
+    "score_violations": 0,
+    "epf_records": 213114,
+    "positive_order_journal_sha256": {
+      "abc-tests-abc": "8877b30d7432290cd67fcbbdfc22e5749556e8bf5030bb28d752030ae57037b4",
+      "abc-tests-acb": "4cd1b10a8a298b09d6da42946b036bff4462524a3bfa7e67740ee4745235a1ff",
+      "abc-tests-bac": "10c300d749d979e92b5ed5c57aaaec717b990edf86d1950166155cd8ce6d0acc",
+      "abc-tests-bca": "f6bd453c128ae439332726aa933b7f3e3855934aad70117112164f6efc525255",
+      "abc-tests-cab": "a9bca46051ccd0c8999a05cc155e1213c13cd30d5bf9be6927d5ec016ae44057",
+      "abc-tests-cba": "690a928efb59bfdb8d1ac7fd2ee211119f8ed045e5b8def24989baea75345256",
+      "acb-tests-abc": "806d8f57592cac4c87f7ccfb16c35543e4aca1c777cc3ddf30dee6309896e95f",
+      "acb-tests-acb": "2be1d643aebe0f8bd7bcfde4165cbf560a8b79b7c39811f6fc7863dd18777af5",
+      "acb-tests-bac": "c40f16c01c21830eb5444e971456326efe4199284ad7f7cb17445f0051ce7587",
+      "acb-tests-bca": "b754fba2395d8cbe6762e4a56c0afaaf601e2b3e40b7d2ee526bdb0480949ea7",
+      "acb-tests-cab": "593fe7ae6f6bef4adbe1d7b9dfa1fa9527cb2cb088a1f4041e08135af6536636",
+      "acb-tests-cba": "c547454f375db2aaa2068fd38640098d874abb97097df653b096d9a6184abf40",
+      "bac-tests-abc": "9ca33382c1719dfa905865c2f62fb798e1c4902767096ebd9c6ca16b0c437457",
+      "bac-tests-acb": "98a52df6f3b4b5c0203799cc7bc660f476abfa2a43b2f1047276a0b4df39c296",
+      "bac-tests-bac": "efe3d6ba93dfd4245f06272022abfa6d86b9fd6e8a02c9d4981813a0bfab8dfd",
+      "bac-tests-bca": "5f29881ba06d2f2e2f9db22292369848f3191402ef90d62cb2fe99ea314461b3",
+      "bac-tests-cab": "58e3d36aa253b8114af63381542f5af82bbccafbf4975efde0404457df41f9a5",
+      "bac-tests-cba": "dafdd3f5b80d5a957b9a42841c56ce32b024853a4488dfaae73b4b7bb02a20d8",
+      "bca-tests-abc": "4bd604b79dcfb6419575c3b8df3d71a0127d4ee26011c01e898034659a389a49",
+      "bca-tests-acb": "7c54a8a3f2b66f07a8b84989557e8d8ca619c678b680e39ed448f398eaf35b37",
+      "bca-tests-bac": "b553300fa0788109bb114d32579ac6b6624fba731f9f1d21679a7ee9169000b3",
+      "bca-tests-bca": "62941ef70be99b696a1e4ff939a08e48905a8500d44c515194d7cdf66d91e45a",
+      "bca-tests-cab": "b932876854075a09db0fe7b10a9683a4a91a950b2d92d277de2cad425e987bba",
+      "bca-tests-cba": "4be70fdddd1cd3d41ca1e4992094e07c6188ac4fce82cc70c4bf0381f54515f7",
+      "cab-tests-abc": "07fd36c4729fb36515593f0cf8349dca1e5ead0268c0065729f902b100d3ab18",
+      "cab-tests-acb": "13712b11e8e5b88c87ba5c982f7f4aa894cd4e3474db8b01cc7f099a86ac61d2",
+      "cab-tests-bac": "4c8e5f3e7add56b278917862eab5388ca16453581239cc8359b4d192ed805f51",
+      "cab-tests-bca": "87820521dc513b1ba9d640320ed5d467012fc6b5d17b4abf5e058b2ae514bf94",
+      "cab-tests-cab": "26dc9e46efa69a7fc7e979a3b8bbdd811dd9f9c0277a15b4efac60fb7f0579c7",
+      "cab-tests-cba": "30e0155a4a7e8abac7fdd5126e5a3033287ef4d5ede73b76c5057948d62bdf2d",
+      "cba-tests-abc": "dcef4267445fbea73ebf649433fa5874b59cdd3db3429a925dcdae5a6ae1b330",
+      "cba-tests-acb": "5662148097a770774a550982d6460c8d50e29dd5d022fe281c25a1cc6c0c081e",
+      "cba-tests-bac": "770c317fb2a553d80b9bd4535f6bb5c14746c36c316896d4a437d28fea2eb342",
+      "cba-tests-bca": "e22116936d2a32eda9c1aeee3698463a1322f324435adc6f5da8e0148f11b863",
+      "cba-tests-cab": "0973b3b75e3de3b41846b524cf5de8f6113f0282685aadc9fe1905eebdb5500a",
+      "cba-tests-cba": "d757003edb53009e6b05158c0f71f6d3e20beab538b58dcf0be174b613c3f8ad"
+    }
+  }
+}

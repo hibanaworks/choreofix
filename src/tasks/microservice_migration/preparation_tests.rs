@@ -324,10 +324,7 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
                 )
             };
             async {
-                check_review(
-                    decode(test_b.recv::<TestCandidate<SERVICE_B>>().await?)?,
-                    SERVICES[1],
-                )
+                check_review(decode(test_b.recv::<TestCandidate<SERVICE_B>>().await?)?, SERVICES[1])?;
             };
             async {
                 author
@@ -421,7 +418,9 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
                 let repaired = decode(b_file.recv::<Implemented>().await?)?;
                 assert_eq!(repaired["data"]["service"], SERVICES[1]);
                 assert_ne!(repaired["data"]["receipt"], failed["data"]["candidate"]);
-                same(&repaired["data"]["plan"], &failed["data"]["plan"])
+                same(&repaired["data"]["plan"], &failed["data"]["plan"])?;
+                let reviewed = decode(b_file.recv::<Reviewed<DEVELOPER_B>>().await?)?;
+                check_review(reviewed, SERVICES[1])
             };
             async {
                 let plan = decode(c_file.recv::<Proposed<DEVELOPER_C>>().await?)?;
@@ -482,6 +481,10 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
                 let repaired = decode(review_file.recv::<Candidate<SERVICE_B>>().await?)?;
                 assert_eq!(repaired["data"]["service"], SERVICES[1]);
                 assert_eq!(repaired["data"]["agent"], "DEVELOPER_B");
+                review_file.send::<Review<SERVICE_B>>(&Arguments(encode(&json!({"pr_id":SERVICES[1]}))?)).await?;
+                let reviewed = decode(review_file.recv::<Reviewed<DEVELOPER_B>>().await?)?;
+                assert_eq!(reviewed["data"]["candidate"], repaired["data"]["receipt"]);
+                check_review(reviewed, SERVICES[1])?;
                 let a = decode(review_file.recv::<Candidate<SERVICE_A>>().await?)?;
                 let c = decode(review_file.recv::<Candidate<SERVICE_C>>().await?)?;
                 assert_eq!(a["data"]["status"], "tests passed");
@@ -499,6 +502,14 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
         assert!(
             matches!(result, Poll::Ready(Err(error)) if error.is_unavailable()),
             "an approved service must not acquire a new build: {result:?}"
+        );
+        assert_eq!(transport.take_observations().len(), 0);
+        let b_args = Arguments(br#"{"feature_name":"microservice_b"}"#.to_vec());
+        let mut replay = pin!(b_file.send::<Implement<DEVELOPER_B>>(&b_args));
+        let result = poll_fn(|cx| Poll::Ready(replay.as_mut().poll(cx))).await;
+        assert!(
+            matches!(result, Poll::Ready(Err(error)) if error.is_unavailable()),
+            "the developer cannot edit the newly approved repair: {result:?}"
         );
         assert_eq!(transport.take_observations().len(), 0);
         let mut calls = journal
@@ -522,6 +533,7 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
                 ("DEVOPS", "migrate_schema"),
                 ("DEVOPS", "migrate_schema"),
                 ("DEVOPS", "migrate_schema"),
+                ("REVIEWER", "code_review"),
                 ("REVIEWER", "code_review"),
                 ("REVIEWER", "code_review"),
                 ("REVIEWER", "code_review"),

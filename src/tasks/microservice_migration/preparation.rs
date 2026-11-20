@@ -206,10 +206,9 @@ fn review_candidate<const DEVELOPER: u8, const REVIEWER: u8, const SERVICE: u8>(
     )
 }
 
-fn build<const DEVELOPER: u8, const FILE: u8, const SERVICE: u8, const TESTER: u8>(
+fn reviewed_revision<const DEVELOPER: u8, const FILE: u8, const SERVICE: u8, const VERDICT: u8>(
     review: impl Projectable + Copy,
     returned: impl Projectable,
-    handoff: impl Projectable,
 ) -> impl Projectable {
     let attempt = g::seq(
         g::send::<FILE, SERVICE, Implement<DEVELOPER>>(),
@@ -219,23 +218,31 @@ fn build<const DEVELOPER: u8, const FILE: u8, const SERVICE: u8, const TESTER: u
         g::send::<SERVICE, REVIEW_FILE, Reviewed<DEVELOPER>>(),
         g::send::<DEVELOPER, FILE, Reviewed<DEVELOPER>>(),
     );
-    let approved = g::seq(g::send::<SERVICE, DEVELOPER, Approved>(), report);
+    let approved = g::seq(g::send::<VERDICT, DEVELOPER, Approved>(), report);
     let rejected = g::seq(
-        g::send::<SERVICE, DEVELOPER, Rejected>(),
+        g::send::<VERDICT, DEVELOPER, Rejected>(),
         g::seq(report, returned),
     );
+    g::seq(
+        attempt,
+        g::route(approved, g::seq(g::seq(rejected, attempt).roll(), approved)),
+    )
+}
+
+fn build<const DEVELOPER: u8, const FILE: u8, const SERVICE: u8, const TESTER: u8>(
+    review: impl Projectable + Copy,
+    returned: impl Projectable,
+    handoff: impl Projectable,
+) -> impl Projectable {
     g::seq(
         g::send::<ARCHITECT, DEVELOPER, Proposed<DEVELOPER>>(),
         g::seq(
             g::send::<ARCHITECT, FILE, Proposed<DEVELOPER>>(),
             g::seq(
-                attempt,
+                reviewed_revision::<DEVELOPER, FILE, SERVICE, SERVICE>(review, returned),
                 g::seq(
-                    g::route(approved, g::seq(g::seq(rejected, attempt).roll(), approved)),
-                    g::seq(
-                        g::send::<SERVICE, TESTER, TestCandidate<SERVICE>>(),
-                        handoff,
-                    ),
+                    g::send::<SERVICE, TESTER, TestCandidate<SERVICE>>(),
+                    handoff,
                 ),
             ),
         ),
@@ -258,34 +265,36 @@ fn test_session<const SERVICE: u8, const TESTER: u8>() -> impl Projectable + Cop
     )
 }
 
-fn test_result<const SERVICE: u8, const TESTER: u8, const DEVELOPER: u8, const FILE: u8>()
--> impl Projectable {
+fn test_result<
+    const SERVICE: u8,
+    const TESTER: u8,
+    const REVIEWER: u8,
+    const DEVELOPER: u8,
+    const FILE: u8,
+>() -> impl Projectable {
     let report = g::send::<DEVELOPER, FILE, TestReport>();
-    g::route(
-        g::seq(
-            g::send::<SERVICE, DEVELOPER, Passed>(),
-            g::par(
-                report,
-                g::send::<SERVICE, REVIEW_FILE, Candidate<SERVICE>>(),
-            ),
-        ),
-        g::seq(
-            g::send::<SERVICE, DEVELOPER, Failed>(),
+    let passed = g::seq(
+        g::send::<SERVICE, DEVELOPER, Passed>(),
+        g::par(
+            report,
             g::seq(
-                report,
-                g::seq(
-                    g::send::<TESTER, DEVELOPER, Loan<SERVICE>>(),
-                    g::seq(
-                        g::send::<FILE, SERVICE, Implement<DEVELOPER>>(),
-                        g::seq(
-                            g::send::<SERVICE, FILE, Implemented>(),
-                            g::send::<SERVICE, REVIEW_FILE, Candidate<SERVICE>>(),
-                        ),
-                    ),
-                ),
+                g::send::<SERVICE, REVIEWER, Passed>(),
+                g::send::<REVIEWER, REVIEW_FILE, Candidate<SERVICE>>(),
             ),
         ),
-    )
+    );
+    let repair = reviewed_revision::<DEVELOPER, FILE, SERVICE, REVIEWER>(
+        review_candidate::<DEVELOPER, REVIEWER, SERVICE>(),
+        g::send::<REVIEWER, DEVELOPER, Loan<SERVICE>>(),
+    );
+    let failed = g::seq(
+        g::send::<SERVICE, DEVELOPER, Failed>(),
+        g::seq(
+            report,
+            g::seq(g::send::<TESTER, DEVELOPER, Loan<SERVICE>>(), repair),
+        ),
+    );
+    g::route(passed, failed)
 }
 
 fn schema<const S: u8>() -> impl Projectable + Copy {
@@ -349,10 +358,10 @@ pub(super) fn preparation() -> impl Projectable {
         ),
     );
     let reports = g::par(
-        test_result::<SERVICE_A, TESTER_A, DEVELOPER_A, DEVELOPER_A_FILE>(),
+        test_result::<SERVICE_A, TESTER_A, REVIEWER_A, DEVELOPER_A, DEVELOPER_A_FILE>(),
         g::par(
-            test_result::<SERVICE_B, TESTER_B, DEVELOPER_B, DEVELOPER_B_FILE>(),
-            test_result::<SERVICE_C, TESTER_C, DEVELOPER_C, DEVELOPER_C_FILE>(),
+            test_result::<SERVICE_B, TESTER_B, REVIEWER_B, DEVELOPER_B, DEVELOPER_B_FILE>(),
+            test_result::<SERVICE_C, TESTER_C, REVIEWER_C, DEVELOPER_C, DEVELOPER_C_FILE>(),
         ),
     );
     let tests = g::route(
@@ -556,18 +565,46 @@ pub(super) async fn developer<'run, const DEVELOPER: u8, const SERVICE: u8>(
                         let result = tested.recv::<Failed>().await?.to_vec();
                         endpoint.send::<TestReport>(&result.as_slice()).await?;
                         let failed = decode(&result)?;
-                        let mut returned = endpoint.recv::<Loan<SERVICE>>().await?;
-                        let received = returned.recv::<Implement<DEVELOPER>>().await?;
-                        let repair = effects.apply(received).await?;
-                        checked_build(&repair, agent, service, &plan)?;
-                        if repair["data"]["receipt"] == failed["data"]["candidate"] {
-                            return Err(ShellError::message("repair reused the failed candidate"));
+                        let mut prior = failed["data"]["candidate"].clone();
+                        loop {
+                            let mut returned = endpoint.recv::<Loan<SERVICE>>().await?;
+                            let received = returned.recv::<Implement<DEVELOPER>>().await?;
+                            let repair = effects.apply(received).await?;
+                            checked_build(&repair, agent, service, &plan)?;
+                            if repair["data"]["receipt"] == prior {
+                                return Err(ShellError::message(
+                                    "repair reused the failed candidate",
+                                ));
+                            }
+                            prior = repair["data"]["receipt"].clone();
+                            let repaired = encode(&repair)?;
+                            returned.send::<Implemented>(&repaired.as_slice()).await?;
+                            endpoint.send::<Loan<SERVICE>>(returned).await?;
+                            endpoint
+                                .send::<Candidate<SERVICE>>(&repaired.as_slice())
+                                .await?;
+                            let decision = endpoint.offer().await?;
+                            match decision.label() {
+                                <Approved as g::Message>::LOGICAL_LABEL => {
+                                    let result = decision.recv::<Approved>().await?.to_vec();
+                                    endpoint
+                                        .send::<Reviewed<DEVELOPER>>(&result.as_slice())
+                                        .await?;
+                                    break;
+                                }
+                                <Rejected as g::Message>::LOGICAL_LABEL => {
+                                    let result = decision.recv::<Rejected>().await?.to_vec();
+                                    endpoint
+                                        .send::<Reviewed<DEVELOPER>>(&result.as_slice())
+                                        .await?;
+                                }
+                                _ => {
+                                    return Err(ShellError::message(
+                                        "unknown service review outcome",
+                                    ));
+                                }
+                            }
                         }
-                        let repaired = encode(&repair)?;
-                        returned.send::<Implemented>(&repaired.as_slice()).await?;
-                        returned
-                            .send::<Candidate<SERVICE>>(&repaired.as_slice())
-                            .await?;
                         return Ok(());
                     }
                     _ => return Err(ShellError::message("unknown service test outcome")),
@@ -583,6 +620,23 @@ pub(super) async fn developer<'run, const DEVELOPER: u8, const SERVICE: u8>(
             _ => return Err(ShellError::message("unknown service review outcome")),
         }
     }
+}
+
+fn checked_review(result: &Value, pr: &Value, candidate: &Value) -> ShellResult<()> {
+    let data = &result["data"];
+    if result["tool_name"] != "code_review"
+        || data["agent"] != "REVIEWER"
+        || data["pr_id"] != *pr
+        || data["service"] != *pr
+        || data["candidate"] != candidate["data"]["receipt"]
+        || data["plan"] != candidate["data"]["plan"]
+        || data["receipt"].as_u64().is_none_or(|receipt| receipt == 0)
+    {
+        return Err(ShellError::message(
+            "review result differs from its admitted candidate",
+        ));
+    }
+    Ok(())
 }
 
 pub(super) async fn reviewer<const REVIEWER: u8, const DEVELOPER: u8, const SERVICE: u8>(
@@ -601,21 +655,12 @@ pub(super) async fn reviewer<const REVIEWER: u8, const DEVELOPER: u8, const SERV
         let pr = arguments["pr_id"].clone();
         same(&pr, &candidate["data"]["service"])?;
         let result = effects.apply(received).await?;
-        let data = &result["data"];
-        if result["tool_name"] != "code_review"
-            || data["agent"] != "REVIEWER"
-            || data["pr_id"] != pr
-            || data["service"] != pr
-            || data["candidate"] != candidate["data"]["receipt"]
-            || data["plan"] != candidate["data"]["plan"]
-            || data["receipt"].as_u64().is_none_or(|receipt| receipt == 0)
-        {
-            return Err(ShellError::message(
-                "review result differs from its admitted candidate",
-            ));
-        }
+        checked_review(&result, &pr, &candidate)?;
         let result_bytes = encode(&result)?;
-        match (result["success"].as_bool(), data["status"].as_str()) {
+        match (
+            result["success"].as_bool(),
+            result["data"]["status"].as_str(),
+        ) {
             (Some(true), Some("reviewed")) => {
                 let approval = ReviewReply::<true>::from_bytes(&result_bytes)?;
                 service.send::<Approved>(&approval).await?;
@@ -624,7 +669,7 @@ pub(super) async fn reviewer<const REVIEWER: u8, const DEVELOPER: u8, const SERV
                     .await?;
                 service.send::<TestCandidate<SERVICE>>(&approval).await?;
                 endpoint.send::<Loan<SERVICE>>(service).await?;
-                return Ok(());
+                break;
             }
             (Some(false), Some("changes_requested")) => {
                 service
@@ -642,6 +687,66 @@ pub(super) async fn reviewer<const REVIEWER: u8, const DEVELOPER: u8, const SERV
             }
         }
     }
+    let outcome = endpoint.offer().await?;
+    match outcome.label() {
+        <Passed as g::Message>::LOGICAL_LABEL => {
+            let tested = outcome.recv::<Passed>().await?.to_vec();
+            endpoint
+                .send::<Candidate<SERVICE>>(&tested.as_slice())
+                .await?;
+        }
+        <Loan<SERVICE> as g::Message>::LOGICAL_LABEL => {
+            let mut service = outcome.recv::<Loan<SERVICE>>().await?;
+            loop {
+                let bytes = endpoint.recv::<Candidate<SERVICE>>().await?.to_vec();
+                let candidate = decode(&bytes)?;
+                service
+                    .send::<Candidate<SERVICE>>(&bytes.as_slice())
+                    .await?;
+                let received = service.recv::<Review<SERVICE>>().await?;
+                let arguments = decode(received.as_bytes())?;
+                same(&arguments["pr_id"], &candidate["data"]["service"])?;
+                let result = effects.apply(received).await?;
+                checked_review(&result, &arguments["pr_id"], &candidate)?;
+                let bytes = encode(&result)?;
+                match (
+                    result["success"].as_bool(),
+                    result["data"]["status"].as_str(),
+                ) {
+                    (Some(true), Some("reviewed")) => {
+                        let approval = ReviewReply::<true>::from_bytes(&bytes)?;
+                        endpoint.send::<Approved>(&approval).await?;
+                        service
+                            .send::<Reviewed<DEVELOPER>>(&bytes.as_slice())
+                            .await?;
+
+                        break;
+                    }
+                    (Some(false), Some("changes_requested")) => {
+                        endpoint
+                            .send::<Rejected>(&ReviewReply::<false>::from_bytes(&bytes)?)
+                            .await?;
+                        service
+                            .send::<Reviewed<DEVELOPER>>(&bytes.as_slice())
+                            .await?;
+                        endpoint.send::<Loan<SERVICE>>(service).await?;
+                        service = endpoint.recv::<Loan<SERVICE>>().await?;
+                    }
+                    _ => {
+                        return Err(ShellError::message(
+                            "unknown result from the migration reviewer",
+                        ));
+                    }
+                }
+            }
+        }
+        _ => {
+            return Err(ShellError::message(
+                "unexpected migration review continuation",
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub(super) async fn tester<'run, const TESTER: u8, const SERVICE: u8>(
@@ -687,7 +792,7 @@ pub(super) async fn tester<'run, const TESTER: u8, const SERVICE: u8>(
             .send::<Passed>(&ReviewReply::from_bytes(&bytes)?)
             .await?;
         service
-            .send::<Candidate<SERVICE>>(&bytes.as_slice())
+            .send::<Passed>(&ReviewReply::from_bytes(&bytes)?)
             .await?;
     } else {
         service
