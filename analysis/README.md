@@ -168,10 +168,13 @@ last usage reports sum to 2,185,945 tokens and the final total is unknown.
 Two further attempts have no aggregate report.
 
 On November 20, five scripted wash guests published the 7M document in each
-of six runs on the typed receiver implementation. The effect audit identified
-two distinct source occurrences for each of the 12 figure insertions, one
-from the document and one from the figure store. All six runs passed dynamic
-EPF replay and the common simulator reported completion with zero violations.
+of six runs on the typed receiver implementation. In each of the 12 figure
+insertions, the document Endpoint received the file request, forwarded it to
+the figure store, and received the store's confirmation. The simulator call
+followed both receives at the document Endpoint. The table gives the frame,
+source occurrence and journal row for all three messages, and the row and ID
+of the simulator call. All six runs passed dynamic EPF replay and the common
+simulator reported completion with zero violations.
 The [per-run measurements](7m-figure-receipts.json) identify the input build,
 the captures and the rejected figure-ID substitution in the depth-2 journal.
 

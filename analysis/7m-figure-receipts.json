@@ -1,6 +1,6 @@
 {
   "task": "7M",
-  "scope": "Five scripted wash guests per case. Figure insertions list the document and figure-store request occurrences used by the effect audit.",
+  "scope": "Five scripted wash guests per case. For each insertion, apply_pair consumes document_request and store_reply_to_document. forwarded_to_store identifies the intervening request. Each frame and source occurrence comes from the EPF-checked receive.",
   "core_revision": "331afd6e4b6315e103ce9cb9311f9d9140fc0e57",
   "source_manifest_sha256": "3249fdd2f099c76bb80210ad30de1cf1b885d79ff85890264f9179fff52fca13",
   "runtime_sha256": "46e083e0aa7f9ffe0318243dacd4acd56f83b442619fc5b25c0d4fe1e9c4aa7f",
@@ -14,120 +14,419 @@
       "depth": 0,
       "effects": 17,
       "figure_insertions": [
-        [
-          14,
-          15
-        ],
-        [
-          25,
-          26
-        ]
+        {
+          "score_event": 5,
+          "document_request": {
+            "frame": 245,
+            "occurrence": 13,
+            "receive_row": 1636
+          },
+          "forwarded_to_store": {
+            "frame": 249,
+            "occurrence": 14,
+            "receive_row": 1648
+          },
+          "store_reply_to_document": {
+            "frame": 251,
+            "occurrence": 15,
+            "receive_row": 1659
+          },
+          "effect_id": 18,
+          "effect_request_row": 1660,
+          "section": "CHAPTER_1",
+          "figure_id": "figure:4",
+          "chapters_written_before_insertion": [
+            "CHAPTER_1"
+          ]
+        },
+        {
+          "score_event": 9,
+          "document_request": {
+            "frame": 358,
+            "occurrence": 24,
+            "receive_row": 2366
+          },
+          "forwarded_to_store": {
+            "frame": 360,
+            "occurrence": 25,
+            "receive_row": 2397
+          },
+          "store_reply_to_document": {
+            "frame": 365,
+            "occurrence": 26,
+            "receive_row": 2402
+          },
+          "effect_id": 26,
+          "effect_request_row": 2403,
+          "section": "CHAPTER_3",
+          "figure_id": "figure:9",
+          "chapters_written_before_insertion": [
+            "CHAPTER_1",
+            "CHAPTER_3"
+          ]
+        }
       ],
       "epf_records": 4731,
       "simulator_complete": true,
       "violations": 0,
       "events_sha256": "b52ec81b669ff6036c0a99b3ef332562539c81b4e7e1886a5603e731ea3c60c6",
-      "audit_sha256": "831e3c9330d612decd10a7d29065d2521aea002aae08248e4b30a5c32a6c6b67"
+      "audit_sha256": "831e3c9330d612decd10a7d29065d2521aea002aae08248e4b30a5c32a6c6b67",
+      "initial_draft_completion_order": [
+        "CHAPTER_1",
+        "CHAPTER_3",
+        "CHAPTER_2"
+      ]
     },
     {
       "case": "depth-1",
       "depth": 1,
       "effects": 24,
       "figure_insertions": [
-        [
-          25,
-          26
-        ],
-        [
-          14,
-          15
-        ]
+        {
+          "score_event": 6,
+          "document_request": {
+            "frame": 273,
+            "occurrence": 24,
+            "receive_row": 1808
+          },
+          "forwarded_to_store": {
+            "frame": 275,
+            "occurrence": 25,
+            "receive_row": 1826
+          },
+          "store_reply_to_document": {
+            "frame": 278,
+            "occurrence": 26,
+            "receive_row": 1831
+          },
+          "effect_id": 20,
+          "effect_request_row": 1832,
+          "section": "CHAPTER_3",
+          "figure_id": "figure:5",
+          "chapters_written_before_insertion": [
+            "CHAPTER_2",
+            "CHAPTER_3"
+          ]
+        },
+        {
+          "score_event": 10,
+          "document_request": {
+            "frame": 386,
+            "occurrence": 13,
+            "receive_row": 2551
+          },
+          "forwarded_to_store": {
+            "frame": 388,
+            "occurrence": 14,
+            "receive_row": 2569
+          },
+          "store_reply_to_document": {
+            "frame": 391,
+            "occurrence": 15,
+            "receive_row": 2574
+          },
+          "effect_id": 28,
+          "effect_request_row": 2575,
+          "section": "CHAPTER_1",
+          "figure_id": "figure:10",
+          "chapters_written_before_insertion": [
+            "CHAPTER_2",
+            "CHAPTER_3",
+            "CHAPTER_1"
+          ]
+        }
       ],
       "epf_records": 7642,
       "simulator_complete": true,
       "violations": 0,
       "events_sha256": "8ad30ae80559ef134b8cf54d57026d81efb174bd99eaeb548ad59c5384ef60e9",
-      "audit_sha256": "ec6a3471b6a409de42fe1c18f21a14efb7a8528e83516b50a480f40716fff23e"
+      "audit_sha256": "ec6a3471b6a409de42fe1c18f21a14efb7a8528e83516b50a480f40716fff23e",
+      "initial_draft_completion_order": [
+        "CHAPTER_2",
+        "CHAPTER_3",
+        "CHAPTER_1"
+      ]
     },
     {
       "case": "depth-2",
       "depth": 2,
       "effects": 26,
       "figure_insertions": [
-        [
-          25,
-          26
-        ],
-        [
-          14,
-          15
-        ]
+        {
+          "score_event": 5,
+          "document_request": {
+            "frame": 245,
+            "occurrence": 24,
+            "receive_row": 1636
+          },
+          "forwarded_to_store": {
+            "frame": 249,
+            "occurrence": 25,
+            "receive_row": 1648
+          },
+          "store_reply_to_document": {
+            "frame": 251,
+            "occurrence": 26,
+            "receive_row": 1659
+          },
+          "effect_id": 18,
+          "effect_request_row": 1660,
+          "section": "CHAPTER_3",
+          "figure_id": "figure:5",
+          "chapters_written_before_insertion": [
+            "CHAPTER_3"
+          ]
+        },
+        {
+          "score_event": 10,
+          "document_request": {
+            "frame": 386,
+            "occurrence": 13,
+            "receive_row": 2564
+          },
+          "forwarded_to_store": {
+            "frame": 390,
+            "occurrence": 14,
+            "receive_row": 2569
+          },
+          "store_reply_to_document": {
+            "frame": 391,
+            "occurrence": 15,
+            "receive_row": 2574
+          },
+          "effect_id": 28,
+          "effect_request_row": 2575,
+          "section": "CHAPTER_1",
+          "figure_id": "figure:9",
+          "chapters_written_before_insertion": [
+            "CHAPTER_3",
+            "CHAPTER_1",
+            "CHAPTER_2"
+          ]
+        }
       ],
       "epf_records": 8409,
       "simulator_complete": true,
       "violations": 0,
       "events_sha256": "50880d943b97be0807442cc2a7035ba985f6221d654ff4cd13517a376b838c24",
-      "audit_sha256": "47a7921660908d02943f923ff626493d9ed9876bf042c6000f3a4177a59ff7bb"
+      "audit_sha256": "47a7921660908d02943f923ff626493d9ed9876bf042c6000f3a4177a59ff7bb",
+      "initial_draft_completion_order": [
+        "CHAPTER_3",
+        "CHAPTER_1",
+        "CHAPTER_2"
+      ]
     },
     {
       "case": "write-1-2-3",
       "depth": 0,
       "effects": 17,
       "figure_insertions": [
-        [
-          25,
-          26
-        ],
-        [
-          14,
-          15
-        ]
+        {
+          "score_event": 9,
+          "document_request": {
+            "frame": 355,
+            "occurrence": 24,
+            "receive_row": 2351
+          },
+          "forwarded_to_store": {
+            "frame": 357,
+            "occurrence": 25,
+            "receive_row": 2369
+          },
+          "store_reply_to_document": {
+            "frame": 360,
+            "occurrence": 26,
+            "receive_row": 2374
+          },
+          "effect_id": 26,
+          "effect_request_row": 2375,
+          "section": "CHAPTER_3",
+          "figure_id": "figure:8",
+          "chapters_written_before_insertion": [
+            "CHAPTER_1",
+            "CHAPTER_2",
+            "CHAPTER_3"
+          ]
+        },
+        {
+          "score_event": 10,
+          "document_request": {
+            "frame": 386,
+            "occurrence": 13,
+            "receive_row": 2551
+          },
+          "forwarded_to_store": {
+            "frame": 388,
+            "occurrence": 14,
+            "receive_row": 2563
+          },
+          "store_reply_to_document": {
+            "frame": 390,
+            "occurrence": 15,
+            "receive_row": 2568
+          },
+          "effect_id": 28,
+          "effect_request_row": 2569,
+          "section": "CHAPTER_1",
+          "figure_id": "figure:9",
+          "chapters_written_before_insertion": [
+            "CHAPTER_1",
+            "CHAPTER_2",
+            "CHAPTER_3"
+          ]
+        }
       ],
       "epf_records": 4688,
       "simulator_complete": true,
       "violations": 0,
       "events_sha256": "d9cefcfdcc224c6e8e748594e2f10e9af6c3a65eed3da9e17c915e3526161512",
-      "audit_sha256": "b5406758699a510937a6da0d4fd4c778c29072354e8191ee3c306126a2cc9df3"
+      "audit_sha256": "b5406758699a510937a6da0d4fd4c778c29072354e8191ee3c306126a2cc9df3",
+      "initial_draft_completion_order": [
+        "CHAPTER_1",
+        "CHAPTER_2",
+        "CHAPTER_3"
+      ]
     },
     {
       "case": "write-2-1-3",
       "depth": 0,
       "effects": 17,
       "figure_insertions": [
-        [
-          14,
-          15
-        ],
-        [
-          25,
-          26
-        ]
+        {
+          "score_event": 7,
+          "document_request": {
+            "frame": 301,
+            "occurrence": 13,
+            "receive_row": 1993
+          },
+          "forwarded_to_store": {
+            "frame": 303,
+            "occurrence": 14,
+            "receive_row": 2011
+          },
+          "store_reply_to_document": {
+            "frame": 306,
+            "occurrence": 15,
+            "receive_row": 2016
+          },
+          "effect_id": 22,
+          "effect_request_row": 2017,
+          "section": "CHAPTER_1",
+          "figure_id": "figure:5",
+          "chapters_written_before_insertion": [
+            "CHAPTER_2",
+            "CHAPTER_1"
+          ]
+        },
+        {
+          "score_event": 10,
+          "document_request": {
+            "frame": 386,
+            "occurrence": 24,
+            "receive_row": 2564
+          },
+          "forwarded_to_store": {
+            "frame": 390,
+            "occurrence": 25,
+            "receive_row": 2569
+          },
+          "store_reply_to_document": {
+            "frame": 391,
+            "occurrence": 26,
+            "receive_row": 2574
+          },
+          "effect_id": 28,
+          "effect_request_row": 2575,
+          "section": "CHAPTER_3",
+          "figure_id": "figure:4",
+          "chapters_written_before_insertion": [
+            "CHAPTER_2",
+            "CHAPTER_1",
+            "CHAPTER_3"
+          ]
+        }
       ],
       "epf_records": 4687,
       "simulator_complete": true,
       "violations": 0,
       "events_sha256": "d3b55f03947011d39bcb73374b3b738310c5e931872bed5e95177428460ee450",
-      "audit_sha256": "52e9f086e9bb0f52326ebd8ae5bc962a2dab02dbba21aa485ab14f942f2cab23"
+      "audit_sha256": "52e9f086e9bb0f52326ebd8ae5bc962a2dab02dbba21aa485ab14f942f2cab23",
+      "initial_draft_completion_order": [
+        "CHAPTER_2",
+        "CHAPTER_1",
+        "CHAPTER_3"
+      ]
     },
     {
       "case": "write-3-2-1",
       "depth": 0,
       "effects": 17,
       "figure_insertions": [
-        [
-          14,
-          15
-        ],
-        [
-          25,
-          26
-        ]
+        {
+          "score_event": 9,
+          "document_request": {
+            "frame": 355,
+            "occurrence": 13,
+            "receive_row": 2351
+          },
+          "forwarded_to_store": {
+            "frame": 357,
+            "occurrence": 14,
+            "receive_row": 2369
+          },
+          "store_reply_to_document": {
+            "frame": 360,
+            "occurrence": 15,
+            "receive_row": 2374
+          },
+          "effect_id": 26,
+          "effect_request_row": 2375,
+          "section": "CHAPTER_1",
+          "figure_id": "figure:8",
+          "chapters_written_before_insertion": [
+            "CHAPTER_3",
+            "CHAPTER_2",
+            "CHAPTER_1"
+          ]
+        },
+        {
+          "score_event": 10,
+          "document_request": {
+            "frame": 386,
+            "occurrence": 24,
+            "receive_row": 2551
+          },
+          "forwarded_to_store": {
+            "frame": 388,
+            "occurrence": 25,
+            "receive_row": 2569
+          },
+          "store_reply_to_document": {
+            "frame": 391,
+            "occurrence": 26,
+            "receive_row": 2574
+          },
+          "effect_id": 28,
+          "effect_request_row": 2575,
+          "section": "CHAPTER_3",
+          "figure_id": "figure:9",
+          "chapters_written_before_insertion": [
+            "CHAPTER_3",
+            "CHAPTER_2",
+            "CHAPTER_1"
+          ]
+        }
       ],
       "epf_records": 4688,
       "simulator_complete": true,
       "violations": 0,
       "events_sha256": "34e0c1c61725a5f191d4c8d5cf667e7057709907409e1d8b5f06dd57359c78fd",
-      "audit_sha256": "ce871e9c0de8eb3099703cac6dcda5cd724e867e9f7c7912e808823f1cd0c94d"
+      "audit_sha256": "ce871e9c0de8eb3099703cac6dcda5cd724e867e9f7c7912e808823f1cd0c94d",
+      "initial_draft_completion_order": [
+        "CHAPTER_3",
+        "CHAPTER_2",
+        "CHAPTER_1"
+      ]
     }
   ],
   "altered_depth_2_record": {

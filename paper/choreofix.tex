@@ -561,6 +561,20 @@ zero violations in 174.78 seconds and 2,251,389 inclusive tokens. The
 source-bound record is
 \path{output/experiments/research-paper-direct-20261118/v5/verified-3M.json}.
 
+Task 7M exercises an effect that needs two resources. A document Endpoint
+receives a request to insert a particular figure in a chapter, forwards the
+request to the figure store, and receives its confirmation. The receiver
+consumes both incoming messages and compares their arguments before calling
+the simulator. Six scripted runs with five Wasm guests reached publication
+on the same executable. The three initial drafts completed in all six possible
+orders. Five of the twelve insertions ran while at least one other chapter
+still lacked a completed draft. Across 118 effects and 34,845 EPF records,
+all 12 figure insertions had two
+distinct committed receives before the corresponding simulator call. Changing
+the figure ID in a saved store request caused the audit to reject that record.
+The journal rows, effect IDs and build hashes are in
+\path{analysis/7m-figure-receipts.json}.
+
 \subsection{Live-agent evidence across 36 tasks}
 The 19 November inventory includes one audited execution for each of the
 43 qualified task--depth conditions across 29 families. We matched each raw
