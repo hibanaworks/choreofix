@@ -83,7 +83,9 @@ macro_rules! roles {
                     ("Minor2", Request::<MINOR_2>::LOGICAL_LABEL),
                     ("Minor3", Request::<MINOR_3>::LOGICAL_LABEL),
                     ("Minor4", Request::<MINOR_4>::LOGICAL_LABEL),
-                    ("AuthorOutcome", AuthorOutcome::LOGICAL_LABEL),
+                    ("AuthorOutcome", AuthorOutcome::<35>::LOGICAL_LABEL),
+                    ("Chapter3Outcome", AuthorOutcome::<CHAPTER_3_OUTCOME>::LOGICAL_LABEL),
+                    ("Chapter4Outcome", AuthorOutcome::<CHAPTER_4_OUTCOME>::LOGICAL_LABEL),
                     ("Create1", Request::<CREATE_1>::LOGICAL_LABEL),
                     ("Create3", Request::<CREATE_3>::LOGICAL_LABEL),
                     ("Create4", Request::<CREATE_4>::LOGICAL_LABEL),
@@ -245,14 +247,14 @@ pub async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             async { check_and_review(&mut fact_part_i, &simulator).await };
             async { check_and_review(&mut fact_editorial, &simulator).await };
             async {
-                check_chapter::<FACT_3, CHECK_3, MATERIAL_3, REVISE_3, MINOR_3>(
+                check_chapter::<FACT_3, CHECK_3, MATERIAL_3, REVISE_3, MINOR_3, CHAPTER_3_OUTCOME>(
                     &mut fact_3,
                     &simulator,
                 )
                 .await
             };
             async {
-                check_chapter::<FACT_4, CHECK_4, MATERIAL_4, REVISE_4, MINOR_4>(
+                check_chapter::<FACT_4, CHECK_4, MATERIAL_4, REVISE_4, MINOR_4, CHAPTER_4_OUTCOME>(
                     &mut fact_4,
                     &simulator,
                 )

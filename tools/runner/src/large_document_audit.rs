@@ -233,7 +233,11 @@ pub(crate) fn check(
             ("EDITOR_IN_CHIEF", "combine_sections", _) => ("DOCUMENT", vec!["Combine".into()]),
             _ => return Err("effect is outside the 7H file contracts".into()),
         };
-        let (from, primary) = (role(file)?, role(target)?);
+        let request_view = match (tool, section) {
+            ("fact_check" | "review_sections", "CHAPTER_3" | "CHAPTER_4") => "DOCUMENT",
+            _ => target,
+        };
+        let (from, primary) = (role(file)?, role(request_view)?);
         let reassessment = (target == "FACT_PART_I")
             .then(|| role("FACT_EDITORIAL"))
             .transpose()?;
@@ -285,9 +289,7 @@ pub(crate) fn check(
 
         let reply_owners = match tool {
             "insert_figure" => &["FIGURE_STORE"][..],
-            "review_sections" if section != "CHAPTERS_1_2" && result["success"] == true => {
-                &["DOCUMENT"][..]
-            }
+            "review_sections" if section != "CHAPTERS_1_2" => &["DOCUMENT"][..],
             "fact_check" if result["success"] == false => &[target, "DOCUMENT"][..],
             "make_editorial_decision" if result["success"] == false => &["DOCUMENT_OWNER"][..],
             "revise_section" if matches!(operation.as_str(), "Minor1" | "Minor2") => {
@@ -606,12 +608,17 @@ pub(crate) fn check(
             // A Part I minor review carries a single notice listing the exact
             // amendment authorized for each of its chapters.
             let shared_notice = scope == "CHAPTERS_1_2" && operation.starts_with("Minor");
+            let notice_label = match scope {
+                "CHAPTER_3" => "Chapter3Outcome",
+                "CHAPTER_4" => "Chapter4Outcome",
+                _ => "AuthorOutcome",
+            };
             let (&id, _) = one(history.frames.iter().filter(|(id, frame)| {
                 (shared_notice || !used.contains(*id))
                     && sources.iter().any(|source| {
                         role(source).is_ok_and(|source| frame.direction(source, from))
                     })
-                    && compiled["labels"]["AuthorOutcome"] == u64::from(frame.logical_label)
+                    && compiled["labels"][notice_label] == u64::from(frame.logical_label)
                     && frame
                         .received
                         .is_some_and(|received| at < received && received < request_at)

@@ -151,5 +151,75 @@
       "audit-run": "Error: \"failed or altered case result\"",
       "audit-large-document": "Error: \"incomplete protocol capture inventory\""
     }
+  },
+  "chapter_document_custody": {
+    "archive": "output/verification/7h-document-custody-20261121.wXVCHs",
+    "runtime_sha256": "d4fc1a863997c440251737148a37cd58aea6f663c96bac17a5bf7268161adcff",
+    "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+    "source_manifest_sha256": "ef7691cfd2bca48c12d7bc7128f4423d35e62133042a46058386262c92098a01",
+    "mechanism": {
+      "conditions": 18,
+      "effects": 565,
+      "epf_records": 272879,
+      "common_scores_complete": 18,
+      "audit_violations": 0,
+      "scripted_model_calls": 0,
+      "boundary_sha256": "011272afdf03ebfcbffa5b983e9505386bd8e1b15ad49356d51c9d003296293e"
+    },
+    "repeated_major_before_part_i": {
+      "previous_events_sha256": "973667a1b84e7651d74fcdee613d22d09d4d8734eb45b31b6b602fb6cb1c1402",
+      "previous_runtime_sha256": "dfa0254254d4b80c6fa653fbc199c7cde6fe793ee2aa0fb92f3feb1ed33fc12a",
+      "previous_outcome": "36 effects. The blocking REVIEWER command 95 had no reply before the case deadline.",
+      "same_case_inputs": [
+        "simulator_manifest_sha256",
+        "depth",
+        "failure injections",
+        "review and amendment choices",
+        "blocking wash command"
+      ],
+      "current_events_sha256": "49ac65b76cc7230076d936169a96e854cb6edbcdde2f70d2c604794e3e93b721",
+      "effects": 39,
+      "epf_records": 18751,
+      "recovered_reads": [
+        {
+          "agent": "FACT_CHECKER",
+          "command_id": 92,
+          "command": "cat /service/inbox",
+          "error": "wash: read /service/inbox: Permission denied (os error 2)"
+        },
+        {
+          "agent": "REVIEWER",
+          "command_id": 95,
+          "command": "cat /service/inbox",
+          "error": "wash: read /service/inbox: Permission denied (os error 2)"
+        }
+      ]
+    },
+    "groups": [
+      "chapter_reviews",
+      "editorial_reviews",
+      "manuscript_amendments"
+    ],
+    "live_depth_0": {
+      "events_sha256": "86f294e8e3076876a03b420487b80815eb695eb5e29cc47d45f5a74b4546f632",
+      "participants": 7,
+      "completed_participants": 2,
+      "elapsed_seconds": 541.427642209,
+      "effects": 22,
+      "common_score_complete": false,
+      "common_score_violations": 0,
+      "run_audit_error": "failed or altered case result",
+      "effect_audit_error": "incomplete runtime verdict",
+      "reviewer_verdict": "Chapter 3 needed another revision after two successive revise_section effects and fresh fact checks.",
+      "writer_commands": "WRITER_B assembled a replacement chapter in /work/clean.json (97 and 98). Writing that file to /service/write_section/CHAPTER_3 returned a permission error (112). The next command was exit 0 (113), followed by EndpointDropped.",
+      "offline_diagnostic": {
+        "file": "rewrite-diagnostic.json",
+        "payload_sha256": "eab78adf2f19d0aa0266f56756571304dca4e97288b7ea7d4bcab2ea259a84f3",
+        "result": "The same common simulator, restored with the 22 recorded effects, accepted the writer's exact replacement as written. The global offered revise_section during major revisions, which appends feedback to the existing draft. It did not offer write_section for replacement.",
+        "live_effect": false
+      },
+      "qualified": false
+    },
+    "scored_comparison": false
   }
 }

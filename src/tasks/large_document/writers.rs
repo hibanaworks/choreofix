@@ -1,6 +1,6 @@
 //! 7H's writer files bind actual chapter operations and incoming material.
 use super::{
-    facts::{FACT_DATA, FACT_FILE, FACT_IO, FACT_VM},
+    facts::{CHAPTER_3_OUTCOME, CHAPTER_4_OUTCOME, FACT_DATA, FACT_FILE, FACT_IO, FACT_VM},
     figures::{FIGURE_DATA, FIGURE_FILE, FIGURE_IO, FIGURE_VM},
     preparation::*,
     publication::{AuthorOutcome, RECONSIDER_1, RECONSIDER_2},
@@ -225,7 +225,7 @@ pub async fn writer_b(module: &[u8], mut root: Endpoint<'_, WRITER_B_VM>) -> She
         .file(B_FILES[2])?
         .read_as::<EvaluationToChapter3>(&mut evaluation)
         .file(B_FILES[3])?
-        .read_as::<AuthorOutcome>(&mut outcome)
+        .read_as::<AuthorOutcome<CHAPTER_3_OUTCOME>>(&mut outcome)
         .file(B_FILES[4])?
         .write_as::<Request<REVISE_3>>(&mut revision)
         .read_as::<ResultFor<REVISE_3>>(&mut revised)
@@ -262,7 +262,7 @@ pub async fn writer_c(module: &[u8], mut root: Endpoint<'_, WRITER_C_VM>) -> She
         .write_as::<Request<REFERENCES_4>>(&mut refs)
         .read_as::<ResultFor<REFERENCES_4>>(&mut cited)
         .file(C_FILES[2])?
-        .read_as::<AuthorOutcome>(&mut outcome)
+        .read_as::<AuthorOutcome<CHAPTER_4_OUTCOME>>(&mut outcome)
         .file(C_FILES[3])?
         .write_as::<Request<REVISE_4>>(&mut revision)
         .read_as::<ResultFor<REVISE_4>>(&mut revised)

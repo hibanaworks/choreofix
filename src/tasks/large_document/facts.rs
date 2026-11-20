@@ -39,6 +39,8 @@ pub const FACT_IO: u8 = 30;
 pub const CHECK_PART_I: u8 = 23;
 pub const CHECK_3: u8 = 24;
 pub const CHECK_4: u8 = 25;
+pub const CHAPTER_3_OUTCOME: u8 = 49;
+pub const CHAPTER_4_OUTCOME: u8 = 50;
 pub const MATERIAL_PART_I: u8 = 26;
 pub const MATERIAL_3: u8 = 27;
 pub const MATERIAL_4: u8 = 28;
@@ -68,31 +70,32 @@ pub(super) fn chapter_flow<
     const OP: u8,
     const REVISION: u8,
     const MINOR: u8,
+    const OUTCOME: u8,
 >() -> impl Projectable {
     let assessment = || {
         g::seq(
-            fact_request::<FACT, OP>(),
+            fact_request::<DOCUMENT, OP>(),
             g::route(
                 g::seq(
                     g::send::<FACT, FACT_FILE, ResultFor<OP>>(),
                     g::seq(
-                        g::send::<FACT, REVIEW_FILE, ReviewInput>(),
-                        g::send::<REVIEW_FILE, FACT, ReviewRequest<OP>>(),
+                        g::send::<DOCUMENT, REVIEW_FILE, ReviewInput>(),
+                        g::send::<REVIEW_FILE, DOCUMENT, ReviewRequest<OP>>(),
                     ),
                 ),
                 g::seq(
                     g::send::<DOCUMENT, FACT_FILE, ResultFor<OP>>(),
-                    g::send::<FACT, REVIEW_FILE, ReviewInput>(),
+                    g::send::<DOCUMENT, REVIEW_FILE, ReviewInput>(),
                 ),
             ),
         )
     };
     let revision = g::seq(
         g::seq(
-            g::send::<FACT, FILE, AuthorOutcome>(),
+            g::send::<FACT, FILE, AuthorOutcome<OUTCOME>>(),
             g::par(
-                g::send::<FACT, FACT_FILE, FactInput>(),
-                g::send::<FACT, REVIEW_FILE, ReviewInput>(),
+                g::send::<DOCUMENT, FACT_FILE, FactInput>(),
+                g::send::<DOCUMENT, REVIEW_FILE, ReviewInput>(),
             ),
         ),
         g::seq(
@@ -101,18 +104,18 @@ pub(super) fn chapter_flow<
         ),
     );
     let amendment = g::seq(
-        g::send::<FACT, REVIEW_FILE, ReviewInput>(),
+        g::send::<DOCUMENT, FILE, AuthorOutcome<OUTCOME>>(),
         g::seq(
             g::par(
                 g::send::<DOCUMENT, FACT_FILE, FactInput>(),
-                g::send::<DOCUMENT, FILE, AuthorOutcome>(),
+                g::send::<DOCUMENT, REVIEW_FILE, ReviewInput>(),
             ),
             g::seq(
                 g::send::<FILE, DOCUMENT, Request<MINOR>>(),
                 g::seq(
                     g::send::<DOCUMENT, FILE, ResultFor<MINOR>>(),
                     g::seq(
-                        fact_request::<FACT, OP>(),
+                        fact_request::<DOCUMENT, OP>(),
                         g::send::<FACT, FACT_FILE, ResultFor<OP>>(),
                     ),
                 ),
@@ -121,18 +124,18 @@ pub(super) fn chapter_flow<
     );
     let approved = || {
         g::seq(
-            g::send::<FACT, FACT_FILE, FactInput>(),
+            g::send::<DOCUMENT, DRAFTING, ApprovedChapter<OP>>(),
             g::seq(
                 g::par(
-                    g::send::<DOCUMENT, FILE, AuthorOutcome>(),
-                    g::send::<DOCUMENT, REVIEW_FILE, ReviewInput>(),
+                    g::send::<DRAFTING, FILE, AuthorOutcome<OUTCOME>>(),
+                    g::send::<FACT, DRAFTING, Loan<DOCUMENT>>(),
                 ),
-                g::seq(
-                    g::send::<DOCUMENT, DRAFTING, ApprovedChapter<OP>>(),
-                    g::seq(
-                        g::send::<FACT, DRAFTING, Loan<DOCUMENT>>(),
-                        g::send::<FACT, DOCUMENT_OWNER, ResultFor<REVISION>>(),
+                g::par(
+                    g::par(
+                        g::send::<DOCUMENT, FACT_FILE, FactInput>(),
+                        g::send::<DOCUMENT, REVIEW_FILE, ReviewInput>(),
                     ),
+                    g::send::<FACT, DOCUMENT_OWNER, ResultFor<REVISION>>(),
                 ),
             ),
         )
@@ -159,6 +162,7 @@ pub(super) async fn check_chapter<
     const MATERIAL: u8,
     const REVISION: u8,
     const MINOR: u8,
+    const OUTCOME: u8,
 >(
     facts: &mut Endpoint<FACT>,
     effects: &impl ReceivedEffects,
@@ -180,10 +184,10 @@ pub(super) async fn check_chapter<
     let index = 2 + usize::from(OP - CHECK_3);
     let chapter = CHAPTERS[index];
     loop {
-        facts
+        document
             .send::<FactInput>(&encode(&snapshot)?.as_slice())
             .await?;
-        let request = facts.recv::<Request<OP>>().await?;
+        let request = document.recv::<Request<OP>>().await?;
         let checked = effects.apply(request).await?;
         let data = &checked["data"];
         if checked["tool_name"] != "fact_check"
@@ -202,8 +206,10 @@ pub(super) async fn check_chapter<
             facts
                 .send::<ResultFor<OP>>(&checked_bytes.as_slice())
                 .await?;
-            facts.send::<ReviewInput>(&checked_bytes.as_slice()).await?;
-            let request = facts.recv::<ReviewRequest<OP>>().await?;
+            document
+                .send::<ReviewInput>(&checked_bytes.as_slice())
+                .await?;
+            let request = document.recv::<ReviewRequest<OP>>().await?;
             let feedback = decode(request.as_bytes())?.get("feedback").cloned();
             let result = effects.apply(request).await?;
             let data = &result["data"];
@@ -232,16 +238,20 @@ pub(super) async fn check_chapter<
             document
                 .send::<ResultFor<OP>>(&checked_bytes.as_slice())
                 .await?;
-            facts.send::<ReviewInput>(&checked_bytes.as_slice()).await?;
+            document
+                .send::<ReviewInput>(&checked_bytes.as_slice())
+                .await?;
             checked
         };
         let (result, amended) = if result["data"]["status"] == "minor_revision" {
             let outcome = encode(&result)?;
-            facts.send::<ReviewInput>(&outcome.as_slice()).await?;
+            document
+                .send::<AuthorOutcome<OUTCOME>>(&outcome.as_slice())
+                .await?;
             async {
-                let [mut checker, mut author] = document.par()?;
+                let [mut checker, mut reviewer] = document.par()?;
                 async { checker.send::<FactInput>(&outcome.as_slice()).await };
-                async { author.send::<AuthorOutcome>(&outcome.as_slice()).await };
+                async { reviewer.send::<ReviewInput>(&outcome.as_slice()).await };
                 Ok(())
             }
             .await?;
@@ -275,10 +285,10 @@ pub(super) async fn check_chapter<
             document
                 .send::<ResultFor<MINOR>>(&encode(&revised)?.as_slice())
                 .await?;
-            facts
+            document
                 .send::<FactInput>(&encode(&snapshot)?.as_slice())
                 .await?;
-            let args = facts.recv::<Request<OP>>().await?;
+            let args = document.recv::<Request<OP>>().await?;
             let checked = effects.apply(args).await?;
             let data = &checked["data"];
             if checked["tool_name"] != "fact_check"
@@ -301,33 +311,26 @@ pub(super) async fn check_chapter<
         };
         let outcome = encode(&result)?;
         if result["success"] == true {
-            facts.send::<FactInput>(&outcome.as_slice()).await?;
-            async {
-                let [mut author, mut reviewer] = document.par()?;
-                async { author.send::<AuthorOutcome>(&outcome.as_slice()).await };
-                async { reviewer.send::<ReviewInput>(&outcome.as_slice()).await };
-                Ok(())
-            }
-            .await?;
+            document
+                .send::<ApprovedChapter<OP>>(&outcome.as_slice())
+                .await?;
             let receipt = match amended {
                 Some(review) => {
                     encode(&serde_json::json!({"review":review,"checked_minor":result}))?
                 }
                 None => outcome,
             };
-            let latest = encode(&snapshot["sections"][chapter])?;
-            document
-                .send::<ApprovedChapter<OP>>(&latest.as_slice())
-                .await?;
             facts.send::<Loan<DOCUMENT>>(document).await?;
             facts
                 .send::<ResultFor<REVISION>>(&receipt.as_slice())
                 .await?;
             return Ok(());
         }
-        facts.send::<AuthorOutcome>(&outcome.as_slice()).await?;
+        facts
+            .send::<AuthorOutcome<OUTCOME>>(&outcome.as_slice())
+            .await?;
         async {
-            let [mut checker, mut reviewer] = facts.par()?;
+            let [mut checker, mut reviewer] = document.par()?;
             async { checker.send::<FactInput>(&outcome.as_slice()).await };
             async { reviewer.send::<ReviewInput>(&outcome.as_slice()).await };
             Ok(())

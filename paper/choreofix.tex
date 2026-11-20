@@ -717,6 +717,28 @@ stopped before the final capture checkpoint. The trial therefore has a
 positive business score and an unsuccessful end-to-end audit.
 \path{analysis/7h-review-inbox.json}.
 
+In a scripted 7H trial, the reviewer read its inbox twice before submitting
+the next assessment. On the earlier protocol, the second blocking read
+received no reply and the trial timed out after 36 simulator effects.
+We revised the global so that each Part~II chapter's fact check and review
+use one manuscript endpoint, returned to the drafting participant on approval.
+With the same shell commands and review choices, both the fact checker
+and the reviewer received a permission error on their premature reads
+and continued to submission. The trial finished with 39 effects.
+Across all 18 scripted trials on this binary, the common simulator marked
+every manuscript complete. The audits matched 565 effects and checked
+272,879 EPF records with zero violations. These trials used no model calls.
+
+Seven live agents then used the same binary. After two revisions, the
+Chapter~3 writer tried to replace the chapter text following another
+negative review. The shell rejected the write. The writer exited, and the
+run ended after 22 effects without a complete manuscript or a passing
+audit. Replaying those 22 effects in the common simulator and supplying the
+same replacement text produced a successful write. The global permitted
+appending revision feedback at this point, but omitted the writer's choice
+to replace the text. This trial remains outside the qualified set.
+\path{analysis/7h-review-inbox.json}.
+
 These are integration observations from development, not random samples or
 paired baseline trials. They cannot estimate a comparative completion rate,
 latency advantage, or maintenance saving. Earlier failed and interrupted

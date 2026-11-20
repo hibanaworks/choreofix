@@ -1,5 +1,5 @@
 //! Initial writing, references and completed cross-chapter inputs for 7H.
-use super::{facts::*, figures::*, publication::*};
+use super::{facts::*, figures::*, publication::*, review::ReviewInput};
 use crate::{
     imp::json::{decode, encode, same},
     shell::{ShellError, ShellResult, global::Loan, imp::service::ReceivedEffects},
@@ -229,7 +229,7 @@ pub fn preparation() -> impl Projectable {
         ),
     );
     let stable_part_ii = g::seq(
-        chapter_flow::<FACT_4, WRITER_C_FILE, CHECK_4, REVISE_4, MINOR_4>(),
+        chapter_flow::<FACT_4, WRITER_C_FILE, CHECK_4, REVISE_4, MINOR_4, CHAPTER_4_OUTCOME>(),
         g::seq(
             g::send::<DOCUMENT, REFERENCES, StableEvaluation>(),
             g::par(
@@ -241,7 +241,14 @@ pub fn preparation() -> impl Projectable {
                         g::seq(
                             g::send::<REFERENCES, FACT_3, FactMaterial<MATERIAL_3>>(),
                             g::seq(
-                                chapter_flow::<FACT_3, WRITER_B_FILE, CHECK_3, REVISE_3, MINOR_3>(),
+                                chapter_flow::<
+                                    FACT_3,
+                                    WRITER_B_FILE,
+                                    CHECK_3,
+                                    REVISE_3,
+                                    MINOR_3,
+                                    CHAPTER_3_OUTCOME,
+                                >(),
                                 g::send::<DOCUMENT, WRITER_A_FILE, ContributionToPartI>(),
                             ),
                         ),
@@ -462,17 +469,53 @@ pub async fn write_drafts(
     }
     drafting.send::<Loan<DOCUMENT>>(document).await?;
     let fourth = drafting.recv::<ApprovedChapter<CHECK_4>>().await?.to_vec();
-    document = drafting.recv::<Loan<DOCUMENT>>().await?;
-    chapters[3] = crate::imp::json::decode(&fourth)?;
+    let (_, returned) = async {
+        let [mut author, mut custody] = drafting.par()?;
+        async {
+            author
+                .send::<AuthorOutcome<CHAPTER_4_OUTCOME>>(&fourth.as_slice())
+                .await
+        };
+        async { custody.recv::<Loan<DOCUMENT>>().await };
+    }
+    .await?;
+    document = returned;
+    let approval = crate::imp::json::decode(&fourth)?;
+    chapters[3] = approval["data"]["input_snapshot"]["sections"]["CHAPTER_4"].clone();
+    async {
+        let [mut checker, mut reviewer] = document.par()?;
+        async { checker.send::<FactInput>(&fourth.as_slice()).await };
+        async { reviewer.send::<ReviewInput>(&fourth.as_slice()).await };
+        Ok(())
+    }
+    .await?;
     document
-        .send::<StableEvaluation>(&fourth.as_slice())
+        .send::<StableEvaluation>(&crate::imp::json::encode(&chapters[3])?.as_slice())
         .await?;
     drafting.send::<Loan<DOCUMENT>>(document).await?;
     let third = drafting.recv::<ApprovedChapter<CHECK_3>>().await?.to_vec();
-    document = drafting.recv::<Loan<DOCUMENT>>().await?;
-    chapters[2] = crate::imp::json::decode(&third)?;
+    let (_, returned) = async {
+        let [mut author, mut custody] = drafting.par()?;
+        async {
+            author
+                .send::<AuthorOutcome<CHAPTER_3_OUTCOME>>(&third.as_slice())
+                .await
+        };
+        async { custody.recv::<Loan<DOCUMENT>>().await };
+    }
+    .await?;
+    document = returned;
+    let approval = crate::imp::json::decode(&third)?;
+    chapters[2] = approval["data"]["input_snapshot"]["sections"]["CHAPTER_3"].clone();
+    async {
+        let [mut checker, mut reviewer] = document.par()?;
+        async { checker.send::<FactInput>(&third.as_slice()).await };
+        async { reviewer.send::<ReviewInput>(&third.as_slice()).await };
+        Ok(())
+    }
+    .await?;
     document
-        .send::<ContributionToPartI>(&third.as_slice())
+        .send::<ContributionToPartI>(&crate::imp::json::encode(&chapters[2])?.as_slice())
         .await?;
     let inputs = json!({(CHAPTERS[2]):chapters[2], (CHAPTERS[3]):chapters[3]});
     for _ in 0..2 {

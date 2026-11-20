@@ -306,7 +306,7 @@ async fn each_draft_order_delivers_the_actual_cross_chapter_inputs() -> ShellRes
             };
             async { check_and_review(&mut editorial_facts, &world).await };
             async {
-                check_chapter::<FACT_3, CHECK_3, MATERIAL_3, REVISE_3, MINOR_3>(
+                check_chapter::<FACT_3, CHECK_3, MATERIAL_3, REVISE_3, MINOR_3, CHAPTER_3_OUTCOME>(
                     &mut third_facts,
                     &world,
                 )
@@ -314,7 +314,7 @@ async fn each_draft_order_delivers_the_actual_cross_chapter_inputs() -> ShellRes
                 .map_err(|error| shell::ShellError::message(format!("facts 3: {error:?}")))
             };
             async {
-                check_chapter::<FACT_4, CHECK_4, MATERIAL_4, REVISE_4, MINOR_4>(
+                check_chapter::<FACT_4, CHECK_4, MATERIAL_4, REVISE_4, MINOR_4, CHAPTER_4_OUTCOME>(
                     &mut fourth_facts,
                     &world,
                 )
@@ -519,7 +519,7 @@ async fn each_draft_order_delivers_the_actual_cross_chapter_inputs() -> ShellRes
                 .await?;
                 c.recv::<ResultFor<REFERENCES_4>>().await?;
                 assert_eq!(
-                    decode(c.recv::<AuthorOutcome>().await?)?["data"]["status"],
+                    decode(c.recv::<AuthorOutcome<CHAPTER_4_OUTCOME>>().await?)?["data"]["status"],
                     "reviewed"
                 );
                 assert_eq!(
@@ -540,7 +540,7 @@ async fn each_draft_order_delivers_the_actual_cross_chapter_inputs() -> ShellRes
                     writes[3]["data"]["artifact"]
                 );
                 assert_eq!(
-                    decode(b.recv::<AuthorOutcome>().await?)?["data"]["status"],
+                    decode(b.recv::<AuthorOutcome<CHAPTER_3_OUTCOME>>().await?)?["data"]["status"],
                     "reviewed"
                 );
                 assert_eq!(

@@ -14,15 +14,160 @@ use std::{
 #[hibana_runtime::main]
 #[test]
 #[ignore = "requires the versioned 7H preparation executable and wash Wasm"]
-async fn authors_receive_the_completed_chapters_their_work_depends_on() -> Result<()> {
+async fn chapter_reviews() -> Result<()> {
+    run_cases(
+        "chapter_reviews",
+        [
+            (
+                "repeated-major-before-part-i",
+                0,
+                false,
+                [0, 0, 0, 0, 0],
+                &[][..],
+                false,
+            ),
+            (
+                "major-then-accept",
+                0,
+                false,
+                [0, 0, 0, 0, 0],
+                &[][..],
+                false,
+            ),
+            ("depth-2", 2, false, [0, 0, 0, 0, 0], &[][..], false),
+            ("depth-1", 1, false, [0, 0, 0, 0, 0], &[][..], false),
+            (
+                "part-ii-fact-and-major-repair",
+                0,
+                true,
+                [0, 0, 0, 0, 0],
+                &["CHAPTER_2"][..],
+                false,
+            ),
+            ("published", 0, false, [0, 0, 0, 0, 0], &[][..], false),
+        ],
+    )
+    .await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires the versioned 7H preparation executable and wash Wasm"]
+async fn editorial_reviews() -> Result<()> {
+    run_cases(
+        "editorial_reviews",
+        [
+            (
+                "part-ii-minor",
+                0,
+                false,
+                [0, 0, 0, 0, 0],
+                &["CHAPTER_3", "CHAPTER_4"][..],
+                false,
+            ),
+            (
+                "part-ii-amendment-fact-repair",
+                0,
+                false,
+                [0, 0, 0, 0, 0],
+                &["CHAPTER_3", "CHAPTER_4"][..],
+                true,
+            ),
+            (
+                "editorial-repair",
+                0,
+                false,
+                [2, 0, 0, 0, 0],
+                &[][..],
+                false,
+            ),
+            (
+                "editorial-reassessment",
+                0,
+                false,
+                [1, 0, 0, 1, 1],
+                &[][..],
+                false,
+            ),
+            ("fact-repair", 0, false, [0, 2, 0, 0, 0], &[][..], false),
+            ("review-repair", 0, false, [0, 0, 2, 0, 0], &[][..], false),
+        ],
+    )
+    .await
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires the versioned 7H preparation executable and wash Wasm"]
+async fn manuscript_amendments() -> Result<()> {
+    run_cases(
+        "manuscript_amendments",
+        [
+            (
+                "minor-first",
+                0,
+                false,
+                [0, 0, 0, 0, 0],
+                &["CHAPTER_1"][..],
+                false,
+            ),
+            (
+                "minor-both-forward",
+                0,
+                false,
+                [0, 0, 0, 0, 0],
+                &["CHAPTER_1", "CHAPTER_2"][..],
+                false,
+            ),
+            (
+                "major-then-two-amendments",
+                0,
+                false,
+                [0, 0, 0, 0, 0],
+                &["CHAPTER_1", "CHAPTER_2"][..],
+                false,
+            ),
+            (
+                "part-i-amendment-fact-repair",
+                0,
+                false,
+                [0, 0, 0, 0, 0],
+                &["CHAPTER_1", "CHAPTER_2"][..],
+                false,
+            ),
+            (
+                "minor-both-reverse",
+                0,
+                false,
+                [0, 0, 0, 0, 0],
+                &["CHAPTER_2", "CHAPTER_1"][..],
+                false,
+            ),
+            (
+                "repeated-major-nonblocking-review",
+                0,
+                false,
+                [0, 0, 0, 0, 0],
+                &[][..],
+                false,
+            ),
+        ],
+    )
+    .await
+}
+
+type DocumentCase<'a> = (&'a str, u8, bool, [u32; 5], &'a [&'a str], bool);
+
+async fn run_cases(group: &str, cases: [DocumentCase<'_>; 6]) -> Result<()> {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()?;
     std::env::set_current_dir(workspace)?;
     let evidence =
         PathBuf::from(std::env::var_os("CHOREOFIX_EVIDENCE_ROOT").ok_or("7H evidence root")?);
-    fs::create_dir_all(&evidence)?;
-    let root = evidence.join("large-document-wasi");
+    let base = evidence.join("large-document-wasi");
+    fs::create_dir_all(&base)?;
+    let root = base.join(group);
     fs::create_dir(&root)?;
     let runtime = PathBuf::from(
         std::env::var_os("CHOREOFIX_LARGE_DOCUMENT_WASI_BINARY").ok_or("7H executable")?,
@@ -38,117 +183,6 @@ async fn authors_receive_the_completed_chapters_their_work_depends_on() -> Resul
     projection::archive(&root.join("runtime"), &root, "7H")?;
     let build = archive_build_receipt(&root.join("runtime"), &receipt, &root)?;
     let runtime_sha = digest(&root.join("runtime"))?;
-    let cases = [
-        (
-            "major-then-accept",
-            0,
-            false,
-            [0, 0, 0, 0, 0],
-            &[][..],
-            false,
-        ),
-        ("depth-2", 2, false, [0, 0, 0, 0, 0], &[][..], false),
-        ("depth-1", 1, false, [0, 0, 0, 0, 0], &[][..], false),
-        (
-            "part-ii-fact-and-major-repair",
-            0,
-            true,
-            [0, 0, 0, 0, 0],
-            &["CHAPTER_2"][..],
-            false,
-        ),
-        ("published", 0, false, [0, 0, 0, 0, 0], &[][..], false),
-        (
-            "part-ii-minor",
-            0,
-            false,
-            [0, 0, 0, 0, 0],
-            &["CHAPTER_3", "CHAPTER_4"][..],
-            false,
-        ),
-        (
-            "part-ii-amendment-fact-repair",
-            0,
-            false,
-            [0, 0, 0, 0, 0],
-            &["CHAPTER_3", "CHAPTER_4"][..],
-            true,
-        ),
-        (
-            "editorial-repair",
-            0,
-            false,
-            [2, 0, 0, 0, 0],
-            &[][..],
-            false,
-        ),
-        (
-            "editorial-reassessment",
-            0,
-            false,
-            [1, 0, 0, 1, 1],
-            &[][..],
-            false,
-        ),
-        ("fact-repair", 0, false, [0, 2, 0, 0, 0], &[][..], false),
-        ("review-repair", 0, false, [0, 0, 2, 0, 0], &[][..], false),
-        (
-            "minor-first",
-            0,
-            false,
-            [0, 0, 0, 0, 0],
-            &["CHAPTER_1"][..],
-            false,
-        ),
-        (
-            "minor-both-forward",
-            0,
-            false,
-            [0, 0, 0, 0, 0],
-            &["CHAPTER_1", "CHAPTER_2"][..],
-            false,
-        ),
-        (
-            "major-then-two-amendments",
-            0,
-            false,
-            [0, 0, 0, 0, 0],
-            &["CHAPTER_1", "CHAPTER_2"][..],
-            false,
-        ),
-        (
-            "part-i-amendment-fact-repair",
-            0,
-            false,
-            [0, 0, 0, 0, 0],
-            &["CHAPTER_1", "CHAPTER_2"][..],
-            false,
-        ),
-        (
-            "minor-both-reverse",
-            0,
-            false,
-            [0, 0, 0, 0, 0],
-            &["CHAPTER_2", "CHAPTER_1"][..],
-            false,
-        ),
-        (
-            "repeated-major-nonblocking-review",
-            0,
-            false,
-            [0, 0, 0, 0, 0],
-            &[][..],
-            false,
-        ),
-        (
-            "repeated-major-before-part-i",
-            0,
-            false,
-            [0, 0, 0, 0, 0],
-            &[][..],
-            false,
-        ),
-    ];
     let mut reports = Vec::with_capacity(cases.len());
     for (case, depth, repair_part_ii, failures, minor_sections, reject_amended_part_ii) in cases {
         let audit = publication_case(

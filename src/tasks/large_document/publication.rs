@@ -41,7 +41,7 @@ pub type PublicationMaterial<'a> = g::Msg<31, &'a [u8]>;
 type WithheldDocument<'a> = g::Msg<32, &'a [u8]>;
 type EditorialApproval<'a> = g::Msg<33, ReviewReply<'a, true>>;
 type EditorialRejection<'a> = g::Msg<34, ReviewReply<'a, false>>;
-pub type AuthorOutcome<'a> = g::Msg<35, &'a [u8]>;
+pub type AuthorOutcome<'a, const LABEL: u8 = 35> = g::Msg<LABEL, &'a [u8]>;
 pub type UpdatedPartI<'a> = g::Msg<36, &'a [u8]>;
 pub type PartIClosed<'a> = g::Msg<39, &'a [u8]>;
 

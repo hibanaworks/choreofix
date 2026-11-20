@@ -20,6 +20,12 @@ const MULTI_ROUND_DISCOVERY_CASES: usize = 3;
 const RESEARCH_PAPER_CASES: usize = 2;
 const SURVEY_PAPER_DEPTHS: [usize; 2] = [0, 2];
 
+const LARGE_DOCUMENT_GROUPS: [&str; 3] = [
+    "chapter_reviews",
+    "editorial_reviews",
+    "manuscript_amendments",
+];
+
 const FAMILIES: [&str; 30] = [
     "large_document",
     "cicd_pipeline",
@@ -208,6 +214,18 @@ fn boundary_assignments(family: &str, filter: &str) -> Result<Vec<(String, Optio
             return Err("unknown CI/CD finite assignment filter".into());
         }
         return Ok(assignments);
+    }
+    if family == "large_document" {
+        let groups = LARGE_DOCUMENT_GROUPS
+            .map(|group| format!("large_document_boundary::{group}"))
+            .into_iter()
+            .filter(|name| name.contains(filter))
+            .map(|name| (name, None))
+            .collect::<Vec<_>>();
+        if groups.is_empty() {
+            return Err("unknown large document test group".into());
+        }
+        return Ok(groups);
     }
     if family == "coordination" {
         let assignments = [
@@ -660,17 +678,50 @@ pub fn run(output: &Path, filter: Option<&str>) -> Result<Value> {
                 return Err("16M qualification requires its audited actual-Wasm boundary".into());
             }
         }
-        if family == "large_document" {
-            let report: Value = serde_json::from_slice(&fs::read(
-                output.join("evidence/large-document-wasi/boundary.json"),
-            )?)?;
-            if completed != 1
-                || report["task"] != "7H"
-                || report["status"] != "passed"
-                || report["runtime_binary_sha256"] != digest(&binary)?
-            {
-                return Err("7H qualification requires its audited actual-Wasm boundary".into());
+        if family == "large_document" && test_filter == "large_document_boundary::" {
+            let directory = output.join("evidence/large-document-wasi");
+            let runtime = digest(&binary)?;
+            let build = crate::evidence::archive_build_receipt(&binary, &receipt, &directory)?;
+            let wash = digest(
+                &root.join("vendor/hibana-wash/target/wasm32-wasip1/release/hibana-wash.wasm"),
+            )?;
+            let mut cases = Vec::new();
+            let mut names = BTreeSet::new();
+            for group in LARGE_DOCUMENT_GROUPS {
+                let report: Value = serde_json::from_slice(&fs::read(
+                    directory.join(group).join("boundary.json"),
+                )?)?;
+                let rows = report["cases"].as_array().ok_or("missing 7H cases")?;
+                if report["task"] != "7H"
+                    || report["status"] != "passed"
+                    || report["runtime_binary_sha256"] != runtime
+                    || report["build"] != build
+                    || report["wasm_sha256"] != wash
+                    || rows.len() != 6
+                {
+                    return Err("incomplete 7H test group or mismatched binary".into());
+                }
+                for row in rows {
+                    let name = row["case"].as_str().ok_or("missing 7H case name")?;
+                    if !names.insert(name.to_owned()) {
+                        return Err("duplicate 7H test case".into());
+                    }
+                    let mut row = row.clone();
+                    row["group"] = json!(group);
+                    cases.push(row);
+                }
             }
+            if completed != LARGE_DOCUMENT_GROUPS.len() as u64 {
+                return Err("7H qualification requires every test group".into());
+            }
+            save(
+                &directory.join("boundary.json"),
+                &json!({
+                    "task":"7H", "status":"passed", "runtime_binary_sha256":runtime,
+                    "build":build, "wasm_sha256":wash,
+                    "cases":cases, "model_calls":0, "scored_benchmark":false
+                }),
+            )?;
         }
         if family == "full_stack_api" {
             let report: Value = serde_json::from_slice(&fs::read(
