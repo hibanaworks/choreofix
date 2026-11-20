@@ -466,25 +466,34 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         }
         Ok((objects, tests))
     };
-    let aggregate_label = label("AllForCompiler")?;
-    let aggregates: Vec<_> = frames
-        .iter()
-        .filter(|(_, f)| f.direction(service, compiler) && f.logical_label == aggregate_label)
-        .collect();
-    if aggregates.len()
-        != test_history
-            .len()
-            .checked_sub(2)
-            .ok_or("initial test bundle missing")?
-    {
-        return Err("missing or extra test receipt bundle".into());
-    }
-    for (id, frame) in aggregates {
-        let (_, tests) = snapshot(frame.sent)?;
-        if frame.value()? != json!(tests) || !used.insert(*id) {
-            return Err("aggregate reuses or changes actual tests".into());
+    for (recipient, name) in [
+        (compiler, "AllForCompiler"),
+        (integrator, "AllForIntegrator"),
+    ] {
+        let aggregate_label = label(name)?;
+        let aggregates: Vec<_> = frames
+            .iter()
+            .filter(|(_, f)| f.direction(service, recipient) && f.logical_label == aggregate_label)
+            .collect();
+        if aggregates.len()
+            != test_history
+                .len()
+                .checked_sub(2)
+                .ok_or("initial test bundle missing")?
+        {
+            return Err("missing or extra test receipt bundle".into());
+        }
+        for (id, frame) in aggregates {
+            let (_, tests) = snapshot(frame.sent)?;
+            if frame.value()? != json!(tests) || !used.insert(*id) {
+                return Err("aggregate reuses or changes actual tests".into());
+            }
         }
     }
+    let integrator_file = role("INTEGRATOR_FILE")?;
+    let file_repair = label("FileRepair")?;
+    let file_ready = label("FileReady")?;
+    let choose_repair = label("ChooseRepair")?;
     let repair_label = label("RepairCandidate")?;
     let ready_label = label("ReadyCandidate")?;
     let mut ready = Vec::new();
@@ -511,7 +520,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     })
                 })
         };
-        let mut expected = json!({"objects":objects,"tests":tests});
+        let mut expected = json!({"objects":objects});
         if frame.logical_label == ready_label {
             if (0..3).any(|index| !current(index)) {
                 return Err("ready candidate has stale or failed actual checks".into());
@@ -531,6 +540,65 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             let index = next.1;
             if current(index) {
                 return Err("repair requests an already current checked object".into());
+            }
+            let eligible: Vec<_> = (0..3)
+                .filter(|&i| !current(i))
+                .map(|i| modules[i])
+                .collect();
+            let mut expected_notice = json!({"objects":objects, "tests":tests});
+            expected_notice["success"] = json!(false);
+            expected_notice["rebuild"] = json!(eligible);
+            let mut offers = frames
+                .iter()
+                .filter(|(_, item)| {
+                    item.sent > frame.sent
+                        && item.sent < next.0
+                        && item.direction(integrator, integrator_file)
+                        && item.logical_label == file_repair
+                })
+                .collect::<Vec<_>>();
+            offers.sort_by_key(|(_, item)| item.sent);
+            let mut choices = frames
+                .iter()
+                .filter(|(_, item)| {
+                    item.sent > frame.sent
+                        && item.sent < next.0
+                        && item.direction(integrator_file, integrator)
+                        && item.logical_label == choose_repair
+                })
+                .collect::<Vec<_>>();
+            choices.sort_by_key(|(_, item)| item.sent);
+            if offers.is_empty() || offers.len() != choices.len() {
+                return Err("missing candidate read or shell repair choice".into());
+            }
+            let attempts = offers.len();
+            let mut previous = frame.received()?;
+            for (attempt, ((offer_id, offer), (choice_id, choice))) in
+                offers.into_iter().zip(choices).enumerate()
+            {
+                if offer.value()? != expected_notice
+                    || offer.sent <= previous
+                    || choice.sent <= offer.received()?
+                    || !used.insert(*offer_id)
+                    || !used.insert(*choice_id)
+                {
+                    return Err(
+                        "repair choice differs from the offered candidate or its occurrence".into(),
+                    );
+                }
+                previous = choice.received()?;
+                let requested = std::str::from_utf8(&choice.bytes).ok().map(str::trim);
+                if attempt + 1 == attempts {
+                    if requested != Some(modules[index]) {
+                        return Err(
+                            "actual rebuild differs from the integrator shell choice".into()
+                        );
+                    }
+                } else if requested.is_some_and(|name| eligible.contains(&name)) {
+                    return Err("an eligible shell repair choice was discarded".into());
+                } else {
+                    expected_notice["error"] = json!("choose a module listed in rebuild");
+                }
             }
             let request =
                 json!({"module":modules[index],"object":objects[index],"test":tests[index]});
@@ -561,7 +629,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     .filter(|(_, f)| {
                         f.direction(integrator, target)
                             && f.logical_label == selected_label
-                            && f.sent > frame.received.unwrap_or(frame.sent)
+                            && f.sent > previous
                             && f.sent < next.0
                     })
                     .min_by_key(|(_, f)| f.sent)
@@ -576,13 +644,15 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         return Err("ready candidate missing or duplicated".into());
     }
     let ready = ready[0];
-    let file_ready = label("FileReady")?;
+    let (objects, tests) = snapshot(ready.sent)?;
+    let proof = json!({"success":true,"objects":objects,"tests":tests});
     let file_link = label("LinkFile")?;
-    let integrator_file = role("INTEGRATOR_FILE")?;
     let candidates = frames
         .iter()
         .filter(|(_, frame)| {
-            frame.direction(integrator, integrator_file) && frame.logical_label == file_ready
+            frame.direction(integrator, integrator_file)
+                && frame.logical_label == file_ready
+                && frame.sent > ready.sent
         })
         .collect::<Vec<_>>();
     let (id, candidate) = *candidates.first().ok_or("actual candidate file missing")?;
@@ -593,7 +663,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         })
         .ok_or("link file input missing")?;
     if candidates.len() != 1
-        || candidate.value()? != ready.value()?
+        || candidate.value()? != proof
         || candidate.sent <= ready.received()?
         || candidate.received()? >= request.sent
         || !used.insert(*id)
@@ -608,7 +678,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         .iter()
         .find(|(_, f)| f.direction(integrator, compiler) && f.logical_label == finish_label)
         .ok_or("final actual checks missing")?;
-    if finish.value()? != ready.value()? || finish.sent <= ready.received()? || !used.insert(*id) {
+    if finish.value()? != proof || finish.sent <= ready.received()? || !used.insert(*id) {
         return Err("final checks changed the actual ready candidate".into());
     }
     for (resource, name) in [
@@ -893,6 +963,44 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
             .ok_or_else(|| format!("accepted {kind}"))?;
         checked.push(json!({"kind":kind,"rejected":true,"error":error.to_string()}));
     }
+    // Preserve every transport observation of the write while substituting another module.
+    let choice_label = artifact["compiled"]["labels"]["ChooseRepair"]
+        .as_u64()
+        .ok_or("choice label")?;
+    let (choice, replacement) = sends
+        .iter()
+        .find_map(|frame| {
+            let id = frame["frame_id"].as_u64()?;
+            if labels.get(&id).copied().map(u64::from) != Some(choice_label) {
+                return None;
+            }
+            ["module_a", "module_b", "module_c"]
+                .into_iter()
+                .find_map(|name| {
+                    let bytes = format!("{name}\n");
+                    (frame["payload"] == json!(bytes.as_bytes())).then_some((
+                        id,
+                        if name == "module_a" {
+                            b"module_b\n"
+                        } else {
+                            b"module_a\n"
+                        },
+                    ))
+                })
+        })
+        .ok_or("scripted shell repair choice")?;
+    let mut changed = rows.clone();
+    for row in &mut changed {
+        if row["message"]["type"] == "protocol_frame" && row["message"]["frame_id"] == choice {
+            row["message"]["payload"] = json!(replacement);
+        }
+    }
+    let error = check(&changed, &artifact, dynamic)
+        .err()
+        .ok_or("accepted substituted repair choice")?;
+    checked.push(
+        json!({"kind":"substituted_shell_repair_choice","rejected":true,"error":error.to_string()}),
+    );
     for field in ["frame_label", "lane"] {
         let mut changed = rows.clone();
         for row in &mut changed {

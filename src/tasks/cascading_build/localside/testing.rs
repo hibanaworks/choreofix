@@ -47,7 +47,19 @@ pub async fn run(
         .await?;
     }
     let bytes = imp::encode(&serde_json::json!(results))?;
-    endpoint.send::<AllForCompiler>(&bytes.as_slice()).await?;
+    async {
+        let [mut compiler, mut integrator] = endpoint.par()?;
+        async {
+            compiler.send::<AllForCompiler>(&bytes.as_slice()).await?;
+        };
+        async {
+            integrator
+                .send::<AllForIntegrator>(&bytes.as_slice())
+                .await?;
+        };
+        Ok::<(), ShellError>(())
+    }
+    .await?;
     loop {
         let branch = endpoint.offer().await?;
         let (index, received) = match branch.label() {
@@ -95,6 +107,18 @@ pub async fn run(
         }
         .await?;
         let bytes = imp::encode(&serde_json::json!(results))?;
-        endpoint.send::<AllForCompiler>(&bytes.as_slice()).await?;
+        async {
+            let [mut compiler, mut integrator] = endpoint.par()?;
+            async {
+                compiler.send::<AllForCompiler>(&bytes.as_slice()).await?;
+            };
+            async {
+                integrator
+                    .send::<AllForIntegrator>(&bytes.as_slice())
+                    .await?;
+            };
+            Ok::<(), ShellError>(())
+        }
+        .await?;
     }
 }

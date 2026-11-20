@@ -143,15 +143,20 @@ pub fn candidate(objects: &[Value; 3], tests: &[Value; 3]) -> ShellResult<Value>
     }
     Ok(json!({"objects":objects,"tests":tests}))
 }
-pub fn needed(objects: &[Value; 3], tests: &[Value; 3]) -> ShellResult<Option<usize>> {
-    for index in 0..3 {
+pub fn rebuild_modules(objects: &[Value; 3], tests: &[Value; 3]) -> ShellResult<Vec<&'static str>> {
+    let mut modules = Vec::new();
+    for (index, name) in MODULES.iter().enumerate() {
         validate_object(&objects[index], index)?;
         test_result(&tests[index], index)?;
         if !current(objects, tests, index)? {
-            return Ok(Some(index));
+            modules.push(*name);
         }
     }
-    Ok(None)
+    Ok(modules)
+}
+pub fn requested_module(bytes: &[u8]) -> Option<usize> {
+    let name = std::str::from_utf8(bytes).ok()?.trim();
+    MODULES.iter().position(|module| *module == name)
 }
 pub fn link_arguments(value: Value) -> ShellResult<Value> {
     let mut names: Vec<_> = value["modules"]
@@ -205,27 +210,4 @@ pub fn candidate_parts(value: &Value) -> ShellResult<([Value; 3], [Value; 3])> {
     let tests = parse("tests")?;
     candidate(&objects, &tests)?;
     Ok((objects, tests))
-}
-
-/// The cell contains the received candidate itself. It is the resolver's
-/// actual decision input, not a selected-module flag or a protocol cursor.
-pub fn selected<const EXPECTED: usize>(
-    input: &core::cell::Cell<Value>,
-) -> Result<hibana::runtime::resolver::DecisionArm, hibana::runtime::resolver::ResolverError> {
-    use hibana::runtime::resolver::{DecisionArm, ResolverError};
-    let value = input.take();
-    let choice = candidate_parts(&value)
-        .and_then(|(objects, tests)| needed(&objects, &tests))
-        .ok()
-        .flatten()
-        .map(|index| {
-            if index == EXPECTED {
-                DecisionArm::Left
-            } else {
-                DecisionArm::Right
-            }
-        })
-        .ok_or_else(ResolverError::reject);
-    input.set(value);
-    choice
 }

@@ -240,9 +240,10 @@ pub async fn run<'r>(
                     imp::object(&builds[1], 1)?,
                     imp::object(&builds[2], 2)?,
                 ];
-                if imp::needed(&objects, &tests)?.is_none() {
+                if imp::rebuild_modules(&objects, &tests)?.is_empty() {
                     let proof = imp::finish(&objects, &tests)?;
-                    let bytes = imp::encode(&proof)?;
+                    let bytes =
+                        imp::encode(&serde_json::json!({"objects":objects,"success":true}))?;
                     endpoint
                         .send::<ReadyCandidate>(&ReviewReply::from_bytes(&bytes)?)
                         .await?;
@@ -254,7 +255,7 @@ pub async fn run<'r>(
                     }
                     break (objects, tests);
                 }
-                let bytes = imp::encode(&imp::candidate(&objects, &tests)?)?;
+                let bytes = imp::encode(&serde_json::json!({"objects":objects}))?;
                 endpoint.send::<RepairCandidate>(&bytes.as_slice()).await?;
                 let repair = endpoint.offer().await?;
                 let (index, request) = match repair.label() {

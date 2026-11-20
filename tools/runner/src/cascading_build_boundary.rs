@@ -238,7 +238,7 @@ async fn tester(guest: &process::Guest, invalid: bool) -> Result<()> {
     Ok(())
 }
 
-async fn integrator(guest: &process::Guest, invalid: bool) -> Result<()> {
+async fn integrator(guest: &process::Guest, invalid: bool, priority: &str) -> Result<()> {
     if invalid {
         let bad = guest
             .command(
@@ -254,11 +254,78 @@ async fn integrator(guest: &process::Guest, invalid: bool) -> Result<()> {
             "{bad}"
         );
     }
-    let candidate = response(
-        &guest
-            .command("INTEGRATOR", "cat /service/candidate".into())
-            .await?,
-    )?;
+    let mut try_unknown = invalid;
+    let mut try_current = invalid;
+    let candidate = loop {
+        let ready = guest
+            .command(
+                "INTEGRATOR",
+                "dd if=/service/candidate iflag=nonblock".into(),
+            )
+            .await?;
+        if !ready["stdout"]
+            .as_str()
+            .ok_or("ready candidate output")?
+            .contains("wash:")
+        {
+            break response(&ready)?;
+        }
+        let repair = guest
+            .command("INTEGRATOR", "dd if=/service/rebuild iflag=nonblock".into())
+            .await?;
+        if repair["stdout"]
+            .as_str()
+            .ok_or("repair offer output")?
+            .contains("wash:")
+        {
+            hibana_runtime::host::sleep(Duration::from_millis(5)).await?;
+            continue;
+        }
+        let offered = response(&repair)?;
+        let eligible = offered["rebuild"]
+            .as_array()
+            .ok_or("current repair candidates")?;
+        let module = priority
+            .chars()
+            .map(|letter| format!("module_{}", letter.to_ascii_lowercase()))
+            .find(|name| eligible.iter().any(|value| value == name))
+            .ok_or("no eligible builder")?;
+        let current = ["module_a", "module_b", "module_c"]
+            .into_iter()
+            .find(|module| !eligible.iter().any(|value| value == module));
+        let invalid_choices = [
+            try_unknown.then_some("unknown"),
+            current.filter(|_| try_current),
+        ];
+        for rejected in invalid_choices.into_iter().flatten() {
+            guest
+                .command("INTEGRATOR", format!("echo {rejected} > /service/rebuild"))
+                .await?;
+            let retry = response(
+                &guest
+                    .command("INTEGRATOR", "cat /service/rebuild".into())
+                    .await?,
+            )?;
+            assert_eq!(retry["rebuild"], offered["rebuild"]);
+            assert_eq!(retry["objects"], offered["objects"]);
+            assert_eq!(retry["tests"], offered["tests"]);
+            assert_eq!(retry["error"], "choose a module listed in rebuild");
+        }
+        try_unknown = false;
+        if current.is_some() {
+            try_current = false;
+        }
+        let reply = guest
+            .command("INTEGRATOR", format!("echo {module} > /service/rebuild"))
+            .await?;
+        assert!(
+            !reply["stdout"]
+                .as_str()
+                .ok_or("repair choice output")?
+                .contains("wash:"),
+            "{reply}"
+        );
+    };
     assert_eq!(candidate["success"], true);
     assert_eq!(
         candidate["objects"]
@@ -340,28 +407,29 @@ async fn actual_five_wasm_build_test_repair_and_link() -> Result<()> {
     }
     projection::archive(&binary, &directory, "10M")?;
     let orders = ["ABC", "ACB", "BAC", "BCA", "CAB", "CBA"];
-    for (depth, order, invalid, delay, failures) in orders
-        .map(|order| {
-            (
-                0,
-                order,
-                true,
-                0.01,
-                &[
-                    ("run_build_tests", 0),
-                    ("run_build_tests", 1),
-                    ("run_build_tests", 2),
-                ][..],
-            )
-        })
+    let injected = &[
+        ("run_build_tests", 0),
+        ("run_build_tests", 1),
+        ("run_build_tests", 2),
+    ][..];
+    let multi_failure = orders
         .into_iter()
-        .chain(
-            (0..=2).flat_map(|depth| orders.map(move |order| (depth, order, false, 0.01, &[][..]))),
-        )
-        .chain([
-            (0, orders[0], false, 1.0, &[][..]),
-            (0, orders[5], false, 1.0, &[][..]),
-        ])
+        .zip(orders.into_iter().rev())
+        .map(|(order, priority)| (0, order, priority, true, 0.01, injected));
+    for (depth, order, priority, invalid, delay, failures) in
+        [(0, "ABC", "ABC", true, 0.01, injected)]
+            .into_iter()
+            .chain(multi_failure)
+            .chain((0..=2).flat_map(|depth| {
+                orders
+                    .into_iter()
+                    .zip(orders.into_iter().rev())
+                    .map(move |(order, priority)| (depth, order, priority, false, 0.01, &[][..]))
+            }))
+            .chain([
+                (0, "ABC", "CBA", false, 1.0, &[][..]),
+                (0, "CBA", "ABC", false, 1.0, &[][..]),
+            ])
     {
         let case_index = outcomes.len();
         let output = directory.join(format!("case{case_index}"));
@@ -372,7 +440,7 @@ async fn actual_five_wasm_build_test_repair_and_link() -> Result<()> {
         )?;
         save(
             &output.join("case.json"),
-            &json!({"task":"10M","depth":depth,"initial_order":order,
+            &json!({"task":"10M","depth":depth,"initial_order":order,"repair_preference":priority,
             "model_calls":0,"scored_benchmark":false,"build_receipt":"../build-receipt.json",
             "build_receipt_sha256":receipt_hash,"invalid_input_recovery":invalid,
             "delay_multiplier":delay,"failure_overrides":failures,
@@ -391,6 +459,7 @@ async fn actual_five_wasm_build_test_repair_and_link() -> Result<()> {
                 "task",
                 "depth",
                 "initial_order",
+                "repair_preference",
                 "initial_order_control",
                 "invalid_input_recovery",
                 "delay_multiplier",
@@ -448,7 +517,7 @@ async fn actual_five_wasm_build_test_repair_and_link() -> Result<()> {
                 async {
                     async {
                         async { tester(&guest, invalid).await };
-                        async { integrator(&guest, invalid).await };
+                        async { integrator(&guest, invalid, priority).await };
                         // Only this model-free fixture chooses its command order.
                         // The executable receives no order or resolver selection.
                         let [first, second, third] =
@@ -606,7 +675,7 @@ async fn actual_five_wasm_build_test_repair_and_link() -> Result<()> {
         assert_eq!(checked["dynamic_protocol_checked"], true);
         save(&output.join("audit.json"), checked)?;
         outcomes.push(
-            json!({"case":output,"task":"10M","depth":depth,"initial_order":order,
+            json!({"case":output,"task":"10M","depth":depth,"initial_order":order,"repair_preference":priority,
             "invalid_input_recovery":invalid,"delay_multiplier":delay,"failure_overrides":failures,
             "protocol_complete":true,"common_score_complete":true,"actual_build_test_overlaps":overlaps,
             "audit_file":"audit.json","audit_sha256":digest(&output.join("audit.json"))?,"auditor_sha256":digest(&auditor)?,
@@ -617,8 +686,8 @@ async fn actual_five_wasm_build_test_repair_and_link() -> Result<()> {
             "wasm_execution_reused":previous.is_some()}),
         );
     }
-    if outcomes.len() != 26 {
-        return Err("all 26 declared Wasm conditions must be checked".into());
+    if outcomes.len() != 27 {
+        return Err("all 27 declared Wasm conditions must be checked".into());
     }
     save(
         &directory.join("report.json"),

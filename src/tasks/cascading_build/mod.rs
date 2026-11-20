@@ -7,7 +7,7 @@ mod tests;
 mod wire;
 
 use crate::shell::{ShellError, ShellResult};
-use hibana::runtime::{SessionKitStorage, ids::SessionId, resolver::ResolverRef};
+use hibana::runtime::{SessionKitStorage, ids::SessionId};
 
 #[hibana_runtime::scope]
 pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
@@ -52,7 +52,6 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
             let p = programs();
             bus.projected(p.observation());
             let capture = |row| bus.capture(row);
-            let input = core::cell::Cell::new(serde_json::Value::Null);
             let mut slab = vec![0; 2 * 1024 * 1024];
             let incoming_capacity = slab.len();
             let mut storage = SessionKitStorage::uninit();
@@ -91,16 +90,6 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                 let mut tester_data = rv.enter(session, &p.tester_data)?;
                 let tester_file = rv.enter(session, &p.tester_file)?;
                 let tester_vm = rv.enter(session, &p.tester_vm)?;
-                rv.set_resolver(
-                    &p.integrator,
-                    ResolverRef::<REBUILD_A>::decision_state(&input, imp::selected::<0>),
-                )
-                .map_err(|_| ShellError::message("could not bind actual A candidate input"))?;
-                rv.set_resolver(
-                    &p.integrator,
-                    ResolverRef::<REBUILD_B>::decision_state(&input, imp::selected::<1>),
-                )
-                .map_err(|_| ShellError::message("could not bind actual B candidate input"))?;
                 async {
                     file_metadata::run(&mut a_data, a_file, BUILDER_FILES).await?;
                 };
@@ -143,7 +132,7 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                     localside::testing::run(&mut testing, &simulator).await?;
                 };
                 async {
-                    localside::integrator::run(&mut integrator, &input).await?;
+                    localside::integrator::run(&mut integrator).await?;
                 };
                 async {
                     localside::tester::run(&mut tester).await?;
@@ -268,12 +257,17 @@ pub async fn run_stdio(module: &[u8]) -> ShellResult<()> {
                     let mut request = vec![0; crate::shell::GUEST_MEMORY_BYTES];
                     let mut result = vec![0; incoming_capacity];
                     let mut candidate = vec![0; incoming_capacity];
+                    let mut repair = vec![0; incoming_capacity];
+                    let mut choice = vec![0; crate::shell::GUEST_MEMORY_BYTES];
                     let files = ChoreoFsFiles::new(integrator_vm).file(
                         ChoreoFsFile::new(INTEGRATOR_FILES[0], file)
                             .write_as::<LinkFile>(&mut request)
                             .read_as::<FileLinked>(&mut result)
                             .file(INTEGRATOR_FILES[1])?
-                            .read_as::<FileReady>(&mut candidate),
+                            .read_as::<FileReady>(&mut candidate)
+                            .file(INTEGRATOR_FILES[2])?
+                            .write_as::<ChooseRepair>(&mut choice)
+                            .read_as::<FileRepair>(&mut repair),
                     )?;
                     let mut memory = vec![0; crate::shell::GUEST_MEMORY_BYTES];
                     let mut guest_storage = HibanaWasiGuestStorage::uninit();

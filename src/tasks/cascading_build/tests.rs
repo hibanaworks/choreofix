@@ -7,7 +7,7 @@ use crate::shell::{
         service::{PairedEffects, ReceivedEffects, ResourceReceipt, SimulatorOperation},
     },
 };
-use hibana::runtime::{SessionKitStorage, ids::SessionId, resolver::DecisionArm};
+use hibana::runtime::{SessionKitStorage, ids::SessionId};
 use serde_json::{Value, json};
 use std::cell::Cell;
 
@@ -73,7 +73,10 @@ fn a_positive_test_cannot_hide_later_shared_input_changes() {
     assert!(imp::validate_object(&objects[1], 1).is_ok());
     assert!(imp::current(&objects, &tests, 1).unwrap());
     assert!(!imp::current(&objects, &tests, 0).unwrap());
-    assert_eq!(imp::needed(&objects, &tests).unwrap(), Some(0));
+    assert_eq!(
+        imp::rebuild_modules(&objects, &tests).unwrap(),
+        ["module_a"]
+    );
     assert!(imp::finish(&objects, &tests).is_err());
 }
 
@@ -87,18 +90,24 @@ fn wrong_modules_extra_arguments_and_malformed_candidates_are_rejected() {
 }
 
 #[test]
-fn resolver_reads_actual_failed_receipt_and_restores_its_input() {
+fn guest_can_choose_each_of_multiple_stale_modules() {
     let (objects, mut tests) = checked_objects();
+    tests[0]["success"] = json!(false);
     tests[2]["success"] = json!(false);
-    let actual = imp::candidate(&objects, &tests).unwrap();
-    let input = Cell::new(actual.clone());
-    assert_eq!(imp::selected::<0>(&input).unwrap(), DecisionArm::Right);
-    assert_eq!(imp::selected::<2>(&input).unwrap(), DecisionArm::Left);
-    assert_eq!(input.take(), actual);
-    let malformed = json!({"objects":["not an actual candidate"]});
-    input.set(malformed.clone());
-    assert!(imp::selected::<0>(&input).is_err());
-    assert_eq!(input.take(), malformed);
+    assert_eq!(
+        imp::rebuild_modules(&objects, &tests).unwrap(),
+        ["module_a", "module_c"]
+    );
+    assert_eq!(imp::requested_module(b"module_c\n"), Some(2));
+    assert_eq!(imp::requested_module(b"module_a"), Some(0));
+    assert!(imp::requested_module(b"unknown").is_none());
+    assert!(imp::reconsider(&objects, &tests, 1).is_err());
+    for index in [2, 0] {
+        assert_eq!(
+            imp::reconsider(&objects, &tests, index).unwrap()["module"],
+            imp::MODULES[index]
+        );
+    }
 }
 
 #[test]

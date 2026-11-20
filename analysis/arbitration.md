@@ -220,12 +220,40 @@ We tested all six orders of the three schema migrations using seven real wash gu
 
 These are scripted depth-zero runs through the preparation part of 4H. The original task allows the migration orders; this experiment establishes that all six remain available. The upstream 9E comparison above measures a strict extension of a task's visible behavior. The full 4H task still requires deployment, registration and recovery.
 
-To reproduce from the repository root, build the `microservice_migration` family with the runner's `--build-wasi` option. Set `CHOREOFIX_MICROSERVICE_MIGRATION_WASI_BINARY` to the built executable and `CHOREOFIX_EVIDENCE_ROOT` to a fresh directory. Run the following under the repository's resource guard.
+### Deployment and registration in the common simulator
+
+Can DevOps register A while B and C still await deployment? We tested the common simulator with three services whose reviews, tests and schema migrations had succeeded. For each of the 25 acyclic dependency graphs an architect can declare on these services, we tried all 90 orders of the six remaining actions in which each deployment precedes its own registration. We injected no failures. Across the 2,250 graph/order pairs, 720 completed with zero violations. The other 1,530 recorded violations. The zero-violation cases were exactly those where every declared dependency had already deployed when its dependent service deployed.
+
+| Dependency graphs | Legal orders per graph | Graph/order pairs with zero violations |
+| ---: | ---: | ---: |
+| 1 | 90 | 90 |
+| 6 | 45 | 270 |
+| 6 | 30 | 180 |
+| 12 | 15 | 180 |
+
+A barrier requiring all deployments to finish before any registration would lose 432 of the 720 legal pairs. This count follows from the ordering constraints. Each fixed deployment order admits 15 interleavings with the registrations. Only six put all three registrations last. For example, with no declared dependencies, deploying and registering A before deploying B is a valid completion prefix. In a graph where B depends on A, B may deploy once A has deployed, even if A has yet to register.
+
+These measurements exercise the scoring environment. The seven-guest Wasm experiments above cover preparation and schema migration. The [per-graph measurements and simulator input hashes](../output/verification/4h-deploy-register-orders-7knyo3us/summary.json) identify the exact evaluation inputs. The summary's SHA-256 is `bdec659bc61b38a1907a6e864d448f61c21ff9f166ae02618c991b1625b0af9f`.
+
+To reproduce the seven-guest preparation test from the repository root, build the `microservice_migration` family with the runner's `--build-wasi` option. Set `CHOREOFIX_MICROSERVICE_MIGRATION_WASI_BINARY` to the built executable and `CHOREOFIX_EVIDENCE_ROOT` to a fresh directory. Run the following under the repository's resource guard.
 
 ```sh
 cargo +stable test --locked --manifest-path tools/runner/Cargo.toml \
   microservice_migration_boundary:: -- --ignored --nocapture
 ```
+
+## Choosing a rebuild in 10M
+
+Two scripted, five-guest Wasm runs began with the same A, B, C build order. Each used the same executable, shell module, depth, delay, invalid-input probes and injection settings. The first test of A found unavailable inputs. The first tests of B and C failed by injection. All three modules were therefore eligible for reconsideration. The integrator chose a module by writing its name to the projected `/service/rebuild` file. The next fresh assessment also failed by injection.
+
+| Guest preference among eligible modules | Actual rebuilds after the initial three | Matched effects | EPF records | Common score violations |
+| --- | --- | ---: | ---: | ---: |
+| A, B, C | A, A, B, C | 15 | 48,589 | 0 |
+| C, B, A | C, C, B, A | 15 | 46,070 | 0 |
+
+Both trials reached the final link. In both, the effect auditor rejected a coherent substitution of another module name in the recorded shell choice. This checks whether the auditor can distinguish the choice from the module actually rebuilt. The trials used no model calls. They establish that a fixed initial build order permits more than one subsequent repair order on this executable.
+
+The runtime SHA-256 was `a6a95a2f92881be1a91dcc9a623f96a66783fedee928a66df66e01f6c50fdc3d`. The journals have SHA-256 `106d0ad5ed6be29a3c21b043ba8f685027dc88ed2dd6a9cac0a2cad065f4930d` and `6d19548df1247ad3c67d2f2e309209a5ca44256ea58b9a3392d27a28b638e5aa`. The [Wasm regression](../tools/runner/src/cascading_build_boundary.rs) includes these two conditions in the `cascading_build_boundary::` qualification.
 
 ## Admission to a mechanism comparison
 

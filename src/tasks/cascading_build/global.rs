@@ -1,5 +1,5 @@
 //! One source for all initial builder orders and unbounded data-driven repairs.
-use super::wire::{Arguments, BuildRequest};
+use super::wire::{Arguments, BuildRequest, RepairNotice};
 use crate::shell::imp::review_reply::ReviewReply;
 use hibana::{
     Endpoint, g,
@@ -38,8 +38,6 @@ pub const TESTER_VM: u8 = 36;
 pub const TESTER_DATA: u8 = 52;
 pub use crate::shell::global::{FileExit, Loan};
 pub const SESSION: u32 = 102;
-pub const REBUILD_A: u16 = 915;
-pub const REBUILD_B: u16 = 916;
 
 pub type LoanCoreA<'r> = g::Msg<1, Endpoint<'r, CORE>>;
 pub type LoanConfigA<'r> = g::Msg<2, Endpoint<'r, CONFIG>>;
@@ -72,6 +70,7 @@ pub type TestB<'a> = g::Msg<29, BuildRequest<'a, TESTER>>;
 pub type TestC<'a> = g::Msg<30, BuildRequest<'a, TESTER>>;
 pub type Tested<'a> = g::Msg<31, &'a [u8]>;
 pub type Feedback<'a> = g::Msg<32, &'a [u8]>;
+pub type AllForIntegrator<'a> = g::Msg<78, &'a [u8]>;
 pub type AllForCompiler<'a> = g::Msg<34, &'a [u8]>;
 pub type RetryA<'a> = g::Msg<35, &'a [u8]>;
 pub type RetryB<'a> = g::Msg<36, &'a [u8]>;
@@ -113,6 +112,8 @@ pub type FileFeedback<'a> = g::Msg<72, &'a [u8]>;
 pub type FileReconsidered<'a> = g::Msg<73, &'a [u8]>;
 pub type FileFinished<'a> = g::Msg<74, &'a [u8]>;
 pub type FileReady<'a> = g::Msg<75, ReviewReply<'a, true>>;
+pub type FileRepair<'a> = g::Msg<77, RepairNotice<'a>>;
+pub type ChooseRepair<'a> = g::Msg<76, &'a [u8]>;
 const fn object(
     path: &'static [u8],
     fd: u8,
@@ -146,9 +147,10 @@ pub const TESTER_FILES: [hibana_wasip1_runtime::choreofs::ChoreoFsObject<'static
     object(b"service/run_build_tests_c", 6),
     object(b"service/next_object", 7),
 ];
-pub const INTEGRATOR_FILES: [hibana_wasip1_runtime::choreofs::ChoreoFsObject<'static>; 2] = [
+pub const INTEGRATOR_FILES: [hibana_wasip1_runtime::choreofs::ChoreoFsObject<'static>; 3] = [
     object(b"service/link_modules", 4),
     object(b"service/candidate", 5),
+    object(b"service/rebuild", 6),
 ];
 
 fn build_a() -> impl Projectable {
@@ -375,21 +377,31 @@ fn pipeline(
     )
 }
 fn all_results() -> impl Projectable {
-    g::send::<TEST_SERVICE, COMPILER, AllForCompiler>()
+    g::par(
+        g::send::<TEST_SERVICE, COMPILER, AllForCompiler>(),
+        g::send::<TEST_SERVICE, INTEGRATOR, AllForIntegrator>(),
+    )
 }
 fn repair() -> impl Projectable {
     g::seq(
-        g::send::<COMPILER, INTEGRATOR, RepairCandidate>(),
+        g::seq(
+            g::send::<COMPILER, INTEGRATOR, RepairCandidate>(),
+            g::seq(
+                g::send::<INTEGRATOR, INTEGRATOR_FILE, FileRepair>(),
+                g::send::<INTEGRATOR_FILE, INTEGRATOR, ChooseRepair>(),
+            )
+            .roll(),
+        ),
         g::seq(
             g::route(
                 g::seq(
-                    g::par(
-                        g::seq(
-                            g::send::<INTEGRATOR, A, RetryA>(),
-                            g::send::<A, A_FILE, FileReconsidered>(),
-                        ),
+                    g::seq(
+                        g::send::<INTEGRATOR, COMPILER, RetryAForCompiler>(),
                         g::par(
-                            g::send::<INTEGRATOR, COMPILER, RetryAForCompiler>(),
+                            g::seq(
+                                g::send::<INTEGRATOR, A, RetryA>(),
+                                g::send::<A, A_FILE, FileReconsidered>(),
+                            ),
                             g::par(
                                 g::seq(
                                     g::send::<INTEGRATOR, B, RetryAToB>(),
@@ -409,13 +421,13 @@ fn repair() -> impl Projectable {
                 ),
                 g::route(
                     g::seq(
-                        g::par(
-                            g::seq(
-                                g::send::<INTEGRATOR, B, RetryB>(),
-                                g::send::<B, B_FILE, FileReconsidered>(),
-                            ),
+                        g::seq(
+                            g::send::<INTEGRATOR, COMPILER, RetryBForCompiler>(),
                             g::par(
-                                g::send::<INTEGRATOR, COMPILER, RetryBForCompiler>(),
+                                g::seq(
+                                    g::send::<INTEGRATOR, B, RetryB>(),
+                                    g::send::<B, B_FILE, FileReconsidered>(),
+                                ),
                                 g::par(
                                     g::seq(
                                         g::send::<INTEGRATOR, A, RetryBToA>(),
@@ -434,13 +446,13 @@ fn repair() -> impl Projectable {
                         ),
                     ),
                     g::seq(
-                        g::par(
-                            g::seq(
-                                g::send::<INTEGRATOR, C, RetryC>(),
-                                g::send::<C, C_FILE, FileReconsidered>(),
-                            ),
+                        g::seq(
+                            g::send::<INTEGRATOR, COMPILER, RetryCForCompiler>(),
                             g::par(
-                                g::send::<INTEGRATOR, COMPILER, RetryCForCompiler>(),
+                                g::seq(
+                                    g::send::<INTEGRATOR, C, RetryC>(),
+                                    g::send::<C, C_FILE, FileReconsidered>(),
+                                ),
                                 g::par(
                                     g::seq(
                                         g::send::<INTEGRATOR, A, RetryCToA>(),
@@ -458,10 +470,8 @@ fn repair() -> impl Projectable {
                             g::seq(g::send::<COMPILER, TESTER, TestObjectC>(), test_c()),
                         ),
                     ),
-                )
-                .resolve::<REBUILD_B>(),
-            )
-            .resolve::<REBUILD_A>(),
+                ),
+            ),
             all_results(),
         ),
     )
@@ -777,6 +787,7 @@ impl Programs {
             ("TestC", TestC::LOGICAL_LABEL),
             ("Tested", Tested::LOGICAL_LABEL),
             ("Feedback", Feedback::LOGICAL_LABEL),
+            ("AllForIntegrator", AllForIntegrator::LOGICAL_LABEL),
             ("AllForCompiler", AllForCompiler::LOGICAL_LABEL),
             ("RetryA", RetryA::LOGICAL_LABEL),
             ("RetryB", RetryB::LOGICAL_LABEL),
@@ -817,6 +828,8 @@ impl Programs {
             ("FileReconsidered", FileReconsidered::LOGICAL_LABEL),
             ("FileFinished", FileFinished::LOGICAL_LABEL),
             ("FileReady", FileReady::LOGICAL_LABEL),
+            ("FileRepair", FileRepair::LOGICAL_LABEL),
+            ("ChooseRepair", ChooseRepair::LOGICAL_LABEL),
         ]
         .into_iter()
         .map(|(name, label)| (name.into(), label.into()))

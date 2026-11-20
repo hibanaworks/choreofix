@@ -93,3 +93,33 @@ impl SimulatorOperation for BuildRequest<'_, TESTER> {
     const RPC: (&'static str, &'static str) = ("TEST_RUNNER", "run_build_tests");
     const ARGUMENT_FIELD: Option<&'static str> = Some("arguments");
 }
+
+/// The repair offer lists every module that requires a new object or test.
+pub struct RepairNotice<'a>(pub &'a [u8]);
+impl WireEncode for RepairNotice<'_> {
+    fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
+        self.0.encode_into(output)
+    }
+}
+impl WirePayload for RepairNotice<'_> {
+    const SCHEMA_ID: u32 = 0x4342_0200;
+    type Decoded<'a> = &'a [u8];
+
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        let malformed = |_| CodecError::Malformed;
+        let value = imp::decode(input.as_bytes()).map_err(malformed)?;
+        let (objects, tests) = imp::candidate_parts(&value).map_err(malformed)?;
+        let modules = imp::rebuild_modules(&objects, &tests).map_err(malformed)?;
+        let valid = !modules.is_empty()
+            && value["success"] == false
+            && value["rebuild"] == serde_json::json!(modules);
+        if valid {
+            Ok(())
+        } else {
+            Err(CodecError::Malformed)
+        }
+    }
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
+        input.as_bytes()
+    }
+}
