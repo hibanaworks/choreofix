@@ -1,22 +1,20 @@
 //! Actual clinical data owners; all communication is visible at its effect boundary.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::Endpoint;
 use serde_json::{Value, json};
 use std::cell::Cell;
 
 #[hibana_runtime::scope]
-pub async fn patient_a<'r, D: Domain>(
+pub async fn patient_a<'r, D: ReceivedEffects>(
     endpoint: &mut Endpoint<'r, PATIENT_A_SERVICE>,
     (mut panel, actual): (Endpoint<'r, PANEL_A>, &Cell<Value>),
-    domain: &D,
+    effects: &D,
 ) -> ShellResult<()> {
-    let arguments = endpoint.recv::<AssessmentRequestA>().await?.into_value();
+    let request = endpoint.recv::<AssessmentRequestA>().await?;
+    let arguments = imp::decode(request.as_bytes())?;
     imp::patient(&arguments, "patient_a")?;
-    let assessment = domain
-        .execute("ER_DOCTOR_A", "assess_patient", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let assessment = effects.apply(request).await?;
     imp::actual_result(&assessment, "patient_a")?;
     let bytes = imp::encode(&assessment)?;
     async {
@@ -39,16 +37,14 @@ pub async fn patient_a<'r, D: Domain>(
                 tests.send::<PanelLoan<PANEL_A>>(panel).await?;
                 let admitted = tests.recv::<PanelFileRequestA>().await?;
                 tests.send::<PanelAdmittedA>(&admitted).await?;
-                let arguments = tests.recv::<TestRequest<2>>().await?.into_value();
+                let request = tests.recv::<TestRequest<2>>().await?;
+                let arguments = imp::decode(request.as_bytes())?;
                 imp::same(&arguments, &admitted.into_value())?;
                 imp::tests(
                     &arguments,
                     ("patient_a", &["trauma_panel", "blood_type", "coag"]),
                 )?;
-                let result = domain
-                    .execute("ER_DOCTOR_A", "order_tests", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(request).await?;
                 imp::actual_result(&result, "patient_a")?;
                 imp::same(
                     &result["data"]["inputs"]["assessment"],
@@ -97,13 +93,11 @@ pub async fn patient_a<'r, D: Domain>(
     let findings = json!({"assessment":assessment, "tests":receipts, "ct":ct});
     let bytes = imp::encode(&findings)?;
     endpoint.send::<FindingsA>(&bytes.as_slice()).await?;
-    let arguments = endpoint.recv::<DiagnosisRequestA>().await?.into_value();
+    let request = endpoint.recv::<DiagnosisRequestA>().await?;
+    let arguments = imp::decode(request.as_bytes())?;
     imp::patient(&arguments, "patient_a")?;
     imp::optional_text(&arguments, "symptoms")?;
-    let result = domain
-        .execute("ER_DOCTOR_A", "diagnose", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let result = effects.apply(request).await?;
     imp::actual_result(&result, "patient_a")?;
     imp::same(
         &result["data"]["inputs"]["assessment"],
@@ -166,17 +160,15 @@ pub async fn patient_a<'r, D: Domain>(
 }
 
 #[hibana_runtime::scope]
-pub async fn patient_b<'r, D: Domain>(
+pub async fn patient_b<'r, D: ReceivedEffects>(
     endpoint: &mut Endpoint<'r, PATIENT_B_SERVICE>,
     (mut panel, actual): (Endpoint<'r, PANEL_B>, &Cell<Value>),
-    domain: &D,
+    effects: &D,
 ) -> ShellResult<()> {
-    let arguments = endpoint.recv::<AssessmentRequestB>().await?.into_value();
+    let request = endpoint.recv::<AssessmentRequestB>().await?;
+    let arguments = imp::decode(request.as_bytes())?;
     imp::patient(&arguments, "patient_b")?;
-    let assessment = domain
-        .execute("ER_DOCTOR_B", "assess_patient", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let assessment = effects.apply(request).await?;
     imp::actual_result(&assessment, "patient_b")?;
     let bytes = imp::encode(&assessment)?;
     async {
@@ -199,13 +191,11 @@ pub async fn patient_b<'r, D: Domain>(
                 tests.send::<PanelLoan<PANEL_B>>(panel).await?;
                 let admitted = tests.recv::<PanelFileRequestB>().await?;
                 tests.send::<PanelAdmittedB>(&admitted).await?;
-                let arguments = tests.recv::<TestRequest<3>>().await?.into_value();
+                let request = tests.recv::<TestRequest<3>>().await?;
+                let arguments = imp::decode(request.as_bytes())?;
                 imp::same(&arguments, &admitted.into_value())?;
                 imp::tests(&arguments, ("patient_b", &["stroke_panel", "ct_angio"]))?;
-                let result = domain
-                    .execute("ER_DOCTOR_B", "order_tests", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(request).await?;
                 imp::actual_result(&result, "patient_b")?;
                 imp::same(
                     &result["data"]["inputs"]["assessment"],
@@ -264,13 +254,11 @@ pub async fn patient_b<'r, D: Domain>(
     let findings = json!({"assessment":assessment, "tests":receipts, "ct":ct, "mri":mri});
     let bytes = imp::encode(&findings)?;
     endpoint.send::<FindingsB>(&bytes.as_slice()).await?;
-    let arguments = endpoint.recv::<DiagnosisRequestB>().await?.into_value();
+    let request = endpoint.recv::<DiagnosisRequestB>().await?;
+    let arguments = imp::decode(request.as_bytes())?;
     imp::patient(&arguments, "patient_b")?;
     imp::optional_text(&arguments, "symptoms")?;
-    let result = domain
-        .execute("ER_DOCTOR_B", "diagnose", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let result = effects.apply(request).await?;
     imp::actual_result(&result, "patient_b")?;
     imp::same(
         &result["data"]["inputs"]["assessment"],

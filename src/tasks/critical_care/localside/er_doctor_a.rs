@@ -13,7 +13,9 @@ pub async fn run(endpoint: &mut Endpoint<ER_A>) -> ShellResult<()> {
             let (completed, tests) = loop {
                 let mut panel = clinical.recv::<PanelLoan<PANEL_A>>().await?;
                 let admitted = clinical.recv::<PanelAdmittedA>().await?;
-                panel.send::<TestRequest<2>>(&admitted).await?;
+                panel
+                    .send::<TestRequest<2>>(&imp::EffectRequest(admitted))
+                    .await?;
                 let attempt = imp::decode(panel.recv::<TestResult>().await?)?;
                 imp::actual_result(&attempt, "patient_a")?;
                 clinical.send::<PanelReturn<PANEL_A>>(panel).await?;

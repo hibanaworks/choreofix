@@ -1,14 +1,14 @@
 //! Physical imaging owners; requests are checked before the actual effect.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{Endpoint, g::Message};
 use serde_json::Value;
 
 #[hibana_runtime::scope]
-pub async fn ct<'r, D: Domain>(
+pub async fn ct<'r, D: ReceivedEffects>(
     endpoint: &mut Endpoint<'r, CT_SERVICE>,
     mut instrument: Endpoint<'r, CT_SCANNER>,
-    domain: &D,
+    effects: &D,
 ) -> ShellResult<()> {
     let mut assessment_a = Value::Null;
     let mut assessment_b = Value::Null;
@@ -27,12 +27,10 @@ pub async fn ct<'r, D: Domain>(
                 endpoint.send::<CtPerformAdmittedA>(&admitted).await?;
                 let admitted = admitted.into_value();
                 endpoint.send::<CtLoan>(instrument).await?;
-                let arguments = endpoint.recv::<CtPerformRequestA>().await?.into_value();
+                let request = endpoint.recv::<CtPerformRequestA>().await?;
+                let arguments = imp::decode(request.as_bytes())?;
                 imp::same(&arguments, &admitted)?;
-                let result = domain
-                    .execute("RADIOLOGIST", "perform_imaging", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(request).await?;
                 imp::actual_result(&result, "patient_a")?;
                 imp::same(
                     &result["data"]["inputs"]["assessment"],
@@ -60,12 +58,10 @@ pub async fn ct<'r, D: Domain>(
                 endpoint.send::<CtInterpretAdmittedA>(&admitted).await?;
                 let admitted = admitted.into_value();
                 endpoint.send::<CtLoan>(instrument).await?;
-                let arguments = endpoint.recv::<CtInterpretRequestA>().await?.into_value();
+                let request = endpoint.recv::<CtInterpretRequestA>().await?;
+                let arguments = imp::decode(request.as_bytes())?;
                 imp::same(&arguments, &admitted)?;
-                let result = domain
-                    .execute("RADIOLOGIST", "interpret_imaging", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(request).await?;
                 imp::actual_result(&result, "patient_a")?;
                 imp::same(
                     &result["data"]["inputs"]["assessment"],
@@ -99,12 +95,10 @@ pub async fn ct<'r, D: Domain>(
                 endpoint.send::<CtPerformAdmittedB>(&admitted).await?;
                 let admitted = admitted.into_value();
                 endpoint.send::<CtLoan>(instrument).await?;
-                let arguments = endpoint.recv::<CtPerformRequestB>().await?.into_value();
+                let request = endpoint.recv::<CtPerformRequestB>().await?;
+                let arguments = imp::decode(request.as_bytes())?;
                 imp::same(&arguments, &admitted)?;
-                let result = domain
-                    .execute("RADIOLOGIST", "perform_imaging", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(request).await?;
                 imp::actual_result(&result, "patient_b")?;
                 imp::same(
                     &result["data"]["inputs"]["assessment"],
@@ -132,12 +126,10 @@ pub async fn ct<'r, D: Domain>(
                 endpoint.send::<CtInterpretAdmittedB>(&admitted).await?;
                 let admitted = admitted.into_value();
                 endpoint.send::<CtLoan>(instrument).await?;
-                let arguments = endpoint.recv::<CtInterpretRequestB>().await?.into_value();
+                let request = endpoint.recv::<CtInterpretRequestB>().await?;
+                let arguments = imp::decode(request.as_bytes())?;
                 imp::same(&arguments, &admitted)?;
-                let result = domain
-                    .execute("RADIOLOGIST", "interpret_imaging", arguments)
-                    .await
-                    .map_err(ShellError::message)?;
+                let result = effects.apply(request).await?;
                 imp::actual_result(&result, "patient_b")?;
                 imp::same(
                     &result["data"]["inputs"]["assessment"],
@@ -169,10 +161,10 @@ pub async fn ct<'r, D: Domain>(
 }
 
 #[hibana_runtime::scope]
-pub async fn mri<'r, D: Domain>(
+pub async fn mri<'r, D: ReceivedEffects>(
     endpoint: &mut Endpoint<'r, MRI_SERVICE>,
     mut instrument: Endpoint<'r, MRI>,
-    domain: &D,
+    effects: &D,
 ) -> ShellResult<()> {
     let admitted = endpoint.recv::<MriPerformIntent>().await?;
 
@@ -182,12 +174,10 @@ pub async fn mri<'r, D: Domain>(
     endpoint.send::<MriPerformAdmitted>(&admitted).await?;
     let admitted = admitted.into_value();
     endpoint.send::<MriLoan>(instrument).await?;
-    let arguments = endpoint.recv::<MriPerformRequest>().await?.into_value();
+    let request = endpoint.recv::<MriPerformRequest>().await?;
+    let arguments = imp::decode(request.as_bytes())?;
     imp::same(&arguments, &admitted)?;
-    let image = domain
-        .execute("RADIOLOGIST", "perform_imaging", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let image = effects.apply(request).await?;
     imp::actual_result(&image, "patient_b")?;
     imp::same(
         &image["data"]["inputs"]["assessment"],
@@ -212,12 +202,10 @@ pub async fn mri<'r, D: Domain>(
     endpoint.send::<MriInterpretAdmitted>(&admitted).await?;
     let admitted = admitted.into_value();
     endpoint.send::<MriLoan>(instrument).await?;
-    let arguments = endpoint.recv::<MriInterpretRequest>().await?.into_value();
+    let request = endpoint.recv::<MriInterpretRequest>().await?;
+    let arguments = imp::decode(request.as_bytes())?;
     imp::same(&arguments, &admitted)?;
-    let report = domain
-        .execute("RADIOLOGIST", "interpret_imaging", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let report = effects.apply(request).await?;
     imp::actual_result(&report, "patient_b")?;
     imp::same(
         &report["data"]["inputs"]["assessment"],

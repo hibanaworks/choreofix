@@ -1,13 +1,16 @@
 //! Actual two-patient treatment boundaries and one operating-room continuation.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, imp::service::Domain};
+use crate::shell::{
+    ShellError, ShellResult,
+    imp::service::{PairedEffects, ReceivedEffects},
+};
 use hibana::Endpoint;
 
 #[hibana_runtime::scope]
-pub async fn anesthesia<'r, D: Domain>(
+pub async fn anesthesia<'r, D: ReceivedEffects>(
     endpoint: &mut Endpoint<'r, ANESTHESIA_SERVICE>,
     room: Endpoint<'r, OPERATING_ROOM>,
-    domain: &D,
+    effects: &D,
 ) -> ShellResult<()> {
     let diagnosis = imp::decode(endpoint.recv::<DiagnosisForAnesthesia>().await?)?;
     imp::actual_result(&diagnosis["result"], "patient_a")?;
@@ -17,12 +20,10 @@ pub async fn anesthesia<'r, D: Domain>(
     imp::patient(&admitted, "patient_a")?;
     imp::optional_text(&admitted, "type")?;
     endpoint.send::<AnesthesiaLoan>(room).await?;
-    let arguments = endpoint.recv::<AnesthesiaRequest>().await?.into_value();
+    let request = endpoint.recv::<AnesthesiaRequest>().await?;
+    let arguments = imp::decode(request.as_bytes())?;
     imp::same(&arguments, &admitted)?;
-    let result = domain
-        .execute("ANESTHESIOLOGIST", "prepare_anesthesia", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let result = effects.apply(request).await?;
     imp::actual_result(&result, "patient_a")?;
     imp::same(
         &result["data"]["inputs"]["assessment"],
@@ -62,9 +63,9 @@ pub async fn anesthesia<'r, D: Domain>(
 }
 
 #[hibana_runtime::scope]
-pub async fn surgery<'r, D: Domain>(
+pub async fn surgery<'r, D: ReceivedEffects>(
     endpoint: &mut Endpoint<'r, SURGERY_SERVICE>,
-    domain: &D,
+    effects: &D,
 ) -> ShellResult<()> {
     let diagnosis = imp::decode(endpoint.recv::<DiagnosisForSurgery>().await?)?;
     imp::actual_result(&diagnosis["result"], "patient_a")?;
@@ -87,12 +88,10 @@ pub async fn surgery<'r, D: Domain>(
         return Err(ShellError::message("unexpected surgical procedure"));
     }
     endpoint.send::<SurgeryLoan>(room).await?;
-    let arguments = endpoint.recv::<SurgeryRequest>().await?.into_value();
+    let request = endpoint.recv::<SurgeryRequest>().await?;
+    let arguments = imp::decode(request.as_bytes())?;
     imp::same(&arguments, &admitted)?;
-    let result = domain
-        .execute("SURGEON", "perform_surgery", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let result = effects.apply(request).await?;
     imp::actual_result(&result, "patient_a")?;
     imp::same(
         &result["data"]["inputs"]["assessment"],
@@ -124,10 +123,10 @@ pub async fn surgery<'r, D: Domain>(
 }
 
 #[hibana_runtime::scope]
-pub async fn icu<'r, D: Domain>(
+pub async fn icu<'r, D: PairedEffects>(
     endpoint: &mut Endpoint<'r, ICU_SERVICE>,
     (bed, ventilator): (Endpoint<'r, ICU_BEDS>, Endpoint<'r, VENTILATOR>),
-    domain: &D,
+    effects: &D,
 ) -> ShellResult<()> {
     let diagnosis = imp::decode(endpoint.recv::<DiagnosisForIcu>().await?)?;
     imp::actual_result(&diagnosis["result"], "patient_b")?;
@@ -148,18 +147,18 @@ pub async fn icu<'r, D: Domain>(
         Ok(())
     }
     .await?;
-    let (bed_request, vent_request) = async {
+    let result = async {
         let [mut bed_branch, mut vent_branch] = endpoint.par()?;
-        async { Ok::<_, ShellError>(bed_branch.recv::<BedRequest>().await?.into_value()) };
-        async { Ok::<_, ShellError>(vent_branch.recv::<VentilatorRequest>().await?.into_value()) };
+        let (bed_request, vent_request) = async {
+            async { bed_branch.recv::<BedRequest>().await };
+            async { vent_branch.recv::<VentilatorRequest>().await };
+        }
+        .await?;
+        imp::same(&imp::decode(bed_request.as_bytes())?, &admitted)?;
+        imp::same(&imp::decode(vent_request.as_bytes())?, &admitted)?;
+        effects.apply_pair(bed_request, vent_request).await
     }
     .await?;
-    imp::same(&bed_request, &admitted)?;
-    imp::same(&vent_request, &admitted)?;
-    let result = domain
-        .execute("ICU_COORDINATOR", "manage_icu", admitted)
-        .await
-        .map_err(ShellError::message)?;
     imp::actual_result(&result, "patient_b")?;
     imp::same(
         &result["data"]["inputs"]["assessment"],
@@ -202,17 +201,15 @@ pub async fn icu<'r, D: Domain>(
 }
 
 #[hibana_runtime::scope]
-pub async fn pharmacy<'r, D: Domain>(
+pub async fn pharmacy<'r, D: ReceivedEffects>(
     endpoint: &mut Endpoint<'r, PHARMACY_SERVICE>,
-    domain: &D,
+    effects: &D,
 ) -> ShellResult<()> {
-    let arguments = endpoint.recv::<ReviewRequest>().await?.into_value();
+    let request = endpoint.recv::<ReviewRequest>().await?;
+    let arguments = imp::decode(request.as_bytes())?;
     imp::patient(&arguments, "patient_A_and_B")?;
     imp::optional_text(&arguments, "medications")?;
-    let result = domain
-        .execute("PHARMACIST", "review_prescriptions", arguments)
-        .await
-        .map_err(ShellError::message)?;
+    let result = effects.apply(request).await?;
     imp::actual_result(&result, "patient_A_and_B")?;
     let bytes = imp::encode(&result)?;
     async {

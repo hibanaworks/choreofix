@@ -30,7 +30,9 @@ including the 8M API operations, consume its received request directly.
 
 In 5E the panel and scanner submissions carry the arguments to their resource
 Endpoints. The simulator consumes the request received from the panel or
-scanner. In 6H the staging receiver consumes the deployment request, sends
+scanner. In 5H the ICU receiver checks requests from the bed and ventilator
+against the admitted patient data. One ICU effect consumes both receives.
+In 6H the staging receiver consumes the deployment request, sends
 the stage check and compares the reply with the requested service and previous
 validations. The pending simulator call owns its arguments and sends them only
 when awaited after those checks. Dropping it before then issues no RPC.

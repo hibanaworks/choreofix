@@ -13,7 +13,9 @@ pub async fn run(endpoint: &mut Endpoint<RADIOLOGIST>) -> ShellResult<()> {
                     CtPerformAdmittedA::LOGICAL_LABEL => {
                         let admitted = branch.recv::<CtPerformAdmittedA>().await?;
                         let mut scanner = ct.recv::<CtLoan>().await?;
-                        scanner.send::<CtPerformRequestA>(&admitted).await?;
+                        scanner
+                            .send::<CtPerformRequestA>(&imp::EffectRequest(admitted))
+                            .await?;
                         let result = imp::decode(scanner.recv::<CtImageA>().await?)?;
                         imp::actual_result(&result, "patient_a")?;
                         ct.send::<CtLoan>(scanner).await?;
@@ -21,7 +23,9 @@ pub async fn run(endpoint: &mut Endpoint<RADIOLOGIST>) -> ShellResult<()> {
                     CtInterpretAdmittedA::LOGICAL_LABEL => {
                         let admitted = branch.recv::<CtInterpretAdmittedA>().await?;
                         let mut scanner = ct.recv::<CtLoan>().await?;
-                        scanner.send::<CtInterpretRequestA>(&admitted).await?;
+                        scanner
+                            .send::<CtInterpretRequestA>(&imp::EffectRequest(admitted))
+                            .await?;
                         let result = imp::decode(scanner.recv::<CtReportA>().await?)?;
                         imp::actual_result(&result, "patient_a")?;
                         ct.send::<CtLoan>(scanner).await?;
@@ -29,7 +33,9 @@ pub async fn run(endpoint: &mut Endpoint<RADIOLOGIST>) -> ShellResult<()> {
                     CtPerformAdmittedB::LOGICAL_LABEL => {
                         let admitted = branch.recv::<CtPerformAdmittedB>().await?;
                         let mut scanner = ct.recv::<CtLoan>().await?;
-                        scanner.send::<CtPerformRequestB>(&admitted).await?;
+                        scanner
+                            .send::<CtPerformRequestB>(&imp::EffectRequest(admitted))
+                            .await?;
                         let result = imp::decode(scanner.recv::<CtImageB>().await?)?;
                         imp::actual_result(&result, "patient_b")?;
                         ct.send::<CtLoan>(scanner).await?;
@@ -37,7 +43,9 @@ pub async fn run(endpoint: &mut Endpoint<RADIOLOGIST>) -> ShellResult<()> {
                     CtInterpretAdmittedB::LOGICAL_LABEL => {
                         let admitted = branch.recv::<CtInterpretAdmittedB>().await?;
                         let mut scanner = ct.recv::<CtLoan>().await?;
-                        scanner.send::<CtInterpretRequestB>(&admitted).await?;
+                        scanner
+                            .send::<CtInterpretRequestB>(&imp::EffectRequest(admitted))
+                            .await?;
                         let result = imp::decode(scanner.recv::<CtReportB>().await?)?;
                         imp::actual_result(&result, "patient_b")?;
                         ct.send::<CtLoan>(scanner).await?;
@@ -50,13 +58,17 @@ pub async fn run(endpoint: &mut Endpoint<RADIOLOGIST>) -> ShellResult<()> {
         async {
             let admitted = mri.recv::<MriPerformAdmitted>().await?;
             let mut scanner = mri.recv::<MriLoan>().await?;
-            scanner.send::<MriPerformRequest>(&admitted).await?;
+            scanner
+                .send::<MriPerformRequest>(&imp::EffectRequest(admitted))
+                .await?;
             let result = imp::decode(scanner.recv::<MriImage>().await?)?;
             imp::actual_result(&result, "patient_b")?;
             mri.send::<MriLoan>(scanner).await?;
             let admitted = mri.recv::<MriInterpretAdmitted>().await?;
             let mut scanner = mri.recv::<MriLoan>().await?;
-            scanner.send::<MriInterpretRequest>(&admitted).await?;
+            scanner
+                .send::<MriInterpretRequest>(&imp::EffectRequest(admitted))
+                .await?;
             let result = imp::decode(scanner.recv::<MriReport>().await?)?;
             imp::actual_result(&result, "patient_b")?;
             mri.send::<MriLoan>(scanner).await?;

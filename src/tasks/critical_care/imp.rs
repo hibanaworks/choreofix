@@ -1,5 +1,5 @@
 //! Patient/result codecs and actual data validation; no protocol operations.
-use crate::shell::{ShellError, ShellResult};
+use crate::shell::{ShellError, ShellResult, imp::service::SimulatorOperation};
 use hibana::runtime::wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload};
 use serde_json::Value;
 use std::cell::Cell;
@@ -210,4 +210,90 @@ impl<const OPERATION: u8> WirePayload for Arguments<OPERATION> {
     fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self {
         Self(input.as_bytes().to_vec())
     }
+}
+
+/// Only the final request received from the file or loaned resource can cause this effect.
+pub struct EffectRequest<const OPERATION: u8>(pub Arguments<OPERATION>);
+
+impl<const OPERATION: u8> WireEncode for EffectRequest<OPERATION> {
+    fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
+        self.0.encode_into(output)
+    }
+}
+
+impl<const OPERATION: u8> WirePayload for EffectRequest<OPERATION> {
+    const SCHEMA_ID: u32 = 0xac05_2100 | OPERATION as u32;
+    type Decoded<'a> = ReceivedPayload<'a, Self>;
+
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        Arguments::<OPERATION>::validate_payload(input)
+    }
+
+    fn decode_validated_payload(input: ReceivedPayload<'_, Self>) -> Self::Decoded<'_> {
+        input
+    }
+}
+
+impl SimulatorOperation for EffectRequest<0> {
+    const RPC: (&'static str, &'static str) = ("ER_DOCTOR_A", "assess_patient");
+}
+
+impl SimulatorOperation for EffectRequest<1> {
+    const RPC: (&'static str, &'static str) = ("ER_DOCTOR_B", "assess_patient");
+}
+
+impl SimulatorOperation for EffectRequest<2> {
+    const RPC: (&'static str, &'static str) = ("ER_DOCTOR_A", "order_tests");
+}
+
+impl SimulatorOperation for EffectRequest<3> {
+    const RPC: (&'static str, &'static str) = ("ER_DOCTOR_B", "order_tests");
+}
+
+impl SimulatorOperation for EffectRequest<4> {
+    const RPC: (&'static str, &'static str) = ("RADIOLOGIST", "perform_imaging");
+}
+
+impl SimulatorOperation for EffectRequest<5> {
+    const RPC: (&'static str, &'static str) = ("RADIOLOGIST", "interpret_imaging");
+}
+
+impl SimulatorOperation for EffectRequest<6> {
+    const RPC: (&'static str, &'static str) = ("RADIOLOGIST", "perform_imaging");
+}
+
+impl SimulatorOperation for EffectRequest<7> {
+    const RPC: (&'static str, &'static str) = ("RADIOLOGIST", "interpret_imaging");
+}
+
+impl SimulatorOperation for EffectRequest<8> {
+    const RPC: (&'static str, &'static str) = ("RADIOLOGIST", "perform_imaging");
+}
+
+impl SimulatorOperation for EffectRequest<9> {
+    const RPC: (&'static str, &'static str) = ("RADIOLOGIST", "interpret_imaging");
+}
+
+impl SimulatorOperation for EffectRequest<10> {
+    const RPC: (&'static str, &'static str) = ("ANESTHESIOLOGIST", "prepare_anesthesia");
+}
+
+impl SimulatorOperation for EffectRequest<11> {
+    const RPC: (&'static str, &'static str) = ("SURGEON", "perform_surgery");
+}
+
+impl SimulatorOperation<2> for EffectRequest<12> {
+    const RPC: (&'static str, &'static str) = ("ICU_COORDINATOR", "manage_icu");
+}
+
+impl SimulatorOperation for EffectRequest<13> {
+    const RPC: (&'static str, &'static str) = ("PHARMACIST", "review_prescriptions");
+}
+
+impl SimulatorOperation for EffectRequest<14> {
+    const RPC: (&'static str, &'static str) = ("ER_DOCTOR_A", "diagnose");
+}
+
+impl SimulatorOperation for EffectRequest<15> {
+    const RPC: (&'static str, &'static str) = ("ER_DOCTOR_B", "diagnose");
 }
