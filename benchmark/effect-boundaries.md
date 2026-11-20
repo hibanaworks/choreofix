@@ -1,4 +1,4 @@
-# Shared effects and the adapter contract
+# Shared effects at resource receivers
 
 The model chooses shell commands in its own hibana-wash Wasm instance. WASI
 requests reach ChoreoFS through projected Endpoint receives. A task object
@@ -6,20 +6,22 @@ contains request data; opening or writing it alone does not authorize its
 business operation. The task global determines when the corresponding request
 and resource Endpoint can be used.
 
-The physical effect is a call to the versioned common task simulator. In 6E,
-the repository or reviewer consumes Hibana's `ReceivedPayload` in `ReceivedEffects::apply`.
-The payload type selects the simulator operation and participant. Its received
-bytes provide the arguments. The receiver can inspect these bytes but cannot
-construct another receipt from them. When the reviewer approves a feature it
-gives its review Endpoint to the repository. Only a rejection returns it for
-another attempt. The simulator reply determines that choice.
+A physical effect updates the versioned common simulator. In 6E (review),
+16E (CI/CD) and 7H (collaborative writing), the resource receiver passes the
+actual Hibana `ReceivedPayload` to `ReceivedEffects::apply`. Its type fixes the
+participant and operation. Its bytes supply the arguments, and passing it
+consumes that receive. In 7H the two figure-lookup messages carry data. The
+document owner compares the figure store's confirmation with the original
+lookup before consuming the confirmation to insert the figure. The two final
+15E chamber checks also use received requests.
 
-Other families still give resource receivers an explicit simulator connection
-with `Domain::execute(agent, tool, arguments)`. Its caller is trusted to match
-these values to the incoming requests, including requests for both resources
-where required. A shared terminal or private-filesystem I/O reference has neither effect interface. EPF and the effect auditor check an individual execution. The
-native integration binds the session, physical resources and simulator process
-for the trial. A received payload alone carries no external trial identifier.
+The other task receivers using `Domain::execute(agent, tool, arguments)` still
+select the operation and arguments in native code. The experiment trusts their
+implementation to match the received request and satisfy any additional resource
+conditions. Sharing terminal, private-file or observation I/O gives a participant
+no simulator entry point. Native integration binds the session, physical
+resources and simulator process for the trial. A received payload carries no
+external trial identifier. EPF and the effect auditor check the recorded run.
 
 ## Receiver contract
 
