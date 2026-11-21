@@ -1,0 +1,27 @@
+{
+  "task": "11M",
+  "scope": "Native job continuations with the production inspection bench and gauge, plus a separate scripted six-job Wasm regression on the common simulator. Integrated replacement manufacture is pending.",
+  "live_qualified": false,
+  "model_calls": 0,
+  "scored_comparisons": 0,
+  "archive": "output/verification/11m-gauge.t9B43npL",
+  "archive_checksums_sha256": "4aa02d0aab86c86730e80119987e3b2728817bac3bc58a1417323cdd59b7a271",
+  "build_receipt_sha256": "55335f42d7095fb4f2d1eca6654a8d6cb7b4b6c78d3aa9ea71831dccb1991206",
+  "binary_sha256": "7362cd6cc1530a23025223795b903647ab8f5dabce5399ef3e59a782c23198e7",
+  "native_test_source_sha256": "dd1c522689d3c2e356b0ff82a56fea45b5fde9ab39bb19549069ca28b13f641c",
+  "native_test_binary_sha256": "d02f41ba30b6fbcf213d83a243f56167022d9d8c9844bc005d95a0dc2f28e489",
+  "scripted_runner_sha256": "280a25da8c76e71a8ee0556ebb4490d89053356262b1f74ad8264c82644003db",
+  "totals": {
+    "native_job_cases": 25,
+    "native_controlled_effects": {
+      "do_job": 67,
+      "inspect_quality": 67,
+      "dispatch_rework": 42
+    },
+    "native_epf_records": 6660,
+    "scripted_wash_cases": 30,
+    "scripted_epf_records": 203535,
+    "scripted_business_complete": 6,
+    "scripted_violations": 0
+  }
+}

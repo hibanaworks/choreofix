@@ -1,14 +1,23 @@
 //! The same gauge measures every material presented by a workstation.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult, global::Loan, imp::service::ReceivedEffects};
-use hibana::Endpoint;
+use crate::shell::{
+    ShellError, ShellResult,
+    global::{FileExit, Loan},
+    imp::service::ReceivedEffects,
+};
+use hibana::{Endpoint, g::Message};
 
-pub async fn bench<'run>(mut bench: Endpoint<'run, BENCH>) -> ShellResult<()> {
+pub async fn bench<'run>(bench: &mut Endpoint<'run, BENCH>) -> ShellResult<i32> {
     let mut gauge = bench.recv::<Loan<GAUGE>>().await?;
-    for _ in imp::JOBS {
+    loop {
         let ready = bench.offer().await?;
         let job = ready.label();
         match job {
+            FileExit::LOGICAL_LABEL => {
+                let status = ready.recv::<FileExit>().await?;
+                bench.send::<Loan<GAUGE>>(gauge).await?;
+                return Ok(status);
+            }
             WORKER_A => {
                 let sample = ready.recv::<CheckPart<WORKER_A>>().await?;
                 gauge
@@ -89,8 +98,6 @@ pub async fn bench<'run>(mut bench: Endpoint<'run, BENCH>) -> ShellResult<()> {
             _ => unreachable!(),
         }
     }
-    bench.send::<Loan<GAUGE>>(gauge).await?;
-    Ok(())
 }
 
 pub async fn readout<'run>(

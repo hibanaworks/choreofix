@@ -281,7 +281,17 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
     use hibana::runtime::program::project;
     const OTHER_WORKER: u8 = 25;
     let source = hibana::g::par(
-        job_quality::<JOB, WORKER, CAP>(work, work),
+        g::par(
+            g::par(
+                gauge(),
+                g::seq(
+                    g::send::<INSPECTOR, BENCH, CheckPart<JOB>>(),
+                    g::send::<BENCH, INSPECTOR, Measurement<JOB>>(),
+                )
+                .roll(),
+            ),
+            job_quality::<JOB, WORKER, CAP>(work, work),
+        ),
         hibana::g::seq(
             hibana::g::send::<DEPOT, OTHER_WORKER, Loan1>(),
             hibana::g::send::<OTHER_WORKER, DEPOT, Return1>(),
@@ -289,6 +299,9 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
     );
     let worker_program = project::<WORKER>(&source);
     let job_program = project::<CAP>(&source);
+    let bench_program = project::<BENCH>(&source);
+    let gauge_program = project::<GAUGE>(&source);
+    let readout_program = project::<READOUT>(&source);
     let inspector_program = project::<INSPECTOR>(&source);
     let dispatcher_program = project::<DISPATCHER>(&source);
     let depot_program = project::<DEPOT>(&source);
@@ -298,7 +311,12 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
     let other_tool_program = project::<TOOL_1>(&source);
     let (bus, _, _) = Bus::open(
         data::AGENTS,
-        [(session, CAP), (session, TOOL_0), (session, TOOL_1)],
+        [
+            (session, CAP),
+            (session, TOOL_0),
+            (session, TOOL_1),
+            (session, GAUGE),
+        ],
     );
     let verdict = Cell::new(Value::Null);
     let records: [Cell<Vec<hibana::runtime::tap::TapEvent>>; 5] =
@@ -344,6 +362,9 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
         .map_err(|error| ShellError::message(format!("{error:?}")))?;
     let mut worker = worker_runtime.enter(session, &worker_program)?;
     let mut job = worker_runtime.enter(session, &job_program)?;
+    let mut bench = depot_runtime.enter(session, &bench_program)?;
+    let readout = depot_runtime.enter(session, &readout_program)?;
+    let gauge = depot_runtime.enter(session, &gauge_program)?;
     let mut inspector = inspector_runtime.enter(session, &inspector_program)?;
     let mut dispatcher = dispatcher_runtime.enter(session, &dispatcher_program)?;
     let mut cabinet = depot_runtime.enter(session, &depot_program)?;
@@ -367,7 +388,9 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
         rejected_inspections: rejected,
         events: Cell::new(Vec::new()),
     };
-    let ((), (), (), mut retired) = hibana_runtime::race(async {
+    let ((), (), (), (), (), mut retired) = hibana_runtime::race(async {
+        async { assert_eq!(localside::inspection::bench(&mut bench).await?, 0); };
+        async { localside::inspection::readout(readout, gauge, &effects).await?; };
         async {
             let mut previous: Option<Value> = None;
             loop {
@@ -410,20 +433,23 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
             loop {
                 let part = data::decode(inspector.recv::<PartReady>().await?)?;
                 let mut job = inspector.recv::<JobLoan<CAP>>().await?;
-                job.send::<InspectRequest<JOB>>(&check).await?;
-                let request = inspector.recv::<InspectRequest<JOB>>().await?;
-                let received = data::decode(request.as_bytes())?;
-                data::inspection_input(&part, &received)?;
-                let result = effects.apply(request).await?;
-                data::inspected(&part, &received, &result)?;
-                let bytes = data::encode(&result)?;
-                inspector.send::<InspectionResult>(&bytes.as_slice()).await?;
-                let actual = data::decode(job.recv::<InspectionResult>().await?)?;
+                job.send::<CheckPart<JOB>>(&check).await?;
+                let sample = inspector.recv::<CheckPart<JOB>>().await?;
+                let sample = data::JobArguments::from_bytes(sample.as_bytes())?;
+                data::inspection_input(&part, &sample.value())?;
+                inspector.send::<CheckPart<JOB>>(&sample).await?;
+                let result = data::decode(inspector.recv::<InspectionResult>().await?)?;
+                let actual = data::decode(inspector.recv::<Measurement<JOB>>().await?)?;
                 assert_eq!(actual, result);
+                data::inspected(&part, &sample.value(), &actual)?;
+                let bytes = data::encode(&actual)?;
+                inspector.send::<InspectionResult>(&bytes.as_slice()).await?;
+                assert_eq!(data::decode(job.recv::<InspectionResult>().await?)?, actual);
                 verdict.set(actual.clone());
                 if actual["success"] == true {
                     job.send::<Approved<JOB>>(&data::InspectionReply::<JOB,true>::from_bytes(&bytes)?).await?;
                     inspector.send::<JobLoan<CAP>>(job).await?;
+                    inspector.send::<shell::global::FileExit>(&0).await?;
                     break;
                 }
                 job.send::<Failed<JOB>>(&data::InspectionReply::<JOB,false>::from_bytes(&bytes)?).await?;
@@ -656,6 +682,8 @@ async fn all_six_quality_continuations_preserve_actual_rework_and_close_on_appro
         quality_case::<4, WORKER_B, 13>(rejected, station_job::<4, 13>()).await?;
         quality_case::<5, WORKER_C, 14>(rejected, station_job::<5, 14>()).await?;
     }
+    // The seventh inspection uses the same gauge and the sixth actual rework order.
+    quality_case::<5, WORKER_C, 14>(6, station_job::<5, 14>()).await?;
     Ok(())
 }
 
@@ -883,7 +911,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
             let mut alpha_service = caller.enter(session, &programs.alpha_service)?;
             let mut beta_service = caller.enter(session, &programs.beta_service)?;
             let mut gamma_service = caller.enter(session, &programs.gamma_service)?;
-            let bench = caller.enter(session, &programs.bench)?;
+            let mut bench = caller.enter(session, &programs.bench)?;
             let readout = host.enter(session, &programs.readout)?;
             let gauge = host.enter(session, &programs.gauge)?;
             let mut inspector = caller.enter(session, &programs.inspector)?;
@@ -903,7 +931,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
             let c_bytes = data::encode(&json!({"job_id":data::JOBS[2]}))?;
             let execution = hibana_runtime::race(
                 async {
-                    async { localside::inspection::bench(bench).await?; };
+                    async { assert_eq!(localside::inspection::bench(&mut bench).await?, 0); };
                     async { localside::inspection::readout(readout, gauge, &simulator).await?; };
                     async {
                         localside::tool_depot::run(
@@ -1038,6 +1066,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                             let result = data::decode(inspector.recv::<InspectionResult>().await?)?;
                             assert_eq!(result["data"]["input_part"]["job_id"], data::JOBS[usize::from(job)]);
                         }
+                        inspector.send::<shell::global::FileExit>(&0).await?;
                     };
                     async {
                         bus.fixture_peer::<12>(&effects, &["do_job", "inspect_quality"])

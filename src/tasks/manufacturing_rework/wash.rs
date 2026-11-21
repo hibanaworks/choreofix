@@ -205,7 +205,16 @@ pub async fn run(path: &str) -> ShellResult<()> {
             g::par(
                 g::par(io, metadata),
                 g::par(
-                    shell_io::<INSPECTOR_VM, INSPECTOR, INSPECTOR_FILES, INSPECTOR_TERM>(),
+                    g::par(
+                        g::seq(
+                            file_metadata::<INSPECTOR, INSPECTOR_FILES>().roll(),
+                            g::send::<BENCH, INSPECTOR_FILES, FileExit>(),
+                        ),
+                        g::seq(
+                            private_io::<INSPECTOR_VM, INSPECTOR_TERM>(),
+                            g::send::<INSPECTOR_VM, INSPECTOR_TERM, Exit>(),
+                        ),
+                    ),
                     shell_io::<DISPATCHER_VM, DISPATCHER, DISPATCHER_FILES, DISPATCHER_TERM>(),
                 ),
             ),
@@ -438,11 +447,12 @@ pub async fn run(path: &str) -> ShellResult<()> {
         )
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
         let mut inspector_files = rv.enter(session, &inspector_files)?;
-        let bench = rv.enter(session, &bench)?;
+        let mut bench = rv.enter(session, &bench)?;
         let readout = rv.enter(session, &readout)?;
         let gauge = rv.enter(session, &gauge)?;
         async {
-            localside::inspection::bench(bench).await?;
+            let status = localside::inspection::bench(&mut bench).await?;
+            bench.send::<FileExit>(&status).await?;
         };
         async {
             localside::inspection::readout(readout, gauge, &simulator).await?;

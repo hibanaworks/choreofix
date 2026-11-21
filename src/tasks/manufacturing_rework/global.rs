@@ -1,6 +1,6 @@
 //! Each workstation serves either assigned worker first. Three of the six jobs also require a cabinet tool.
 use super::imp::{DO_JOB, INSPECT_QUALITY};
-use crate::shell::global::Loan;
+use crate::shell::global::{FileExit, Loan};
 use hibana::{Endpoint, g, runtime::program::Projectable};
 
 pub const A_FILES: u8 = 15;
@@ -64,7 +64,6 @@ pub type FinishedPart<'a, const WORKER: u8> = g::Msg<WORKER, &'a [u8]>;
 pub type CheckPart<const JOB: u8> = g::Msg<JOB, super::imp::JobArguments<JOB, INSPECT_QUALITY>>;
 pub type PartReady<'a> = g::Msg<22, &'a [u8]>;
 pub type JobLoan<'r, const CAP: u8> = g::Msg<23, Endpoint<'r, CAP>>;
-pub type InspectRequest<const JOB: u8> = g::Msg<24, super::imp::JobArguments<JOB, INSPECT_QUALITY>>;
 pub type Approved<'a, const JOB: u8> = g::Msg<25, super::imp::InspectionReply<'a, JOB, true>>;
 pub type Failed<'a, const JOB: u8> = g::Msg<26, super::imp::InspectionReply<'a, JOB, false>>;
 pub type DispatchRequest<const JOB: u8> = g::Msg<27, super::imp::DispatchArguments<JOB>>;
@@ -108,7 +107,10 @@ pub fn gauge() -> impl Projectable {
                 ),
             )
             .roll(),
-            g::send::<BENCH, READOUT, Loan<GAUGE>>(),
+            g::seq(
+                g::send::<INSPECTOR, BENCH, FileExit>(),
+                g::send::<BENCH, READOUT, Loan<GAUGE>>(),
+            ),
         ),
     )
 }
@@ -119,7 +121,7 @@ fn inspection<const JOB: u8, const WORKER: u8, const CAP: u8>() -> impl Projecta
         g::seq(
             g::send::<WORKER, INSPECTOR, JobLoan<CAP>>(),
             g::seq(
-                g::send::<CAP, INSPECTOR, InspectRequest<JOB>>(),
+                g::send::<CAP, INSPECTOR, CheckPart<JOB>>(),
                 g::send::<INSPECTOR, CAP, InspectionResult>(),
             ),
         ),
