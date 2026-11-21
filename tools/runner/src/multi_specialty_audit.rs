@@ -31,7 +31,7 @@ fn completed<'a>(
     modality: Option<&str>,
     before: usize,
 ) -> Result<&'a Value> {
-    one(calls.iter().copied().filter(|call| {
+    Ok(one(calls.iter().copied().filter(|call| {
         call.request["agent"] == actor
             && call.request["tool"] == tool
             && modality.is_none_or(|m| {
@@ -39,19 +39,19 @@ fn completed<'a>(
                     .as_str()
                     .is_some_and(|s| s.eq_ignore_ascii_case(m))
             })
-            && call.result.as_ref().is_some_and(|(at, _)| *at < before)
+            && call.result.0 < before
     }))?
-    .result()
-    .map(|(_, value)| value)
+    .result
+    .1)
 }
 fn panel(calls: &[&Call], actor: &str, before: usize) -> Result<Value> {
     let mut panel = serde_json::Map::new();
     for call in calls.iter().copied().filter(|call| {
         call.request["agent"] == actor
             && call.request["tool"] == "order_tests"
-            && call.result.as_ref().is_some_and(|(at, _)| *at < before)
+            && call.result.0 < before
     }) {
-        let result = call.result()?.1;
+        let result = call.result.1;
         for test in result["data"]["tests"]
             .as_array()
             .ok_or("actual panel tests")?
@@ -81,24 +81,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "5M" || fixture["task"] != "5M" || fixture["type"] != "fixtures" {
         return Err("multi-specialty task differs".into());
     }
-    let actors = fixture["fixtures"]
-        .as_array()
-        .ok_or("medical participants")?;
-    if actors.len() != 5
-        || actors
-            .iter()
-            .map(|a| a["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != BTreeSet::from([
-                Some("ER_DOCTOR"),
-                Some("CARDIOLOGIST"),
-                Some("NEUROLOGIST"),
-                Some("RADIOLOGIST"),
-                Some("PHARMACIST"),
-            ])
-    {
-        return Err("multi-specialty participants differ".into());
-    }
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/5M/metadata.json"),
+    )?;
+
     let role = |name: &str| -> Result<u64> {
         compiled["roles"][name]
             .as_u64()
@@ -297,10 +284,10 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut used = BTreeSet::new();
     for call in &ordered {
         let actor = call.request["agent"].as_str().ok_or("effect actor")?;
-        let tool = call.tool()?;
+        let tool = call.tool;
         let arguments = &call.request["arguments"];
-        let (_, result) = call.result()?;
-        let (ended, _) = call.ended()?;
+        let (_, result) = call.result;
+        let (ended, _) = call.ended;
         if arguments["patient_id"] != "patient_1"
             || result["success"] != true
             || result["data"]["patient_id"] != "patient_1"
@@ -630,11 +617,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                     .filter(|call| {
                         call.request["agent"] == actor
                             && call.request["tool"] == "order_tests"
-                            && call.result.as_ref().is_some_and(|(at, _)| *at < f.sent)
+                            && call.result.0 < f.sent
                     })
-                    .max_by_key(|call| call.result.as_ref().map(|(at, _)| *at))
+                    .max_by_key(|call| call.result.0)
                     .ok_or("completed record has no actual last test")?;
-                json!({"tests":panel(&ordered,actor,f.sent)?,"attempt":last.result()?.1})
+                json!({"tests":panel(&ordered,actor,f.sent)?,"attempt":last.result.1})
             }
             "Candidate" => case(&ordered, f.sent)?,
             "FileCardFindings" | "FileNeuroFindings" => {
@@ -659,12 +646,12 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut cross_scanner_overlaps = 0;
     for (i, a) in ordered.iter().enumerate() {
         for b in &ordered[i + 1..] {
-            if a.started()?.1 < b.ended()?.1 && b.started()?.1 < a.ended()?.1 {
+            if a.started.1 < b.ended.1 && b.started.1 < a.ended.1 {
                 overlaps += 1;
                 if a.request["agent"] == "RADIOLOGIST"
                     && b.request["agent"] == "RADIOLOGIST"
-                    && a.tool()? == b.tool()?
-                    && matches!(a.tool()?, "perform_imaging" | "interpret_imaging")
+                    && a.tool == b.tool
+                    && matches!(a.tool, "perform_imaging" | "interpret_imaging")
                     && a.request["arguments"]["modality"] != b.request["arguments"]["modality"]
                 {
                     cross_scanner_overlaps += 1;

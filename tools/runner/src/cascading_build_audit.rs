@@ -17,24 +17,13 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "10M" || fixture["task"] != "10M" || fixture["type"] != "fixtures" {
         return Err("cascading build task differs".into());
     }
-    let actors = fixture["fixtures"].as_array().ok_or("build participants")?;
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/10M/metadata.json"),
+    )?;
     let agents = ["BUILDER_A", "BUILDER_B", "BUILDER_C"];
     let modules = ["module_a", "module_b", "module_c"];
-    if actors.len() != 5
-        || actors
-            .iter()
-            .map(|a| a["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != BTreeSet::from([
-                Some("BUILDER_A"),
-                Some("BUILDER_B"),
-                Some("BUILDER_C"),
-                Some("TEST_RUNNER"),
-                Some("INTEGRATOR"),
-            ])
-    {
-        return Err("cascading build participants differ".into());
-    }
+
     let name = |group: &str, key: &str| -> Result<u64> {
         compiled[group][key]
             .as_u64()
@@ -96,9 +85,9 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut links = Vec::new();
     for call in &ordered {
         let agent = call.request["agent"].as_str().ok_or("effect agent")?;
-        let tool = call.tool()?;
+        let tool = call.tool;
         let args = &call.request["arguments"];
-        let (at, result) = call.result()?;
+        let (at, result) = call.result;
         call.take_score(&mut scored, args)?;
         if args.as_object().is_none_or(|fields| fields.len() != 1)
             || result["tool_name"] != tool
@@ -421,7 +410,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         || links.len() != 1
         || ordered
             .last()
-            .is_none_or(|last| last.tool().ok() != Some("link_modules"))
+            .is_none_or(|last| last.tool != "link_modules")
     {
         return Err("extra or missing actual build/test/link effect".into());
     }

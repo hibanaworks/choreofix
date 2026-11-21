@@ -31,8 +31,11 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
     let compiled = &projection["compiled"];
     let labels = crate::projection::frames(projection, records)?;
     let fixture = &records.first().ok_or("empty evidence")?["message"];
-    let actors = fixture["fixtures"].as_array().ok_or("API actors")?;
-    if compiled["task"] != "8E" || fixture["task"] != "8E" || actors.len() != 3 {
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/8E/metadata.json"),
+    )?;
+    if compiled["task"] != "8E" || fixture["task"] != "8E" {
         return Err("unexpected API task".into());
     }
     let depth = fixture["depth"]
@@ -94,8 +97,8 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
                 .iter()
                 .filter(|(_, call)| call.request["agent"] == agent),
         )?;
-        let (result_at, result) = call.result()?;
-        if call.tool()? != tool
+        let (result_at, result) = call.result;
+        if call.tool != tool
             || call.request["arguments"] != original["arguments"]
             || result["tool_name"] != tool
             || result["success"] != (agent != "TESTER" || depth == 0)
@@ -270,7 +273,7 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
             .iter()
             .filter(|(_, call)| call.request["agent"] == "TESTER"),
     )?;
-    let (finished, test_result) = test.result()?;
+    let (finished, test_result) = test.result;
     let mut complete_reads = BTreeMap::new();
     let mut early_reads = 0;
     let tester_controller = role("TESTER_CLOSE")?;
@@ -389,10 +392,7 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
     }
     let mut ordered = journal.calls.values().collect::<Vec<_>>();
     ordered.sort_by_key(|call| call.emitted);
-    if ordered
-        .iter()
-        .map(|call| call.tool())
-        .collect::<Result<Vec<_>>>()?
+    if ordered.iter().map(|call| call.tool).collect::<Vec<_>>()
         != [
             "migrate_schema",
             "implement_backend",
@@ -400,7 +400,7 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
         ]
         || ordered
             .windows(2)
-            .any(|pair| pair[0].result().is_ok_and(|(at, _)| at >= pair[1].emitted))
+            .any(|pair| pair[0].result.0 >= pair[1].emitted)
     {
         return Err("actual schema/backend/test data causality differs".into());
     }

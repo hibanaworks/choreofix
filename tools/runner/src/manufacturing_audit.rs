@@ -28,22 +28,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "11E" || fixture["task"] != "11E" || fixture["type"] != "fixtures" {
         return Err("manufacturing source or fixture differs".into());
     }
-    let actors = fixture["fixtures"]
-        .as_array()
-        .ok_or("manufacturing participants")?;
-    if actors.len() != 3
-        || actors
-            .iter()
-            .map(|a| a["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != BTreeSet::from([
-                Some("TECHNICIAN_A"),
-                Some("TECHNICIAN_B"),
-                Some("SUPERVISOR"),
-            ])
-    {
-        return Err("manufacturing participants differ".into());
-    }
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/11E/metadata.json"),
+    )?;
+
     let name = |group: &str, key: &str| -> Result<u64> {
         compiled[group][key]
             .as_u64()
@@ -122,7 +111,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             .values()
             .filter(|call| {
                 call.request["agent"] == agent
-                    && call.tool().is_ok_and(|tool| tool == "do_job")
+                    && call.tool == "do_job"
                     && call.request["arguments"]["job_id"] == job
             })
             .collect::<Vec<_>>();
@@ -130,7 +119,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             return Err("missing or repeated job effect".into());
         };
         let arguments = json!({"job_id":job});
-        let (at, result) = call.result()?;
+        let (at, result) = call.result;
         if call.request["arguments"] != arguments
             || result["tool_name"] != "do_job"
             || result["success"] != true
@@ -185,15 +174,12 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     });
     let reports = calls
         .values()
-        .filter(|call| {
-            call.request["agent"] == "SUPERVISOR"
-                && call.tool().is_ok_and(|tool| tool == "collect_reports")
-        })
+        .filter(|call| call.request["agent"] == "SUPERVISOR" && call.tool == "collect_reports")
         .collect::<Vec<_>>();
     let [call] = reports.as_slice() else {
         return Err("missing or repeated report effect".into());
     };
-    let (at, result) = call.result()?;
+    let (at, result) = call.result;
     if call.request["arguments"] != json!({})
         || result["tool_name"] != "collect_reports"
         || result["success"] != true
@@ -246,7 +232,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     for call in calls.values() {
         // The neutral simulator records collect_reports' declared default,
         // whereas its actual accepted request omits that optional argument.
-        let scored_arguments = if call.tool()? == "collect_reports" {
+        let scored_arguments = if call.tool == "collect_reports" {
             json!({"scope":"all_jobs"})
         } else {
             call.request["arguments"].clone()

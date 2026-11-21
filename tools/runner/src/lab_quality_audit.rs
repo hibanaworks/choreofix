@@ -8,10 +8,10 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
 };
-type Calls = BTreeMap<u64, Call>;
+type Calls<'a> = BTreeMap<u64, Call<'a>>;
 type Frames<'a> = BTreeMap<u64, Frame<'a>>;
-fn target(call: &Call) -> Result<&str> {
-    let key = match call.tool()? {
+fn target<'a>(call: &Call<'a>) -> Result<&'a str> {
+    let key = match call.tool {
         "run_analysis" => "sample",
         "run_separation" => "material",
         "run_synthesis" | "run_bioassay" => "compound",
@@ -67,12 +67,13 @@ fn known(
 ) -> Result<u64> {
     let call = one(calls.values().filter(|c| {
         c.request["agent"] == actor
-            && c.tool().ok() == Some(tool)
+            && c.tool == tool
             && target(c).ok() == Some(name)
-            && c.result()
-                .is_ok_and(|(at, v)| at < before && v == value && v["success"] == true)
+            && c.result.0 < before
+            && c.result.1 == value
+            && c.result.1["success"] == true
     }))?;
-    call.result()?.1["data"]["artifact_id"]
+    call.result.1["data"]["artifact_id"]
         .as_u64()
         .ok_or_else(|| "missing actual positive scientific receipt".into())
 }
@@ -276,15 +277,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             .ok_or_else(|| format!("compiled QC message {name}").into())
     };
     let labels = |names: &[&str]| -> Result<Vec<u64>> { names.iter().map(|n| label(n)).collect() };
-    let actors = fixture["fixtures"].as_array().ok_or("scientist fixtures")?;
-    if actors
-        .iter()
-        .filter_map(|a| a["agent"].as_str())
-        .collect::<BTreeSet<_>>()
-        != BTreeSet::from(["CHEMIST", "BIOLOGIST", "ANALYST", "QC_CONTROLLER"])
-    {
-        return Err("QC scientists differ from the original task".into());
-    }
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/13M/metadata.json"),
+    )?;
+
     let contracts = crate::projection::frames(artifact, rows)?;
     let journal = journal::read(rows, &contracts, actors, dynamic)?;
     let journal::Journal {
@@ -320,10 +317,10 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     ordered.sort_by_key(|c| c.emitted);
     for call in ordered {
         let actor = call.request["agent"].as_str().ok_or("scientific actor")?;
-        let tool = call.tool()?;
+        let tool = call.tool;
         let name = target(call)?;
         let args = &call.request["arguments"];
-        let (ended, value) = call.result()?;
+        let (ended, value) = call.result;
         let data = &value["data"];
         let success = value["success"]
             .as_bool()
@@ -855,10 +852,9 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         }
         for id in inputs.as_object().ok_or("scientific receipts")?.values() {
             let previous = one(calls.values().filter(|c| {
-                c.result()
-                    .is_ok_and(|(_, v)| v["success"] == true && v["data"]["artifact_id"] == *id)
+                c.result.1["success"] == true && c.result.1["data"]["artifact_id"] == *id
             }))?;
-            if previous.ended()?.0 >= call.started()?.0 {
+            if previous.ended.0 >= call.started.0 {
                 return Err("scientific input was incomplete before the effect".into());
             }
         }
@@ -981,7 +977,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     }
     let final_call = one(calls.values().filter(|c| {
         c.request["agent"] == "CHEMIST"
-            && c.tool().ok() == Some("run_analysis")
+            && c.tool == "run_analysis"
             && target(c).ok() == Some("final_validation")
     }))?;
     let chemist = role("CHEMIST")?;
@@ -998,11 +994,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let qc_complete = ["chemist_qc", "biologist_qc"]
         .into_iter()
         .map(|key| {
-            one(calls
-                .values()
-                .filter(|c| c.result().is_ok_and(|(_, v)| v == &quality_value[key])))?
-            .ended()
-            .map(|v| v.0)
+            Ok(
+                one(calls.values().filter(|c| c.result.1 == &quality_value[key]))?
+                    .ended
+                    .0,
+            )
         })
         .collect::<Result<Vec<_>>>()?
         .into_iter()
@@ -1022,9 +1018,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         .ok_or("quality operations")?;
     let quality_end = quality_calls
         .iter()
-        .map(|c| c.ended().map(|t| t.0))
-        .collect::<Result<Vec<_>>>()?
-        .into_iter()
+        .map(|c| c.ended.0)
         .max()
         .ok_or("quality results")?;
     for (from, to, message, value, after, before) in [

@@ -11,23 +11,12 @@ type Edge = (&'static str, &'static str, &'static str);
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty 7M history")?["message"];
-    let actors = fixture["fixtures"].as_array().ok_or("7M participants")?;
-    if fixture["task"] != "7M"
-        || compiled["task"] != "7M"
-        || actors.len() != 5
-        || actors
-            .iter()
-            .filter_map(|actor| actor["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != BTreeSet::from([
-                "WRITER_A",
-                "WRITER_B",
-                "FIGURE_CREATOR",
-                "FACT_CHECKER",
-                "EDITOR",
-            ])
-    {
-        return Err("7M task or participants differ".into());
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/7M/metadata.json"),
+    )?;
+    if fixture["task"] != "7M" || compiled["task"] != "7M" {
+        return Err("foreign task fixture or projection".into());
     }
     let history = journal::read(rows, &projection::frames(artifact, rows)?, actors, dynamic)?;
     let scored = history.score["events"]
@@ -70,8 +59,8 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     for call in &ordered {
         let who = call.request["agent"].as_str().ok_or("7M effect actor")?;
         let args = &call.request["arguments"];
-        let tool = call.tool()?;
-        let (returned, result) = call.result()?;
+        let tool = call.tool;
+        let (returned, result) = call.result;
         let chapter = args["section_name"].as_str().unwrap_or_default();
         let (file, reader) = match who {
             "WRITER_A" => ("WRITER_FILE", "WRITER_A_SNAPSHOTS"),
@@ -257,13 +246,13 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     }
 
     let publication = publication.ok_or("missing 7M publication")?;
-    let (_, result) = publication.result()?;
+    let (_, result) = publication.result;
     let data = &result["data"];
     let mut prepared = ordered
         .iter()
         .filter_map(|call| {
-            let (at, value) = call.result.as_ref()?;
-            (*at < publication.emitted).then_some((*at, &call.request, value))
+            let (at, value) = call.result;
+            (at < publication.emitted).then_some((at, call.request, value))
         })
         .collect::<Vec<_>>();
     prepared.sort_by_key(|(at, _, _)| *at);

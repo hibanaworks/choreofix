@@ -76,20 +76,12 @@ pub(super) fn operation(
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty discovery history")?["message"];
-    let actors = fixture["fixtures"]
-        .as_array()
-        .ok_or("discovery participants")?;
-    if compiled["task"] != "14E"
-        || fixture["type"] != "fixtures"
-        || fixture["task"] != "14E"
-        || actors.len() != 4
-        || actors
-            .iter()
-            .filter_map(|actor| actor["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != BTreeSet::from(["CHEMIST", "BIOLOGIST", "TOXICOLOGIST", "LEAD_SCIENTIST"])
-    {
-        return Err("foreign discovery task or participants".into());
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/14E/metadata.json"),
+    )?;
+    if compiled["task"] != "14E" || fixture["type"] != "fixtures" || fixture["task"] != "14E" {
+        return Err("foreign task fixture or projection".into());
     }
     let role = |name: &str| {
         compiled["roles"][name]
@@ -139,11 +131,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut intervals = Vec::new();
     for call in history.calls.values() {
         let agent = call.request["agent"].as_str().ok_or("discovery agent")?;
-        let tool = call.tool()?;
+        let tool = call.tool;
         let arguments = &call.request["arguments"];
-        let (end, output) = call.result()?;
-        let (start, started) = call.started()?;
-        let (_, ended) = call.ended()?;
+        let (end, output) = call.result;
+        let (start, started) = call.started;
+        let (_, ended) = call.ended;
         let (file, owner, instrument, operation) = operation(agent, tool, arguments)
             .ok_or_else(|| format!("unexpected discovery effect {agent} {tool} {arguments}"))?;
         let request = receive(file, owner, operation)?;

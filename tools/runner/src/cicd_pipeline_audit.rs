@@ -13,9 +13,10 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "16M" || fixture["task"] != "16M" {
         return Err("foreign pipeline task".into());
     }
-    let participants = fixture["fixtures"]
-        .as_array()
-        .ok_or("pipeline participants")?;
+    let participants = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/16M/metadata.json"),
+    )?;
     let headers = projection::frames(artifact, rows)?;
     let journal = journal::read(rows, &headers, participants, dynamic)?;
     let score = journal.score["events"]
@@ -51,9 +52,9 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut scored = BTreeSet::new();
     for call in journal.calls.values() {
         let agent = call.request["agent"].as_str().ok_or("pipeline agent")?;
-        let tool = call.tool()?;
+        let tool = call.tool;
         let arguments = &call.request["arguments"];
-        let (result_at, result) = call.result()?;
+        let (result_at, result) = call.result;
         let receipt = result["data"]["receipt"]
             .as_u64()
             .ok_or("common effect receipt")?;

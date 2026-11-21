@@ -8,26 +8,12 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if artifact["compiled"]["task"] != "4H" || fixture["task"] != "4H" {
         return Err("expected a 4H projection and participants".into());
     }
-    let actors = fixture["fixtures"].as_array().ok_or("4H participants")?;
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/4H/metadata.json"),
+    )?;
     let headers = projection::frames(artifact, rows)?;
-    let expected = BTreeSet::from([
-        "ARCHITECT",
-        "DEVELOPER_A",
-        "DEVELOPER_B",
-        "DEVELOPER_C",
-        "REVIEWER",
-        "TESTER",
-        "DEVOPS",
-    ]);
-    if actors.len() != expected.len()
-        || actors
-            .iter()
-            .filter_map(|actor| actor["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != expected
-    {
-        return Err("incomplete 4H participants".into());
-    }
+
     let history = journal::read(rows, &headers, actors, dynamic)?;
     let mut result = preparation(&history, &artifact["compiled"]["roles"])?;
     result["epf_records"] = dynamic["captured_records"].clone();
@@ -62,9 +48,9 @@ pub(super) fn preparation(history: &journal::Journal, roles: &Value) -> Result<V
     let mut request_edges = BTreeSet::new();
     let mut reply_edges = BTreeSet::new();
     for (&id, call) in calls {
-        let tool = call.tool()?;
+        let tool = call.tool;
         let args = &call.request["arguments"];
-        let (completed, result) = call.result()?;
+        let (completed, result) = call.result;
         let data = &result["data"];
         let subject = match tool {
             "design_proposal" => "",
@@ -458,8 +444,8 @@ fn deployment_attempts(
                 return Err("invalid deployment file request".into());
             }
             let evidence = journal::one(history.calls.values().filter_map(|c| {
-                let (at, test) = c.result().ok()?;
-                (c.tool().ok()? == "run_tests"
+                let (at, test) = c.result;
+                (c.tool == "run_tests"
                     && at < request.sent
                     && test["data"]["service"] == name
                     && test["success"] == true)
@@ -536,9 +522,9 @@ fn deployment_attempts(
                     history
                         .calls
                         .values()
-                        .filter(|c| c.tool().ok() == Some("design_proposal")),
+                        .filter(|c| c.tool == "design_proposal"),
                 )?
-                .result()?
+                .result
                 .1;
                 if outcome["success"] != false
                     || !physical.is_empty()
@@ -547,12 +533,10 @@ fn deployment_attempts(
                         .as_array()
                         .is_some_and(|deps| deps.contains(&json!(dependency)))
                     || history.calls.values().any(|c| {
-                        c.tool().ok() == Some("deploy_service")
-                            && c.result().is_ok_and(|(at, r)| {
-                                at < forwarded_at
-                                    && r["success"] == true
-                                    && r["data"]["service"] == dependency
-                            })
+                        c.tool == "deploy_service"
+                            && c.result.0 < forwarded_at
+                            && c.result.1["success"] == true
+                            && c.result.1["data"]["service"] == dependency
                     })
                 {
                     return Err("unjustified deployment deferral".into());
@@ -561,15 +545,15 @@ fn deployment_attempts(
             }
             let (&physical_id, admitted) = journal::one(physical.into_iter())?;
             let (&rpc, call) = journal::one(history.calls.iter().filter(|(_, c)| {
-                c.tool().ok() == Some("deploy_service")
+                c.tool == "deploy_service"
                     && c.request["arguments"] == args
                     && admitted.received < c.emitted
-                    && c.result()
-                        .is_ok_and(|(at, result)| at < answer.sent && *result == outcome)
+                    && c.result.0 < answer.sent
+                    && *c.result.1 == outcome
             }))?;
-            let (observed_id, observed) = frame(server, env, None, Some(call.result()?.1))?;
+            let (observed_id, observed) = frame(server, env, None, Some(call.result.1))?;
             if !(forward.received < admitted.sent
-                && call.result()?.0 < observed.sent
+                && call.result.0 < observed.sent
                 && observed.received < answer.sent)
                 || outcome["data"]["test"] != evidence["data"]["receipt"]
                 || outcome["data"]["candidate"] != evidence["data"]["candidate"]

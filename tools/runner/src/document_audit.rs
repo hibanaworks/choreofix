@@ -11,19 +11,19 @@ const CHAPTERS: [&str; 2] = ["CHAPTER_1", "CHAPTER_2"];
 fn snapshot(calls: &[&Call], before: usize) -> Result<Value> {
     let mut completed = calls
         .iter()
-        .filter(|call| call.result.as_ref().is_some_and(|(at, _)| *at < before))
+        .filter(|call| call.result.0 < before)
         .copied()
         .collect::<Vec<_>>();
-    completed.sort_by_key(|call| call.result.as_ref().map(|(at, _)| *at));
+    completed.sort_by_key(|call| call.result.0);
     let mut material = json!({"sections":{},"references":{}});
     for call in completed {
-        let tool = call.tool()?;
+        let tool = call.tool;
         let category = match tool {
             "write_section" | "revise_section" => "sections",
             "update_references" => "references",
             _ => continue,
         };
-        let (_, result) = call.result()?;
+        let (_, result) = call.result;
         let chapter = call.request["arguments"]["section_name"]
             .as_str()
             .filter(|name| CHAPTERS.contains(name))
@@ -45,18 +45,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "7E" || fixture["task"] != "7E" || fixture["type"] != "fixtures" {
         return Err("document task differs".into());
     }
-    let actors = fixture["fixtures"]
-        .as_array()
-        .ok_or("document participants")?;
-    if actors.len() != 3
-        || actors
-            .iter()
-            .map(|a| a["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != BTreeSet::from([Some("WRITER_A"), Some("WRITER_B"), Some("EDITOR")])
-    {
-        return Err("document participants differ".into());
-    }
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/7E/metadata.json"),
+    )?;
+
     let name = |group: &str, key: &str| -> Result<u64> {
         compiled[group][key]
             .as_u64()
@@ -100,9 +93,9 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         let agent = call.request["agent"]
             .as_str()
             .ok_or("document effect actor")?;
-        let tool = call.tool()?;
+        let tool = call.tool;
         let args = &call.request["arguments"];
-        let (result_at, result) = call.result()?;
+        let (result_at, result) = call.result;
         let actor = name("roles", agent)?;
         let (file, chapter) = match agent {
             "WRITER_A" => ("A_FILE", CHAPTERS[0]),
@@ -216,14 +209,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                     .filter(|review| {
                         review.request["tool"] == "review_sections"
                             && review.request["arguments"]["section_name"] == chapter
-                            && review
-                                .result
-                                .as_ref()
-                                .is_some_and(|(at, _)| *at < chosen.sent)
+                            && review.result.0 < chosen.sent
                     })
-                    .max_by_key(|review| review.result.as_ref().map(|(at, _)| *at))
+                    .max_by_key(|review| review.result.0)
                     .ok_or("reconsideration lacks its actual review")?;
-                let (_, actual_review) = actual_review.result()?;
+                let (_, actual_review) = actual_review.result;
                 if chosen.value()? != json!({"review_id":actual_review["data"]["review_id"]})
                     || actual_review["data"]["input_snapshot"] != snapshot(&ordered, call.emitted)?
                     || !used.insert(*id)
@@ -407,14 +397,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                         .filter(|review| {
                             review.request["tool"] == "review_sections"
                                 && review.request["arguments"]["section_name"] == scope
-                                && review
-                                    .result
-                                    .as_ref()
-                                    .is_some_and(|(at, _)| *at < call.emitted)
+                                && review.result.0 < call.emitted
                         })
-                        .max_by_key(|review| review.result.as_ref().map(|(at, _)| *at))
+                        .max_by_key(|review| review.result.0)
                         .ok_or("publication without actual review")?;
-                    let (at, value) = review.result()?;
+                    let (at, value) = review.result;
                     if value["success"] != true
                         || value["data"]["input_snapshot"] != current
                         || result["data"]["review_receipts"][scope] != value["data"]["review_id"]

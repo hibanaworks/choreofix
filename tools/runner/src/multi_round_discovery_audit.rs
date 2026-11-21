@@ -117,27 +117,13 @@ fn operation(agent: &str, tool: &str, arguments: &Value) -> Option<Operation> {
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty 14H history")?["message"];
-    let actors = fixture["fixtures"].as_array().ok_or("14H participants")?;
-    let expected = BTreeSet::from([
-        "CHEMIST",
-        "BIOLOGIST",
-        "TOXICOLOGIST",
-        "CLINICAL_LEAD",
-        "FORMULATION_SCIENTIST",
-        "REGULATORY_SPECIALIST",
-        "PROJECT_DIRECTOR",
-    ]);
-    if compiled["task"] != "14H"
-        || fixture["type"] != "fixtures"
-        || fixture["task"] != "14H"
-        || actors.len() != expected.len()
-        || actors
-            .iter()
-            .filter_map(|actor| actor["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != expected
-    {
-        return Err("wrong 14H protocol or participants".into());
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/14H/metadata.json"),
+    )?;
+
+    if compiled["task"] != "14H" || fixture["type"] != "fixtures" || fixture["task"] != "14H" {
+        return Err("foreign task fixture or projection".into());
     }
     let role = |name: &str| {
         compiled["roles"][name]
@@ -211,14 +197,14 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     calls.sort_by_key(|call| call.emitted);
     for call in calls {
         let agent = call.request["agent"].as_str().ok_or("scientist")?;
-        let tool = call.tool()?;
+        let tool = call.tool;
         let arguments = &call.request["arguments"];
         let (file, owner, resources, name, result_view) = operation(agent, tool, arguments)
             .ok_or_else(|| format!("unknown course of scientific effect {agent} {tool}"))?;
         let code = label(name)?;
-        let (start, started) = call.started()?;
-        let (_, ended) = call.ended()?;
-        let (end, output) = call.result()?;
+        let (start, started) = call.started;
+        let (_, ended) = call.ended;
+        let (end, output) = call.result;
         let before = call.emitted.min(start);
         let request = take(file, owner, code, 0..before)?;
         let received = request.received;

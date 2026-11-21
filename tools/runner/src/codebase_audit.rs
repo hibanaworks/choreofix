@@ -39,26 +39,26 @@ fn prior<'a>(calls: &'a BTreeMap<u64, Call>, call: &Call, tool: &str) -> Result<
         .filter(|p| {
             p.request["agent"] == call.request["agent"]
                 && p.request["tool"] == tool
-                && p.result.as_ref().is_some_and(|(at, _)| *at < call.emitted)
+                && p.result.0 < call.emitted
         })
-        .max_by_key(|p| p.result.as_ref().map(|(at, _)| *at))
+        .max_by_key(|p| p.result.0)
         .ok_or("missing actual completed input")?;
-    Ok(earlier.result()?.1)
+    Ok(earlier.result.1)
 }
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let fixture = &rows.first().ok_or("empty codebase evidence")?["message"];
     let task = fixture["task"].as_str().ok_or("codebase task")?;
-    let participants = match task {
-        "1E" => 3,
-        "1M" => 5,
-        "1H" => 7,
+    let description = match task {
+        "1E" => include_str!("../../../benchmark/descriptions/1E/metadata.json"),
+        "1M" => include_str!("../../../benchmark/descriptions/1M/metadata.json"),
+        "1H" => include_str!("../../../benchmark/descriptions/1H/metadata.json"),
         _ => return Err("unknown codebase task".into()),
     };
+    let actors = crate::journal::participants(fixture, description)?;
+    let participants = actors.len();
     let compiled = &artifact["compiled"];
-    let actors = fixture["fixtures"].as_array().ok_or("original inputs")?;
     if compiled["task"] != task
         || compiled["session"] != 20
-        || actors.len() != participants
         || compiled["participants"]
             .as_object()
             .is_none_or(|p| p.len() != participants)
@@ -130,7 +130,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         let declared = &compiled["participants"][agent];
         let role = declared["role"].as_u64().ok_or("native role")?;
         let file = declared["file"].as_u64().ok_or("file role")?;
-        let tool = call.tool()?;
+        let tool = call.tool;
         let args = &call.request["arguments"];
         let assigned = one(actor["calls"]
             .as_array()
@@ -147,7 +147,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         {
             return Err("wrong or duplicate assigned work".into());
         }
-        let (result_at, result) = call.result()?;
+        let (result_at, result) = call.result;
         if result["tool_name"] != tool
             || result["data"]["agent"] != agent
             || !result["success"].is_boolean()
@@ -303,13 +303,12 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                     .filter(|p| {
                         p.request["agent"] == agent
                             && p.request["tool"] == "run_local_tests"
-                            && p.result.as_ref().is_some_and(|(at, v)| {
-                                *at < call.emitted && v["data"]["status"] == "tests_failed"
-                            })
+                            && p.result.0 < call.emitted
+                            && p.result.1["data"]["status"] == "tests_failed"
                     })
-                    .max_by_key(|p| p.result.as_ref().map(|(at, _)| *at));
+                    .max_by_key(|p| p.result.0);
                 let repair = if let Some(negative) = negative {
-                    let value = negative.result()?.1;
+                    let value = negative.result.1;
                     json!({"test_id":value["data"]["test_id"],"tested_commit":value["data"]["input_snapshot"]["id"],"diagnostic":value["data"]["diagnostic"]})
                 } else {
                     Value::Null
@@ -440,9 +439,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                     call.request["agent"] == actor["agent"]
                         && call.request["tool"] == "run_local_tests"
                 })
-                .map(|call| call.result().map(|r| r.0))
-                .collect::<Result<Vec<_>>>()?
-                .into_iter()
+                .map(|call| call.result.0)
                 .max()
                 .ok_or("final test")?;
             for module in actor["modules"].as_array().ok_or("modules")? {
@@ -488,15 +485,14 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     }
     let mut maximum = 0;
     for (first, resources) in &commits {
-        let start = first.started()?.1;
+        let start = first.started.1;
         let mut overlap = 0;
         for (second, other) in &commits {
-            if second.started()?.1 <= start && start < second.ended()?.1 {
+            if second.started.1 <= start && start < second.ended.1 {
                 overlap += 1;
             }
             if first.request != second.request
-                && first.started()?.1.max(second.started()?.1)
-                    < first.ended()?.1.min(second.ended()?.1)
+                && first.started.1.max(second.started.1) < first.ended.1.min(second.ended.1)
                 && resources.iter().any(|r| other.contains(r))
             {
                 return Err("actual shared-module commits overlap".into());

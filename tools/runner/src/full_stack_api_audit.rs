@@ -10,26 +10,12 @@ use std::{collections::BTreeSet, ops::Range};
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty full-stack evidence")?["message"];
-    let participants = fixture["fixtures"]
-        .as_array()
-        .ok_or("full-stack participants")?;
-    if compiled["task"] != "8M"
-        || fixture["task"] != "8M"
-        || fixture["type"] != "fixtures"
-        || participants.len() != 5
-        || participants
-            .iter()
-            .filter_map(|p| p["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != BTreeSet::from([
-                "DB_ADMIN",
-                "BACKEND_DEV",
-                "FRONTEND_DEV",
-                "REVIEWER",
-                "TESTER",
-            ])
-    {
-        return Err("foreign full-stack task or participant set".into());
+    let participants = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/8M/metadata.json"),
+    )?;
+    if compiled["task"] != "8M" || fixture["task"] != "8M" || fixture["type"] != "fixtures" {
+        return Err("foreign task fixture or projection".into());
     }
     let role = |name: &str| {
         compiled["roles"][name]
@@ -96,10 +82,10 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         ordered
             .iter()
             .filter(|call| {
-                call.tool().ok() == Some(tool)
+                call.tool == tool
                     && target.is_none_or(|target| call.request["arguments"]["pr_id"] == target)
             })
-            .filter_map(|call| call.result().ok())
+            .map(|call| call.result)
             .filter(|(at, _)| *at < before)
             .max_by_key(|(at, _)| *at)
             .map(|(_, value)| value)
@@ -111,20 +97,18 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut early_requests = Vec::new();
     let mut previous_attempt = None;
     for (index, &call) in ordered.iter().enumerate() {
-        let tool = call.tool()?;
+        let tool = call.tool;
         let agent = call.request["agent"]
             .as_str()
             .ok_or("full-stack effect agent")?;
         let args = &call.request["arguments"];
-        let (returned, result) = call.result()?;
+        let (returned, result) = call.result;
         let success = result["success"]
             .as_bool()
             .ok_or("full-stack effect success")?;
         let data = &result["data"];
         let first_backend = tool == "implement_backend"
-            && !ordered[..index]
-                .iter()
-                .any(|earlier| earlier.tool().ok() == Some(tool));
+            && !ordered[..index].iter().any(|earlier| earlier.tool == tool);
         let in_recovery = previous_attempt.is_some();
 
         let mut replies = Vec::new();
@@ -138,7 +122,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                 ]);
                 if !ordered[..index]
                     .iter()
-                    .any(|earlier| earlier.tool().ok() == Some("implement_backend"))
+                    .any(|earlier| earlier.tool == "implement_backend")
                     && let Ok(before) = latest(tool, None, call.emitted)
                 {
                     let (request, reason) = take(
@@ -353,9 +337,10 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                         "api" => "define_api",
                         _ => unreachable!(),
                     };
-                    if !ordered[..index].iter().any(|prior| {
-                        prior.emitted > *decision_at && prior.tool().ok() == Some(corrected)
-                    }) {
+                    if !ordered[..index]
+                        .iter()
+                        .any(|prior| prior.emitted > *decision_at && prior.tool == corrected)
+                    {
                         return Err("chosen correction did not execute before the retest".into());
                     }
                 }
@@ -388,7 +373,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                 } else {
                     let next = ordered[index + 1..]
                         .iter()
-                        .find(|next| next.tool().ok() == Some(tool))
+                        .find(|next| next.tool == tool)
                         .ok_or("failed test has no retest")?;
                     let (decision, selected) = take(
                         ("REVIEW_FILE", "REVIEW_SERVICE", "RepairDecision"),

@@ -894,7 +894,7 @@ async fn publication_case(
             && call.request["tool"] == "write_section"
             && call.request["arguments"]["section_name"] == "CHAPTER_4"
     }))?;
-    assert!(chapter_three_figure.ended()?.0 < evaluation_draft.started()?.0);
+    assert!(chapter_three_figure.ended.0 < evaluation_draft.started.0);
     let evaluation_creation = one(journal.calls.values().filter(|call| {
         call.request["tool"] == "create_figure"
             && call.request["arguments"]["description"] == "Evaluation plot"
@@ -905,7 +905,7 @@ async fn publication_case(
     let evaluation_received = journal.frames[&id].receipt["receive_commit"]["journal_row"]
         .as_u64()
         .ok_or("evaluation receipt journal row")?;
-    assert!(evaluation_creation.ended()?.0 < evaluation_received as usize);
+    assert!(evaluation_creation.ended.0 < evaluation_received as usize);
     let evaluation_figure = one(journal.calls.values().filter(|call| {
         call.request["tool"] == "insert_figure"
             && call.request["arguments"]["section_name"] == "CHAPTER_4"
@@ -914,13 +914,13 @@ async fn publication_case(
         call.request["tool"] == "update_references"
             && call.request["arguments"]["section_name"] == "CHAPTER_3"
     }))?;
-    assert!(evaluation_figure.ended()?.0 < evaluation_received as usize);
-    assert!((evaluation_received as usize) < contribution_references.started()?.0);
+    assert!(evaluation_figure.ended.0 < evaluation_received as usize);
+    assert!((evaluation_received as usize) < contribution_references.started.0);
     let write_first = one(journal.calls.values().filter(|call| {
         call.request["tool"] == "write_section"
             && call.request["arguments"]["section_name"] == "CHAPTER_1"
     }))?;
-    let initial = &write_first.result()?.1["data"]["artifact"];
+    let initial = &write_first.result.1["data"]["artifact"];
     let mut submissions = Vec::new();
     let file = compiled["roles"]["WRITER_A_FILE"]
         .as_u64()
@@ -950,26 +950,23 @@ async fn publication_case(
             .filter(|call| {
                 call.request["tool"] == "review_sections"
                     && call.request["arguments"]["section_name"] == chapter
-                    && call.result().is_ok_and(|(_, review)| {
-                        matches!(
-                            review["data"]["status"].as_str(),
-                            Some("reviewed" | "minor_revision")
-                        )
-                    })
+                    && matches!(
+                        call.result.1["data"]["status"].as_str(),
+                        Some("reviewed" | "minor_revision")
+                    )
             })
-            .max_by_key(|call| call.ended.map(|(row, _)| row))
+            .max_by_key(|call| call.ended.0)
             .ok_or("current scoped review")?;
-        let (review_at, verdict) = review.result()?;
+        let (review_at, verdict) = review.result;
         let (checked_at, checked) = if part_ii_minor.contains(&chapter) && !reject_amended_part_ii {
             assert_eq!(verdict["data"]["status"], "minor_revision");
             one(journal.calls.values().filter(|call| {
                 call.request["tool"] == "fact_check"
                     && call.request["arguments"]["section_name"] == chapter
-                    && call
-                        .result()
-                        .is_ok_and(|(at, check)| review_at < at && check["success"] == true)
+                    && review_at < call.result.0
+                    && call.result.1["success"] == true
             }))?
-            .result()?
+            .result
         } else {
             assert_eq!(verdict["data"]["status"], "reviewed");
             (review_at, verdict)
@@ -1082,7 +1079,7 @@ async fn publication_case(
         .calls
         .values()
         .filter(|call| {
-            call.tool().ok() == Some("fact_check")
+            call.tool == "fact_check"
                 && call.request["arguments"]["section_name"] == "CHAPTERS_1_2"
                 && fact_grant.received < call.emitted
                 && call.emitted < fact_return.received
@@ -1102,20 +1099,18 @@ async fn publication_case(
     );
     let mut assessments = Vec::new();
     for (attempt, checked) in initial_part_i.iter().enumerate() {
-        let (_, checked_result) = checked.result()?;
+        let (_, checked_result) = checked.result;
         let check_id = &checked_result["data"]["check_id"];
         let passed_facts = attempt >= fact_failures as usize;
         assert_eq!(checked_result["success"], passed_facts);
         let (result_at, verdict) = if passed_facts {
             one(journal.calls.values().filter(|call| {
-                call.tool().ok() == Some("review_sections")
-                    && call.result().is_ok_and(|(_, result)| {
-                        result["data"]["fact_receipts"]["CHAPTERS_1_2"] == *check_id
-                    })
+                call.tool == "review_sections"
+                    && call.result.1["data"]["fact_receipts"]["CHAPTERS_1_2"] == *check_id
             }))?
-            .result()?
+            .result
         } else {
-            checked.result()?
+            checked.result
         };
         let amended = minor_check.is_some() && attempt + 1 == initial_attempts;
         let approved = attempt + 1 == initial_part_i.len() && !amended;
@@ -1177,15 +1172,15 @@ async fn publication_case(
         if let Some(next) = initial_part_i.get(attempt + 1).filter(|_| !amended) {
             let received_at = author_received_at.ok_or("author revision verdict")?;
             let revised = one(journal.calls.values().filter(|call| {
-                call.tool().ok() == Some("revise_section")
+                call.tool == "revise_section"
                     && received_at < call.emitted
-                    && call.ended.is_some_and(|(at, _)| at < next.emitted)
+                    && call.ended.0 < next.emitted
             }))?;
             let section = revised.request["arguments"]["section_name"]
                 .as_str()
                 .ok_or("revised chapter")?;
-            let current = &next.result()?.1["data"]["input_snapshot"]["sections"][section];
-            assert_eq!(*current, revised.result()?.1["data"]["artifact"]);
+            let current = &next.result.1["data"]["input_snapshot"]["sections"][section];
+            assert_eq!(*current, revised.result.1["data"]["artifact"]);
             assert_ne!(
                 *current,
                 verdict["data"]["input_snapshot"]["sections"][section]
@@ -1199,14 +1194,12 @@ async fn publication_case(
     let mut minor_amendments = Vec::new();
     if let Some(checked) = minor_check {
         let review = one(journal.calls.values().filter(|call| {
-            call.tool().ok() == Some("review_sections")
+            call.tool == "review_sections"
                 && call.request["arguments"]["section_name"] == "CHAPTERS_1_2"
-                && call
-                    .result()
-                    .is_ok_and(|(_, result)| result["data"]["status"] == "minor_revision")
+                && call.result.1["data"]["status"] == "minor_revision"
         }))?;
-        let receipt = &review.result()?.1["data"];
-        let (checked_at, check) = checked.result()?;
+        let receipt = &review.result.1["data"];
+        let (checked_at, check) = checked.result;
         assert_eq!(check["success"], !reject_amended_part_i);
         assert_ne!(
             check["data"]["check_id"],
@@ -1216,7 +1209,7 @@ async fn publication_case(
             .calls
             .values()
             .filter(|call| {
-                call.tool().ok() == Some("revise_section")
+                call.tool == "revise_section"
                     && call.request["arguments"]["review_id"] == receipt["review_id"]
             })
             .collect();
@@ -1224,8 +1217,8 @@ async fn publication_case(
         assert_eq!(effects.len(), minor_sections.len());
         for (effect, chapter) in effects.into_iter().zip(minor_sections) {
             assert_eq!(effect.request["arguments"]["section_name"], chapter);
-            assert!(review.ended()?.0 < effect.emitted && effect.ended()?.0 < checked.emitted);
-            let revised = &effect.result()?.1["data"]["artifact"];
+            assert!(review.ended.0 < effect.emitted && effect.ended.0 < checked.emitted);
+            let revised = &effect.result.1["data"]["artifact"];
             assert_eq!(revised["content"], receipt["minor_replacements"][chapter]);
             assert_eq!(
                 revised["previous_id"],
@@ -1276,19 +1269,19 @@ async fn publication_case(
                 .ok_or("reassessment after rejected amendments")?;
             let received = rejection_received.ok_or("author's rejected amendment receipt")?;
             let corrected = one(journal.calls.values().filter(|call| {
-                call.tool().ok() == Some("revise_section")
+                call.tool == "revise_section"
                     && received < call.emitted
-                    && call.ended.is_some_and(|(at, _)| at < next.emitted)
+                    && call.ended.0 < next.emitted
             }))?;
             let chapter = corrected.request["arguments"]["section_name"]
                 .as_str()
                 .ok_or("corrected chapter")?;
             assert_eq!(
-                next.result()?.1["data"]["input_snapshot"]["sections"][chapter],
-                corrected.result()?.1["data"]["artifact"]
+                next.result.1["data"]["input_snapshot"]["sections"][chapter],
+                corrected.result.1["data"]["artifact"]
             );
             assert_ne!(
-                corrected.result()?.1["data"]["artifact"],
+                corrected.result.1["data"]["artifact"],
                 check["data"]["input_snapshot"]["sections"][chapter]
             );
         }
@@ -1320,10 +1313,7 @@ async fn publication_case(
         let mut decisions: Vec<_> = journal
             .calls
             .values()
-            .filter(|call| {
-                call.tool()
-                    .is_ok_and(|tool| tool == "make_editorial_decision")
-            })
+            .filter(|call| call.tool == "make_editorial_decision")
             .collect();
         decisions.sort_by_key(|call| call.emitted);
         assert_eq!(decisions.len(), materials.len());
@@ -1332,7 +1322,7 @@ async fn publication_case(
         let combined = one(journal
             .calls
             .values()
-            .filter(|call| call.tool().is_ok_and(|tool| tool == "combine_sections")))?;
+            .filter(|call| call.tool == "combine_sections"))?;
         for (attempt, (decided, (_, material_frame))) in decisions
             .into_iter()
             .zip(materials.iter().copied())
@@ -1346,11 +1336,11 @@ async fn publication_case(
             assert_eq!(grant["actor"], editor);
             assert_eq!(returned["actor"], owner);
             assert!(granted.received < material_frame.received);
-            assert!(material_frame.received < decided.started()?.0);
+            assert!(material_frame.received < decided.started.0);
             let returned_at = reclaimed.received;
-            assert!(decided.ended()?.0 < returned_at);
+            assert!(decided.ended.0 < returned_at);
             let material = material_frame.value()?;
-            let decision = decided.result()?.1;
+            let decision = decided.result.1;
             for field in ["input_snapshot", "review_receipts"] {
                 assert_eq!(decision["data"][field], material[field]);
             }
@@ -1359,9 +1349,9 @@ async fn publication_case(
             let mut evidence = json!({"grant":grant,"return":returned,
                 "decision_id":decision["data"]["decision_id"],"decision_success":decision["success"]});
             if final_decision {
-                assert!(decided.ended()?.0 < combined.started()?.0);
-                assert!(combined.ended()?.0 < returned_at);
-                let published = &combined.result()?.1["data"];
+                assert!(decided.ended.0 < combined.started.0);
+                assert!(combined.ended.0 < returned_at);
+                let published = &combined.result.1["data"];
                 for field in ["input_snapshot", "review_receipts", "fact_receipts"] {
                     assert_eq!(published[field], material[field]);
                 }
@@ -1370,7 +1360,7 @@ async fn publication_case(
                     decision["data"]["decision_id"]
                 );
                 evidence["published_artifact"] = published["artifact_id"].clone();
-                let (result_at, result) = combined.result()?;
+                let (result_at, result) = combined.result;
                 outcomes.push((editor, result.clone(), result_at, [None; 3]));
             } else {
                 let next_grant = transfers[2 * attempt + 2].1.received;
@@ -1391,9 +1381,9 @@ async fn publication_case(
                 assert_eq!(grant_commit["actor"], reassessor);
                 assert_eq!(return_commit["actor"], owner);
                 let revised = one(journal.calls.values().filter(|call| {
-                    call.tool().is_ok_and(|tool| tool == "revise_section")
+                    call.tool == "revise_section"
                         && call.emitted > returned_at
-                        && call.ended.is_some_and(|(end, _)| end < grant_at)
+                        && call.ended.0 < grant_at
                 }))?;
                 let section = revised.request["arguments"]["section_name"]
                     .as_str()
@@ -1402,7 +1392,7 @@ async fn publication_case(
                     .calls
                     .values()
                     .filter(|call| {
-                        call.tool().ok() == Some("fact_check")
+                        call.tool == "fact_check"
                             && call.request["arguments"]["section_name"] == "CHAPTERS_1_2"
                             && grant_at < call.emitted
                             && call.emitted < return_at
@@ -1411,8 +1401,8 @@ async fn publication_case(
                 checked_in_custody.sort_by_key(|call| call.emitted);
                 let first_check = checked_in_custody.first().ok_or("first reassessment")?;
                 assert_eq!(
-                    first_check.result()?.1["data"]["input_snapshot"]["sections"][section],
-                    revised.result()?.1["data"]["artifact"]
+                    first_check.result.1["data"]["input_snapshot"]["sections"][section],
+                    revised.result.1["data"]["artifact"]
                 );
                 let errors = if attempt == 0 {
                     post_edit_fact + post_edit_review
@@ -1430,26 +1420,23 @@ async fn publication_case(
                     material["fact_receipts"]["CHAPTERS_1_2"]
                 );
                 let refreshed_fact = one(journal.calls.values().filter(|call| {
-                    call.tool().ok() == Some("fact_check")
-                        && call.result().is_ok_and(|(_, result)| {
-                            result["data"]["check_id"] == updated["fact_receipts"]["CHAPTERS_1_2"]
-                        })
+                    call.tool == "fact_check"
+                        && call.result.1["data"]["check_id"]
+                            == updated["fact_receipts"]["CHAPTERS_1_2"]
                 }))?;
                 let refreshed_review = one(journal.calls.values().filter(|call| {
-                    call.tool().ok() == Some("review_sections")
-                        && call.result().is_ok_and(|(_, result)| {
-                            result["data"]["review_id"]
-                                == updated["review_receipts"]["CHAPTERS_1_2"]
-                        })
+                    call.tool == "review_sections"
+                        && call.result.1["data"]["review_id"]
+                            == updated["review_receipts"]["CHAPTERS_1_2"]
                 }))?;
-                assert!(grant_at < refreshed_fact.emitted && refreshed_fact.ended()?.0 < return_at);
+                assert!(grant_at < refreshed_fact.emitted && refreshed_fact.ended.0 < return_at);
                 assert!(
-                    grant_at < refreshed_review.emitted && refreshed_review.ended()?.0 < return_at
+                    grant_at < refreshed_review.emitted && refreshed_review.ended.0 < return_at
                 );
                 let checks = checked_in_custody
                     .iter()
                     .map(|call| {
-                        let (_, check) = call.result()?;
+                        let (_, check) = call.result;
                         Ok(json!({"check_id":check["data"]["check_id"],"success":check["success"]}))
                     })
                     .collect::<Result<Vec<_>>>()?;
@@ -1524,9 +1511,9 @@ async fn publication_case(
         "effects":journal.calls.len(),"captured_records":dynamic["captured_records"],"correspondence":correspondence,
         "evaluation_flow":{
             "chapter_three_evaluation_receive_row":evaluation_received,
-            "chapter_four_figure_creation_start_row":evaluation_creation.started()?.0,
-            "chapter_four_insertion_end_row":evaluation_figure.ended()?.0,
-            "chapter_three_references_start_row":contribution_references.started()?.0
+            "chapter_four_figure_creation_start_row":evaluation_creation.started.0,
+            "chapter_four_insertion_end_row":evaluation_figure.ended.0,
+            "chapter_three_references_start_row":contribution_references.started.0
         },
         "part_i_submissions":submissions,
         "fact_checks":fact_checks,

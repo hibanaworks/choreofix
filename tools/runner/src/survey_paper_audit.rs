@@ -37,29 +37,13 @@ const CHAPTERS: [(&str, &str, &str, &str, &str); 4] = [
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty survey journal")?["message"];
-    let actors = fixture["fixtures"]
-        .as_array()
-        .ok_or("survey participants")?;
-    let names = BTreeSet::from([
-        "RESEARCHER_A",
-        "RESEARCHER_B",
-        "RESEARCHER_C",
-        "RESEARCHER_D",
-        "DATA_ANALYST",
-        "REVIEWER",
-        "EDITOR_IN_CHIEF",
-    ]);
-    if compiled["task"] != "3H"
-        || fixture["type"] != "fixtures"
-        || fixture["task"] != "3H"
-        || actors.len() != names.len()
-        || actors
-            .iter()
-            .filter_map(|a| a["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != names
-    {
-        return Err("wrong survey task or participant set".into());
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/3H/metadata.json"),
+    )?;
+
+    if compiled["task"] != "3H" || fixture["type"] != "fixtures" || fixture["task"] != "3H" {
+        return Err("foreign task fixture or projection".into());
     }
 
     let role = |name: &str| {
@@ -136,10 +120,10 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             .as_str()
             .ok_or("survey effect actor")?;
         let args = &call.request["arguments"];
-        let tool = call.tool()?;
-        let (start, started) = call.started()?;
-        let (_, ended) = call.ended()?;
-        let (result_at, output) = call.result()?;
+        let tool = call.tool;
+        let (start, started) = call.started;
+        let (_, ended) = call.ended;
+        let (result_at, output) = call.result;
         let success = output["success"].as_bool().ok_or("survey effect verdict")?;
         let before = call.emitted.min(start);
         let score = journal::one(scores.iter().enumerate().filter(|(index, event)| {
@@ -147,7 +131,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         }))?;
         used_scores.insert(score.0);
         intervals.push((
-            crate::oracle::resources_for_call(&metadata, agent, &call.request)?,
+            crate::oracle::resources_for_call(&metadata, agent, call.request)?,
             started,
             ended,
         ));
@@ -185,7 +169,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                     let review_value = review.value()?;
                     let review_at = review.received;
                     let actual = journal::one(calls.iter().filter_map(|(_, call)| {
-                        let (at, result) = call.result().ok()?;
+                        let (at, result) = call.result;
                         (at < review_at
                             && result["tool_name"] == "peer_review"
                             && result["success"] == true
@@ -216,7 +200,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                 }
             } else {
                 let (_, decision) = journal::one(calls.iter().filter_map(|(_, call)| {
-                    let (at, result) = call.result().ok()?;
+                    let (at, result) = call.result;
                     (at < admitted && result["tool_name"] == "make_editorial_decision")
                         .then_some((at, result))
                 }))?;
@@ -245,7 +229,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                 let start = calls
                     .iter()
                     .filter_map(|(_, other)| {
-                        let (at, result) = other.result().ok()?;
+                        let (at, result) = other.result;
                         (at < before && result["tool_name"] == tool).then_some(at)
                     })
                     .max()
@@ -299,7 +283,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                     .1
                     .value()?;
                     let research = journal::one(calls.iter().filter_map(|(_, call)| {
-                        let (at, result) = call.result().ok()?;
+                        let (at, result) = call.result;
                         (at < admitted
                             && result["tool_name"] == "research_topic"
                             && result["data"]["agent"] == author)
@@ -360,7 +344,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                     let rejection = calls
                         .iter()
                         .filter_map(|(_, call)| {
-                            let (at, result) = call.result().ok()?;
+                            let (at, result) = call.result;
                             (at < admitted
                                 && result["tool_name"] == "peer_review"
                                 && result["data"]["scope"] == chapter)

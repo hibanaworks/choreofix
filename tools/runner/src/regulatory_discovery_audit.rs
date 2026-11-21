@@ -9,25 +9,13 @@ use std::{
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty regulatory history")?["message"];
-    let actors = fixture["fixtures"].as_array().ok_or("14M participants")?;
-    let expected = BTreeSet::from([
-        "CHEMIST",
-        "BIOLOGIST",
-        "TOXICOLOGIST",
-        "LEAD_SCIENTIST",
-        "REGULATORY_SPECIALIST",
-    ]);
-    if compiled["task"] != "14M"
-        || fixture["type"] != "fixtures"
-        || fixture["task"] != "14M"
-        || actors.len() != expected.len()
-        || actors
-            .iter()
-            .filter_map(|actor| actor["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != expected
-    {
-        return Err("wrong regulatory task or participant set".into());
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/14M/metadata.json"),
+    )?;
+
+    if compiled["task"] != "14M" || fixture["type"] != "fixtures" || fixture["task"] != "14M" {
+        return Err("foreign task fixture or projection".into());
     }
     let role = |name: &str| {
         compiled["roles"][name]
@@ -103,11 +91,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         let agent = call.request["agent"]
             .as_str()
             .ok_or("missing effect agent")?;
-        let tool = call.tool()?;
+        let tool = call.tool;
         let arguments = &call.request["arguments"];
-        let (end, output) = call.result()?;
-        let (start, started) = call.started()?;
-        let (_, ended) = call.ended()?;
+        let (end, output) = call.result;
+        let (start, started) = call.started;
+        let (_, ended) = call.ended;
         let success = output["success"].as_bool().ok_or("missing effect result")?;
         let (file, owner, instrument, name) = if agent == "REGULATORY_SPECIALIST"
             && tool == "verify_regulatory_compliance"

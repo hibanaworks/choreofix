@@ -21,13 +21,14 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
     {
         return Err("different task or invalid dining configuration".into());
     }
-    let actors = fixture["fixtures"].as_array().ok_or("fixtures")?;
-    let count = match fixture["task"].as_str() {
-        Some("9E") => 3,
-        Some("9M") => 5,
-        Some("9H") => 7,
+    let description = match fixture["task"].as_str() {
+        Some("9E") => include_str!("../../../benchmark/descriptions/9E/metadata.json"),
+        Some("9M") => include_str!("../../../benchmark/descriptions/9M/metadata.json"),
+        Some("9H") => include_str!("../../../benchmark/descriptions/9H/metadata.json"),
         _ => return Err("unknown dining task".into()),
     };
+    let actors = crate::journal::participants(fixture, description)?;
+    let count = actors.len();
     // Physical integration identities, shared with the actual application.
     // This is not a source execution or a current-holder table.
     let layout = [
@@ -131,11 +132,10 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
         ),
     ];
     let layout = &layout[..count];
-    if actors.len() != count
-        || actors
-            .iter()
-            .zip(AGENTS)
-            .any(|(actor, name)| actor["agent"] != name)
+    if actors
+        .iter()
+        .zip(AGENTS)
+        .any(|(actor, name)| actor["agent"] != name)
     {
         return Err("dining participant identities".into());
     }
@@ -311,7 +311,7 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
                                     && at < call.emitted
                                     && call.emitted < replied
                             }))?;
-                        let (result_at, result) = call.result()?;
+                        let (result_at, result) = call.result;
                         if result_at >= reply.sent
                             || call.request["arguments"] != arguments
                             || effects.insert(call_id, (request_id, None)).is_some()
@@ -432,7 +432,7 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
                                 return Err("successful close lacks one admitted effect".into());
                             }
                             let (&call_id, call) = calls[0];
-                            let (result_at, result) = call.result()?;
+                            let (result_at, result) = call.result;
                             if result_at >= completion
                                 || call.request["arguments"]
                                     != arguments.ok_or("invalid arguments")?
@@ -489,7 +489,7 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
             for (call, event) in calls.into_iter().zip(events) {
                 let id = call.request["id"].as_u64().ok_or("effect ID")?;
                 let &(close_id, authority_id) = effects.get(&id).ok_or("unbound effect")?;
-                let (result_at, result) = call.result()?;
+                let (result_at, result) = call.result;
                 let mut resources = Vec::new();
                 if result["success"] != true || result["data"]["philosopher"] != agent {
                     return Err("unexpected original dining result".into());
@@ -581,7 +581,7 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
                         "endpoint_frame":loan_id,"endpoint_receive":journal.frames[&loan_id].receipt["receive_commit"],
                         "result_frame":reply_id,"return_frame":return_id}));
                     }
-                    meals.push((call.started()?.1, call.ended()?.1, names));
+                    meals.push((call.started.1, call.ended.1, names));
                 }
                 let expected_args = if tool == "think" {
                     json!({})

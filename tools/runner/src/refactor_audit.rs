@@ -46,13 +46,13 @@ fn code_before<'a>(calls: &'a BTreeMap<u64, Call>, target: &str, before: usize) 
     let call = calls
         .values()
         .filter(|c| {
-            c.tool().ok() == Some("refactor_code")
+            c.tool == "refactor_code"
                 && c.request["arguments"]["target"] == target
-                && c.ended().is_ok_and(|(at, _)| at < before)
+                && c.ended.0 < before
         })
-        .max_by_key(|c| c.ended().unwrap().0)
+        .max_by_key(|c| c.ended.0)
         .ok_or("missing completed refactor material")?;
-    call.result()?.1["data"]["source"]
+    call.result.1["data"]["source"]
         .as_str()
         .ok_or_else(|| "refactor source bytes".into())
 }
@@ -103,24 +103,11 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             .as_u64()
             .ok_or_else(|| format!("compiled label {name}").into())
     };
-    let actors = fixture["fixtures"]
-        .as_array()
-        .ok_or("original refactor participants")?;
-    if actors.len() != 5
-        || actors
-            .iter()
-            .filter_map(|a| a["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != BTreeSet::from([
-                "ARCHITECT",
-                "DEVELOPER_A",
-                "DEVELOPER_B",
-                "REVIEWER",
-                "TESTER",
-            ])
-    {
-        return Err("shared-refactor participants differ".into());
-    }
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/4M/metadata.json"),
+    )?;
+
     let headers = crate::projection::frames(projection, rows)?;
     let journal = journal::read(rows, &headers, actors, dynamic)?;
     let journal::Journal {
@@ -167,14 +154,14 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
         let at = snapshot.sent;
         let latest = calls
             .values()
-            .filter(|c| c.tool().ok() == Some("refactor_code"))
-            .filter_map(|c| c.ended().ok().map(|(end, _)| (end, c)))
+            .filter(|c| c.tool == "refactor_code")
+            .map(|c| (c.ended.0, c))
             .filter(|(end, _)| *end < at)
             .max_by_key(|(end, _)| *end)
             .ok_or("candidate lacks repository edit")?
             .1;
         let snapshot_value = snapshot.value()?;
-        if snapshot_value != latest.result()?.1["data"]["working_candidates"]
+        if snapshot_value != latest.result.1["data"]["working_candidates"]
             || snapshot_value[module] != candidate(&calls, module, at)?
         {
             return Err("snapshot differs from the actual repository contents".into());
@@ -184,7 +171,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
     let mut matched = BTreeSet::new();
     for call in calls.values() {
         let agent = call.request["agent"].as_str().ok_or("effect agent")?;
-        let tool = call.tool()?;
+        let tool = call.tool;
         let args = &call.request["arguments"];
         let actor = one(actors.iter().filter(|a| a["agent"] == agent))?;
         if !actor["calls"]
@@ -200,7 +187,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
         {
             return Err("unassigned or duplicated original effect".into());
         }
-        let (at, value) = call.result()?;
+        let (at, value) = call.result;
         let data = &value["data"];
         if value["tool_name"] != tool || value["success"] != true {
             return Err("actual effect result differs".into());
@@ -298,7 +285,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                 }
             }
             "code_review" | "run_tests" => {
-                let hash = candidate(&calls, module, call.started()?.0)?;
+                let hash = candidate(&calls, module, call.started.0)?;
                 checked(value, module, &hash)?;
                 let repo = role("REPO_OWNER")?;
                 let ready_label = label(&format!(
@@ -352,7 +339,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                 )?;
             }
             "merge_code" => {
-                let hash = candidate(&calls, module, call.started()?.0)?;
+                let hash = candidate(&calls, module, call.started.0)?;
                 if data["branch"] != module
                     || data["candidate_sha256"] != hash
                     || data["published_candidates"][module] != hash
@@ -394,14 +381,14 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         return Err("publication reused unrelated validation".into());
                     }
                     let checked_call = one(calls.values().filter(|p| {
-                        p.tool().ok() == Some(operation)
+                        p.tool == operation
                             && p.request["agent"] == actor
-                            && p.result().is_ok_and(|(_, v)| v["data"] == event["result"])
+                            && p.result.1["data"] == event["result"]
                     }))?;
-                    if checked_call.ended()?.0 >= call.started()?.0 {
+                    if checked_call.ended.0 >= call.started.0 {
                         return Err("publication used unfinished validation".into());
                     }
-                    validation.insert(kind, checked_call.result()?.1.clone());
+                    validation.insert(kind, checked_call.result.1.clone());
                 }
                 let admitted = json!({"arguments":args,
                     "review":validation["review"],"test":validation["test"]});

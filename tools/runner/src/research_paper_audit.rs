@@ -30,24 +30,12 @@ const CHAPTERS: [(&str, &str, &str, &str, &str); 3] = [
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty paper history")?["message"];
-    let actors = fixture["fixtures"].as_array().ok_or("3M participants")?;
-    if compiled["task"] != "3M"
-        || fixture["type"] != "fixtures"
-        || fixture["task"] != "3M"
-        || actors.len() != 5
-        || actors
-            .iter()
-            .filter_map(|actor| actor["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != BTreeSet::from([
-                "RESEARCHER_A",
-                "RESEARCHER_B",
-                "RESEARCHER_C",
-                "FACT_CHECKER",
-                "EDITOR",
-            ])
-    {
-        return Err("wrong paper task or participant set".into());
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/3M/metadata.json"),
+    )?;
+    if compiled["task"] != "3M" || fixture["type"] != "fixtures" || fixture["task"] != "3M" {
+        return Err("foreign task fixture or projection".into());
     }
     let role = |name: &str| {
         compiled["roles"][name]
@@ -128,11 +116,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut intervals = Vec::new();
     for (&effect_id, call) in calls {
         let agent = call.request["agent"].as_str().ok_or("paper actor")?;
-        let tool = call.tool()?;
+        let tool = call.tool;
         let arguments = &call.request["arguments"];
-        let (start, started) = call.started()?;
-        let (_, ended) = call.ended()?;
-        let (result_at, output) = call.result()?;
+        let (start, started) = call.started;
+        let (_, ended) = call.ended;
+        let (result_at, output) = call.result;
         let success = output["success"].as_bool().ok_or("paper verdict")?;
         let before = call.emitted.min(start);
         let score = journal::one(evaluated.iter().enumerate().filter(|(index, event)| {
@@ -140,7 +128,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         }))?;
         used_scores.insert(score.0);
         intervals.push((
-            crate::oracle::resources_for_call(&metadata, agent, &call.request)?,
+            crate::oracle::resources_for_call(&metadata, agent, call.request)?,
             started,
             ended,
         ));

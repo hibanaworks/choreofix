@@ -7,8 +7,8 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 #[cfg(test)]
 use {crate::evidence::digest, std::path::Path};
-fn target(call: &Call) -> Result<&str> {
-    let key = match call.tool()? {
+fn target<'a>(call: &Call<'a>) -> Result<&'a str> {
+    let key = match call.tool {
         "run_analysis" => "sample",
         "run_separation" => "material",
         "run_bioassay" => "compound",
@@ -22,11 +22,11 @@ fn result<'a>(
     calls: &'a BTreeMap<u64, Call>,
     (actor, tool, name): (&str, &str, &str),
 ) -> Result<&'a Value> {
-    one(calls.values().filter(|c| {
-        c.request["agent"] == actor && c.tool().ok() == Some(tool) && target(c).ok() == Some(name)
+    Ok(one(calls.values().filter(|c| {
+        c.request["agent"] == actor && c.tool == tool && target(c).ok() == Some(name)
     }))?
-    .result()
-    .map(|(_, v)| v)
+    .result
+    .1)
 }
 fn frame<'a>(
     (frames, used): (&'a BTreeMap<u64, Frame<'a>>, &mut BTreeSet<usize>),
@@ -60,17 +60,11 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             .as_u64()
             .ok_or_else(|| format!("compiled message {name}").into())
     };
-    let actors = fixture["fixtures"]
-        .as_array()
-        .ok_or("original scientists")?;
-    if actors
-        .iter()
-        .filter_map(|a| a["agent"].as_str())
-        .collect::<BTreeSet<_>>()
-        != BTreeSet::from(["CHEMIST", "BIOLOGIST", "ANALYST"])
-    {
-        return Err("laboratory participants differ".into());
-    }
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/13E/metadata.json"),
+    )?;
+
     let contracts = crate::projection::frames(projection, rows)?;
     let journal = journal::read(rows, &contracts, actors, dynamic)?;
     let journal::Journal {
@@ -119,7 +113,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
     let mut scored = BTreeSet::new();
     for call in calls.values() {
         let actor = call.request["agent"].as_str().ok_or("effect scientist")?;
-        let tool = call.tool()?;
+        let tool = call.tool;
         let name = target(call)?;
         let args = &call.request["arguments"];
         let original = one(actors.iter().filter(|a| a["agent"] == actor))?;
@@ -158,7 +152,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
         {
             return Err("scientific arguments contain invented fields".into());
         }
-        let (ended, value) = call.result()?;
+        let (ended, value) = call.result;
         let data = &value["data"];
         let key = match tool {
             "run_analysis" => "sample",
@@ -272,11 +266,10 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             return Err("scientific effect used missing, stale or foreign material".into());
         }
         for receipt in inputs.as_object().ok_or("scientific inputs")?.values() {
-            let previous = one(calls.values().filter(|c| {
-                c.result()
-                    .is_ok_and(|(_, v)| v["data"]["artifact_id"] == *receipt)
-            }))?;
-            if previous.ended()?.0 >= call.started()?.0 {
+            let previous = one(calls
+                .values()
+                .filter(|c| c.result.1["data"]["artifact_id"] == *receipt))?;
+            if previous.ended.0 >= call.started.0 {
                 return Err("scientific input was not complete before use".into());
             }
         }
@@ -326,9 +319,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
     }
     let find_call = |(actor, tool, name): (&str, &str, &str)| -> Result<&Call> {
         one(calls.values().filter(|c| {
-            c.request["agent"] == actor
-                && c.tool().ok() == Some(tool)
-                && target(c).ok() == Some(name)
+            c.request["agent"] == actor && c.tool == tool && target(c).ok() == Some(name)
         }))
     };
     let first_quality = find_call(("ANALYST", "run_analysis", "molecular_detail"))?
@@ -341,7 +332,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             "Purified",
             &specimen,
             find_call(("CHEMIST", "run_separation", "compound_purification"))?
-                .ended()?
+                .ended
                 .0,
             find_call(("BIOLOGIST", "run_bioassay", "compound_purification"))?.emitted,
         ),
@@ -351,7 +342,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             "Sample",
             &specimen,
             find_call(("CHEMIST", "run_separation", "compound_purification"))?
-                .ended()?
+                .ended
                 .0,
             find_call(("BIOLOGIST", "run_bioassay", "compound_purification"))?.emitted,
         ),
@@ -361,7 +352,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             "AssayNotice",
             &assay_data,
             find_call(("BIOLOGIST", "run_bioassay", "compound_purification"))?
-                .ended()?
+                .ended
                 .0,
             first_quality,
         ),
@@ -371,7 +362,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             "FileAssay",
             &assay_data,
             find_call(("BIOLOGIST", "run_bioassay", "compound_purification"))?
-                .ended()?
+                .ended
                 .0,
             first_quality,
         ),
@@ -381,11 +372,11 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             "Quality",
             &quality,
             find_call(("ANALYST", "run_analysis", "molecular_detail"))?
-                .ended()?
+                .ended
                 .0
                 .max(
                     find_call(("ANALYST", "run_separation", "verification"))?
-                        .ended()?
+                        .ended
                         .0,
                 ),
             find_call(("CHEMIST", "run_analysis", "final_validation"))?.emitted,
@@ -396,11 +387,11 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             "FileQuality",
             &quality,
             find_call(("ANALYST", "run_analysis", "molecular_detail"))?
-                .ended()?
+                .ended
                 .0
                 .max(
                     find_call(("ANALYST", "run_separation", "verification"))?
-                        .ended()?
+                        .ended
                         .0,
                 ),
             find_call(("CHEMIST", "run_analysis", "final_validation"))?.emitted,

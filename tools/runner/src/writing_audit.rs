@@ -38,25 +38,25 @@ fn prior<'a>(calls: &'a BTreeMap<u64, Call>, call: &Call, tool: &str) -> Result<
     let earlier = calls.values().filter(|p| {
         p.request["agent"] == call.request["agent"]
             && p.request["tool"] == tool
-            && p.result.as_ref().is_some_and(|(at, _)| *at < call.emitted)
+            && p.result.0 < call.emitted
     });
     let p = one(earlier)?;
-    Ok(p.result()?.1)
+    Ok(p.result.1)
 }
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let fixture = &rows.first().ok_or("empty writing evidence")?["message"];
     let task = fixture["task"].as_str().ok_or("writing task")?;
-    let participants = match task {
-        "2E" => 3,
-        "2M" => 5,
-        "2H" => 7,
+    let description = match task {
+        "2E" => include_str!("../../../benchmark/descriptions/2E/metadata.json"),
+        "2M" => include_str!("../../../benchmark/descriptions/2M/metadata.json"),
+        "2H" => include_str!("../../../benchmark/descriptions/2H/metadata.json"),
         _ => return Err("unknown writing task".into()),
     };
+    let actors = crate::journal::participants(fixture, description)?;
+    let participants = actors.len();
     let compiled = &artifact["compiled"];
-    let actors = fixture["fixtures"].as_array().ok_or("writing inputs")?;
     if compiled["task"] != task
         || compiled["session"] != 18
-        || actors.len() != participants
         || compiled["participants"]
             .as_object()
             .is_none_or(|p| p.len() != participants)
@@ -82,7 +82,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         let declared = &compiled["participants"][agent];
         let role = declared["role"].as_u64().ok_or("actual native role")?;
         let file = declared["file"].as_u64().ok_or("actual file role")?;
-        let tool = call.tool()?;
+        let tool = call.tool;
         let args = &call.request["arguments"];
         let assigned = one(actor["calls"]
             .as_array()
@@ -97,7 +97,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         if !args_match || !completed.insert((agent, tool)) {
             return Err("wrong or duplicate original work".into());
         }
-        let (result_at, result) = call.result()?;
+        let (result_at, result) = call.result;
         if result["tool_name"] != tool
             || result["data"]["agent"] != agent
             || !result["success"].is_boolean()
@@ -322,15 +322,14 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     }
     let mut maximum = 0;
     for (first, resources) in &writes {
-        let start = first.started()?.1;
+        let start = first.started.1;
         let mut overlap = 0;
         for (second, other_resources) in &writes {
-            if second.started()?.1 <= start && start < second.ended()?.1 {
+            if second.started.1 <= start && start < second.ended.1 {
                 overlap += 1;
             }
             if first.request != second.request
-                && first.started()?.1.max(second.started()?.1)
-                    < first.ended()?.1.min(second.ended()?.1)
+                && first.started.1.max(second.started.1) < first.ended.1.min(second.ended.1)
                 && resources.iter().any(|r| other_resources.contains(r))
             {
                 return Err("actual shared-section effects overlap".into());

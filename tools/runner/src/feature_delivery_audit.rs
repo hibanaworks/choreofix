@@ -15,8 +15,8 @@ fn named(compiled: &Value, group: &str, name: &str) -> Result<u64> {
         .as_u64()
         .ok_or_else(|| format!("compiled {group} {name}").into())
 }
-fn target(call: &Call) -> Result<&str> {
-    let key = match call.tool()? {
+fn target<'a>(call: &Call<'a>) -> Result<&'a str> {
+    let key = match call.tool {
         "implement_feature" => "feature_name",
         "merge_code" => "branch",
         "code_review" => "pr_id",
@@ -42,13 +42,10 @@ fn receipt(value: &Value) -> Result<u64> {
         .and_then(|s| s.parse().ok())
         .ok_or_else(|| "actual effect receipt".into())
 }
-fn material<'a>(calls: &'a BTreeMap<u64, Call>, tool: &str, id: u64) -> Result<&'a Call> {
-    one(calls.values().filter(|call| {
-        call.tool().is_ok_and(|t| t == tool)
-            && call
-                .result()
-                .is_ok_and(|(_, result)| receipt(result).ok() == Some(id))
-    }))
+fn material<'a>(calls: &'a BTreeMap<u64, Call<'a>>, tool: &str, id: u64) -> Result<&'a Call<'a>> {
+    one(calls
+        .values()
+        .filter(|call| call.tool == tool && receipt(call.result.1).ok() == Some(id)))
 }
 const BUSINESS_ROLES: [&str; 18] = [
     "MERGE_REQUESTS",
@@ -92,25 +89,11 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
     if fixture["type"] != "fixtures" || fixture["task"] != "6M" {
         return Err("6M fixture".into());
     }
-    let actors = fixture["fixtures"]
-        .as_array()
-        .ok_or("original participants")?;
-    let expected = BTreeSet::from([
-        "DEVELOPER_A",
-        "DEVELOPER_B",
-        "REVIEWER",
-        "TEST_WRITER",
-        "CI_RUNNER",
-    ]);
-    if actors.len() != expected.len()
-        || actors
-            .iter()
-            .filter_map(|a| a["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != expected
-    {
-        return Err("6M participants".into());
-    }
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/6M/metadata.json"),
+    )?;
+
     let headers = crate::projection::frames(projection, rows)?;
     let journal = crate::journal::read(rows, &headers, actors, dynamic)?;
     let crate::journal::Journal {
@@ -154,7 +137,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
     let mut ordered = calls.values().collect::<Vec<_>>();
     ordered.sort_by_key(|call| call.emitted);
     for call in &ordered {
-        let tool = call.tool()?;
+        let tool = call.tool;
         let f = feature(call)?;
         let suffix = if f == 0 { "A" } else { "B" };
         let name = if f == 0 {
@@ -202,7 +185,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
         {
             return Err("effect differs from the assigned actual arguments".into());
         }
-        let (at, result) = call.result()?;
+        let (at, result) = call.result;
         if result["tool_name"] != tool
             || result["data"]["agent"] != agent
             || !result["success"].is_boolean()
@@ -229,9 +212,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
         let next = ordered
             .iter()
             .filter(|other| {
-                other.emitted > call.emitted
-                    && other.tool().ok() == Some(tool)
-                    && feature(other).ok() == Some(f)
+                other.emitted > call.emitted && other.tool == tool && feature(other).ok() == Some(f)
             })
             .map(|other| other.emitted)
             .min()
@@ -328,9 +309,9 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                     .as_u64()
                     .ok_or("candidate receipt")?;
                 let implementation = material(&calls, "implement_feature", source)?;
-                let implemented = implementation.result()?.1;
+                let implemented = implementation.result.1;
                 if feature(implementation)? != f
-                    || implementation.ended()?.0 >= call.started()?.0
+                    || implementation.ended.0 >= call.started.0
                     || result["data"]["candidate_sha256"] != implemented["data"]["candidate_sha256"]
                 {
                     return Err("validation differs from the actually completed candidate".into());
@@ -412,14 +393,14 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         .as_u64()
                         .ok_or("merge approval")?,
                 )?;
-                let implemented = implementation.result()?.1;
-                let approved = review.result()?.1;
+                let implemented = implementation.result.1;
+                let approved = review.result.1;
                 if feature(implementation)? != f
                     || feature(review)? != f
                     || result["success"] != true
                     || approved["success"] != true
-                    || implementation.ended()?.0 >= review.started()?.0
-                    || review.ended()?.0 >= call.started()?.0
+                    || implementation.ended.0 >= review.started.0
+                    || review.ended.0 >= call.started.0
                     || approved["data"]["source_receipt"] != json!(receipt(implemented)?)
                     || approved["data"]["candidate_sha256"]
                         != implemented["data"]["candidate_sha256"]
@@ -437,7 +418,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         merge_file,
                         &[label(&format!("MergeReady{suffix}"))?],
                     ),
-                    (approved, review.result()?.0, call.emitted),
+                    (approved, review.result.0, call.emitted),
                 )?;
                 if ready.received >= request.received {
                     return Err("merge before actual readiness".into());
@@ -488,8 +469,8 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         }
                         let actual = material(&calls, "write_tests", receipt(test)?)?;
                         if feature(actual)? != index
-                            || actual.result()?.1 != test
-                            || actual.ended()?.0 >= call.started()?.0
+                            || actual.result.1 != test
+                            || actual.ended.0 >= call.started.0
                         {
                             return Err("publication carries another actual test definition".into());
                         }
@@ -512,9 +493,9 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         .as_u64()
                         .ok_or("CI publication")?,
                 )?;
-                let merged = merge.result()?.1;
+                let merged = merge.result.1;
                 if feature(merge)? != f
-                    || merge.ended()?.0 >= call.started()?.0
+                    || merge.ended.0 >= call.started.0
                     || result["data"]["suite"] != arguments["suite"]
                     || result["data"]["repository_sha256"] != merged["data"]["repository_sha256"]
                     || result["data"]["published_candidates"]
@@ -557,7 +538,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         role("CI_FILE")?,
                         &[label(&format!("FilePublication{suffix}"))?],
                     ),
-                    (merged, merge.result()?.0, call.emitted),
+                    (merged, merge.result.0, call.emitted),
                 )?;
                 if incoming.received >= call.emitted {
                     return Err("CI request before actual publication delivery".into());
@@ -624,8 +605,8 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
     let mut overlaps = BTreeMap::<String, usize>::new();
     for (i, a) in ordered.iter().enumerate() {
         for b in ordered.iter().skip(i + 1) {
-            if a.started()?.1.max(b.started()?.1) < a.ended()?.1.min(b.ended()?.1) {
-                let mut tools = [a.tool()?, b.tool()?];
+            if a.started.1.max(b.started.1) < a.ended.1.min(b.ended.1) {
+                let mut tools = [a.tool, b.tool];
                 tools.sort();
                 *overlaps.entry(tools.join("+")).or_default() += 1;
             }

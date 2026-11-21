@@ -44,7 +44,7 @@ fn completed<'a>(
     key: (&str, &str, &str, Option<&str>),
     before: usize,
 ) -> Result<&'a Value> {
-    one(calls.iter().copied().filter(|call| {
+    Ok(one(calls.iter().copied().filter(|call| {
         call.request["agent"] == key.0
             && call.request["tool"] == key.1
             && call.request["arguments"]["patient_id"] == key.2
@@ -53,10 +53,10 @@ fn completed<'a>(
                     .as_str()
                     .is_some_and(|v| v.eq_ignore_ascii_case(m))
             })
-            && call.result.as_ref().is_some_and(|(at, _)| *at < before)
+            && call.result.0 < before
     }))?
-    .result()
-    .map(|(_, value)| value)
+    .result
+    .1)
 }
 fn panel(calls: &[&Call], key: (&str, &str), before: usize) -> Result<Value> {
     let mut values = serde_json::Map::new();
@@ -64,9 +64,9 @@ fn panel(calls: &[&Call], key: (&str, &str), before: usize) -> Result<Value> {
         call.request["agent"] == key.0
             && call.request["tool"] == "order_tests"
             && call.request["arguments"]["patient_id"] == key.1
-            && call.result.as_ref().is_some_and(|(at, _)| *at < before)
+            && call.result.0 < before
     }) {
-        let result = call.result()?.1;
+        let result = call.result.1;
         for test in result["data"]["tests"]
             .as_array()
             .ok_or("actual test names")?
@@ -106,27 +106,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "5H" || fixture["task"] != "5H" || fixture["type"] != "fixtures" {
         return Err("critical-care task differs".into());
     }
-    let actors = fixture["fixtures"]
-        .as_array()
-        .ok_or("clinical participants")?;
-    let expected = BTreeSet::from([
-        "ER_DOCTOR_A",
-        "ER_DOCTOR_B",
-        "RADIOLOGIST",
-        "SURGEON",
-        "ANESTHESIOLOGIST",
-        "ICU_COORDINATOR",
-        "PHARMACIST",
-    ]);
-    if actors.len() != 7
-        || actors
-            .iter()
-            .map(|v| v["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != expected.iter().copied().map(Some).collect()
-    {
-        return Err("critical-care participants differ".into());
-    }
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/5H/metadata.json"),
+    )?;
+
     let role = |name: &str| -> Result<u64> {
         compiled["roles"][name]
             .as_u64()
@@ -205,11 +189,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut used = BTreeSet::new();
     for call in &ordered {
         let actor = call.request["agent"].as_str().ok_or("effect actor")?;
-        let tool = call.tool()?;
+        let tool = call.tool;
         let arguments = &call.request["arguments"];
         let patient = arguments["patient_id"].as_str().ok_or("effect patient")?;
-        let (_, result) = call.result()?;
-        let (ended, _) = call.ended()?;
+        let (_, result) = call.result;
+        let (ended, _) = call.ended;
         if result["success"] != true
             || result["data"]["patient_id"] != patient
             || !result["data"]["artifact_id"].is_string()
@@ -676,10 +660,10 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut scanners = 0;
     for (i, a) in ordered.iter().enumerate() {
         for b in &ordered[i + 1..] {
-            if a.started()?.1 < b.ended()?.1 && b.started()?.1 < a.ended()?.1 {
+            if a.started.1 < b.ended.1 && b.started.1 < a.ended.1 {
                 overlaps += 1;
                 if a.request["tool"] == b.request["tool"]
-                    && matches!(a.tool()?, "perform_imaging" | "interpret_imaging")
+                    && matches!(a.tool, "perform_imaging" | "interpret_imaging")
                     && a.request["arguments"]["modality"] != b.request["arguments"]["modality"]
                 {
                     scanners += 1;

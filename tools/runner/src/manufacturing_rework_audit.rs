@@ -20,25 +20,12 @@ pub(super) fn verify(
 ) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let inputs = &rows.first().ok_or("missing workshop journal")?["message"];
-    let actors = inputs["fixtures"]
-        .as_array()
-        .ok_or("workshop participants")?;
-    if inputs["task"] != "11M"
-        || compiled["task"] != "11M"
-        || actors.len() != 5
-        || actors
-            .iter()
-            .filter_map(|a| a["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != BTreeSet::from([
-                "DISPATCHER",
-                "INSPECTOR",
-                "WORKER_A",
-                "WORKER_B",
-                "WORKER_C",
-            ])
-    {
-        return Err("workshop task or participants differ".into());
+    let actors = crate::journal::participants(
+        inputs,
+        include_str!("../../../benchmark/descriptions/11M/metadata.json"),
+    )?;
+    if inputs["task"] != "11M" || compiled["task"] != "11M" {
+        return Err("foreign task fixture or projection".into());
     }
     let history = journal::read(rows, labels, actors, epf)?;
     let role = |name: &str| -> Result<u64> {
@@ -88,8 +75,8 @@ pub(super) fn verify(
         let worker = role(worker)?;
         let file = role(file)?;
         let machine = role(&format!("{station}_MACHINE"))?;
-        let (reply_at, result) = call.result()?;
-        let tool = call.tool()?;
+        let (reply_at, result) = call.result;
+        let tool = call.tool;
         let expected_agent = match tool {
             "do_job" => agent,
             "inspect_quality" => "INSPECTOR",
@@ -251,7 +238,7 @@ pub(super) fn verify(
                 parts[i] = Some((part, delivered));
                 readings[i] = None;
                 orders[i] = None;
-                intervals.push((station, index < 3, call.started()?.1, call.ended()?.1));
+                intervals.push((station, index < 3, call.started.1, call.ended.1));
             }
             "inspect_quality" => {
                 let (part, produced) = parts[i].ok_or("inspection without a manufactured part")?;
@@ -346,7 +333,7 @@ pub(super) fn verify(
         }
         evidence.push(
             json!({"rpc_id":id,"agent":expected_agent,"tool":tool,"job":job,"frames":matched,
-                   "effect_start_row":call.started()?.0,"effect_end_row":call.ended()?.0}),
+                   "effect_start_row":call.started.0,"effect_end_row":call.ended.0}),
         );
     }
     for (id, f) in &history.frames {

@@ -20,25 +20,13 @@ pub(crate) fn effects(
     epf: &Value,
 ) -> Result<Vec<Value>> {
     let fixture = &rows.first().ok_or("empty wafer journal")?["message"];
-    let actors = fixture["fixtures"].as_array().ok_or("wafer participants")?;
-    let expected = BTreeSet::from([
-        "LITHOGRAPHER",
-        "DEPOSITOR",
-        "ETCHER",
-        "METROLOGY_ENGINEER",
-        "PROCESS_CONTROLLER",
-        "INTEGRATION_ENGINEER",
-    ]);
-    if fixture["task"] != "15E"
-        || artifact["compiled"]["task"] != "15E"
-        || actors.len() != expected.len()
-        || actors
-            .iter()
-            .filter_map(|a| a["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != expected
-    {
-        return Err("foreign wafer task or participants".into());
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/15E/metadata.json"),
+    )?;
+
+    if fixture["task"] != "15E" || artifact["compiled"]["task"] != "15E" {
+        return Err("foreign task fixture or projection".into());
     }
     let roles = &artifact["compiled"]["roles"];
     let role = |name: &str| {
@@ -83,14 +71,14 @@ pub(crate) fn effects(
     for call in orders {
         let args = &call.request["arguments"];
         let agent = call.request["agent"].as_str().ok_or("wafer agent")?;
-        let tool = call.tool()?;
+        let tool = call.tool;
         let field = match tool {
             "check_monitoring" => "check_type",
             "run_metrology_measurement" => "measurement",
             "run_deposition" | "run_etch_process" | "run_stepper_exposure" => "process",
             _ => return Err("unexpected wafer tool".into()),
         };
-        let (returned, result) = call.result()?;
+        let (returned, result) = call.result;
         let name = result["data"][field]
             .as_str()
             .ok_or("wafer result operation")?;

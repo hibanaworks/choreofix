@@ -13,26 +13,12 @@ type Instrument = (&'static str, &'static str, &'static str, &'static str);
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty scientific history")?["message"];
-    let actors = fixture["fixtures"]
-        .as_array()
-        .ok_or("scientific participants")?;
-    if compiled["task"] != "13H"
-        || fixture["type"] != "fixtures"
-        || fixture["task"] != "13H"
-        || actors.len() != 5
-        || actors
-            .iter()
-            .filter_map(|a| a["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != BTreeSet::from([
-                "CHEMIST",
-                "BIOLOGIST",
-                "ANALYST",
-                "QC_CONTROLLER",
-                "SAFETY_OFFICER",
-            ])
-    {
-        return Err("scientific history uses a foreign task or participants".into());
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/13H/metadata.json"),
+    )?;
+    if compiled["task"] != "13H" || fixture["type"] != "fixtures" || fixture["task"] != "13H" {
+        return Err("foreign task fixture or projection".into());
     }
     let role = |name: &str| {
         compiled["roles"][name]
@@ -103,8 +89,8 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     for call in ordered {
         let who = call.request["agent"].as_str().ok_or("scientific agent")?;
         let input = &call.request["arguments"];
-        let tool = call.tool()?;
-        let (returned, output) = call.result()?;
+        let tool = call.tool;
+        let (returned, output) = call.result;
         let success = output["success"]
             .as_bool()
             .ok_or("scientific result status")?;

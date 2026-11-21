@@ -9,9 +9,9 @@ use std::{
 
 use crate::journal::{Call, one, records};
 
-impl Call {
+impl Call<'_> {
     fn target(&self) -> Result<&str> {
-        let key = match self.tool()? {
+        let key = match self.tool {
             "implement_feature" => "feature_name",
             "code_review" => "pr_id",
             "merge_code" => "branch",
@@ -58,16 +58,11 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
     {
         return Err("6E fixture".into());
     }
-    let actors = fixture["fixtures"].as_array().ok_or("original actors")?;
-    if actors.len() != 3
-        || actors
-            .iter()
-            .map(|a| a["agent"].as_str().unwrap_or(""))
-            .collect::<BTreeSet<_>>()
-            != BTreeSet::from(["DEVELOPER_A", "DEVELOPER_B", "REVIEWER"])
-    {
-        return Err("6E participants".into());
-    }
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/6E/metadata.json"),
+    )?;
+
     let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
@@ -78,7 +73,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
         return Err("wrong session".into());
     }
     for call in calls.values() {
-        let m = &call.request;
+        let m = call.request;
         let actor = actors
             .iter()
             .find(|a| a["agent"] == m["agent"])
@@ -138,15 +133,15 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
         return Err("original event count".into());
     }
     for call in calls.values() {
-        let (_, result) = call.result()?;
+        let (_, result) = call.result;
         let target = call.target()?;
-        let args = match call.tool()? {
+        let args = match call.tool {
             "implement_feature" => json!({"feature":target,"source":result["data"]["source"]}),
             "code_review" => json!({"target":target}),
             "merge_code" => json!({"branch":target}),
             _ => unreachable!(),
         };
-        if call.tool()? == "implement_feature"
+        if call.tool == "implement_feature"
             && call.request["arguments"]
                 .get("source")
                 .is_some_and(|source| *source != result["data"]["source"])
@@ -187,7 +182,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             role(projection, owner)?,
             role(projection, review_file)?,
         );
-        let (result_at, result) = call.result()?;
+        let (result_at, result) = call.result;
         let next = calls
             .values()
             .filter(|other| {
@@ -198,7 +193,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             .map(|other| other.emitted)
             .min()
             .unwrap_or(rows.len());
-        let (from, to, request_label, reply_label) = match call.tool()? {
+        let (from, to, request_label, reply_label) = match call.tool {
             "implement_feature" => (file, repo, 200 + feature, 208 + feature),
             "merge_code" => (file, repo, 202 + feature, 210 + feature),
             "code_review" => (review_file, reviewer, 5 + feature, 5 + feature),
@@ -222,7 +217,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
         }))?;
         checked_json.insert(reply.sent);
         used_calls.insert(*id);
-        match call.tool()? {
+        match call.tool {
             "implement_feature" => {
                 if result["success"] != true {
                     return Err("implementation failed".into());
@@ -242,25 +237,23 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                 let previous = review_calls
                     .iter()
                     .filter(|c| c.target().ok() == call.target().ok() && c.emitted < call.emitted)
-                    .map(|c| c.result().map(|(at, _)| at))
-                    .collect::<Result<Vec<_>>>()?
-                    .into_iter()
+                    .map(|c| c.result.0)
                     .max()
                     .unwrap_or(0);
                 let implementation = calls
                     .values()
                     .filter(|c| {
-                        c.tool().is_ok_and(|t| t == "implement_feature")
+                        c.tool == "implement_feature"
                             && c.target().ok() == call.target().ok()
-                            && c.started
-                                .is_some_and(|(at, _)| previous < at && at < call.emitted)
+                            && previous < c.started.0
+                            && c.started.0 < call.emitted
                     })
-                    .max_by_key(|c| c.started.map(|v| v.0))
+                    .max_by_key(|c| c.started.0)
                     .ok_or("review without a fresh implementation")?;
-                if implementation.ended()?.0 >= call.started()?.0 {
+                if implementation.ended.0 >= call.started.0 {
                     return Err("review before implementation".into());
                 }
-                let (impl_at, impl_result) = implementation.result()?;
+                let (impl_at, impl_result) = implementation.result;
                 one(frames.values().filter(|f| {
                     f.direction(repo, reviewer)
                         && u64::from(f.logical_label) == 5 + feature
@@ -309,24 +302,21 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                 };
                 let reviewed = review_calls
                     .iter()
-                    .filter(|c| {
-                        c.target().is_ok_and(|v| v == feature)
-                            && c.ended.is_some_and(|(at, _)| at < call.emitted)
-                    })
-                    .max_by_key(|c| c.ended.map(|v| v.0))
+                    .filter(|c| c.target().is_ok_and(|v| v == feature) && c.ended.0 < call.emitted)
+                    .max_by_key(|c| c.ended.0)
                     .ok_or("merge without review")?;
                 let implemented = calls
                     .values()
                     .filter(|c| {
-                        c.tool().is_ok_and(|v| v == "implement_feature")
+                        c.tool == "implement_feature"
                             && c.target().is_ok_and(|v| v == feature)
-                            && c.started.is_some_and(|(at, _)| at < call.emitted)
+                            && c.started.0 < call.emitted
                     })
-                    .max_by_key(|c| c.started.map(|v| v.0))
+                    .max_by_key(|c| c.started.0)
                     .ok_or("merge without implementation")?;
                 if result["success"] != true
-                    || reviewed.result()?.1["success"] != true
-                    || implemented.ended()?.0 >= reviewed.started()?.0
+                    || reviewed.result.1["success"] != true
+                    || implemented.ended.0 >= reviewed.started.0
                 {
                     return Err("merge lacks approval for the current implementation".into());
                 }
@@ -360,9 +350,8 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
     let mut overlap = BTreeMap::<String, usize>::new();
     for (i, first) in effects.iter().enumerate() {
         for second in effects.iter().skip(i + 1) {
-            if first.started()?.1.max(second.started()?.1) < first.ended()?.1.min(second.ended()?.1)
-            {
-                let mut names = [first.tool()?, second.tool()?];
+            if first.started.1.max(second.started.1) < first.ended.1.min(second.ended.1) {
+                let mut names = [first.tool, second.tool];
                 names.sort();
                 *overlap.entry(names.join("+")).or_default() += 1;
             }
@@ -370,7 +359,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
     }
     let mut selections: Vec<_> = calls
         .values()
-        .filter(|call| call.tool().is_ok_and(|tool| tool == "code_review"))
+        .filter(|call| call.tool == "code_review")
         .collect();
     selections.sort_by_key(|call| call.emitted);
     let targets = selections

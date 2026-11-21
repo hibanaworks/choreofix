@@ -18,8 +18,8 @@ fn name(compiled: &Value, group: &str, key: &str) -> Result<u64> {
         .filter(|value| *value <= 255)
         .ok_or_else(|| format!("missing compiled {group} {key}").into())
 }
-fn target(call: &Call) -> Result<&str> {
-    let key = match call.tool()? {
+fn target<'a>(call: &Call<'a>) -> Result<&'a str> {
+    let key = match call.tool {
         "research_topic" => "topic",
         "write_section" | "revise_section" | "update_references" | "review_sections" => {
             "section_name"
@@ -35,7 +35,7 @@ fn sections(value: &str) -> Vec<&str> {
     value.split(',').map(str::trim).collect()
 }
 fn assignment(call: &Call, fixture: &Value) -> Result<()> {
-    let tool = call.tool()?;
+    let tool = call.tool;
     let schema = fixture["tool_schemas"]
         .as_array()
         .ok_or("original report schemas")?
@@ -129,18 +129,18 @@ fn material(calls: &[&Call], before: usize) -> Result<Value> {
     let mut completed = calls
         .iter()
         .copied()
-        .filter(|call| call.result.as_ref().is_some_and(|(at, _)| *at < before))
+        .filter(|call| call.result.0 < before)
         .collect::<Vec<_>>();
-    completed.sort_by_key(|call| call.result.as_ref().map(|(at, _)| *at));
+    completed.sort_by_key(|call| call.result.0);
     let mut snapshot = json!({"sections":{},"references":{}});
     for call in completed {
-        let category = match call.tool()? {
+        let category = match call.tool {
             "write_section" | "revise_section" => "sections",
             "update_references" => "references",
             _ => continue,
         };
         let scope = target(call)?;
-        let (_, result) = call.result()?;
+        let (_, result) = call.result;
         if !matches!(scope, "section_a" | "section_b")
             || result["success"] != true
             || !result["data"]["artifact"]["id"].is_string()
@@ -161,18 +161,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if fixture["type"] != "fixtures" || fixture["task"] != "3E" || compiled["task"] != "3E" {
         return Err("report task differs".into());
     }
-    let actors = fixture["fixtures"]
-        .as_array()
-        .ok_or("report participants")?;
-    if actors.len() != 3
-        || actors
-            .iter()
-            .map(|a| a["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != BTreeSet::from([Some("RESEARCHER_A"), Some("RESEARCHER_B"), Some("EDITOR")])
-    {
-        return Err("report participants differ".into());
-    }
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/3E/metadata.json"),
+    )?;
+
     let headers = crate::projection::contracts(compiled)?;
     let labels = crate::projection::frames(artifact, rows)?;
     let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
@@ -217,9 +210,9 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     for call in &ordered {
         assignment(call, fixture)?;
         let agent = call.request["agent"].as_str().ok_or("report actor")?;
-        let tool = call.tool()?;
+        let tool = call.tool;
         let args = &call.request["arguments"];
-        let (result_at, result) = call.result()?;
+        let (result_at, result) = call.result;
         let actor = role(agent)?;
         let (file, section) = match agent {
             "RESEARCHER_A" => (role("A_FILE")?, "section_a"),
@@ -254,7 +247,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                         && f.received > result_at
                         && f.value().is_ok_and(|v| v == *result)
                 })?;
-                if request.received >= call.started()?.0
+                if request.received >= call.started.0
                     || reply.received <= result_at
                     || !result["data"]["artifact"]["id"].is_string()
                 {
@@ -411,11 +404,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                         .filter(|p| {
                             p.request["tool"] == "review_sections"
                                 && target(p).ok() == Some(section)
-                                && p.result.as_ref().is_some_and(|(at, _)| *at < call.emitted)
+                                && p.result.0 < call.emitted
                         })
                         .max_by_key(|p| p.emitted)
                         .ok_or("revision lacks its actual review")?;
-                    let (_, value) = prior.result()?;
+                    let (_, value) = prior.result;
                     if value["success"] != false
                         || value["data"]["input_snapshot"]
                             != scoped(&material(&ordered, call.emitted)?, section)
@@ -455,11 +448,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                             .filter(|p| {
                                 p.request["tool"] == "review_sections"
                                     && target(p).ok() == Some(section)
-                                    && p.result.as_ref().is_some_and(|(at, _)| *at < call.emitted)
+                                    && p.result.0 < call.emitted
                             })
                             .max_by_key(|p| p.emitted)
                             .ok_or("publication lacks a current review")?;
-                        let (at, value) = prior.result()?;
+                        let (at, value) = prior.result;
                         if value["success"] != true
                             || value["data"]["input_snapshot"] != scoped(&current, section)
                             || result["data"]["review_receipts"][section]
@@ -502,9 +495,9 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                             p.request["tool"] == "research_topic" && p.request["agent"] == agent
                         })
                         .ok_or("material lacks actual research")?;
-                    if research.result()?.0 >= call.emitted
+                    if research.result.0 >= call.emitted
                         || result["data"]["artifact"]["research_inputs"][target(research)?]
-                            != research.result()?.1["data"]["artifact"]
+                            != research.result.1["data"]["artifact"]
                     {
                         return Err("material did not consume its actual research".into());
                     }
@@ -674,9 +667,8 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut overlaps = BTreeMap::<String, usize>::new();
     for (index, first) in ordered.iter().enumerate() {
         for second in ordered.iter().skip(index + 1) {
-            if first.started()?.1.max(second.started()?.1) < first.ended()?.1.min(second.ended()?.1)
-            {
-                let mut pair = [first.tool()?, second.tool()?];
+            if first.started.1.max(second.started.1) < first.ended.1.min(second.ended.1) {
+                let mut pair = [first.tool, second.tool];
                 pair.sort_unstable();
                 *overlaps.entry(pair.join("+")).or_default() += 1;
             }
@@ -734,7 +726,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let call = journal
         .calls
         .values()
-        .filter(|call| call.tool().is_ok_and(|tool| tool == "research_topic"))
+        .filter(|call| call.tool == "research_topic")
         .min_by_key(|call| call.emitted)
         .ok_or("missing actual research for effect-boundary counterexamples")?;
     let file = name(
@@ -752,7 +744,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 .value()
                 .is_ok_and(|value| value == call.request["arguments"])
     }))?;
-    let (result_at, result) = call.result()?;
+    let (result_at, result) = call.result;
     let reply = one(journal.frames.values().filter(|frame| {
         frame.identity["target"] == file && frame.value().is_ok_and(|value| value == *result)
     }))?;

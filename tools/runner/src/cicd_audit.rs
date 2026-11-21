@@ -23,18 +23,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "16E" || fixture["task"] != "16E" || fixture["type"] != "fixtures" {
         return Err("CI/CD task or source differs".into());
     }
-    let actors = fixture["fixtures"]
-        .as_array()
-        .ok_or("original participants")?;
-    if actors.len() != 3
-        || actors
-            .iter()
-            .map(|a| a["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != BTreeSet::from([Some("DEVELOPER"), Some("TESTER"), Some("DEPLOYER")])
-    {
-        return Err("CI/CD participants differ".into());
-    }
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/16E/metadata.json"),
+    )?;
+
     let labels = crate::projection::frames(artifact, rows)?;
     let journal = journal::read(rows, &labels, actors, dynamic)?;
     let frames = &journal.frames;
@@ -172,7 +165,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                     let (&call_id, call) = one(journal.calls.iter().filter(|(_, c)| {
                         c.request["agent"] == agent && c.request["tool"] == tool
                     }))?;
-                    let (result_at, result) = call.result()?;
+                    let (result_at, result) = call.result;
                     if !used_calls.insert(call_id)
                         || arguments != original["arguments"]
                         || arguments != call.request["arguments"]

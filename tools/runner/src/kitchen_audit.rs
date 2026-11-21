@@ -28,16 +28,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "12E" || fixture["task"] != "12E" || fixture["type"] != "fixtures" {
         return Err("kitchen source or input differs".into());
     }
-    let actors = fixture["fixtures"].as_array().ok_or("kitchen actors")?;
-    if actors.len() != 3
-        || actors
-            .iter()
-            .map(|a| a["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != BTreeSet::from([Some("CHEF_A"), Some("CHEF_B"), Some("CHEF_C")])
-    {
-        return Err("kitchen participants differ".into());
-    }
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/12E/metadata.json"),
+    )?;
+
     let name = |group: &str, key: &str| -> Result<u64> {
         compiled[group][key]
             .as_u64()
@@ -127,7 +122,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             if request.value()? != args || request.received >= call.emitted {
                 return Err("effect before its actual operation-file receive".into());
             }
-            let (result_at, result) = call.result()?;
+            let (result_at, result) = call.result;
             let status = match tool {
                 "prepare_base_dish" => "base dish prepared",
                 "prepare_ingredient" => "ingredient prepared",
@@ -156,8 +151,8 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                 .map(|(index, _)| index)
                 .ok_or("world score differs from the kitchen effect")?;
             scored_used.insert(score_index);
-            let (_, start) = call.started()?;
-            let (_, end) = call.ended()?;
+            let (_, start) = call.started;
+            let (_, end) = call.ended;
             let reply_label = name("labels", &reply_name)? as u8;
             let (_, reply) = take(&frames, &mut used, |f| {
                 f.direction(service, file) && f.logical_label == reply_label

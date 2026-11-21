@@ -16,8 +16,8 @@ const FEATURES: [&str; 3] = [
     "notification_system",
 ];
 
-fn target(call: &Call) -> Result<&str> {
-    let key = match call.tool()? {
+fn target<'a>(call: &Call<'a>) -> Result<&'a str> {
+    let key = match call.tool {
         "implement_feature" => "feature_name",
         "write_tests" => "target",
         "code_review" => "pr_id",
@@ -45,28 +45,25 @@ fn receipt(value: &Value) -> Result<u64> {
         .and_then(|id| id.parse().ok())
         .ok_or_else(|| "actual effect receipt".into())
 }
-fn material<'a>(calls: &'a BTreeMap<u64, Call>, tool: &str, id: u64) -> Result<&'a Call> {
-    one(calls.values().filter(|call| {
-        call.tool().ok() == Some(tool)
-            && call
-                .result()
-                .is_ok_and(|(_, value)| receipt(value).ok() == Some(id))
-    }))
+fn material<'a>(calls: &'a BTreeMap<u64, Call<'a>>, tool: &str, id: u64) -> Result<&'a Call<'a>> {
+    one(calls
+        .values()
+        .filter(|call| call.tool == tool && receipt(call.result.1).ok() == Some(id)))
 }
 fn input<'a>(
-    calls: &'a BTreeMap<u64, Call>,
+    calls: &'a BTreeMap<u64, Call<'a>>,
     call: &Call,
     tool: &str,
     field: &str,
-) -> Result<&'a Call> {
+) -> Result<&'a Call<'a>> {
     let previous = material(
         calls,
         tool,
-        call.result()?.1["data"][field]
+        call.result.1["data"][field]
             .as_u64()
             .ok_or("input receipt")?,
     )?;
-    if previous.ended()?.0 >= call.started()?.0 {
+    if previous.ended.0 >= call.started.0 {
         return Err("effect used an input before its actual completion".into());
     }
     Ok(previous)
@@ -88,27 +85,11 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             .as_u64()
             .ok_or_else(|| format!("compiled label {name}").into())
     };
-    let actors = fixture["fixtures"]
-        .as_array()
-        .ok_or("original seven participants")?;
-    let expected = BTreeSet::from([
-        "DEVELOPER_A",
-        "DEVELOPER_B",
-        "DEVELOPER_C",
-        "REVIEWER",
-        "TEST_WRITER",
-        "CI_RUNNER",
-        "RELEASE_MANAGER",
-    ]);
-    if actors.len() != expected.len()
-        || actors
-            .iter()
-            .filter_map(|actor| actor["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != expected
-    {
-        return Err("staged-development participants differ".into());
-    }
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/6H/metadata.json"),
+    )?;
+
     let headers = crate::projection::frames(projection, rows)?;
     let journal = crate::journal::read(rows, &headers, actors, dynamic)?;
     let crate::journal::Journal {
@@ -168,7 +149,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
     ordered.sort_by_key(|call| call.emitted);
     let mut used = BTreeSet::new();
     for call in &ordered {
-        let tool = call.tool()?;
+        let tool = call.tool;
         let f = feature(call)?;
         let suffix = ["A", "B", "C"][f];
         let name = FEATURES[f];
@@ -211,7 +192,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
         {
             return Err("effect differs from actual assigned operation".into());
         }
-        let (at, result) = call.result()?;
+        let (at, result) = call.result;
         let data = &result["data"];
         if result["tool_name"] != tool || data["agent"] != agent || !result["success"].is_boolean()
         {
@@ -237,9 +218,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
         let next = ordered
             .iter()
             .filter(|next| {
-                next.emitted > call.emitted
-                    && next.tool().ok() == Some(tool)
-                    && feature(next).ok() == Some(f)
+                next.emitted > call.emitted && next.tool == tool && feature(next).ok() == Some(f)
             })
             .map(|call| call.emitted)
             .min()
@@ -344,7 +323,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             }
             "write_tests" | "code_review" => {
                 let source = input(&calls, call, "implement_feature", "source_receipt")?;
-                let candidate = source.result()?.1;
+                let candidate = source.result.1;
                 if feature(source)? != f
                     || data["candidate_sha256"] != candidate["data"]["candidate_sha256"]
                 {
@@ -361,15 +340,13 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                     )?;
                 } else {
                     let test = one(calls.values().filter(|test| {
-                        test.tool().ok() == Some("write_tests")
-                            && test.result().is_ok_and(|(_, value)| {
-                                value["data"]["source_receipt"] == data["source_receipt"]
-                            })
+                        test.tool == "write_tests"
+                            && test.result.1["data"]["source_receipt"] == data["source_receipt"]
                     }))?;
-                    if test.ended()?.0 >= call.started()?.0 || data["target"] != name {
+                    if test.ended.0 >= call.started.0 || data["target"] != name {
                         return Err("review lacks its completed actual test input".into());
                     }
-                    let context = json!({"candidate":candidate,"tests":test.result()?.1});
+                    let context = json!({"candidate":candidate,"tests":test.result.1});
                     for (peer, message) in [
                         (reviewer, format!("ReviewCandidate{suffix}")),
                         (review_file, format!("FileReviewCandidate{suffix}")),
@@ -377,7 +354,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         let ready = take_json_frame(
                             (&frames, &mut used),
                             (repo, peer, &[label(&message)?]),
-                            (&context, test.result()?.0, call.emitted),
+                            (&context, test.result.0, call.emitted),
                         )?;
                         if ready.received >= call.emitted {
                             return Err("review before its actual candidate delivery".into());
@@ -423,11 +400,11 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                 }
                 let source = input(&calls, call, "implement_feature", "source_receipt")?;
                 let review = input(&calls, call, "code_review", "review_receipt")?;
-                let checked = review.result()?.1;
+                let checked = review.result.1;
                 if feature(source)? != f
                     || feature(review)? != f
                     || checked["success"] != true
-                    || data["source"] != source.result()?.1["data"]["source"]
+                    || data["source"] != source.result.1["data"]["source"]
                     || data["candidate_sha256"] != checked["data"]["candidate_sha256"]
                     || data["source_receipt"] != checked["data"]["source_receipt"]
                     || data["publication_event"].as_u64() != Some(receipt(result)?)
@@ -443,7 +420,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                 };
                 if let Some((field, success)) = base {
                     let ci = input(&calls, call, "run_tests", field)?;
-                    let prior = ci.result()?.1;
+                    let prior = ci.result.1;
                     if prior["success"] != success
                         || data["base_repository_sha256"] != prior["data"]["repository_sha256"]
                         || data["base_publication_events"] != prior["data"]["publication_events"]
@@ -453,9 +430,9 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                     if !success
                         && (data["repaired_publication_event"]
                             != prior["data"]["publication_event"]
-                            || source.started()?.0
+                            || source.started.0
                                 <= input(&calls, ci, "merge_code", "publication_event")?
-                                    .ended()?
+                                    .ended
                                     .0)
                     {
                         return Err("repair reused source preceding the failed publication".into());
@@ -470,7 +447,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             }
             "run_tests" => {
                 let merge = input(&calls, call, "merge_code", "publication_event")?;
-                let published = merge.result()?.1;
+                let published = merge.result.1;
                 if feature(merge)? != f
                     || data["repository_sha256"] != published["data"]["repository_sha256"]
                     || data["published_candidates"] != published["data"]["published_candidates"]
@@ -480,20 +457,17 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                 let previous_stage = calls
                     .values()
                     .filter(|entry| {
-                        entry.tool().ok() == Some("validate_staging")
+                        entry.tool == "validate_staging"
                             && feature(entry).ok() == Some(f)
-                            && entry.ended().is_ok_and(|(end, _)| end < merge.emitted)
+                            && entry.ended.0 < merge.emitted
                     })
                     .max_by_key(|entry| entry.emitted);
-                let publication_label = if previous_stage.is_some_and(|entry| {
-                    entry
-                        .result()
-                        .is_ok_and(|(_, value)| value["success"] == false)
-                }) {
-                    label(&format!("RepairPublication{suffix}"))?
-                } else {
-                    label(&format!("Publication{suffix}"))?
-                };
+                let publication_label =
+                    if previous_stage.is_some_and(|entry| entry.result.1["success"] == false) {
+                        label(&format!("RepairPublication{suffix}"))?
+                    } else {
+                        label(&format!("Publication{suffix}"))?
+                    };
                 let context = one(frames.values().filter(|frame| {
                     frame.direction(repo, ci_owner)
                         && u64::from(frame.logical_label) == publication_label
@@ -555,8 +529,8 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         .ok_or("CI feature")?;
                     let test = &inputs["tests"][index];
                     let actual = material(&calls, "write_tests", receipt(test)?)?;
-                    if actual.ended()?.0 >= call.started()?.0
-                        || *test != *actual.result()?.1
+                    if actual.ended.0 >= call.started.0
+                        || *test != *actual.result.1
                         || test["data"]["candidate_sha256"] != *hash
                         || data["test_inputs"][feature] != test["data"]
                         || data["test_receipts"][feature] != json!(receipt(test)?)
@@ -571,7 +545,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         role("CI_FILE")?,
                         &[label(&format!("FilePublication{suffix}"))?],
                     ),
-                    (published, merge.result()?.0, call.emitted),
+                    (published, merge.result.0, call.emitted),
                 )?;
                 let outcome = if result["success"] == true {
                     "Passed"
@@ -619,8 +593,8 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             "deploy_service" => {
                 let merge = input(&calls, call, "merge_code", "publication_event")?;
                 let ci = input(&calls, call, "run_tests", "ci_receipt")?;
-                let published = merge.result()?.1;
-                let tested = ci.result()?.1;
+                let published = merge.result.1;
+                let tested = ci.result.1;
                 if result["success"] != true
                     || tested["success"] != true
                     || feature(merge)? != f
@@ -640,10 +614,10 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         "validate_staging",
                         id.as_u64().ok_or("dependency receipt")?,
                     )?;
-                    if checked.ended()?.0 >= call.started()?.0
-                        || checked.result()?.1["success"] != true
-                        || checked.result()?.1["data"]["service"] != *dependency
-                        || checked.result()?.1["data"]["candidate_sha256"]
+                    if checked.ended.0 >= call.started.0
+                        || checked.result.1["success"] != true
+                        || checked.result.1["data"]["service"] != *dependency
+                        || checked.result.1["data"]["candidate_sha256"]
                             != tested["data"]["published_candidates"][dependency]
                     {
                         return Err(
@@ -652,20 +626,18 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                     }
                 }
                 let integrated = input(&calls, ci, "merge_code", "publication_event")?
-                    .result()?
+                    .result
                     .1;
                 let inputs = json!({"publication":published,"integrated_publication":integrated,"ci":tested});
-                let deployment_start = call.started()?.0;
+                let deployment_start = call.started.0;
                 let own_ci = one(calls.values().filter(|own| {
-                    own.tool().ok() == Some("run_tests")
-                        && own.ended().is_ok_and(|(end, _)| end < deployment_start)
-                        && own.result().is_ok_and(|(_, result)| {
-                            result["success"] == true
-                                && result["data"]["publication_event"]
-                                    == published["data"]["publication_event"]
-                        })
+                    own.tool == "run_tests"
+                        && own.ended.0 < deployment_start
+                        && own.result.1["success"] == true
+                        && own.result.1["data"]["publication_event"]
+                            == published["data"]["publication_event"]
                 }))?;
-                let readiness = json!({"publication":published,"integrated_publication":published,"ci":own_ci.result()?.1});
+                let readiness = json!({"publication":published,"integrated_publication":published,"ci":own_ci.result.1});
                 let stage_owner = role(["STAGE_OWNER", "STAGE_OWNER_B", "STAGE_OWNER_C"][f])?;
                 let announced = take_json_frame(
                     (&frames, &mut used),
@@ -674,7 +646,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         stage_owner,
                         &[label(&format!("StagingReady{suffix}"))?],
                     ),
-                    (&readiness, own_ci.result()?.0, call.emitted),
+                    (&readiness, own_ci.result.0, call.emitted),
                 )?
                 .received;
                 take_json_frame(
@@ -701,7 +673,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                 let before_effect = take_json_frame(
                     (&frames, &mut used),
                     (repo, stage, &[label(&format!("StageInputs{suffix}"))?]),
-                    (&inputs, latest.max(ci.result()?.0), call.emitted),
+                    (&inputs, latest.max(ci.result.0), call.emitted),
                 )?
                 .received;
                 if before_effect >= call.emitted {
@@ -724,7 +696,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                 let deployed = input(&calls, call, "deploy_service", "deployment_event")?;
                 if feature(deployed)? != f
                     || data["service"] != name
-                    || data["candidate_sha256"] != deployed.result()?.1["data"]["candidate_sha256"]
+                    || data["candidate_sha256"] != deployed.result.1["data"]["candidate_sha256"]
                 {
                     return Err("validation used another actual deployment".into());
                 }
@@ -743,20 +715,16 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                     committed
                 } else {
                     let rollback = one(calls.values().filter(|rollback| {
-                        rollback.tool().ok() == Some("rollback_service")
-                            && rollback.result().is_ok_and(|(_, value)| {
-                                value["data"]["removed_deployment"]["deployment_event"]
-                                    == data["deployment_event"]
-                            })
+                        rollback.tool == "rollback_service"
+                            && rollback.result.1["data"]["removed_deployment"]["deployment_event"]
+                                == data["deployment_event"]
                     }))?;
                     let returned = one(frames.values().filter(|frame| {
                         frame.direction(stage, repo)
                             && u64::from(frame.logical_label)
                                 == label(&format!("RollbackReceipt{suffix}"))
                                     .expect("known rollback label")
-                            && frame.value().is_ok_and(|value| {
-                                value == *rollback.result().expect("checked rollback result").1
-                            })
+                            && frame.value().is_ok_and(|value| value == *rollback.result.1)
                     }))?;
                     returned.received
                 };
@@ -787,16 +755,15 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         .as_u64()
                         .ok_or("removed deployment receipt")?,
                 )?;
-                let actual = deployed.result()?.1;
+                let actual = deployed.result.1;
                 let failed = one(calls.values().filter(|validation| {
-                    validation.tool().ok() == Some("validate_staging")
-                        && validation.result().is_ok_and(|(_, value)| {
-                            value["data"]["deployment_event"] == removed["deployment_event"]
-                        })
+                    validation.tool == "validate_staging"
+                        && validation.result.1["data"]["deployment_event"]
+                            == removed["deployment_event"]
                 }))?;
                 if result["success"] != true
-                    || failed.ended()?.0 >= call.started()?.0
-                    || failed.result()?.1["success"] != false
+                    || failed.ended.0 >= call.started.0
+                    || failed.result.1["success"] != false
                     || removed.as_object().is_none_or(|object| {
                         object
                             .iter()
@@ -835,8 +802,8 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
     let mut overlaps = BTreeMap::<String, usize>::new();
     for (index, a) in ordered.iter().enumerate() {
         for b in ordered.iter().skip(index + 1) {
-            if a.started()?.1.max(b.started()?.1) < a.ended()?.1.min(b.ended()?.1) {
-                let mut pair = [a.tool()?, b.tool()?];
+            if a.started.1.max(b.started.1) < a.ended.1.min(b.ended.1) {
+                let mut pair = [a.tool, b.tool];
                 pair.sort();
                 *overlaps.entry(pair.join("+")).or_default() += 1;
             }

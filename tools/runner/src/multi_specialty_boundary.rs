@@ -170,8 +170,7 @@ async fn actual_wasi_all_imaging_orders_and_partial_panels() -> Result<()> {
                     .collect::<Vec<_>>();
                 assert_eq!(calls.len(), 2);
                 assert!(
-                    calls[0].started()?.1 < calls[1].ended()?.1
-                        && calls[1].started()?.1 < calls[0].ended()?.1,
+                    calls[0].started.1 < calls[1].ended.1 && calls[1].started.1 < calls[0].ended.1,
                     "independent CT/MRI effects must overlap"
                 );
             }

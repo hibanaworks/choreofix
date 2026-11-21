@@ -16,16 +16,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "10E" || fixture["task"] != "10E" || fixture["type"] != "fixtures" {
         return Err("shared build task differs".into());
     }
-    let actors = fixture["fixtures"].as_array().ok_or("build participants")?;
-    if actors.len() != 3
-        || actors
-            .iter()
-            .map(|a| a["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != BTreeSet::from([Some("BUILDER_A"), Some("BUILDER_B"), Some("INTEGRATOR")])
-    {
-        return Err("shared build participants differ".into());
-    }
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/10E/metadata.json"),
+    )?;
+
     let name = |group: &str, key: &str| -> Result<u64> {
         compiled[group][key]
             .as_u64()
@@ -63,9 +58,9 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut links = 0;
     for call in &ordered {
         let agent = call.request["agent"].as_str().ok_or("build effect agent")?;
-        let tool = call.tool()?;
+        let tool = call.tool;
         let arguments = &call.request["arguments"];
-        let (at, result) = call.result()?;
+        let (at, result) = call.result;
         let (request, reply, file, module) = match (agent, tool) {
             ("BUILDER_A", "compile_module") => ("CompileA", "Compiled", "A_FILE", Some("module_a")),
             ("BUILDER_B", "compile_module") => ("CompileB", "Compiled", "B_FILE", Some("module_b")),

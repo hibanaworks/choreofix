@@ -344,12 +344,14 @@ async fn run_wash_order(
     let effects = crate::microservice_migration_audit::preparation(&history, roles)?;
     save(&output.join("effect-receipts.json"), &effects)?;
     if recovery == Some((1, 2)) {
-        let failed = journal::one(history.calls.iter().filter(|(_, c)| {
-            c.tool().is_ok_and(|tool| tool == "run_tests")
-                && c.result().is_ok_and(|(_, r)| r["success"] == false)
-        }))?;
+        let failed = journal::one(
+            history
+                .calls
+                .iter()
+                .filter(|(_, c)| c.tool == "run_tests" && c.result.1["success"] == false),
+        )?;
         let (&retry_id, retry) = journal::one(history.calls.iter().filter(|(_, c)| {
-            c.tool().is_ok_and(|tool| tool == "run_tests")
+            c.tool == "run_tests"
                 && c.request["arguments"] == failed.1.request["arguments"]
                 && c.emitted > failed.1.emitted
         }))?;
@@ -375,7 +377,7 @@ async fn run_wash_order(
                     || row["message"]["type"] == "simulator_result"
                     || row["direction"] == "domain_end"))
         });
-        let (_, outcome) = failed.1.result()?;
+        let (_, outcome) = failed.1.result;
         let score =
             journal::one(missing.iter_mut().filter(|row| {
                 row["direction"] == "simulator" && row["message"]["type"] == "score"
@@ -422,9 +424,9 @@ async fn run_wash_order(
     for call in history
         .calls
         .values()
-        .filter(|call| call.tool().ok() == Some("run_tests"))
+        .filter(|call| call.tool == "run_tests")
     {
-        let (completed, value) = call.result()?;
+        let (completed, value) = call.result;
         let suffix = match value["data"]["service"].as_str() {
             Some("microservice_a") => "A",
             Some("microservice_b") => "B",
@@ -445,12 +447,10 @@ async fn run_wash_order(
         let environment = role("TEST_ENV".to_owned())?;
         let test_vm = role("TEST_VM".to_owned())?;
         let review = journal::one(history.calls.values().filter(|previous| {
-            previous.tool().ok() == Some("code_review")
-                && previous
-                    .result()
-                    .is_ok_and(|(_, result)| result["data"]["receipt"] == value["data"]["review"])
+            previous.tool == "code_review"
+                && previous.result.1["data"]["receipt"] == value["data"]["review"]
         }))?;
-        let (reviewed_at, approved) = review.result()?;
+        let (reviewed_at, approved) = review.result;
         assert_eq!(approved["success"], true);
         assert_eq!(approved["data"]["candidate"], value["data"]["candidate"]);
         let (&approval, notice) = journal::one(history.frames.iter().filter(|(_, f)| {
@@ -548,7 +548,7 @@ async fn run_wash_order(
                 .calls
                 .values()
                 .filter(|c| {
-                    c.tool().ok() == Some("implement_feature")
+                    c.tool == "implement_feature"
                         && c.request["arguments"]["feature_name"] == value["data"]["service"]
                         && c.emitted > completed
                 })
@@ -558,7 +558,7 @@ async fn run_wash_order(
             let mut after = loan.received;
             let mut revisions = Vec::new();
             for repair in repairs {
-                let (finished, fixed) = repair.result()?;
+                let (finished, fixed) = repair.result;
                 let (&request_id, _) = journal::one(history.frames.iter().filter(|(_, f)| {
                     f.direction(developer_file, service)
                         && f.logical_label == 82
@@ -594,13 +594,12 @@ async fn run_wash_order(
                 assert_eq!(fixed["data"]["plan"], value["data"]["plan"]);
                 assert_ne!(fixed["data"]["receipt"], value["data"]["candidate"]);
                 let review = journal::one(history.calls.values().filter(|c| {
-                    c.tool().ok() == Some("code_review")
+                    c.tool == "code_review"
                         && c.emitted > submitted
                         && c.request["arguments"]["pr_id"] == value["data"]["service"]
-                        && c.result()
-                            .is_ok_and(|(_, r)| r["data"]["candidate"] == fixed["data"]["receipt"])
+                        && c.result.1["data"]["candidate"] == fixed["data"]["receipt"]
                 }))?;
-                let (ended, reviewed) = review.result()?;
+                let (ended, reviewed) = review.result;
                 let (&review_request, _) = journal::one(history.frames.iter().filter(|(_, f)| {
                     f.direction(review_file, service)
                         && u64::from(f.logical_label) == service
@@ -682,11 +681,11 @@ async fn run_wash_order(
     save(&output.join("test-receipts.json"), &json!(test_results))?;
     let mut migrations = Vec::new();
     for (id, call) in &history.calls {
-        if call.tool()? != "migrate_schema" {
+        if call.tool != "migrate_schema" {
             continue;
         }
         let args = &call.request["arguments"];
-        let (returned_at, result) = call.result()?;
+        let (returned_at, result) = call.result;
         let (&request, frame) = journal::one(history.frames.iter().filter(|(_, frame)| {
             frame.direction(file, schemas)
                 && frame.received < call.emitted

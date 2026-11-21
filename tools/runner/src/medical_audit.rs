@@ -9,11 +9,9 @@ use std::{collections::BTreeSet, fs, path::Path};
 
 fn completed<'a>(calls: &[&'a Call], actor: &str, tool: &str, before: usize) -> Result<&'a Value> {
     let call = one(calls.iter().copied().filter(|call| {
-        call.request["agent"] == actor
-            && call.request["tool"] == tool
-            && call.result.as_ref().is_some_and(|(at, _)| *at < before)
+        call.request["agent"] == actor && call.request["tool"] == tool && call.result.0 < before
     }))?;
-    Ok(call.result()?.1)
+    Ok(call.result.1)
 }
 
 // Reconstruct actual current panel contents, not an expected-next-operation cursor.
@@ -22,9 +20,9 @@ fn panel(calls: &[&Call], actor: &str, before: usize) -> Result<Value> {
     for call in calls.iter().copied().filter(|call| {
         call.request["agent"] == actor
             && call.request["tool"] == "order_tests"
-            && call.result.as_ref().is_some_and(|(at, _)| *at < before)
+            && call.result.0 < before
     }) {
-        let result = call.result()?.1;
+        let result = call.result.1;
         for test in result["data"]["tests"]
             .as_array()
             .ok_or("actual panel tests")?
@@ -44,18 +42,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "5E" || fixture["task"] != "5E" || fixture["type"] != "fixtures" {
         return Err("medical task differs".into());
     }
-    let actors = fixture["fixtures"]
-        .as_array()
-        .ok_or("medical participants")?;
-    if actors.len() != 3
-        || actors
-            .iter()
-            .map(|actor| actor["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != BTreeSet::from([Some("ER_DOCTOR"), Some("CARDIOLOGIST"), Some("PHARMACIST")])
-    {
-        return Err("medical participants differ".into());
-    }
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/5E/metadata.json"),
+    )?;
+
     let role = |name: &str| -> Result<u64> {
         compiled["roles"][name]
             .as_u64()
@@ -177,10 +168,10 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut used_frames = BTreeSet::new();
     for call in &ordered {
         let actor = call.request["agent"].as_str().ok_or("effect actor")?;
-        let tool = call.tool()?;
+        let tool = call.tool;
         let arguments = &call.request["arguments"];
-        let (_, result) = call.result()?;
-        let (ended, _) = call.ended()?;
+        let (_, result) = call.result;
+        let (ended, _) = call.ended;
         if arguments["patient_id"] != "patient_1"
             || result["success"] != true
             || result["data"]["patient_id"] != "patient_1"
@@ -353,11 +344,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                     .filter(|call| {
                         call.request["agent"] == actor
                             && call.request["tool"] == "order_tests"
-                            && call.result.as_ref().is_some_and(|(at, _)| *at < frame.sent)
+                            && call.result.0 < frame.sent
                     })
-                    .max_by_key(|call| call.result.as_ref().map(|(at, _)| *at))
+                    .max_by_key(|call| call.result.0)
                     .ok_or("completed panel has no actual last result")?;
-                json!({"tests":panel(&ordered,actor,frame.sent)?,"attempt":last.result()?.1})
+                json!({"tests":panel(&ordered,actor,frame.sent)?,"attempt":last.result.1})
             }
             "Summary" | "CompletedConsultation" => json!({
                 "clinical":{"findings":{
@@ -379,13 +370,13 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut panel_imaging_overlaps = 0;
     for (index, a) in ordered.iter().enumerate() {
         for b in &ordered[index + 1..] {
-            if a.started()?.1 < b.ended()?.1 && b.started()?.1 < a.ended()?.1 {
-                if a.tool()? == "perform_imaging" && b.tool()? == "perform_imaging" {
+            if a.started.1 < b.ended.1 && b.started.1 < a.ended.1 {
+                if a.tool == "perform_imaging" && b.tool == "perform_imaging" {
                     return Err("overlapping actual CT effects".into());
                 }
                 overlaps += 1;
                 if matches!(
-                    (a.tool()?, b.tool()?),
+                    (a.tool, b.tool),
                     ("order_tests", "perform_imaging") | ("perform_imaging", "order_tests")
                 ) {
                     panel_imaging_overlaps += 1;

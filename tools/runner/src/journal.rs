@@ -33,42 +33,30 @@ impl Frame<'_> {
         Ok(serde_json::from_slice(&self.bytes)?)
     }
 }
-pub(crate) struct Call {
-    pub(crate) request: Value,
+/// One fully observed invocation. Positions refer to the same journal.
+pub(crate) struct Call<'a> {
+    pub(crate) request: &'a Value,
+    pub(crate) tool: &'a str,
     pub(crate) emitted: usize,
-    pub(crate) started: Option<(usize, f64)>,
-    pub(crate) result: Option<(usize, Value)>,
-    pub(crate) domain_result: Option<Value>,
-    pub(crate) ended: Option<(usize, f64)>,
+    pub(crate) started: (usize, f64),
+    pub(crate) ended: (usize, f64),
+    pub(crate) result: (usize, &'a Value),
 }
-impl Call {
-    pub(crate) fn started(&self) -> Result<(usize, f64)> {
-        self.started.ok_or_else(|| "missing domain start".into())
-    }
-    pub(crate) fn ended(&self) -> Result<(usize, f64)> {
-        self.ended.ok_or_else(|| "missing domain end".into())
-    }
-    pub(crate) fn result(&self) -> Result<(usize, &Value)> {
-        self.result
-            .as_ref()
-            .map(|(at, value)| (*at, value))
-            .ok_or_else(|| "missing original result".into())
-    }
+impl Call<'_> {
     /// Match the scoring event to the recorded call and reply. Some simulator
     /// tools publish normalized arguments; the caller supplies those exact values.
     pub(crate) fn matches_score(&self, event: &Value, scored_arguments: &Value) -> bool {
-        self.result.as_ref().is_some_and(|(_, result)| {
-            event["agent"] == self.request["agent"]
-                && event["tool"] == self.request["tool"]
-                && event.get("args") == Some(scored_arguments)
-                && result["success"]
-                    .as_bool()
-                    .is_some_and(|success| event["success"] == success)
-                && event
-                    .get("result")
-                    .is_some_and(|value| value == &result["data"])
-                && event["violations"].as_array().is_some_and(Vec::is_empty)
-        })
+        let result = self.result.1;
+        event["agent"] == self.request["agent"]
+            && event["tool"] == self.tool
+            && event.get("args") == Some(scored_arguments)
+            && result["success"]
+                .as_bool()
+                .is_some_and(|success| event["success"] == success)
+            && event
+                .get("result")
+                .is_some_and(|value| value == &result["data"])
+            && event["violations"].as_array().is_some_and(Vec::is_empty)
     }
     /// Consume one scored occurrence. Equal calls can each use a separate equal event.
     pub(crate) fn take_score(&self, remaining: &mut Vec<&Value>, arguments: &Value) -> Result<()> {
@@ -78,11 +66,6 @@ impl Call {
             .ok_or_else(|| format!("missing matching score for effect {}", self.request["id"]))?;
         remaining.swap_remove(index);
         Ok(())
-    }
-    pub(crate) fn tool(&self) -> Result<&str> {
-        self.request["tool"]
-            .as_str()
-            .ok_or_else(|| "tool name".into())
     }
 }
 /// Take the unique unused JSON frame sent on this edge inside the interval.
@@ -112,6 +95,32 @@ pub(crate) fn one<T>(items: impl Iterator<Item = T>) -> Result<T> {
     }
     Ok(frame)
 }
+/// Match the physical participant roster to the original benchmark description.
+pub(crate) fn participants<'a>(fixture: &'a Value, description: &str) -> Result<&'a [Value]> {
+    let metadata: Value = serde_json::from_str(description)?;
+    let expected = metadata["agents"]
+        .as_array()
+        .ok_or("benchmark participants")?;
+    let actual = fixture["fixtures"]
+        .as_array()
+        .ok_or("recorded participants")?;
+    let mut names = BTreeSet::new();
+    for name in expected {
+        if !names.insert(name.as_str().ok_or("benchmark participant name")?) {
+            return Err("duplicate benchmark participant".into());
+        }
+    }
+    for actor in actual {
+        if !names.remove(actor["agent"].as_str().ok_or("recorded participant name")?) {
+            return Err("unexpected or duplicate recorded participant".into());
+        }
+    }
+    if !names.is_empty() {
+        return Err("missing benchmark participant".into());
+    }
+    Ok(actual)
+}
+
 pub(crate) fn records(path: &Path) -> Result<Vec<Value>> {
     parse_records(&fs::read_to_string(path)?)
 }
@@ -305,7 +314,7 @@ pub(crate) fn check_close_pairs(frames: &BTreeMap<u64, Frame>, pairs: &[(u64, u6
 /// Correlated observations owned by the offline auditor, never runtime authority.
 pub(crate) struct Journal<'a> {
     pub(crate) frames: BTreeMap<u64, Frame<'a>>,
-    pub(crate) calls: BTreeMap<u64, Call>,
+    pub(crate) calls: BTreeMap<u64, Call<'a>>,
     pub(crate) score: Value,
 }
 
@@ -328,7 +337,7 @@ pub(crate) fn read<'a>(
         }
     }
     let mut frames = BTreeMap::new();
-    let mut calls = BTreeMap::<u64, Call>::new();
+    let mut effect_rows = BTreeMap::<u64, Vec<usize>>::new();
     let mut exits = BTreeSet::new();
     let mut verdict = None;
     let mut score = None;
@@ -384,57 +393,15 @@ pub(crate) fn read<'a>(
                     },
                 );
             }
-            (Some("runtime"), Some("execute")) => {
+            (Some("runtime" | "domain_start"), Some("execute"))
+            | (Some("domain_end"), _)
+            | (Some("simulator"), Some("simulator_result")) => {
                 let id = m["id"].as_u64().ok_or("effect ID")?;
-                if !actors.iter().any(|actor| actor["agent"] == m["agent"]) {
-                    return Err("unknown effect actor".into());
+                let positions = effect_rows.entry(id).or_default();
+                if positions.len() == 4 {
+                    return Err(format!("extra observation for effect {id}").into());
                 }
-                if calls
-                    .insert(
-                        id,
-                        Call {
-                            request: m.clone(),
-                            emitted: index,
-                            started: None,
-                            result: None,
-                            domain_result: None,
-                            ended: None,
-                        },
-                    )
-                    .is_some()
-                {
-                    return Err("duplicate effect ID".into());
-                }
-            }
-            (Some("domain_start"), Some("execute")) => {
-                let call = calls
-                    .get_mut(&m["id"].as_u64().ok_or("domain ID")?)
-                    .ok_or("domain start without runtime request")?;
-                if *m != call.request || call.started.replace((index, time(row)?)).is_some() {
-                    return Err("altered domain request".into());
-                }
-            }
-            (Some("simulator"), Some("simulator_result")) => {
-                let call = calls
-                    .get_mut(&m["id"].as_u64().ok_or("result ID")?)
-                    .ok_or("result without request")?;
-                if call.domain_result.as_ref() != Some(&m["result"])
-                    || call.result.replace((index, m["result"].clone())).is_some()
-                {
-                    return Err("duplicate original result".into());
-                }
-            }
-            (Some("domain_end"), _) => {
-                let call = calls
-                    .get_mut(&m["id"].as_u64().ok_or("domain end ID")?)
-                    .ok_or("domain end without request")?;
-                if call.request["agent"] != m["agent"]
-                    || call.request["tool"] != m["tool"]
-                    || call.ended.replace((index, time(row)?)).is_some()
-                {
-                    return Err("altered domain result".into());
-                }
-                call.domain_result = Some(m["result"].clone());
+                positions.push(index);
             }
             (Some("runtime"), Some("exit")) => {
                 let agent = m["agent"].as_str().ok_or("exit agent")?;
@@ -463,19 +430,48 @@ pub(crate) fn read<'a>(
         return Err("incomplete observed execution".into());
     }
     let verdict = verdict.ok_or("missing runtime verdict")?;
-    for call in calls.values() {
-        let (start, started) = call.started()?;
-        let (end, ended) = call.ended()?;
-        let (result_at, result) = call.result()?;
-        if !(call.emitted < start
-            && start < end
-            && end < result_at
-            && result_at < verdict
-            && started <= ended)
-            || result["tool_name"] != call.tool()?
+    let mut calls = BTreeMap::new();
+    for (id, positions) in effect_rows {
+        let [emitted, start, end, result_at] = *positions.as_slice() else {
+            return Err(format!("incomplete or duplicate observations for effect {id}").into());
+        };
+        let request = &rows[emitted]["message"];
+        let completed = &rows[end]["message"];
+        let result = rows[result_at]["message"]
+            .get("result")
+            .ok_or("missing simulator result")?;
+        let tool = request["tool"].as_str().ok_or("tool name")?;
+        let started = time(&rows[start])?;
+        let ended = time(&rows[end])?;
+        if rows[emitted]["direction"] != "runtime"
+            || rows[start]["direction"] != "domain_start"
+            || rows[end]["direction"] != "domain_end"
+            || rows[result_at]["direction"] != "simulator"
+            || result_at >= verdict
+            || started > ended
+            || !actors.iter().any(|a| a["agent"] == request["agent"])
+            || rows[start]["message"] != *request
+            || completed["agent"] != request["agent"]
+            || completed["tool"] != tool
+            || completed.get("result") != Some(result)
+            || result["tool_name"] != tool
         {
-            return Err("invalid effect/result interval or tool".into());
+            return Err(format!(
+                "effect {id} observations differ in identity, result or chronology"
+            )
+            .into());
         }
+        calls.insert(
+            id,
+            Call {
+                request,
+                tool,
+                emitted,
+                started: (start, started),
+                ended: (end, ended),
+                result: (result_at, result),
+            },
+        );
     }
     let (score_at, score) = score.ok_or("missing original score")?;
     if score_at <= verdict {
@@ -612,6 +608,26 @@ mod tests {
     }
 
     #[test]
+    fn participant_roster_accepts_any_order_and_rejects_incomplete_or_substituted_names() {
+        let description = r#"{"agents":["A","B"]}"#;
+        let fixture = json!({"fixtures":[{"agent":"B"},{"agent":"A"}]});
+        assert_eq!(
+            participants(&fixture, description).unwrap()[0]["agent"],
+            "B"
+        );
+        for invalid in [
+            json!([{"agent":"A"}]),
+            json!([{"agent":"A"},{"agent":"A"}]),
+            json!([{"agent":"A"},{"agent":"C"}]),
+            json!([{"agent":"A"},{}]),
+            json!([{"agent":"A"},{"agent":"B"},{"agent":"C"}]),
+        ] {
+            assert!(participants(&json!({"fixtures":invalid}), description).is_err());
+        }
+        assert!(participants(&fixture, r#"{"agents":["A","A"]}"#).is_err());
+    }
+
+    #[test]
     fn actual_effect_lifecycle_requires_its_request_and_matching_ordered_result() {
         let request = json!({"type":"execute","id":1,"agent":"A","tool":"write_section","arguments":{"section_name":"section_a"}});
         let result =
@@ -654,6 +670,23 @@ mod tests {
                 !call.matches_score(&changed, &args),
                 "ignored missing {field}"
             );
+        }
+        // Two identical operations can start together and finish in reverse order.
+        let mut second = rows[..4].to_vec();
+        for row in &mut second {
+            row["message"]["id"] = json!(2);
+        }
+        let combined = [&rows[..2], &second[..], &rows[2..]].concat();
+        let paired = read(&combined, &BTreeMap::new(), &actors, &dynamic).unwrap();
+        assert!(paired.calls[&1].started.0 < paired.calls[&2].started.0);
+        assert!(paired.calls[&2].result.0 < paired.calls[&1].ended.0);
+        for index in 0..4 {
+            let mut duplicate = rows.clone();
+            duplicate.insert(index, rows[index].clone());
+            assert!(read(&duplicate, &BTreeMap::new(), &actors, &dynamic).is_err());
+            let mut orphan = rows.clone();
+            orphan[index]["message"]["id"] = json!(2);
+            assert!(read(&orphan, &BTreeMap::new(), &actors, &dynamic).is_err());
         }
         for removed in [0, 1, 2, 3, 4, 5, 6] {
             let mut changed = rows.clone();

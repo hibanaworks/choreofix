@@ -10,26 +10,12 @@ use std::collections::BTreeSet;
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("missing 7H evidence")?["message"];
-    let actors = fixture["fixtures"].as_array().ok_or("7H participants")?;
-    if fixture["type"] != "fixtures"
-        || fixture["task"] != "7H"
-        || compiled["task"] != "7H"
-        || actors.len() != 7
-        || actors
-            .iter()
-            .filter_map(|actor| actor["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != BTreeSet::from([
-                "WRITER_A",
-                "WRITER_B",
-                "WRITER_C",
-                "FIGURE_CREATOR",
-                "FACT_CHECKER",
-                "REVIEWER",
-                "EDITOR_IN_CHIEF",
-            ])
-    {
-        return Err("7H task or participants differ".into());
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/7H/metadata.json"),
+    )?;
+    if fixture["type"] != "fixtures" || fixture["task"] != "7H" || compiled["task"] != "7H" {
+        return Err("foreign task fixture or projection".into());
     }
     let headers = projection::frames(artifact, rows)?;
     let history = journal::read(rows, &headers, actors, dynamic)?;
@@ -84,7 +70,7 @@ pub(crate) fn effects(compiled: &Value, history: &Journal) -> Result<Value> {
                     call.request["tool"] == "review_sections"
                         && call.request["arguments"]["section_name"] == scope
                 })
-                .filter_map(|call| call.result().ok())
+                .map(|call| call.result)
                 .filter(|(end, _)| *end < at)
                 .max_by_key(|(end, _)| *end)
                 .ok_or("7H editor has no current review for its scope")?;
@@ -97,7 +83,7 @@ pub(crate) fn effects(compiled: &Value, history: &Journal) -> Result<Value> {
                         call.request["tool"] == "fact_check"
                             && call.request["arguments"]["section_name"] == scope
                     })
-                    .filter_map(|call| call.result().ok())
+                    .map(|call| call.result)
                     .filter(|(end, _)| review_at < *end && *end < at)
                     .max_by_key(|(end, _)| *end)
                     .ok_or("7H amended editorial material lacks a new fact check")?;
@@ -146,7 +132,7 @@ pub(crate) fn effects(compiled: &Value, history: &Journal) -> Result<Value> {
     let mut fact_checks = Vec::new();
     let mut review_verdicts = Vec::new();
     for &call in &ordered {
-        let tool = call.tool()?;
+        let tool = call.tool;
         let args = &call.request["arguments"];
         let agent = call.request["agent"].as_str().ok_or("7H effect actor")?;
         let (file, actor) = match agent {
@@ -159,7 +145,7 @@ pub(crate) fn effects(compiled: &Value, history: &Journal) -> Result<Value> {
             "EDITOR_IN_CHIEF" => ("EDITOR_FILE", "EDITOR_VM"),
             _ => return Err("unknown 7H effect actor".into()),
         };
-        let (returned, result) = call.result()?;
+        let (returned, result) = call.result;
         if tool == "review_sections"
             && result["data"]["review_id"].is_string()
             && result["data"].get("feedback") != args.get("feedback")
@@ -249,9 +235,9 @@ pub(crate) fn effects(compiled: &Value, history: &Journal) -> Result<Value> {
             .ok_or("7H effect operation")?;
         let replacement = tool == "write_section"
             && ordered.iter().any(|prior| {
-                prior.tool().ok() == Some("write_section")
+                prior.tool == "write_section"
                     && prior.request["arguments"]["section_name"] == section
-                    && prior.ended.is_some_and(|(at, _)| at < request_at)
+                    && prior.ended.0 < request_at
             });
         let performer = match tool {
             "write_section" if replacement => match section {
@@ -342,7 +328,7 @@ pub(crate) fn effects(compiled: &Value, history: &Journal) -> Result<Value> {
                 .filter(|prior| {
                     prior.request["tool"] == "create_figure" && prior.request["agent"] == agent
                 })
-                .filter_map(|prior| prior.result().ok())
+                .map(|prior| prior.result)
                 .filter(|(at, value)| {
                     *at < request_at
                         && value["success"] == true
@@ -440,28 +426,27 @@ pub(crate) fn effects(compiled: &Value, history: &Journal) -> Result<Value> {
                         let latest = ordered
                             .iter()
                             .filter(|prior| {
-                                prior.ended.is_some_and(|(at, _)| at < call.emitted)
+                                prior.ended.0 < call.emitted
                                     && prior.request["arguments"]["section_name"] == chapter
-                                    && prior.tool().is_ok_and(|name| tools.contains(&name))
+                                    && tools.contains(&prior.tool)
                             })
                             .max_by_key(|prior| prior.emitted)
                             .ok_or("7H snapshot lacks a domain effect")?;
-                        if items[chapter] != latest.result()?.1["data"]["artifact"] {
+                        if items[chapter] != latest.result.1["data"]["artifact"] {
                             return Err("7H snapshot has stale domain material".into());
                         }
                     }
                 }
                 fact_checks.push(
                     json!({"scope":section,"check_id":result["data"]["check_id"],
-                    "material_commit":material_commit,"ended_row":call.ended()?.0}),
+                    "material_commit":material_commit,"ended_row":call.ended.0}),
                 );
             } else {
                 let checked = input.value()?;
                 let facts = one(ordered.iter().filter(|prior| {
-                    prior.tool().ok() == Some("fact_check")
-                        && prior
-                            .result()
-                            .is_ok_and(|(at, value)| at < input.received && *value == checked)
+                    prior.tool == "fact_check"
+                        && prior.result.0 < input.received
+                        && *prior.result.1 == checked
                 }))?;
                 if checked["success"] != true
                     || checked["data"]["section"] != section
@@ -473,21 +458,22 @@ pub(crate) fn effects(compiled: &Value, history: &Journal) -> Result<Value> {
                 }
                 review_verdicts.push(json!({"scope":section,"decision":args["decision"],
                     "status":result["data"]["status"],"review_id":result["data"]["review_id"],
-                    "fact_id":facts.result()?.1["data"]["check_id"],"ended_row":call.ended()?.0,
+                    "fact_id":facts.result.1["data"]["check_id"],"ended_row":call.ended.0,
                     "material_commit":material_commit}));
             }
         }
         if operation.starts_with("Minor") {
-            let receipt = one(ordered
-                .iter()
-                .filter_map(|prior| prior.result().ok())
-                .filter(|(at, evidence)| {
-                    *at < request_at
-                        && evidence["tool_name"] == "review_sections"
-                        && evidence["data"]["status"] == "minor_revision"
-                        && evidence["data"]["review_id"] == args["review_id"]
-                }))?
-            .1;
+            let receipt =
+                one(ordered
+                    .iter()
+                    .map(|prior| prior.result)
+                    .filter(|(at, evidence)| {
+                        *at < request_at
+                            && evidence["tool_name"] == "review_sections"
+                            && evidence["data"]["status"] == "minor_revision"
+                            && evidence["data"]["review_id"] == args["review_id"]
+                    }))?
+                .1;
             let prior = &receipt["data"]["input_snapshot"]["sections"][section];
             let amended = &result["data"]["artifact"];
             let mut expected = prior.clone();
@@ -526,7 +512,7 @@ pub(crate) fn effects(compiled: &Value, history: &Journal) -> Result<Value> {
             let decision = if tool == "combine_sections" {
                 let approved = ordered
                     .iter()
-                    .filter_map(|prior| prior.result().ok())
+                    .map(|prior| prior.result)
                     .filter(|(at, value)| {
                         *at < request_at && value["tool_name"] == "make_editorial_decision"
                     })
@@ -569,11 +555,10 @@ pub(crate) fn effects(compiled: &Value, history: &Journal) -> Result<Value> {
                 .iter()
                 .filter(|prior| {
                     (prior.request["arguments"]["section_name"] == scope
-                        && matches!(prior.tool().ok(), Some("fact_check" | "review_sections")))
-                        || (scope == "CHAPTERS_1_2"
-                            && prior.tool().ok() == Some("make_editorial_decision"))
+                        && matches!(prior.tool, "fact_check" | "review_sections"))
+                        || (scope == "CHAPTERS_1_2" && prior.tool == "make_editorial_decision")
                 })
-                .filter_map(|prior| prior.result().ok())
+                .map(|prior| prior.result)
                 .filter(|(at, _)| *at < request_at)
                 .max_by_key(|(at, _)| *at)
                 .ok_or("7H revision occurred before any assessment")?;
@@ -626,10 +611,7 @@ pub(crate) fn effects(compiled: &Value, history: &Journal) -> Result<Value> {
     let publications = ordered
         .iter()
         .filter(|call| {
-            call.request["tool"] == "combine_sections"
-                && call
-                    .result()
-                    .is_ok_and(|(_, result)| result["success"] == true)
+            call.request["tool"] == "combine_sections" && call.result.1["success"] == true
         })
         .count();
     if publications != usize::from(history.score["complete"] == true) {

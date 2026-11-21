@@ -18,18 +18,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "4E" || fixture["task"] != "4E" || fixture["type"] != "fixtures" {
         return Err("coordination task differs".into());
     }
-    let actors = fixture["fixtures"]
-        .as_array()
-        .ok_or("coordination participants")?;
-    if actors.len() != 3
-        || actors
-            .iter()
-            .map(|a| a["agent"].as_str())
-            .collect::<BTreeSet<_>>()
-            != BTreeSet::from([Some("BACKEND_DEV"), Some("FRONTEND_DEV"), Some("TESTER")])
-    {
-        return Err("original coordination participants differ".into());
-    }
+    let actors = crate::journal::participants(
+        fixture,
+        include_str!("../../../benchmark/descriptions/4E/metadata.json"),
+    )?;
+
     let role = |name: &str| number(&compiled["roles"][name]);
     let label =
         |name: &str| -> Result<u8> { Ok(u8::try_from(number(&compiled["labels"][name])?)?) };
@@ -56,13 +49,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                 .calls
                 .values()
                 .filter(|c| {
-                    c.request["agent"] == agent
-                        && c.request["tool"] == tool
-                        && c.result.as_ref().is_some_and(|(at, _)| *at < before)
+                    c.request["agent"] == agent && c.request["tool"] == tool && c.result.0 < before
                 })
-                .max_by_key(|c| c.result.as_ref().map(|(at, _)| *at))
+                .max_by_key(|c| c.result.0)
                 .ok_or("missing actual candidate input")?;
-            Ok(call.result()?.1.clone())
+            Ok(call.result.1.clone())
         };
         Ok(
             json!({"api":latest("BACKEND_DEV","define_api")?,"backend":latest("BACKEND_DEV","implement_feature")?,"frontend":latest("FRONTEND_DEV","implement_feature")?}),
@@ -227,9 +218,9 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                                 c.request["agent"] == agent
                                     && c.request["tool"] == tool
                                     && c.emitted > request_at
-                                    && c.result.as_ref().is_some_and(|(at, _)| *at < reply_at)
+                                    && c.result.0 < reply_at
                             }))?;
-                        let (result_at, result) = call.result()?;
+                        let (result_at, result) = call.result;
                         if !used_calls.insert(call_id)
                             || arguments != call.request["arguments"]
                             || assigned.ok_or("missing original assignment")?["arguments"]
@@ -476,7 +467,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             .values()
             .filter(|c| c.request["tool"] == "run_tests"),
     )?;
-    let (test_result_at, actual_result) = test.result()?;
+    let (test_result_at, actual_result) = test.result;
     let outcomes = compiled["outcome_files"]
         .as_array()
         .ok_or("compiled outcome bindings")?;
