@@ -2429,14 +2429,43 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
             let journal = directory.join("events.jsonl");
             let trace = Trace::create(&journal)?;
             let artifact = projection::archive(&binary, &directory, "11M")?;
-            let (world, _) = Simulator::new("11M", 0, 1.0, trace.clone(), &[])?;
-            world.set_test_delays(json!({"do_job":[0.4,0.4]})).await?;
+            let failures: &[(&str, u32)] = if batch {
+                &[("inspect_quality", 0)]
+            } else {
+                &[]
+            };
+            let (world, _) = Simulator::new("11M", 0, 1.0, trace.clone(), failures)?;
+            world
+                .set_test_delays(json!({"do_job":[0.4,0.4],"inspect_quality":[0.05,0.05]}))
+                .await?;
             let (guest, runtime) =
                 process::guest(&binary, &wash, &["11M"], &directory, trace, world)?;
-            let (parts, outcome) = hibana_runtime::race(
+            let ((parts, inspections), outcome) = hibana_runtime::race(
                 async {
                     async {
                         let mut parts = Vec::new();
+                        let mut inspections = Vec::new();
+                        let inspect = async |i: usize, part: &Value, other: Option<usize>| -> Result<Value> {
+                            let job = jobs[i].1;
+                            let path = format!("/service/inspect/{job}");
+                            let wrong = json!({"job_id":jobs[(i+1)%3].1});
+                            let refused = guest.command("INSPECTOR", format!("printf '%s' '{wrong}' > {path}")).await?;
+                            assert!(refused["stdout"].as_str().is_some_and(|s| s.contains("Invalid argument")), "{refused}");
+                            let arguments = json!({"job_id":job});
+                            let sent = guest.command("INSPECTOR", format!("printf '%s' '{arguments}' > {path}")).await?;
+                            assert_eq!(sent["stdout"], "wash> ", "{sent}");
+                            if let Some(next) = other {
+                                let next_job = jobs[next].1;
+                                let next_args = json!({"job_id":next_job});
+                                let busy = guest.command("INSPECTOR", format!("printf '%s' '{next_args}' | dd of=/service/inspect/{next_job} oflag=nonblock")).await?;
+                                assert!(busy["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{busy}");
+                            }
+                            let result = shell_json_result(&guest.command("INSPECTOR", "cat /service/inspection_result".into()).await?)?;
+                            assert_eq!(result["data"]["input_part"], part["data"]["part"]);
+                            let repeat = guest.command("INSPECTOR", format!("printf '%s' '{arguments}' | dd of={path} oflag=nonblock")).await?;
+                            assert!(repeat["stdout"].as_str().is_some_and(|s| s.contains("Permission denied")), "{repeat}");
+                            Ok(result)
+                        };
                         let early = guest.command("INSPECTOR", "dd if=/service/parts/alpha_job_a iflag=nonblock".into()).await?;
                         assert!(early["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{early}");
                         for &i in &order {
@@ -2465,6 +2494,7 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
                                 )?;
                                 let delivered = shell_json_result(&guest.command("INSPECTOR", format!("cat /service/parts/{job}")).await?)?;
                                 assert_eq!(delivered, part["data"]["part"]);
+                                inspections.push((i, inspect(i, &part, None).await?));
                                 parts.push((i, part));
                             }
                         }
@@ -2476,6 +2506,10 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
                                         .await?,
                                 )?;
                                 parts.push((i, part));
+                            }
+                            for (position, (i, part)) in parts.iter().cycle().skip(1).take(parts.len()).enumerate() {
+                                let other = (position == 0).then_some(parts[2].0);
+                                inspections.push((*i, inspect(*i, part, other).await?));
                             }
                             for (i, part) in &parts {
                                 let job = jobs[*i].1;
@@ -2493,7 +2527,7 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
                                 0
                             );
                         }
-                        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(parts)
+                        Ok::<_, Box<dyn std::error::Error + Send + Sync>>((parts, inspections))
                     };
                     async { runtime.await };
                 },
@@ -2513,7 +2547,7 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
             let events = outcome["score"]["events"]
                 .as_array()
                 .ok_or("station events")?;
-            assert_eq!(events.len(), 3);
+            assert_eq!(events.len(), 6);
             let rows: Vec<Value> = fs::read_to_string(&journal)?
                 .lines()
                 .map(serde_json::from_str)
@@ -2524,13 +2558,24 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
                 .as_array()
                 .ok_or("EPF accepted calls")?;
             let roles = &artifact["compiled"]["roles"];
+            for direction in ["domain_start", "domain_end"] {
+                assert_eq!(
+                    rows.iter()
+                        .filter(|row| row["direction"] == direction)
+                        .count(),
+                    6
+                );
+            }
             let starts: Vec<_> = rows
                 .iter()
                 .enumerate()
-                .filter(|(_, row)| row["direction"] == "domain_start")
+                .filter(|(_, row)| {
+                    row["direction"] == "domain_start" && row["message"]["tool"] == "do_job"
+                })
                 .collect();
             assert_eq!(starts.len(), 3);
             let mut effects = Vec::new();
+            let mut checked_inspections = Vec::new();
             for (i, part) in parts {
                 let (agent, job, station) = jobs[i];
                 assert_eq!(part["success"], true);
@@ -2561,6 +2606,34 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
                 let delivered = find(&[i as u8], worker, &roles["INSPECTOR_VM"])?;
                 assert_eq!(delivered["receive_commit"]["view"], roles["INSPECTOR"]);
                 assert_eq!(json_frame(&rows, delivered)?.1, part["data"]["part"]);
+                let check = find(&[i as u8], &roles["INSPECTOR_VM"], worker)?;
+                let reply = find(&[34], worker, &roles["INSPECTOR_VM"])?;
+                assert_eq!(check["send_view"], roles["INSPECTOR"]);
+                assert_eq!(reply["receive_commit"]["view"], roles["INSPECTOR"]);
+                let args = json!({"job_id":job});
+                let started = rows
+                    .iter()
+                    .enumerate()
+                    .find(|(_, r)| {
+                        r["direction"] == "domain_start"
+                            && r["message"]["tool"] == "inspect_quality"
+                            && r["message"]["arguments"] == args
+                    })
+                    .ok_or("inspection RPC")?;
+                let scored = events
+                    .iter()
+                    .find(|e| e["tool"] == "inspect_quality" && e["args"] == args)
+                    .ok_or("inspection score")?;
+                let inspection = received_instrument_effect(&rows, check, reply, started, scored)?;
+                let (position, (_, shell)) = inspections
+                    .iter()
+                    .enumerate()
+                    .find(|(_, (job_index, _))| *job_index == i)
+                    .ok_or("shell inspection")?;
+                assert_eq!(inspection["result"], *shell);
+                assert_eq!(shell["success"], !(batch && position == 0));
+                assert_eq!(shell["data"]["input_part"], part["data"]["part"]);
+                checked_inspections.push(inspection);
                 assert_eq!(submitted["send_view"], roles[station]);
                 assert_eq!(returned["receive_commit"]["view"], roles[station]);
                 let using_tool = find(&[3, 4], worker, depot)?;
@@ -2633,6 +2706,7 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
             assert_eq!(peak, if batch { 2 } else { 1 }, "{directory:?} {effects:?}");
             let intervals = events
                 .iter()
+                .filter(|event| event["tool"] == "do_job")
                 .map(|event| {
                     let start = event["timestamp"].as_f64().ok_or("simulator job start")?;
                     let end = event["completed_at"]
@@ -2657,7 +2731,7 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
             assert_eq!(simulator_peak, peak);
             save(
                 &directory.join("checked.json"),
-                &json!({"order":order,"submitted_before_reads":batch,"maximum_outstanding_jobs":peak,"maximum_simultaneous_effects":simulator_peak,"epf_records":epf["captured_records"],"effects":effects,"score_complete":false,"model_calls":0}),
+                &json!({"order":order,"submitted_before_reads":batch,"maximum_outstanding_jobs":peak,"maximum_simultaneous_effects":simulator_peak,"epf_records":epf["captured_records"],"effects":effects,"inspections":checked_inspections,"inspection_order":inspections.iter().map(|(i,_)|jobs[*i].1).collect::<Vec<_>>(),"score_complete":false,"model_calls":0}),
             )?;
         }
     }

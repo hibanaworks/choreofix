@@ -508,6 +508,24 @@ impl Domain for ToolEffects {
         tool: &'static str,
         arguments: Value,
     ) -> Result<Value, String> {
+        if agent == "INSPECTOR" && tool == "inspect_quality" {
+            let events = self.events.take();
+            let part = events.iter().find_map(|row| {
+                let part = &row["result"]["data"]["part"];
+                (row["boundary"] == "finish" && part["job_id"] == arguments["job_id"])
+                    .then(|| part.clone())
+            });
+            self.events.set(events);
+            let part = part.ok_or("inspection before the tool finished")?;
+            let job = data::JOBS
+                .iter()
+                .position(|name| arguments["job_id"] == *name)
+                .ok_or("unknown inspection target")?;
+            return Ok(
+                json!({"tool_name":tool,"success":true,"data":{"job_id":arguments["job_id"],
+                "input_part":part,"status":"inspected","inspector":agent,"receipt":format!("inspection/{}",job+1)}}),
+            );
+        }
         let worker = data::AGENTS
             .iter()
             .position(|name| *name == agent)
@@ -559,8 +577,10 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
     for order in orders {
         for (profile, (arrivals, durations, expected_maximum)) in profiles.iter().enumerate() {
             let session = SessionId::new(SESSION);
-            let (mut connection, _, _) =
-                Bus::open(data::AGENTS, [(session, TOOL_0), (session, TOOL_1)]);
+            let (mut connection, _, _) = Bus::open(
+                ["WORKER_A", "WORKER_B", "WORKER_C", "INSPECTOR"],
+                [(session, TOOL_0), (session, TOOL_1)],
+            );
             let (bus, simulator) = connection.split();
             let inputs = [const { Cell::new(Value::Null) }; 5];
             let next = (&inputs[0], &inputs[1]);
@@ -645,41 +665,55 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                         .map_err(|error| ShellError::message(format!("depot: {error}")))?;
                     };
                     async {
-                        localside::worker::run(&mut a).await?;
+                        localside::worker::run(&mut a, &simulator).await?;
                     };
                     async {
-                        localside::worker::run(&mut b).await?;
+                        localside::worker::run(&mut b, &simulator).await?;
                     };
                     async {
-                        localside::worker::run(&mut c).await?;
+                        localside::worker::run(&mut c, &simulator).await?;
                     };
                     async {
-                        for _ in data::AGENTS {
-                            let part = inspector.offer().await?;
-                            let (worker, bytes) = match part.label() {
-                                WORKER_A => (
-                                    WORKER_A,
-                                    part.recv::<FinishedPart<WORKER_A>>().await?.to_vec(),
-                                ),
-                                WORKER_B => (
-                                    WORKER_B,
-                                    part.recv::<FinishedPart<WORKER_B>>().await?.to_vec(),
-                                ),
-                                WORKER_C => (
-                                    WORKER_C,
-                                    part.recv::<FinishedPart<WORKER_C>>().await?.to_vec(),
-                                ),
-                                _ => return Err(ShellError::message("unexpected finished part")),
+                        for worker in order {
+                            let bytes = match worker {
+                                0 => inspector.recv::<FinishedPart<WORKER_A>>().await?.to_vec(),
+                                1 => inspector.recv::<FinishedPart<WORKER_B>>().await?.to_vec(),
+                                2 => inspector.recv::<FinishedPart<WORKER_C>>().await?.to_vec(),
+                                _ => unreachable!(),
                             };
-                            data::inspection_input(
-                                &data::decode(&bytes)?,
-                                &json!({"job_id":data::JOBS[usize::from(worker)]}),
-                            )?;
+                            let arguments = json!({"job_id":data::JOBS[worker]});
+                            let encoded = data::encode(&arguments)?;
+                            match worker {
+                                0 => {
+                                    inspector
+                                        .send::<CheckPart<WORKER_A>>(
+                                            &data::JobArguments::from_bytes(&encoded)?,
+                                        )
+                                        .await?
+                                }
+                                1 => {
+                                    inspector
+                                        .send::<CheckPart<WORKER_B>>(
+                                            &data::JobArguments::from_bytes(&encoded)?,
+                                        )
+                                        .await?
+                                }
+                                2 => {
+                                    inspector
+                                        .send::<CheckPart<WORKER_C>>(
+                                            &data::JobArguments::from_bytes(&encoded)?,
+                                        )
+                                        .await?
+                                }
+                                _ => unreachable!(),
+                            }
+                            let result = data::decode(inspector.recv::<InspectionResult>().await?)?;
+                            data::inspected(&data::decode(&bytes)?, &arguments, &result)?;
                         }
-                        Ok::<(), ShellError>(())
                     };
                     async {
-                        bus.fixture_peer::<3>(&effects, &["do_job"]).await?;
+                        bus.fixture_peer::<6>(&effects, &["do_job", "inspect_quality"])
+                            .await?;
                     };
                     async {
                         // Release the next fixture input after an actual effect

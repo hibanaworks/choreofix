@@ -39,6 +39,7 @@ pub type Return1<'r> = g::Msg<8, Endpoint<'r, TOOL_1>>;
 pub type JobIntent<const JOB: u8> = g::Msg<20, super::imp::JobArguments<JOB, DO_JOB>>;
 pub type JobResult<'a> = g::Msg<21, &'a [u8]>;
 pub type FinishedPart<'a, const WORKER: u8> = g::Msg<WORKER, &'a [u8]>;
+pub type CheckPart<const JOB: u8> = g::Msg<JOB, super::imp::JobArguments<JOB, INSPECT_QUALITY>>;
 pub type PartReady<'a> = g::Msg<22, &'a [u8]>;
 pub type JobLoan<'r, const CAP: u8> = g::Msg<23, Endpoint<'r, CAP>>;
 pub type InspectRequest<const JOB: u8> = g::Msg<24, super::imp::JobArguments<JOB, INSPECT_QUALITY>>;
@@ -249,7 +250,24 @@ pub fn source() -> impl Projectable {
             g::send::<WORKER_C, INSPECTOR, FinishedPart<WORKER_C>>(),
         ),
     );
-    g::seq(g::par(intents, serving), parts)
+    let a = check_part::<WORKER_A>();
+    let b = check_part::<WORKER_B>();
+    let c = check_part::<WORKER_C>();
+    let checks = g::route(
+        g::seq(a, g::route(g::seq(b, c), g::seq(c, b))),
+        g::route(
+            g::seq(b, g::route(g::seq(a, c), g::seq(c, a))),
+            g::seq(c, g::route(g::seq(a, b), g::seq(b, a))),
+        ),
+    );
+    g::seq(g::par(intents, serving), g::par(parts, checks))
+}
+
+fn check_part<const WORKER: u8>() -> impl Projectable + Copy {
+    g::seq(
+        g::send::<INSPECTOR, WORKER, CheckPart<WORKER>>(),
+        g::send::<WORKER, INSPECTOR, InspectionResult>(),
+    )
 }
 
 pub struct Programs {

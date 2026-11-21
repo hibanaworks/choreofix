@@ -45,10 +45,22 @@ const fn part(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
         FdBinding::read(FdReadRow::Base),
     )
 }
-const PARTS: [ChoreoFsObject<'static>; 3] = [
+const fn inspect(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
+    ChoreoFsObject::writable(
+        path,
+        ObjectId(fd as u32),
+        FdSpec::new(fd, 64),
+        FdBinding::write(FdWriteRow::Object),
+    )
+}
+const INSPECTION_FILES: [ChoreoFsObject<'static>; 7] = [
     part(b"service/parts/alpha_job_a", 4),
     part(b"service/parts/beta_job_b", 5),
     part(b"service/parts/gamma_job_c", 6),
+    inspect(b"service/inspect/alpha_job_a", 7),
+    inspect(b"service/inspect/beta_job_b", 8),
+    inspect(b"service/inspect/gamma_job_c", 9),
+    part(b"service/inspection_result", 10),
 ];
 
 const JOB: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
@@ -234,24 +246,34 @@ pub async fn run(path: &str) -> ShellResult<()> {
         let mut inspector_vm = rv.enter(session, &inspector_vm)?;
         let mut inspector_term = rv.enter(session, &inspector_term)?;
         async {
-            file_metadata::run(&mut inspector_files, inspector, PARTS).await?;
+            file_metadata::run(&mut inspector_files, inspector, INSPECTION_FILES).await?;
         };
         async {
             private_io::run(
                 &mut inspector_term,
-                PrivateFs::new(terminal_inspector, bus, &PARTS),
+                PrivateFs::new(terminal_inspector, bus, &INSPECTION_FILES),
             )
             .await?;
         };
         async {
             let inbox = inspector_vm.recv::<Loan<INSPECTOR>>().await?;
             let [mut alpha, mut beta, mut gamma] = [(); 3].map(|_| vec![0; GUEST_MEMORY_BYTES]);
-            let parts = ChoreoFsFile::new(PARTS[0], inbox)
+            let [mut check_a, mut check_b, mut check_c, mut verdict] =
+                [(); 4].map(|_| vec![0; GUEST_MEMORY_BYTES]);
+            let parts = ChoreoFsFile::new(INSPECTION_FILES[0], inbox)
                 .read_as::<FinishedPart<WORKER_A>>(&mut alpha)
-                .file(PARTS[1])?
+                .file(INSPECTION_FILES[1])?
                 .read_as::<FinishedPart<WORKER_B>>(&mut beta)
-                .file(PARTS[2])?
-                .read_as::<FinishedPart<WORKER_C>>(&mut gamma);
+                .file(INSPECTION_FILES[2])?
+                .read_as::<FinishedPart<WORKER_C>>(&mut gamma)
+                .file(INSPECTION_FILES[3])?
+                .write_as::<CheckPart<WORKER_A>>(&mut check_a)
+                .file(INSPECTION_FILES[4])?
+                .write_as::<CheckPart<WORKER_B>>(&mut check_b)
+                .file(INSPECTION_FILES[5])?
+                .write_as::<CheckPart<WORKER_C>>(&mut check_c)
+                .file(INSPECTION_FILES[6])?
+                .read_as::<InspectionResult>(&mut verdict);
             let files = ChoreoFsFiles::new(inspector_vm).file(parts)?;
             let mut memory = vec![0; GUEST_MEMORY_BYTES];
             let mut storage = Box::new(HibanaWasiGuestStorage::uninit());
@@ -287,7 +309,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
             localside::tool_depot::run(&mut depot, (tool_0, tool_1), (&simulator, &inputs)).await?;
         };
         async {
-            localside::worker::run(&mut worker_a).await?;
+            localside::worker::run(&mut worker_a, &simulator).await?;
         };
         async {
             worker_shell::<WORKER_A, A_VM, ALPHA>(a_vm, &module).await?;
@@ -299,7 +321,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
             private_io::run(&mut a_term, PrivateFs::new(terminal_a, bus, &[JOB])).await?;
         };
         async {
-            localside::worker::run(&mut worker_b).await?;
+            localside::worker::run(&mut worker_b, &simulator).await?;
         };
         async {
             worker_shell::<WORKER_B, B_VM, BETA>(b_vm, &module).await?;
@@ -311,7 +333,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
             private_io::run(&mut b_term, PrivateFs::new(terminal_b, bus, &[JOB])).await?;
         };
         async {
-            localside::worker::run(&mut worker_c).await?;
+            localside::worker::run(&mut worker_c, &simulator).await?;
         };
         async {
             worker_shell::<WORKER_C, C_VM, GAMMA>(c_vm, &module).await?;

@@ -1,10 +1,13 @@
 //! One actual worker receives a tool, performs its request and returns the tool.
 use super::super::{global::*, imp};
-use crate::shell::{ShellError, ShellResult};
+use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{Endpoint, g::Message};
 
 #[hibana_runtime::scope]
-pub async fn run<const WORKER: u8>(endpoint: &mut Endpoint<WORKER>) -> ShellResult<()> {
+pub async fn run<const WORKER: u8>(
+    endpoint: &mut Endpoint<WORKER>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()> {
     let material = {
         let [mut intent, mut work] = endpoint.par()?;
         let station = intent.recv::<StationJob<WORKER>>().await?;
@@ -20,7 +23,7 @@ pub async fn run<const WORKER: u8>(endpoint: &mut Endpoint<WORKER>) -> ShellResu
                     let result = imp::decode(tool.recv::<Reply0>().await?)?;
                     imp::completed(&admitted, &result, None)?;
                     let bytes = imp::encode(&result)?;
-                    let material = imp::encode(&result["data"]["part"])?;
+                    let material = result["data"]["part"].clone();
                     let [mut returned, mut part] = work.par()?;
                     async {
                         returned.send::<Return0>(tool).await?;
@@ -39,7 +42,7 @@ pub async fn run<const WORKER: u8>(endpoint: &mut Endpoint<WORKER>) -> ShellResu
                     let result = imp::decode(tool.recv::<Reply1>().await?)?;
                     imp::completed(&admitted, &result, None)?;
                     let bytes = imp::encode(&result)?;
-                    let material = imp::encode(&result["data"]["part"])?;
+                    let material = result["data"]["part"].clone();
                     let [mut returned, mut part] = work.par()?;
                     async {
                         returned.send::<Return1>(tool).await?;
@@ -54,8 +57,19 @@ pub async fn run<const WORKER: u8>(endpoint: &mut Endpoint<WORKER>) -> ShellResu
             _ => Err(ShellError::message("unexpected tool loan")),
         }?
     };
-    endpoint
-        .send::<FinishedPart<WORKER>>(&material.as_slice())
+    let [mut delivery, mut check] = endpoint.par()?;
+    async {
+        delivery
+            .send::<FinishedPart<WORKER>>(&imp::encode(&material)?.as_slice())
+            .await?;
+    };
+    let request = check.recv::<CheckPart<WORKER>>().await?;
+    let arguments = imp::decode(request.as_bytes())?;
+    imp::inspection_input(&material, &arguments)?;
+    let result = effects.apply(request).await?;
+    imp::inspected(&material, &arguments, &result)?;
+    check
+        .send::<InspectionResult>(&imp::encode(&result)?.as_slice())
         .await?;
     Ok(())
 }

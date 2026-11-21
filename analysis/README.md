@@ -268,6 +268,14 @@ Across 12 scripted runs the inspector read all 36 parts, including in reverse
 submission order after all three workers submitted. EPF checked 20,020
 records. Each part read through wash matched the neutral simulator's result.
 
+In the [11M inspection trials](11m-wash-inspections.json) the inspector used
+the same Endpoint to submit inspections and collect their actual verdicts.
+The 12 scripted trials exercised all six inspection orders and included six
+negative verdicts. Each of the 36 inspections consumed a distinct request
+and concerned the part that the corresponding workstation had produced. Six
+trials completed the first inspection before the second job was submitted.
+The other six completed all inspections before reading the published parts.
+
 The cohort-wide measurement is reproducible from the same source-bound trials.
 From the repository root, supply the verified cohort and a new output file:
 

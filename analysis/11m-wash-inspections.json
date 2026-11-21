@@ -1,0 +1,392 @@
+{
+  "task": "11M",
+  "scope": "Four scripted wash participants, three tool-using jobs and one inspector. The other three jobs, dispatch, repeated rework and five live participants remain open.",
+  "archive": "output/verification/11m-wash-inspection-20261121.wtEbSH",
+  "case_directory": "final-cases",
+  "source_manifest_sha256": "2c242b428b86c91ae1aa6b287a729cb3d31c1984282e81a1c53154ce758e988a",
+  "build_receipt_sha256": "21adf8a9371ce7ebc91cfd0da093da57e91db55b113a25172d5df35490f13fa7",
+  "binaries_sha256": {
+    "hibana-wash.wasm": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+    "manufacturing-wasi": "bdd2dc31f75f0edf4c55a79375fac73a3b3222bb96766c9d96570b93be947f4c",
+    "native": "1513e11a5fc024d4862df6aba8f81e3a083e7c215480960ace3b24a6dc11ba04",
+    "runner": "bdffe8d964a025c9bb5d8a1c04b1a22d9e3526d895a6c6f89a563ae796adabc3"
+  },
+  "dependencies": {
+    "hibana": "331afd6e4b6315e103ce9cb9311f9d9140fc0e57",
+    "hibana-epf": "f966c2817c68994315033fa65fbf72390fa107b4",
+    "hibana-runtime": "4e29a837eaf72247a6803ffbbff0c257519df0a5",
+    "hibana-wasip1-runtime": "94ed8a88026f3f1c58e8b35e3766d8b9a83cb334"
+  },
+  "model_calls": 0,
+  "scored_runs": 0,
+  "cases": [
+    {
+      "case": "0-contended",
+      "workstation_submission_order": [
+        "WORKER_A",
+        "WORKER_B",
+        "WORKER_C"
+      ],
+      "inspection_order": [
+        "beta_job_b",
+        "alpha_job_a",
+        "gamma_job_c"
+      ],
+      "simultaneous_jobs": 2,
+      "epf_records": 2725,
+      "manufacturing_effects": 3,
+      "inspection_effects": 3,
+      "negative_inspections": 1,
+      "wrong_job_refusals": 3,
+      "duplicate_refusals": 3,
+      "busy_refusals_then_retry": 1,
+      "order_observed": "three inspections before first successful part read",
+      "sha256": {
+        "events.jsonl": "2b8bca465fd5b76ef21f0218c0578a012a391cbcdbb0be446df8bd339d768fb5",
+        "checked.json": "eb04deeb7d8045c4386a50391878a049cf849fc6fdd4d50929b5befc2e99ff12",
+        "runtime-result.json": "8b6d3feb71acbacf060af107306817a3c081b22185f95a8e52c7026fcdd37dcf",
+        "projection.json": "9573b9cf2184c530d4f1fe2fcbbaf9080cf80e8fc78bc0903db0cab4d5b551b5"
+      }
+    },
+    {
+      "case": "0-serial",
+      "workstation_submission_order": [
+        "WORKER_A",
+        "WORKER_B",
+        "WORKER_C"
+      ],
+      "inspection_order": [
+        "alpha_job_a",
+        "beta_job_b",
+        "gamma_job_c"
+      ],
+      "simultaneous_jobs": 1,
+      "epf_records": 2648,
+      "manufacturing_effects": 3,
+      "inspection_effects": 3,
+      "negative_inspections": 0,
+      "wrong_job_refusals": 3,
+      "duplicate_refusals": 3,
+      "busy_refusals_then_retry": 0,
+      "order_observed": "first inspection completed before second job submitted",
+      "sha256": {
+        "events.jsonl": "ad7e21971c21e0a278e7d85032cba3ea24d1ef9efede6315e6990d9903165bba",
+        "checked.json": "3e4afd05db192c5b9f63474be9fed8073e0109a42b0d8cc8c90234278cfa94f4",
+        "runtime-result.json": "b4293f4ddfae7c9cec02736ba2926beec4e95470dd932b8a051513390c14bbfe",
+        "projection.json": "9573b9cf2184c530d4f1fe2fcbbaf9080cf80e8fc78bc0903db0cab4d5b551b5"
+      }
+    },
+    {
+      "case": "1-contended",
+      "workstation_submission_order": [
+        "WORKER_A",
+        "WORKER_C",
+        "WORKER_B"
+      ],
+      "inspection_order": [
+        "gamma_job_c",
+        "alpha_job_a",
+        "beta_job_b"
+      ],
+      "simultaneous_jobs": 2,
+      "epf_records": 2725,
+      "manufacturing_effects": 3,
+      "inspection_effects": 3,
+      "negative_inspections": 1,
+      "wrong_job_refusals": 3,
+      "duplicate_refusals": 3,
+      "busy_refusals_then_retry": 1,
+      "order_observed": "three inspections before first successful part read",
+      "sha256": {
+        "events.jsonl": "df80a9727597a33dfe2fbe62d6867cd23b21096813c9469c4dd635e133585fa6",
+        "checked.json": "b8d87dff64309d1fe8d4ecf3d6894f48524297c92b7913ed4b9f3094c30d99af",
+        "runtime-result.json": "dde0eccfefe6f1191396f459e407568ef51335def140e12070dd7b3fa6fd7f53",
+        "projection.json": "9573b9cf2184c530d4f1fe2fcbbaf9080cf80e8fc78bc0903db0cab4d5b551b5"
+      }
+    },
+    {
+      "case": "1-serial",
+      "workstation_submission_order": [
+        "WORKER_A",
+        "WORKER_C",
+        "WORKER_B"
+      ],
+      "inspection_order": [
+        "alpha_job_a",
+        "gamma_job_c",
+        "beta_job_b"
+      ],
+      "simultaneous_jobs": 1,
+      "epf_records": 2648,
+      "manufacturing_effects": 3,
+      "inspection_effects": 3,
+      "negative_inspections": 0,
+      "wrong_job_refusals": 3,
+      "duplicate_refusals": 3,
+      "busy_refusals_then_retry": 0,
+      "order_observed": "first inspection completed before second job submitted",
+      "sha256": {
+        "events.jsonl": "d4e7814adfff1897f7277608b1e1bfdd87e69cb057c88cf10c8a1d8927a3e7c7",
+        "checked.json": "41c952294352719c720837777441866751f990de0883c83ca9e8b924a41ee10b",
+        "runtime-result.json": "9696c8d53d5870fc7e8cf0b17985a1ff608f6832be90cc188370b98100983a7a",
+        "projection.json": "9573b9cf2184c530d4f1fe2fcbbaf9080cf80e8fc78bc0903db0cab4d5b551b5"
+      }
+    },
+    {
+      "case": "2-contended",
+      "workstation_submission_order": [
+        "WORKER_B",
+        "WORKER_A",
+        "WORKER_C"
+      ],
+      "inspection_order": [
+        "alpha_job_a",
+        "beta_job_b",
+        "gamma_job_c"
+      ],
+      "simultaneous_jobs": 2,
+      "epf_records": 2727,
+      "manufacturing_effects": 3,
+      "inspection_effects": 3,
+      "negative_inspections": 1,
+      "wrong_job_refusals": 3,
+      "duplicate_refusals": 3,
+      "busy_refusals_then_retry": 1,
+      "order_observed": "three inspections before first successful part read",
+      "sha256": {
+        "events.jsonl": "d149e975322ff68fe70ca0f4de026caaaf990bb3b20c288c71fefdaa579f5008",
+        "checked.json": "17b4e854ef75752b58b38f7dbf06e82965c7a6a9cb5ccedfeafc260da53d58f5",
+        "runtime-result.json": "1db0e0856933f295537f19c5e8486f8a7e16bb0628e923c1c6ff9433bd87a36e",
+        "projection.json": "9573b9cf2184c530d4f1fe2fcbbaf9080cf80e8fc78bc0903db0cab4d5b551b5"
+      }
+    },
+    {
+      "case": "2-serial",
+      "workstation_submission_order": [
+        "WORKER_B",
+        "WORKER_A",
+        "WORKER_C"
+      ],
+      "inspection_order": [
+        "beta_job_b",
+        "alpha_job_a",
+        "gamma_job_c"
+      ],
+      "simultaneous_jobs": 1,
+      "epf_records": 2650,
+      "manufacturing_effects": 3,
+      "inspection_effects": 3,
+      "negative_inspections": 0,
+      "wrong_job_refusals": 3,
+      "duplicate_refusals": 3,
+      "busy_refusals_then_retry": 0,
+      "order_observed": "first inspection completed before second job submitted",
+      "sha256": {
+        "events.jsonl": "4e525882eb04181940e0a1646af79056b13cecb6cce2ae681a79b55daa9d13b5",
+        "checked.json": "ce5acd78e510d7a44230d86e8307823d9e096e7ed317ecade2d5e210c1fb53fe",
+        "runtime-result.json": "573bdedfd7074775c48bc14b5d69ee5cdf47734f8c277d371788e63ed4b9b96b",
+        "projection.json": "9573b9cf2184c530d4f1fe2fcbbaf9080cf80e8fc78bc0903db0cab4d5b551b5"
+      }
+    },
+    {
+      "case": "3-contended",
+      "workstation_submission_order": [
+        "WORKER_B",
+        "WORKER_C",
+        "WORKER_A"
+      ],
+      "inspection_order": [
+        "gamma_job_c",
+        "beta_job_b",
+        "alpha_job_a"
+      ],
+      "simultaneous_jobs": 2,
+      "epf_records": 2727,
+      "manufacturing_effects": 3,
+      "inspection_effects": 3,
+      "negative_inspections": 1,
+      "wrong_job_refusals": 3,
+      "duplicate_refusals": 3,
+      "busy_refusals_then_retry": 1,
+      "order_observed": "three inspections before first successful part read",
+      "sha256": {
+        "events.jsonl": "037db3c28e1cb7375b2c7eb5e9e355eb05606d1673b3a058e6029b85b0744794",
+        "checked.json": "40098f645f3693f9a435cdc21fc18f9d4bb73eee9c3464b6294c7b3610d18f4e",
+        "runtime-result.json": "7e07c9ee9e1d30de7666050457a3e9b63ce18a5cb3a1d5ab6fb0906cc58d428a",
+        "projection.json": "9573b9cf2184c530d4f1fe2fcbbaf9080cf80e8fc78bc0903db0cab4d5b551b5"
+      }
+    },
+    {
+      "case": "3-serial",
+      "workstation_submission_order": [
+        "WORKER_B",
+        "WORKER_C",
+        "WORKER_A"
+      ],
+      "inspection_order": [
+        "beta_job_b",
+        "gamma_job_c",
+        "alpha_job_a"
+      ],
+      "simultaneous_jobs": 1,
+      "epf_records": 2650,
+      "manufacturing_effects": 3,
+      "inspection_effects": 3,
+      "negative_inspections": 0,
+      "wrong_job_refusals": 3,
+      "duplicate_refusals": 3,
+      "busy_refusals_then_retry": 0,
+      "order_observed": "first inspection completed before second job submitted",
+      "sha256": {
+        "events.jsonl": "55de7c59ce68f7aeb28c7fa364e91456a1733811c416d020e6aefb06881cb4cd",
+        "checked.json": "caeb79f4bf87e0ffa2d6a52b9ecf194097a171ca704cfdd7b0b5796c6e643c29",
+        "runtime-result.json": "dd38e6e3acf2c305dd5a681fcf0811da30efb685684273a54d64c12f431f8713",
+        "projection.json": "9573b9cf2184c530d4f1fe2fcbbaf9080cf80e8fc78bc0903db0cab4d5b551b5"
+      }
+    },
+    {
+      "case": "4-contended",
+      "workstation_submission_order": [
+        "WORKER_C",
+        "WORKER_A",
+        "WORKER_B"
+      ],
+      "inspection_order": [
+        "alpha_job_a",
+        "gamma_job_c",
+        "beta_job_b"
+      ],
+      "simultaneous_jobs": 2,
+      "epf_records": 2727,
+      "manufacturing_effects": 3,
+      "inspection_effects": 3,
+      "negative_inspections": 1,
+      "wrong_job_refusals": 3,
+      "duplicate_refusals": 3,
+      "busy_refusals_then_retry": 1,
+      "order_observed": "three inspections before first successful part read",
+      "sha256": {
+        "events.jsonl": "313aac5c3dcc13184109a560cb9aa68dc28da52f3b439a579aa432410a5d7ede",
+        "checked.json": "108bc799c5bf051026b8af3415866d0c9ff0f7b829121ba475badde9609ed155",
+        "runtime-result.json": "1fe6fc823d5ec0c8e6b568ba0d9d46f435cd6f3478bb7aa564ca8dfad2ad42ed",
+        "projection.json": "9573b9cf2184c530d4f1fe2fcbbaf9080cf80e8fc78bc0903db0cab4d5b551b5"
+      }
+    },
+    {
+      "case": "4-serial",
+      "workstation_submission_order": [
+        "WORKER_C",
+        "WORKER_A",
+        "WORKER_B"
+      ],
+      "inspection_order": [
+        "gamma_job_c",
+        "alpha_job_a",
+        "beta_job_b"
+      ],
+      "simultaneous_jobs": 1,
+      "epf_records": 2650,
+      "manufacturing_effects": 3,
+      "inspection_effects": 3,
+      "negative_inspections": 0,
+      "wrong_job_refusals": 3,
+      "duplicate_refusals": 3,
+      "busy_refusals_then_retry": 0,
+      "order_observed": "first inspection completed before second job submitted",
+      "sha256": {
+        "events.jsonl": "66a60b189c838c9130ed12c781d5990cd2520eb8085e700490553b669f9dd380",
+        "checked.json": "0b1708573ee15df83bb1d8346ccbb40a111432dfaadb333d6f18b1366c510739",
+        "runtime-result.json": "4f87632e566d8e3a7a2ed732c3b53bb181e000bfae7ebd5ffbf5441807338bf7",
+        "projection.json": "9573b9cf2184c530d4f1fe2fcbbaf9080cf80e8fc78bc0903db0cab4d5b551b5"
+      }
+    },
+    {
+      "case": "5-contended",
+      "workstation_submission_order": [
+        "WORKER_C",
+        "WORKER_B",
+        "WORKER_A"
+      ],
+      "inspection_order": [
+        "beta_job_b",
+        "gamma_job_c",
+        "alpha_job_a"
+      ],
+      "simultaneous_jobs": 2,
+      "epf_records": 2727,
+      "manufacturing_effects": 3,
+      "inspection_effects": 3,
+      "negative_inspections": 1,
+      "wrong_job_refusals": 3,
+      "duplicate_refusals": 3,
+      "busy_refusals_then_retry": 1,
+      "order_observed": "three inspections before first successful part read",
+      "sha256": {
+        "events.jsonl": "a7b7901894eaaf7444ce3b7623514d31c78b55cd3b6c33471130dd639c96350e",
+        "checked.json": "d7a5b7bf365f39efead7662ea92e494faf3773b8baac77381273420c38687dd5",
+        "runtime-result.json": "a18b0675b5d122881b96180ceccf7135570d6f81df62818f0a5b6f0e2602b6b5",
+        "projection.json": "9573b9cf2184c530d4f1fe2fcbbaf9080cf80e8fc78bc0903db0cab4d5b551b5"
+      }
+    },
+    {
+      "case": "5-serial",
+      "workstation_submission_order": [
+        "WORKER_C",
+        "WORKER_B",
+        "WORKER_A"
+      ],
+      "inspection_order": [
+        "gamma_job_c",
+        "beta_job_b",
+        "alpha_job_a"
+      ],
+      "simultaneous_jobs": 1,
+      "epf_records": 2650,
+      "manufacturing_effects": 3,
+      "inspection_effects": 3,
+      "negative_inspections": 0,
+      "wrong_job_refusals": 3,
+      "duplicate_refusals": 3,
+      "busy_refusals_then_retry": 0,
+      "order_observed": "first inspection completed before second job submitted",
+      "sha256": {
+        "events.jsonl": "b96aee378851b4ae3662e7a24d1fb3eaf1ec231456ed2be4d6bfecedbbddd422",
+        "checked.json": "90ec10284ea88ed13caffc8260b71271f3e7ddcbbc8bdd0c4b3661598a7b2bd4",
+        "runtime-result.json": "5d17742cb17d05c9f861af7d81551170abefed1e943a6178fb90c398eb9cc62c",
+        "projection.json": "9573b9cf2184c530d4f1fe2fcbbaf9080cf80e8fc78bc0903db0cab4d5b551b5"
+      }
+    }
+  ],
+  "totals": {
+    "epf_records": 32254,
+    "manufacturing_effects": 36,
+    "inspection_effects": 36,
+    "negative_inspections": 6,
+    "wrong_job_refusals": 36,
+    "duplicate_refusals": 36,
+    "busy_refusals_then_retry": 6
+  },
+  "same_binary_11e_regression": [
+    {
+      "report": "11e/manufacturing-busy-wasi-1795221660532029000/report.json",
+      "cases": 8,
+      "sha256": "211af2cfc0a49dc701c6c850f96a189261921174da4cf0367d1b2321dbf109cd"
+    },
+    {
+      "report": "11e/manufacturing-wasi-1795221736861460000/report.json",
+      "cases": 28,
+      "sha256": "991033a4a2cec079a8b405cf55f2bd799cabf666e3dd7e0748cec60c42d2f92c"
+    }
+  ],
+  "verification_logs_sha256": {
+    "final-wasm.log": "dfd01c569eba4d708f2e1ad98f7dba2ae87b466dca2acdbb11233df9ae848e37",
+    "native.log": "5909085cddb2099ac78c4af3e8649ff850e4d82ebe1a4169868c5a624efc20ab",
+    "11e.log": "9b1d1f9b09d180a77929af7861d67d75b9fb9ec1bc01708f9d1afd9275098bea",
+    "app-tests.log": "cd5bf584dae014efb8e9a3e548f22fbcbb59e7597abbac3a8ba43fc93548aaa2",
+    "runner-tests.log": "02f7bf4c702b1972cafff98610e9fc45a9e1ac0b2c2b738f66604e74f0e1fc49",
+    "app-clippy.log": "1089f59624078297999c0cc9066caafb3fb472947a329f12d682f1d02bd26e19",
+    "native-clippy.log": "b39456f9c8d8a6519bfc82dd28acf23119a8eb6fad5a6d80d28a1ab71a57950b",
+    "runner-clippy.log": "68cedea3118fe08d78fe5eda52aa2a7b3a9659ad4a89b7eedb1eb78311218f34",
+    "compiler.txt": "408acb044ad9f92dcbaeb61386ef4dc1c39dd1c92d20b02c82b694a783c4b809"
+  }
+}
