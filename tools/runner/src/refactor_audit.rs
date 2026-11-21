@@ -1,7 +1,7 @@
 //! Code-content and actual effect correspondence; EPF owns protocol execution.
 use crate::{
     evidence::Result,
-    journal::{self, Call, Frame, one},
+    journal::{self, Call, one, take_json_frame},
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -62,22 +62,6 @@ fn candidate(calls: &BTreeMap<u64, Call>, module: &str, before: usize) -> Result
         code_before(calls, module, before)?,
         code_before(calls, "SHARED_LIBRARY", before)?,
     )
-}
-fn consume<'a>(
-    (frames, used): (&'a BTreeMap<u64, Frame<'a>>, &mut BTreeSet<usize>),
-    (from, to, label): (u64, u64, u64),
-    (value, after, before): (&Value, usize, usize),
-) -> Result<&'a Frame<'a>> {
-    let frame = one(frames.values().filter(|f| {
-        f.direction(from, to)
-            && u64::from(f.logical_label) == label
-            && after < f.sent
-            && f.sent < before
-            && !used.contains(&f.sent)
-            && f.value().is_ok_and(|v| v == *value)
-    }))?;
-    used.insert(frame.sent);
-    Ok(frame)
 }
 fn checked(value: &Value, module: &str, hash: &str) -> Result<()> {
     if value["success"] != true
@@ -160,7 +144,11 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
         .into_iter()
         .collect::<Result<Vec<_>>>()?;
     journal::check_close_pairs(&frames, &pairs)?;
-    let mut scored = score["events"].as_array().ok_or("scored effects")?.clone();
+    let mut scored = score["events"]
+        .as_array()
+        .ok_or("scored effects")?
+        .iter()
+        .collect::<Vec<_>>();
     let mut used = BTreeSet::new();
     for (suffix, module) in [("A", "module_a"), ("B", "module_b")] {
         let candidate_label = label(&format!("Candidate{suffix}"))?;
@@ -276,17 +264,17 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             ),
             _ => return Err("unknown original effect".into()),
         };
-        let input = consume(
+        let input = take_json_frame(
             (&frames, &mut used),
-            (from, to, label(&request)?),
+            (from, to, &[label(&request)?]),
             (args, 0, call.emitted),
         )?;
         if input.received >= call.emitted {
             return Err("effect preceded its checked receive".into());
         }
-        consume(
+        take_json_frame(
             (&frames, &mut used),
-            (to, from, label(&reply)?),
+            (to, from, &[label(&reply)?]),
             (value, at, usize::MAX),
         )?;
         let score_args = match tool {
@@ -294,11 +282,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             "code_review" => json!({"target":args["pr_id"]}),
             _ => args.clone(),
         };
-        let index = scored
-            .iter()
-            .position(|e| call.matches_score(e, &score_args) && e["success"] == true)
-            .ok_or("effect differs from common score")?;
-        scored.remove(index);
+        call.take_score(&mut scored, &score_args)?;
         match tool {
             "design_proposal" => {
                 if data["proposal"] != args["title"] || !data["document"].is_string() {
@@ -334,35 +318,35 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                     return Err("validation input differs from actual current code".into());
                 }
                 used.insert(ready.sent);
-                consume(
+                take_json_frame(
                     (&frames, &mut used),
                     (
                         to,
                         role("REPO_OWNER")?,
-                        label(&format!(
+                        &[label(&format!(
                             "{}{suffix}",
                             if tool == "code_review" {
                                 "Reviewed"
                             } else {
                                 "Tested"
                             }
-                        ))?,
+                        ))?],
                     ),
                     (value, at, usize::MAX),
                 )?;
-                consume(
+                take_json_frame(
                     (&frames, &mut used),
                     (
                         role("REPO_OWNER")?,
                         role(&format!("{suffix}_FILE"))?,
-                        label(&format!(
+                        &[label(&format!(
                             "{}Feedback{suffix}",
                             if tool == "code_review" {
                                 "Review"
                             } else {
                                 "Test"
                             }
-                        ))?,
+                        ))?],
                     ),
                     (value, at, usize::MAX),
                 )?;
@@ -421,24 +405,24 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                 }
                 let admitted = json!({"arguments":args,
                     "review":validation["review"],"test":validation["test"]});
-                let publication = consume(
+                let publication = take_json_frame(
                     (&frames, &mut used),
                     (
                         role("REPO_OWNER")?,
                         role("REPO")?,
-                        label(&format!("Publication{suffix}"))?,
+                        &[label(&format!("Publication{suffix}"))?],
                     ),
                     (&admitted, input.received, call.emitted),
                 )?;
                 if publication.received >= call.emitted {
                     return Err("publication effect preceded its evidence-bearing receive".into());
                 }
-                consume(
+                take_json_frame(
                     (&frames, &mut used),
                     (
                         role("REPO")?,
                         role("REPO_OWNER")?,
-                        label(&format!("Published{suffix}"))?,
+                        &[label(&format!("Published{suffix}"))?],
                     ),
                     (value, at, usize::MAX),
                 )?;

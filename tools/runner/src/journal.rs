@@ -85,6 +85,25 @@ impl Call {
             .ok_or_else(|| "tool name".into())
     }
 }
+/// Take the unique unused JSON frame sent on this edge inside the interval.
+/// The task checker compares its receive commit with the actual effect time.
+pub(crate) fn take_json_frame<'a>(
+    (frames, used): (&'a BTreeMap<u64, Frame<'a>>, &mut BTreeSet<usize>),
+    (from, to, labels): (u64, u64, &[u64]),
+    (value, after, before): (&Value, usize, usize),
+) -> Result<&'a Frame<'a>> {
+    let frame = one(frames.values().filter(|frame| {
+        frame.direction(from, to)
+            && labels.contains(&u64::from(frame.logical_label))
+            && after < frame.sent
+            && frame.sent < before
+            && !used.contains(&frame.sent)
+            && frame.value().is_ok_and(|actual| actual == *value)
+    }))?;
+    used.insert(frame.sent);
+    Ok(frame)
+}
+
 pub(crate) fn one<T>(items: impl Iterator<Item = T>) -> Result<T> {
     let mut items = items;
     let frame = items.next().ok_or("missing matching frame")?;

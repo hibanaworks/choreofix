@@ -1,7 +1,7 @@
 //! Independent actual-input/effect correspondence. EPF checks source execution.
 use crate::{
     evidence::{Result, digest, save},
-    journal::{Call, Frame, one, records},
+    journal::{Call, one, records, take_json_frame},
 };
 use serde_json::{Value, json};
 use std::{
@@ -70,22 +70,6 @@ fn input<'a>(
         return Err("effect used an input before its actual completion".into());
     }
     Ok(previous)
-}
-fn consume<'a>(
-    (frames, used): (&'a BTreeMap<u64, Frame<'a>>, &mut BTreeSet<usize>),
-    (from, to, labels): (u64, u64, &[u64]),
-    (value, after, before): (&Value, usize, usize),
-) -> Result<&'a Frame<'a>> {
-    let frame = one(frames.values().filter(|frame| {
-        frame.direction(from, to)
-            && labels.contains(&u64::from(frame.logical_label))
-            && after < frame.sent
-            && frame.sent < before
-            && !used.contains(&frame.sent)
-            && frame.value().is_ok_and(|actual| actual == *value)
-    }))?;
-    used.insert(frame.sent);
-    Ok(frame)
 }
 
 pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
@@ -311,7 +295,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             ),
             _ => unreachable!(),
         };
-        let accepted = consume(
+        let accepted = take_json_frame(
             (&frames, &mut used),
             (from, to, &[label(&request)?]),
             (arguments, 0, call.emitted),
@@ -319,7 +303,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
         if accepted.received >= call.emitted {
             return Err("effect before EPF-checked request receive".into());
         }
-        consume(
+        take_json_frame(
             (&frames, &mut used),
             (
                 if tool == "merge_code" { repo } else { to },
@@ -340,14 +324,14 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                     (environment, format!("TestCandidate{suffix}")),
                     (role("TEST_FILE")?, format!("FileTestCandidate{suffix}")),
                 ] {
-                    consume(
+                    take_json_frame(
                         (&frames, &mut used),
                         (repo, peer, &[label(&message)?]),
                         (result, at, next),
                     )?;
                 }
                 for other in ["A", "B", "C"].into_iter().filter(|other| *other != suffix) {
-                    consume(
+                    take_json_frame(
                         (&frames, &mut used),
                         (
                             repo,
@@ -370,7 +354,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                     if result["success"] != true || data["component"] != name {
                         return Err("actual test result".into());
                     }
-                    consume(
+                    take_json_frame(
                         (&frames, &mut used),
                         (environment, repo, &[label(&format!("Tested{suffix}"))?]),
                         (result, at, next),
@@ -390,7 +374,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         (reviewer, format!("ReviewCandidate{suffix}")),
                         (review_file, format!("FileReviewCandidate{suffix}")),
                     ] {
-                        let ready = consume(
+                        let ready = take_json_frame(
                             (&frames, &mut used),
                             (repo, peer, &[label(&message)?]),
                             (&context, test.result()?.0, call.emitted),
@@ -408,7 +392,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         .map(|prefix| label(&format!("{prefix}{outcome}{suffix}")))
                         .into_iter()
                         .collect::<Result<Vec<_>>>()?;
-                    let committed = consume(
+                    let committed = take_json_frame(
                         (&frames, &mut used),
                         (reviewer, repo, &labels),
                         (result, at, next),
@@ -418,7 +402,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         .into_iter()
                         .map(role)
                     {
-                        consume(
+                        take_json_frame(
                             (&frames, &mut used),
                             (repo, peer?, &[label(&format!("ReviewFeedback{suffix}"))?]),
                             (result, committed, next),
@@ -427,7 +411,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                 }
             }
             "merge_code" => {
-                let admitted = consume(
+                let admitted = take_json_frame(
                     (&frames, &mut used),
                     (owner, repo, &[label(&format!("Admit{suffix}"))?]),
                     (arguments, accepted.received, call.emitted),
@@ -580,7 +564,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         return Err("CI differs from the actually completed test inputs".into());
                     }
                 }
-                consume(
+                take_json_frame(
                     (&frames, &mut used),
                     (
                         build,
@@ -601,13 +585,13 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                 .iter()
                 .map(|name| label(name))
                 .collect::<Result<Vec<_>>>()?;
-                let committed = consume(
+                let committed = take_json_frame(
                     (&frames, &mut used),
                     (build, repo, &labels),
                     (result, at, next),
                 )?
                 .received;
-                consume(
+                take_json_frame(
                     (&frames, &mut used),
                     (
                         repo,
@@ -625,7 +609,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                     review_file,
                     role("TEST_FILE")?,
                 ] {
-                    consume(
+                    take_json_frame(
                         (&frames, &mut used),
                         (repo, peer, &[label(&format!("CiUpdate{suffix}"))?]),
                         (result, committed, next),
@@ -683,7 +667,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                 }))?;
                 let readiness = json!({"publication":published,"integrated_publication":published,"ci":own_ci.result()?.1});
                 let stage_owner = role(["STAGE_OWNER", "STAGE_OWNER_B", "STAGE_OWNER_C"][f])?;
-                let announced = consume(
+                let announced = take_json_frame(
                     (&frames, &mut used),
                     (
                         build,
@@ -693,7 +677,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                     (&readiness, own_ci.result()?.0, call.emitted),
                 )?
                 .received;
-                consume(
+                take_json_frame(
                     (&frames, &mut used),
                     (
                         stage,
@@ -702,19 +686,19 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                     ),
                     (&readiness, announced, accepted.sent),
                 )?;
-                let checked = consume(
+                let checked = take_json_frame(
                     (&frames, &mut used),
                     (stage, requests, &[label(&format!("CheckStage{suffix}"))?]),
                     (arguments, accepted.received, call.emitted),
                 )?
                 .received;
-                let latest = consume(
+                let latest = take_json_frame(
                     (&frames, &mut used),
                     (owner, repo, &[label(&format!("LatestChecked{suffix}"))?]),
                     (arguments, checked, call.emitted),
                 )?
                 .received;
-                let before_effect = consume(
+                let before_effect = take_json_frame(
                     (&frames, &mut used),
                     (repo, stage, &[label(&format!("StageInputs{suffix}"))?]),
                     (&inputs, latest.max(ci.result()?.0), call.emitted),
@@ -724,13 +708,13 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                     return Err("deploy before receiving the checked repository head".into());
                 }
                 let installed = label(&format!("Installed{suffix}"))?;
-                let installation = consume(
+                let installation = take_json_frame(
                     (&frames, &mut used),
                     (stage, repo, &[installed]),
                     (result, at, next),
                 )?
                 .received;
-                consume(
+                take_json_frame(
                     (&frames, &mut used),
                     (repo, owner, &[installed]),
                     (result, installation, next),
@@ -749,7 +733,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                 } else {
                     "Failed"
                 };
-                let committed = consume(
+                let committed = take_json_frame(
                     (&frames, &mut used),
                     (stage, repo, &[label(&format!("Stage{outcome}{suffix}"))?]),
                     (result, at, next),
@@ -787,7 +771,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                     role("CI_FILE")?,
                     ci_owner,
                 ] {
-                    consume(
+                    take_json_frame(
                         (&frames, &mut used),
                         (repo, peer, &[label(&format!("StageUpdate{suffix}"))?]),
                         (result, after, next),
@@ -823,7 +807,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         "rollback did not remove the actual negatively validated deployment".into(),
                     );
                 }
-                consume(
+                take_json_frame(
                     (&frames, &mut used),
                     (stage, repo, &[label(&format!("RollbackReceipt{suffix}"))?]),
                     (result, at, next),

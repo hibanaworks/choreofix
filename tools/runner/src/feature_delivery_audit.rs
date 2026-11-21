@@ -1,7 +1,7 @@
 //! Actual file requests, material receipts, effects and replies; EPF checks execution.
 use crate::{
     evidence::{Result, digest, save},
-    journal::{Call, Frame, one, records},
+    journal::{Call, Frame, one, records, take_json_frame},
 };
 use serde_json::{Value, json};
 use std::{
@@ -49,22 +49,6 @@ fn material<'a>(calls: &'a BTreeMap<u64, Call>, tool: &str, id: u64) -> Result<&
                 .result()
                 .is_ok_and(|(_, result)| receipt(result).ok() == Some(id))
     }))
-}
-fn consume<'a>(
-    (frames, used): (&'a BTreeMap<u64, Frame<'a>>, &mut BTreeSet<usize>),
-    (from, to, label): (u64, u64, u64),
-    (value, after, before): (&Value, usize, usize),
-) -> Result<&'a Frame<'a>> {
-    let frame = one(frames.values().filter(|f| {
-        f.direction(from, to)
-            && u64::from(f.logical_label) == label
-            && after < f.sent
-            && f.sent < before
-            && !used.contains(&f.sent)
-            && f.value().is_ok_and(|v| v == *value)
-    }))?;
-    used.insert(frame.sent);
-    Ok(frame)
 }
 const BUSINESS_ROLES: [&str; 18] = [
     "MERGE_REQUESTS",
@@ -286,22 +270,22 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             _ => unreachable!(),
         };
         let merge = tool == "merge_code";
-        let request = consume(
+        let request = take_json_frame(
             (&frames, &mut used),
             (
                 from,
                 if merge { role("MERGE_REQUESTS")? } else { to },
-                label(&request_name)?,
+                &[label(&request_name)?],
             ),
             (arguments, 0, call.emitted),
         )?;
         if merge {
-            let authorized = consume(
+            let authorized = take_json_frame(
                 (&frames, &mut used),
                 (
                     role("REPO_OWNER")?,
                     repo,
-                    label(&format!("InitialMerge{suffix}"))?,
+                    &[label(&format!("InitialMerge{suffix}"))?],
                 ),
                 (arguments, request.received, call.emitted),
             )?;
@@ -312,9 +296,9 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
         if request.received >= call.emitted {
             return Err("effect before its checked request receive".into());
         }
-        consume(
+        take_json_frame(
             (&frames, &mut used),
-            (to, from, label(&reply_name)?),
+            (to, from, &[label(&reply_name)?]),
             (result, at, next),
         )?;
         match tool {
@@ -332,9 +316,9 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         format!("Interface{suffix}"),
                     ),
                 ] {
-                    consume(
+                    take_json_frame(
                         (&frames, &mut used),
-                        (repo, peer, label(&message)?),
+                        (repo, peer, &[label(&message)?]),
                         (result, at, next),
                     )?;
                 }
@@ -355,9 +339,9 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                     if result["success"] != true || result["data"]["component"] != name {
                         return Err("test definition result".into());
                     }
-                    consume(
+                    take_json_frame(
                         (&frames, &mut used),
-                        (environment, repo, label(&format!("Tested{suffix}"))?),
+                        (environment, repo, &[label(&format!("Tested{suffix}"))?]),
                         (result, at, next),
                     )?;
                 } else {
@@ -385,7 +369,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                     used.insert(accepted.sent);
                     if result["success"] == true && u64::from(accepted.logical_label) == outcomes[0]
                     {
-                        consume(
+                        take_json_frame(
                             (&frames, &mut used),
                             (
                                 reviewer,
@@ -394,7 +378,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                                 } else {
                                     "REVIEW_REPAIR_B"
                                 })?,
-                                outcomes[0],
+                                &[outcomes[0]],
                             ),
                             (result, at, accepted.sent),
                         )?;
@@ -405,9 +389,9 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         role("TEST_FILE")?,
                         environment,
                     ] {
-                        consume(
+                        take_json_frame(
                             (&frames, &mut used),
-                            (repo, peer, label(&format!("ReviewFeedback{suffix}"))?),
+                            (repo, peer, &[label(&format!("ReviewFeedback{suffix}"))?]),
                             (result, committed, next),
                         )?;
                     }
@@ -446,9 +430,13 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         "publication differs from its actual candidate or positive approval".into(),
                     );
                 }
-                let ready = consume(
+                let ready = take_json_frame(
                     (&frames, &mut used),
-                    (reviewer, merge_file, label(&format!("MergeReady{suffix}"))?),
+                    (
+                        reviewer,
+                        merge_file,
+                        &[label(&format!("MergeReady{suffix}"))?],
+                    ),
                     (approved, review.result()?.0, call.emitted),
                 )?;
                 if ready.received >= request.received {
@@ -562,12 +550,12 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         return Err("CI used different actual test inputs".into());
                     }
                 }
-                let incoming = consume(
+                let incoming = take_json_frame(
                     (&frames, &mut used),
                     (
                         build,
                         role("CI_FILE")?,
-                        label(&format!("FilePublication{suffix}"))?,
+                        &[label(&format!("FilePublication{suffix}"))?],
                     ),
                     (merged, merge.result()?.0, call.emitted),
                 )?;
@@ -587,25 +575,25 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         "Failed"
                     }
                 ))?;
-                let gate = consume(
+                let gate = take_json_frame(
                     (&frames, &mut used),
-                    (build, role("REPO_OWNER")?, decision),
+                    (build, role("REPO_OWNER")?, &[decision]),
                     (result, at, next),
                 )?;
-                let to_reviewer = consume(
+                let to_reviewer = take_json_frame(
                     (&frames, &mut used),
-                    (build, publisher, label(&format!("CiResult{suffix}"))?),
+                    (build, publisher, &[label(&format!("CiResult{suffix}"))?]),
                     (result, gate.sent, next),
                 )?;
-                let outcome = consume(
+                let outcome = take_json_frame(
                     (&frames, &mut used),
-                    (reviewer, repo, decision),
+                    (reviewer, repo, &[decision]),
                     (result, to_reviewer.received, next),
                 )?;
                 let committed = outcome.received;
-                consume(
+                take_json_frame(
                     (&frames, &mut used),
-                    (repo, build, decision),
+                    (repo, build, &[decision]),
                     (result, committed, next),
                 )?;
                 for peer in [
@@ -615,9 +603,9 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                     role("TEST_FILE")?,
                     environment,
                 ] {
-                    consume(
+                    take_json_frame(
                         (&frames, &mut used),
-                        (publisher, peer, label("CiUpdate")?),
+                        (publisher, peer, &[label("CiUpdate")?]),
                         (result, outcome.sent, next),
                     )?;
                 }
