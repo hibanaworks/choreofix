@@ -186,7 +186,7 @@ pub fn job_quality<const JOB: u8, const WORKER: u8, const CAP: u8>(
     )
 }
 
-fn begin0<const WORKER: u8>() -> impl Projectable + Copy {
+pub(crate) fn begin0<const WORKER: u8>() -> impl Projectable + Copy {
     g::seq(
         g::send::<DEPOT, WORKER, Loan0>(),
         g::send::<TOOL_0, DEPOT, Request0<WORKER>>(),
@@ -198,79 +198,60 @@ fn begin1<const WORKER: u8>() -> impl Projectable {
         g::send::<TOOL_1, DEPOT, Request1<WORKER>>(),
     )
 }
-fn finish0<const WORKER: u8>(part: impl Projectable + Copy) -> impl Projectable + Copy {
+fn finish0<const WORKER: u8>() -> impl Projectable + Copy {
     g::seq(
         g::send::<DEPOT, TOOL_0, Reply0>(),
-        g::par(g::send::<WORKER, DEPOT, Return0>(), part),
+        g::send::<WORKER, DEPOT, Return0>(),
     )
 }
-fn finish1<const WORKER: u8>(part: impl Projectable) -> impl Projectable {
+fn finish1<const WORKER: u8>() -> impl Projectable {
     g::seq(
         g::send::<DEPOT, TOOL_1, Reply1>(),
-        g::par(g::send::<WORKER, DEPOT, Return1>(), part),
+        g::send::<WORKER, DEPOT, Return1>(),
     )
 }
-pub(crate) fn whole0<const WORKER: u8>(part: impl Projectable + Copy) -> impl Projectable + Copy {
-    g::seq(begin0::<WORKER>(), finish0::<WORKER>(part))
+fn whole0<const WORKER: u8>() -> impl Projectable + Copy {
+    g::seq(begin0::<WORKER>(), finish0::<WORKER>())
 }
-fn whole1<const WORKER: u8>(part: impl Projectable) -> impl Projectable {
-    g::seq(begin1::<WORKER>(), finish1::<WORKER>(part))
+fn whole1<const WORKER: u8>() -> impl Projectable {
+    g::seq(begin1::<WORKER>(), finish1::<WORKER>())
 }
 
-fn last_two_order<const FIRST: u8, const LAST: u8>(
-    first: impl Projectable + Copy,
-    last: impl Projectable + Copy,
-) -> impl Projectable {
+fn last_two_order<const FIRST: u8, const LAST: u8>() -> impl Projectable {
     g::seq(
         begin0::<FIRST>(),
         g::route(
-            g::seq(finish0::<FIRST>(first), whole0::<LAST>(last)),
-            g::par(finish0::<FIRST>(first), whole1::<LAST>(last)),
+            g::seq(finish0::<FIRST>(), whole0::<LAST>()),
+            g::par(finish0::<FIRST>(), whole1::<LAST>()),
         )
         .resolve::<ARRIVAL_1>(),
     )
 }
-fn last_two<const A: u8, const B: u8>(
-    a: impl Projectable + Copy,
-    b: impl Projectable + Copy,
-) -> impl Projectable {
-    g::route(last_two_order::<A, B>(a, b), last_two_order::<B, A>(b, a)).resolve::<NEXT>()
+fn last_two<const A: u8, const B: u8>() -> impl Projectable {
+    g::route(last_two_order::<A, B>(), last_two_order::<B, A>()).resolve::<NEXT>()
 }
-
-fn two_running<const FIRST: u8, const SECOND: u8, const THIRD: u8>(
-    first: impl Projectable + Copy,
-    second: impl Projectable + Copy,
-    third: impl Projectable + Copy,
-) -> impl Projectable {
+fn two_running<const FIRST: u8, const SECOND: u8, const THIRD: u8>() -> impl Projectable {
     g::seq(
         begin1::<SECOND>(),
         g::route(
             g::par(
-                g::seq(finish0::<FIRST>(first), whole0::<THIRD>(third)),
-                finish1::<SECOND>(second),
+                g::seq(finish0::<FIRST>(), whole0::<THIRD>()),
+                finish1::<SECOND>(),
             ),
             g::par(
-                finish0::<FIRST>(first),
-                g::seq(finish1::<SECOND>(second), whole1::<THIRD>(third)),
+                finish0::<FIRST>(),
+                g::seq(finish1::<SECOND>(), whole1::<THIRD>()),
             ),
         )
         .resolve::<FINISHED_FIRST>(),
     )
 }
-fn first_job<const FIRST: u8, const A: u8, const B: u8>(
-    first: impl Projectable + Copy,
-    a: impl Projectable + Copy,
-    b: impl Projectable + Copy,
-) -> impl Projectable {
+fn first_job<const FIRST: u8, const A: u8, const B: u8>() -> impl Projectable {
     g::seq(
         begin0::<FIRST>(),
         g::route(
-            g::seq(finish0::<FIRST>(first), last_two::<A, B>(a, b)),
-            g::route(
-                two_running::<FIRST, A, B>(first, a, b),
-                two_running::<FIRST, B, A>(first, b, a),
-            )
-            .resolve::<NEXT>(),
+            g::seq(finish0::<FIRST>(), last_two::<A, B>()),
+            g::route(two_running::<FIRST, A, B>(), two_running::<FIRST, B, A>()).resolve::<NEXT>(),
         )
         .resolve::<ARRIVAL_0>(),
     )
@@ -293,7 +274,10 @@ fn workstation<
                 g::send::<MACHINE, DEPOT, Intent<WORKER>>(),
                 g::seq(
                     g::send::<DEPOT, MACHINE, StationResult<MACHINE>>(),
-                    g::send::<WORKER, OWNER, JobLoan<MACHINE>>(),
+                    g::par(
+                        g::send::<WORKER, OWNER, JobLoan<MACHINE>>(),
+                        g::send::<WORKER, PRIMARY_FILE, JobResult>(),
+                    ),
                 ),
             ),
         ),
@@ -371,14 +355,11 @@ pub fn source() -> impl Projectable {
             >(),
         ),
     );
-    let alpha = g::send::<WORKER_A, ALPHA, JobResult>();
-    let beta = g::send::<WORKER_B, BETA, JobResult>();
-    let gamma = g::send::<WORKER_C, GAMMA, JobResult>();
     let serving = g::route(
-        first_job::<WORKER_A, WORKER_B, WORKER_C>(alpha, beta, gamma),
+        first_job::<WORKER_A, WORKER_B, WORKER_C>(),
         g::route(
-            first_job::<WORKER_B, WORKER_A, WORKER_C>(beta, alpha, gamma),
-            first_job::<WORKER_C, WORKER_A, WORKER_B>(gamma, alpha, beta),
+            first_job::<WORKER_B, WORKER_A, WORKER_C>(),
+            first_job::<WORKER_C, WORKER_A, WORKER_B>(),
         )
         .resolve::<FIRST_B>(),
     )

@@ -2370,6 +2370,9 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
     let wash = root.join("vendor/hibana-wash/target/wasm32-wasip1/release/hibana-wash.wasm");
     fs::create_dir(&output)?;
     archive_build_receipt(&binary, &receipt, &output)?;
+    let artifact = projection::archive(&binary, &output, "11M")?;
+    let projection_path = output.join("projection.json");
+    let projection_sha256 = crate::evidence::digest(&projection_path)?;
     let jobs = [
         ("WORKER_A", "alpha_job_a", "ALPHA"),
         ("WORKER_B", "beta_job_b", "BETA"),
@@ -2426,12 +2429,12 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
             fs::create_dir(&directory)?;
             let journal = directory.join("events.jsonl");
             let trace = Trace::create(&journal)?;
-            let artifact = projection::archive(&binary, &directory, "11M")?;
+            fs::hard_link(&projection_path, directory.join("projection.json"))?;
             crate::evidence::save(
                 &directory.join("case.json"),
                 &json!({
                     "runtime_binary_sha256": artifact["runtime_binary_sha256"],
-                    "compiled_projection_sha256": crate::evidence::digest(&directory.join("projection.json"))?,
+                    "compiled_projection_sha256": projection_sha256,
                 }),
             )?;
             let (world, _) = Simulator::new("11M", 0, 1.0, trace.clone(), failures)?;
@@ -2453,7 +2456,7 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                             let notice = shell_json_result(&guest.command("DISPATCHER", format!("cat /service/{verdict_dir}/{job}")).await?)?;
                             assert_eq!(&notice, inspection);
                             let args = json!({"job_id":job,"reason":format!("inspect {} again",inspection["data"]["input_part"]["artifact_id"].as_str().ok_or("part ID")?)});
-                            let path = format!("/service/dispatch/{job}");
+                            let path = format!("/service/dispatch_rework/{job}");
                             let nonblocking = format!("printf '%s' '{args}' | dd of={path} oflag=nonblock");
                             if accepted {
                                 let refused = guest.command("DISPATCHER", nonblocking).await?;
@@ -2478,7 +2481,7 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                         };
                         let inspect = async |i: usize, part: &Value| -> Result<Value> {
                             let job = jobs[i].1;
-                            let path = format!("/service/inspect/{job}");
+                            let path = format!("/service/inspect_quality/{job}");
                             let wrong = json!({"job_id":jobs[(i+1)%3].1});
                             let refused = guest.command("INSPECTOR", format!("printf '%s' '{wrong}' > {path}")).await?;
                             assert!(refused["stdout"].as_str().is_some_and(|s| s.contains("Invalid argument")), "{refused}");
@@ -2493,9 +2496,15 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                             assert!(repeat["stdout"].as_str().is_some_and(|s| s.contains("Permission denied")), "{repeat}");
                             Ok(result)
                         };
+                        if index == 0 && profile == "serial" {
+                            for (agent, _, _) in jobs {
+                                let early = guest.command(agent, "dd if=/service/do_job iflag=nonblock".into()).await?;
+                                assert!(early["stdout"].as_str().is_some_and(|s| s.contains("Permission denied")), "result read before submission: {agent}: {early}");
+                            }
+                        }
                         let early = guest.command("INSPECTOR", "dd if=/service/parts/alpha_job_a iflag=nonblock".into()).await?;
                         assert!(early["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{early}");
-                        let premature = guest.command("DISPATCHER", "printf '%s' '{\"job_id\":\"alpha_job_a\"}' | dd of=/service/dispatch/alpha_job_a oflag=nonblock".into()).await?;
+                        let premature = guest.command("DISPATCHER", "printf '%s' '{\"job_id\":\"alpha_job_a\"}' | dd of=/service/dispatch_rework/alpha_job_a oflag=nonblock".into()).await?;
                         assert!(premature["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{premature}");
                         let submit = async |i: usize| -> Result<()> {
                             let (agent, job, _) = jobs[i];
@@ -2619,7 +2628,7 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                         for i in order {
                             let job = other_jobs[i].1;
                             let args = json!({"job_id":job});
-                            let sent = guest.command("INSPECTOR",format!("printf '%s' '{args}' > /service/inspect/{job}")).await?;
+                            let sent = guest.command("INSPECTOR",format!("printf '%s' '{args}' > /service/inspect_quality/{job}")).await?;
                             assert_eq!(sent["stdout"], "wash> ", "{sent}");
                         }
                         let mut returned = std::collections::BTreeSet::new();

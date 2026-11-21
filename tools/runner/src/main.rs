@@ -400,10 +400,10 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
                 "/service/do_job (gamma_job_c), /service/do_job_at_other_station (alpha_job_c); their readings are /service/job_update and /service/other_job_update"
             }
             "INSPECTOR" => {
-                "/service/parts/<job_id> for the manufactured part, /service/inspect/<job_id> for the inspection request, and /service/inspection_result for the actual gauge reading"
+                "read-only /service/parts/<job_id> delivers the finished part; write-only /service/inspect_quality/<job_id> accepts {\"job_id\":\"<job_id>\"}; read-only /service/inspection_result delivers the actual gauge reading"
             }
             "DISPATCHER" => {
-                "/service/approved/<job_id> and /service/failed/<job_id> for incoming verdicts; /service/dispatch/<job_id> accepts a rework request and returns its actual order"
+                "read-only /service/approved/<job_id> and /service/failed/<job_id> deliver verdicts; /service/dispatch_rework/<job_id> accepts {\"job_id\":\"<job_id>\"} with optional reason on write and delivers the actual order on read"
             }
             _ => return Err("unknown workshop participant".into()),
         }
@@ -642,7 +642,7 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
         "/service/read_literature, /service/draft_content, /service/write_to_document and /service/review_own_work"
     };
     let coordination = if task == "11M" {
-        "Choose your own shell commands and job order. A worker reads a manufacturing result from the same file used to request the job. The update for that job contains its actual approval or rework order. The inspector's gauge returns the material it measured and the inspection receipt. A dispatcher can probe a verdict file with dd iflag=nonblock without waiting for a particular outcome. Each successful read of an incoming delivery consumes that occurrence."
+        "Choose your own shell commands and job order. A worker reads a manufacturing result from the same file used to request the job. The update for that job contains its actual approval or rework order. The inspector's gauge returns the material it measured and the inspection receipt. For any incoming delivery, dd if=<path> iflag=nonblock probes that file; Resource temporarily unavailable means there is no delivery ready on that file. A blocking read waits for that particular delivery. Each successful read of an incoming delivery consumes that occurrence."
     } else if large_document {
         "Each successful read of an incoming file consumes one delivery. Resource temporarily unavailable means that this read has no delivery ready; Permission denied means the attempted operation was refused. Neither message reports task completion. A saved copy in /work can be read again. A new blocking read waits for another delivery on that particular file, even if another file has data. For writers, data.status in the delivered outcome identifies the work. A review can include the reviewer's own comments in data.feedback. A needs_revision result calls for a substantive revision: /service/revise_section/<chapter> takes section_name and optional feedback text. A minor_revision result names exact replacements: /service/apply_minor_edit/<chapter> takes section_name and review_id. A review_id can also identify a major review; its presence alone does not mean minor_revision. A fact_check or review_sections result concerns the identified manuscript. On files that receive the whole-document decision, publication has tool_name combine_sections and success true. A withheld manuscript has a reviews array and no tool_name."
     } else if cicd_pipeline {

@@ -665,7 +665,16 @@ async fn all_six_quality_continuations_preserve_actual_rework_and_close_on_appro
     fn tool_job<const JOB: u8, const CAP: u8>() -> impl Projectable + Copy {
         g::seq(
             g::send::<CAP, DEPOT, Intent<JOB>>(),
-            whole0::<JOB>(g::send::<JOB, CAP, JobResult>()),
+            g::seq(
+                begin0::<JOB>(),
+                g::seq(
+                    g::send::<DEPOT, TOOL_0, Reply0>(),
+                    g::par(
+                        g::send::<JOB, DEPOT, Return0>(),
+                        g::send::<JOB, CAP, JobResult>(),
+                    ),
+                ),
+            ),
         )
     }
     fn station_job<const JOB: u8, const CAP: u8>() -> impl Projectable + Copy {

@@ -15,57 +15,45 @@ pub async fn run<const WORKER: u8, const MACHINE: u8>(
         let admitted = imp::submission::<WORKER>(arguments.value());
         let mut machine = intent.recv::<JobLoan<MACHINE>>().await?;
         machine.send::<Intent<WORKER>>(&arguments).await?;
-        let branch = work.offer().await?;
-        let material = match branch.label() {
-            Loan0::LOGICAL_LABEL => {
-                async {
-                    let mut tool = branch.recv::<Loan0>().await?;
-                    tool.send::<Request0<WORKER>>(&arguments.into()).await?;
-                    let result = imp::decode(tool.recv::<Reply0>().await?)?;
-                    imp::completed(&admitted, &result, None)?;
-                    let bytes = imp::encode(&result)?;
-                    let material = result["data"]["part"].clone();
-                    let [mut returned, mut part] = work.par()?;
-                    async {
-                        returned.send::<Return0>(tool).await?;
-                    };
-                    async {
-                        part.send::<JobResult>(&bytes.as_slice()).await?;
-                    };
-                    Ok(material)
-                }
-                .await
-            }
-            Loan1::LOGICAL_LABEL => {
-                async {
-                    let mut tool = branch.recv::<Loan1>().await?;
-                    tool.send::<Request1<WORKER>>(&arguments.into()).await?;
-                    let result = imp::decode(tool.recv::<Reply1>().await?)?;
-                    imp::completed(&admitted, &result, None)?;
-                    let bytes = imp::encode(&result)?;
-                    let material = result["data"]["part"].clone();
-                    let [mut returned, mut part] = work.par()?;
-                    async {
-                        returned.send::<Return1>(tool).await?;
-                    };
-                    async {
-                        part.send::<JobResult>(&bytes.as_slice()).await?;
-                    };
-                    Ok(material)
-                }
-                .await
-            }
-            _ => Err(ShellError::message("unexpected tool loan")),
-        }?;
-        let actual = imp::decode(machine.recv::<StationResult<MACHINE>>().await?)?;
-        imp::completed(&admitted, &actual, None)?;
-        if actual["data"]["part"] != material {
+        let (tool_result, station_result) = async {
+            async {
+                let branch = work.offer().await?;
+                let result = match branch.label() {
+                    Loan0::LOGICAL_LABEL => {
+                        let mut tool = branch.recv::<Loan0>().await?;
+                        tool.send::<Request0<WORKER>>(&arguments.into()).await?;
+                        let result = imp::decode(tool.recv::<Reply0>().await?)?;
+                        work.send::<Return0>(tool).await?;
+                        result
+                    }
+                    Loan1::LOGICAL_LABEL => {
+                        let mut tool = branch.recv::<Loan1>().await?;
+                        tool.send::<Request1<WORKER>>(&arguments.into()).await?;
+                        let result = imp::decode(tool.recv::<Reply1>().await?)?;
+                        work.send::<Return1>(tool).await?;
+                        result
+                    }
+                    _ => return Err(ShellError::message("unexpected tool loan")),
+                };
+                imp::completed(&admitted, &result, None)?;
+                Ok::<_, ShellError>(result)
+            };
+            async {
+                let actual = imp::decode(machine.recv::<StationResult<MACHINE>>().await?)?;
+                imp::completed(&admitted, &actual, None)?;
+                intent.send::<JobLoan<MACHINE>>(machine).await?;
+                Ok::<_, ShellError>(actual)
+            };
+        }
+        .await?;
+        if tool_result != station_result {
             return Err(ShellError::message(
-                "station and tool returned different material",
+                "station and tool returned different manufacturing results",
             ));
         }
-        intent.send::<JobLoan<MACHINE>>(machine).await?;
-        material
+        let bytes = imp::encode(&station_result)?;
+        intent.send::<JobResult>(&bytes.as_slice()).await?;
+        station_result["data"]["part"].clone()
     };
     let (result, bytes) = async {
         let [mut delivery, mut check] = work.par()?;

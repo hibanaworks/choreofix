@@ -1,0 +1,135 @@
+{
+  "task": "11M",
+  "task_qualified": false,
+  "scored_benchmark": false,
+  "archive": "output/verification/11m-files.Wfig5Vr8",
+  "live_after_station_result_fix": {
+    "condition_depth": 0,
+    "elapsed_seconds": 101.818009166,
+    "participant_outcomes": {
+      "WORKER_B": {
+        "returned_model": "gpt-6-luna",
+        "returned_effort": "xhigh",
+        "status": "completed",
+        "tool_calls": 11
+      },
+      "DISPATCHER": {
+        "returned_model": "gpt-6-luna",
+        "returned_effort": "xhigh",
+        "status": "harness_error",
+        "tool_calls": 14
+      },
+      "INSPECTOR": {
+        "returned_model": "gpt-6-luna",
+        "returned_effort": "xhigh",
+        "status": "harness_error",
+        "tool_calls": 17
+      },
+      "WORKER_A": {
+        "returned_model": "gpt-6-luna",
+        "returned_effort": "xhigh",
+        "status": "harness_error",
+        "tool_calls": 14
+      },
+      "WORKER_C": {
+        "returned_model": "gpt-6-luna",
+        "returned_effort": "xhigh",
+        "status": "harness_error",
+        "tool_calls": 12
+      }
+    },
+    "business_complete": true,
+    "simulator_violations": [],
+    "completed_effects": {
+      "do_job": 6,
+      "inspect_quality": 6
+    },
+    "protocol": {
+      "error": "EndpointError { operation: \"send\", kind: SessionFault(EndpointDropped) }",
+      "status": "failed",
+      "type": "run_result"
+    },
+    "run_audit": "rejected",
+    "approval_frame_actions": {
+      "606": {
+        "job_id": "alpha_job_a",
+        "actions": [
+          "send"
+        ]
+      },
+      "842": {
+        "job_id": "beta_job_b",
+        "actions": [
+          "send"
+        ]
+      },
+      "909": {
+        "job_id": "gamma_job_c",
+        "actions": [
+          "send"
+        ]
+      },
+      "1175": {
+        "job_id": "alpha_job_c",
+        "actions": [
+          "send"
+        ]
+      },
+      "1406": {
+        "job_id": "gamma_job_b",
+        "actions": [
+          "send"
+        ]
+      },
+      "1685": {
+        "job_id": "beta_job_a",
+        "actions": [
+          "send"
+        ]
+      }
+    },
+    "guest_exits": [
+      "WORKER_B"
+    ],
+    "binary_sha256": {
+      "runner": "eac4e62777ed9b6055317c8315095fc182d9e036d3323a83bd0adc624b001971",
+      "runtime": "a5cd63fd1e50a6efa4f291487744cec1eb99897bc160b8b3253e11b7a88bb67a",
+      "wash.wasm": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca"
+    },
+    "evidence_sha256": {
+      "result.json": "1f93ff56eb7bc82a13dbc6d69cf320b74f60edf76aca2a546eb33bd4c2fa6b6c",
+      "events.jsonl": "276ea25e12332168eba51c6e1bd104b1184bb829ca17352726b05799fe81a871",
+      "versions.json": "9b3f276db782dbd385d6bc31abc914b8394f2e0caf1a5da3db10ce9951843773",
+      "projection.json": "b8ff733a294fe024ceaacb55a984de2273bfba08ced4514afcffe9f9a88bba89",
+      "guest-outcome.json": "964cc75d2d99dd185b7094d047b932b38ad8d3620a772df3ca4cc10585101ce9",
+      "model-outcomes.json": "308c4771fde314e0ac73a711406e77d3dc15b0e9cfc768e8f9661abf97415e2e",
+      "build-receipt.json": "3f54498253eae581ff6c488bda6b7ce831aa8cd648eaf82fe0a7d09517278286",
+      "source-manifest.json": "533ae39066aa8753a5746ed1c59c4a91abd20ea1b9cacb9e6fa8fcdf660cc92a"
+    }
+  },
+  "same_binary_scripted_wasm": {
+    "cases": 30,
+    "business_complete": 6,
+    "business_incomplete_with_open_orders": 24,
+    "simulator_violations": 0,
+    "effects": {
+      "do_job": 180,
+      "inspect_quality": 180,
+      "dispatch_rework": 48
+    },
+    "epf_records": 205896,
+    "runtime_sha256": "a5cd63fd1e50a6efa4f291487744cec1eb99897bc160b8b3253e11b7a88bb67a",
+    "ordering_test": "Before submission, a nonblocking read on each primary worker file returns WASI EACCES. Valid submissions in the same run then succeed."
+  },
+  "earlier_interface_only_pilot": {
+    "run": "live-0",
+    "exit_code": 101,
+    "final_score_recorded": false,
+    "completed_effects_in_preserved_prefix": {
+      "do_job": 3,
+      "inspect_quality": 3
+    },
+    "events_sha256": "eb9211c9bb508a0cbcf1586a1570b345487bd03e586cd8aecc1023184baf0885"
+  },
+  "remaining": "All six approvals were sent. The dispatcher polled failure files and exited without receiving these approvals. The six-job Wasm protocol still ends after delivering a rework order and does not yet manufacture the replacement."
+}
