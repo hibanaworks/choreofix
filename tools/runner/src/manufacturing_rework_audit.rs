@@ -61,7 +61,7 @@ pub(super) fn verify(
     let bench = role("BENCH")?;
     let gauge = role("GAUGE")?;
     let readout = role("READOUT")?;
-    let depot = role("DEPOT")?;
+    let cabinet = role("CABINET")?;
     let world = history.score["events"]
         .as_array()
         .ok_or("workshop score events")?;
@@ -199,69 +199,70 @@ pub(super) fn verify(
                     Some(call.emitted),
                 )?
                 .received()?;
-                if index < 3 {
-                    frame(
-                        machine,
-                        depot,
-                        10,
+                let drive = role(&format!("{station}_DRIVE"))?;
+                let input = frame(
+                    machine,
+                    drive,
+                    if index < 3 { 10 } else { 20 },
+                    Some(args),
+                    Some(claim),
+                    Some(call.emitted),
+                )?
+                .received()?;
+                let equipment_result = if index < 3 {
+                    let demand = frame(
+                        drive,
+                        cabinet,
+                        index,
                         Some(args),
-                        Some(claim),
+                        Some(input),
                         Some(call.emitted),
-                    )?;
-                    let tool_role = [role("TOOL_0")?, role("TOOL_1")?];
-                    let (slot, _) =
-                        journal::one(tool_role.iter().enumerate().filter(|(slot, t)| {
-                            history.frames.values().any(|f| {
-                                f.direction(**t, depot)
-                                    && f.logical_label == 3 + *slot as u8
-                                    && f.sent > admission
-                                    && f.received.is_some_and(|at| at < call.emitted)
-                                    && f.value().is_ok_and(|v| v == *args)
-                            })
-                        }))?;
-                    frame(
-                        tool_role[slot],
-                        depot,
-                        3 + slot as u8,
-                        Some(args),
-                        Some(admission),
-                        Some(call.emitted),
-                    )?;
-                    let tool_reply = frame(
-                        depot,
-                        tool_role[slot],
-                        5 + slot as u8,
-                        Some(result),
-                        Some(reply_at),
-                        None,
                     )?
                     .received()?;
+                    let tools = [role("TOOL_0")?, role("TOOL_1")?];
+                    let physical = journal::one(tools.into_iter().filter(|&t| {
+                        history.frames.values().any(|f| {
+                            f.direction(t, drive)
+                                && u64::from(f.logical_label) == t
+                                && f.sent > demand
+                                && f.received.is_some_and(|at| at < call.emitted)
+                                && f.value().is_ok_and(|v| v == *args)
+                        })
+                    }))?;
+                    let label = u8::try_from(physical)?;
                     frame(
-                        depot,
-                        machine,
-                        machine.try_into()?,
-                        Some(result),
-                        Some(reply_at),
-                        None,
-                    )?;
-                    frame(worker, file, 21, Some(result), Some(tool_reply), None)?;
-                    frame(worker, inspector, index, Some(part), Some(tool_reply), None)?;
-                } else {
-                    let drive = role(&format!("{station}_DRIVE"))?;
-                    frame(
-                        machine,
+                        physical,
                         drive,
-                        20,
+                        label,
                         Some(args),
-                        Some(claim),
+                        Some(demand),
                         Some(call.emitted),
                     )?;
-                    let returned = frame(drive, machine, 21, Some(result), Some(reply_at), None)?
-                        .received()?;
-                    frame(worker, file, 21, Some(result), Some(returned), None)?;
-                    frame(worker, inspector, index, Some(part), Some(returned), None)?;
-                }
-                parts[i] = Some((part, reply_at));
+                    frame(drive, physical, label, Some(result), Some(reply_at), None)?.received()?
+                } else {
+                    reply_at
+                };
+                let returned = frame(
+                    drive,
+                    machine,
+                    21,
+                    Some(result),
+                    Some(equipment_result),
+                    None,
+                )?
+                .received()?;
+                frame(worker, file, 21, Some(result), Some(returned), None)?;
+                frame(worker, inspector, index, Some(part), Some(returned), None)?;
+                let delivered = frame(
+                    worker,
+                    bench,
+                    u8::try_from(file)?,
+                    Some(part),
+                    Some(returned),
+                    None,
+                )?
+                .received()?;
+                parts[i] = Some((part, delivered));
                 readings[i] = None;
                 orders[i] = None;
                 intervals.push((station, index < 3, call.started()?.1, call.ended()?.1));
@@ -276,21 +277,12 @@ pub(super) fn verify(
                 {
                     return Err("wrong or repeated inspected part".into());
                 }
-                let submitted = frame(
-                    inspector,
-                    worker,
-                    index,
-                    Some(args),
-                    None,
-                    Some(call.emitted),
-                )?
-                .received()?;
                 let presented = frame(
-                    worker,
+                    inspector,
                     bench,
                     index,
                     Some(args),
-                    Some(submitted),
+                    Some(parts[i].ok_or("inspection without manufacture")?.1),
                     Some(call.emitted),
                 )?
                 .received()?;
@@ -306,11 +298,7 @@ pub(super) fn verify(
                     frame(readout, gauge, 34, Some(result), Some(reply_at), None)?.received()?;
                 frame(gauge, inspector, 34, Some(result), Some(actual), None)?;
                 let approved = result["success"].as_bool().ok_or("missing gauge verdict")?;
-                let verdict_label = match (index < 3, approved) {
-                    (true, _) => index,
-                    (false, true) => 25,
-                    (false, false) => 26,
-                };
+                let verdict_label = if approved { 25 } else { 26 };
                 let measured = frame(
                     bench,
                     worker,
@@ -323,11 +311,12 @@ pub(super) fn verify(
                 if approved {
                     frame(worker, file, 36, Some(result), Some(measured), None)?;
                 }
+                let closed = json!({"closed":job});
                 let delivered = frame(
                     worker,
                     dispatcher,
                     26,
-                    (!approved).then_some(result),
+                    Some(if approved { &closed } else { result }),
                     Some(measured),
                     None,
                 )?
@@ -370,7 +359,8 @@ pub(super) fn verify(
             _ => unreachable!(),
         }
         evidence.push(
-            json!({"rpc_id":id,"agent":expected_agent,"tool":tool,"job":job,"frames":matched}),
+            json!({"rpc_id":id,"agent":expected_agent,"tool":tool,"job":job,"frames":matched,
+                   "effect_start_row":call.started()?.0,"effect_end_row":call.ended()?.0}),
         );
     }
     for (id, f) in &history.frames {

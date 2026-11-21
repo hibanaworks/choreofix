@@ -1,5 +1,5 @@
 //! Each worker has direct ChoreoFS requests on two distinct workstations.
-use super::manufacturing_rework::{global::*, imp, localside};
+use super::manufacturing_rework::{global::*, localside};
 use crate::shell::{
     GUEST_MEMORY_BYTES, ShellError, ShellResult,
     global::{Exit, FileExit, Loan, file_metadata, private_io},
@@ -12,7 +12,6 @@ use hibana::{
         SessionKitStorage,
         ids::SessionId,
         program::{Projectable, project},
-        resolver::ResolverRef,
     },
 };
 use hibana_wasip1_runtime::{
@@ -20,8 +19,7 @@ use hibana_wasip1_runtime::{
     choreofs::{ChoreoFsObject, FdSpec, ObjectId},
     protocol::{FdBinding, FdReadRow, FdWriteRow},
 };
-use serde_json::{Value, json};
-use std::cell::Cell;
+use serde_json::json;
 
 const A_VM: u8 = 9;
 const B_VM: u8 = 10;
@@ -186,56 +184,71 @@ pub async fn run(path: &str) -> ShellResult<()> {
             ),
         ),
     );
-    let global = g::seq(
-        g::par(
-            workstation_files(),
-            g::par(
-                g::seq(
-                    g::send::<INSPECTOR_FILES, INSPECTOR_VM, Loan<BENCH>>(),
-                    g::send::<INSPECTOR_FILES, INSPECTOR_VM, Loan<INSPECTOR>>(),
-                ),
-                g::send::<DISPATCHER_FILES, DISPATCHER_VM, Loan<DISPATCHER>>(),
-            ),
-        ),
-        g::par(
-            source(),
-            g::par(
-                g::par(io, metadata),
-                g::par(
-                    g::par(
-                        g::seq(
-                            file_metadata::<INSPECTOR, INSPECTOR_FILES>().roll(),
-                            g::send::<BENCH, INSPECTOR_FILES, FileExit>(),
-                        ),
-                        g::seq(
-                            private_io::<INSPECTOR_VM, INSPECTOR_TERM>(),
-                            g::send::<INSPECTOR_VM, INSPECTOR_TERM, Exit>(),
-                        ),
-                    ),
-                    shell_io::<DISPATCHER_VM, DISPATCHER, DISPATCHER_FILES, DISPATCHER_TERM>(),
-                ),
-            ),
-        ),
-    );
-    let global = g::seq(
-        global,
+    let bootstrap = g::par(
+        workstation_files(),
         g::par(
             g::seq(
-                g::send::<ALPHA_C_FILES, ALPHA_DRIVE, FileExit>(),
-                g::send::<ALPHA_DRIVE, ALPHA_OWNER, FileExit>(),
+                g::send::<INSPECTOR_FILES, INSPECTOR_VM, Loan<BENCH>>(),
+                g::send::<INSPECTOR_FILES, INSPECTOR_VM, Loan<INSPECTOR>>(),
             ),
+            g::send::<DISPATCHER_FILES, DISPATCHER_VM, Loan<DISPATCHER>>(),
+        ),
+    );
+    let files = g::par(
+        g::par(io, metadata),
+        g::par(
             g::par(
                 g::seq(
-                    g::send::<BETA_A_FILES, BETA_DRIVE, FileExit>(),
-                    g::send::<BETA_DRIVE, BETA_OWNER, FileExit>(),
+                    file_metadata::<INSPECTOR, INSPECTOR_FILES>().roll(),
+                    g::send::<BENCH, INSPECTOR_FILES, FileExit>(),
                 ),
                 g::seq(
-                    g::send::<GAMMA_B_FILES, GAMMA_DRIVE, FileExit>(),
-                    g::send::<GAMMA_DRIVE, GAMMA_OWNER, FileExit>(),
+                    private_io::<INSPECTOR_VM, INSPECTOR_TERM>(),
+                    g::send::<INSPECTOR_VM, INSPECTOR_TERM, Exit>(),
+                ),
+            ),
+            shell_io::<DISPATCHER_VM, DISPATCHER, DISPATCHER_FILES, DISPATCHER_TERM>(),
+        ),
+    );
+    let files_closed = g::seq(
+        files,
+        g::seq(
+            g::par(
+                g::send::<ALPHA_C_FILES, DEPOT, StationClosed<ALPHA_DRIVE>>(),
+                g::par(
+                    g::send::<BETA_A_FILES, DEPOT, StationClosed<BETA_DRIVE>>(),
+                    g::send::<GAMMA_B_FILES, DEPOT, StationClosed<GAMMA_DRIVE>>(),
+                ),
+            ),
+            g::send::<DEPOT, CABINET, FileExit>(),
+        ),
+    );
+    let global = g::seq(
+        bootstrap,
+        g::par(
+            source(),
+            g::seq(
+                files_closed,
+                g::par(
+                    g::seq(
+                        g::send::<DEPOT, ALPHA_DRIVE, StationClosed<ALPHA_DRIVE>>(),
+                        g::send::<ALPHA_DRIVE, ALPHA_OWNER, FileExit>(),
+                    ),
+                    g::par(
+                        g::seq(
+                            g::send::<DEPOT, BETA_DRIVE, StationClosed<BETA_DRIVE>>(),
+                            g::send::<BETA_DRIVE, BETA_OWNER, FileExit>(),
+                        ),
+                        g::seq(
+                            g::send::<DEPOT, GAMMA_DRIVE, StationClosed<GAMMA_DRIVE>>(),
+                            g::send::<GAMMA_DRIVE, GAMMA_OWNER, FileExit>(),
+                        ),
+                    ),
                 ),
             ),
         ),
     );
+    let cabinet = project::<CABINET>(&global);
     let inspector = project::<INSPECTOR>(&global);
     let bench = project::<BENCH>(&global);
     let gauge = project::<GAUGE>(&global);
@@ -317,6 +330,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
         ("WORKER_B", WORKER_B),
         ("WORKER_C", WORKER_C),
         ("DEPOT", DEPOT),
+        ("CABINET", CABINET),
         ("TOOL_0", TOOL_0),
         ("TOOL_1", TOOL_1),
         ("ALPHA", ALPHA),
@@ -368,6 +382,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
         rows(&worker_b),
         rows(&worker_c),
         rows(&depot),
+        rows(&cabinet),
         rows(&tool_0),
         rows(&tool_1),
         rows(&alpha),
@@ -385,7 +400,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
     ];
     let projection = json!({
         "type": "compiled_projection", "format_version": 1, "task": "11M",
-        "scope": "six jobs on shared workstations and one inspection gauge, with repeat manufacture on the three station-only jobs", "session": SESSION,
+        "scope": "six jobs on shared workstations and one inspection gauge, with repeat manufacture after a measured rejection and dispatch", "session": SESSION,
         "roles": roles,
         "programs": programs,
     });
@@ -441,43 +456,11 @@ pub async fn run(path: &str) -> ShellResult<()> {
     bus.projected(projection);
     let capture = |row| bus.capture(row);
     let mut slab = vec![0; 2 * 1024 * 1024];
-    let inputs = [const { Cell::new(Value::Null) }; 5];
-    let next = (&inputs[0], &inputs[1]);
     let mut storage = SessionKitStorage::uninit();
     let rv = storage.init().rendezvous(&mut slab, &bus.transport)?;
     rv.observe(&capture);
     let observations = rv.tap();
     let trial = async {
-        rv.set_resolver(
-            &depot,
-            ResolverRef::<FIRST_A>::decision_state(&inputs[0], imp::worker_a),
-        )
-        .map_err(|e| ShellError::message(format!("{e:?}")))?;
-        rv.set_resolver(
-            &depot,
-            ResolverRef::<FIRST_B>::decision_state(&inputs[0], imp::worker_b),
-        )
-        .map_err(|e| ShellError::message(format!("{e:?}")))?;
-        rv.set_resolver(
-            &depot,
-            ResolverRef::<NEXT>::decision_state(&next, imp::next),
-        )
-        .map_err(|e| ShellError::message(format!("{e:?}")))?;
-        rv.set_resolver(
-            &depot,
-            ResolverRef::<ARRIVAL_0>::decision_state(&inputs[2], imp::arrival),
-        )
-        .map_err(|e| ShellError::message(format!("{e:?}")))?;
-        rv.set_resolver(
-            &depot,
-            ResolverRef::<ARRIVAL_1>::decision_state(&inputs[3], imp::arrival),
-        )
-        .map_err(|e| ShellError::message(format!("{e:?}")))?;
-        rv.set_resolver(
-            &depot,
-            ResolverRef::<FINISHED_FIRST>::decision_state(&inputs[4], imp::finished),
-        )
-        .map_err(|e| ShellError::message(format!("{e:?}")))?;
         let mut inspector_files = rv.enter(session, &inspector_files)?;
         let bench = rv.enter(session, &bench)?;
         let readout = rv.enter(session, &readout)?;
@@ -635,6 +618,10 @@ pub async fn run(path: &str) -> ShellResult<()> {
             vm.send::<Exit>(&status).await?;
             Ok(())
         };
+        let mut cabinet = rv.enter(session, &cabinet)?;
+        async {
+            localside::tool_depot::run(&mut cabinet).await?;
+        };
         let mut depot = rv.enter(session, &depot)?;
         let tool_0 = rv.enter(session, &tool_0)?;
         let tool_1 = rv.enter(session, &tool_1)?;
@@ -661,7 +648,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
         let alpha_c = rv.enter(session, &alpha_c)?;
         async {
             file_metadata::run(&mut alpha_c_files, alpha_c, [OTHER_JOB, OTHER_UPDATE]).await?;
-            alpha_c_files.send::<FileExit>(&0).await?;
+            alpha_c_files.send::<StationClosed<ALPHA_DRIVE>>(&0).await?;
         };
         let mut beta_owner = rv.enter(session, &beta_owner)?;
         let beta_drive = rv.enter(session, &beta_drive)?;
@@ -671,7 +658,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
         let beta_a = rv.enter(session, &beta_a)?;
         async {
             file_metadata::run(&mut beta_a_files, beta_a, [OTHER_JOB, OTHER_UPDATE]).await?;
-            beta_a_files.send::<FileExit>(&0).await?;
+            beta_a_files.send::<StationClosed<BETA_DRIVE>>(&0).await?;
         };
         let mut gamma_owner = rv.enter(session, &gamma_owner)?;
         let gamma_drive = rv.enter(session, &gamma_drive)?;
@@ -681,7 +668,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
         let gamma_b = rv.enter(session, &gamma_b)?;
         async {
             file_metadata::run(&mut gamma_b_files, gamma_b, [OTHER_JOB, OTHER_UPDATE]).await?;
-            gamma_b_files.send::<FileExit>(&0).await?;
+            gamma_b_files.send::<StationClosed<GAMMA_DRIVE>>(&0).await?;
         };
         async {
             file_metadata::run(&mut a_files, alpha, WORKSTATION_FILES).await?;
@@ -757,29 +744,52 @@ pub async fn run(path: &str) -> ShellResult<()> {
             let alpha_drive = depot.recv::<Loan<ALPHA_DRIVE>>().await?;
             let beta_drive = depot.recv::<Loan<BETA_DRIVE>>().await?;
             let gamma_drive = depot.recv::<Loan<GAMMA_DRIVE>>().await?;
+            depot.send::<SlotLoan<TOOL_0, TOOL_0>>(tool_0).await?;
+            depot.send::<SlotLoan<TOOL_1, TOOL_1>>(tool_1).await?;
             async {
-                localside::worker::drive::<ALPHA_DRIVE, ALPHA_JOB_C>(alpha_drive, &simulator)
-                    .await?;
+                localside::worker::drive::<ALPHA_DRIVE, WORKER_A, ALPHA_JOB_C, 60, 63>(
+                    alpha_drive,
+                    &simulator,
+                )
+                .await?;
             };
             async {
-                localside::worker::drive::<BETA_DRIVE, BETA_JOB_A>(beta_drive, &simulator).await?;
+                localside::worker::drive::<BETA_DRIVE, WORKER_B, BETA_JOB_A, 61, 64>(
+                    beta_drive, &simulator,
+                )
+                .await?;
             };
             async {
-                localside::worker::drive::<GAMMA_DRIVE, GAMMA_JOB_B>(gamma_drive, &simulator)
-                    .await?;
+                localside::worker::drive::<GAMMA_DRIVE, WORKER_C, GAMMA_JOB_B, 62, 65>(
+                    gamma_drive,
+                    &simulator,
+                )
+                .await?;
             };
-            localside::tool_depot::run(&mut depot, (tool_0, tool_1), (&simulator, &inputs)).await?;
+            let alpha = depot.recv::<StationClosed<ALPHA_DRIVE>>().await?;
+            let beta = depot.recv::<StationClosed<BETA_DRIVE>>().await?;
+            let gamma = depot.recv::<StationClosed<GAMMA_DRIVE>>().await?;
+            depot.send::<FileExit>(&(alpha | beta | gamma)).await?;
+            let _tool0 = depot.recv::<SlotLoan<TOOL_0, TOOL_0>>().await?;
+            let _tool1 = depot.recv::<SlotLoan<TOOL_1, TOOL_1>>().await?;
+            depot.send::<StationClosed<ALPHA_DRIVE>>(&alpha).await?;
+            depot.send::<StationClosed<BETA_DRIVE>>(&beta).await?;
+            depot.send::<StationClosed<GAMMA_DRIVE>>(&gamma).await?;
         };
         async {
             let mut service = worker_a.recv::<Loan<ALPHA_SERVICE>>().await?;
             async {
-                localside::worker::station_job::<ALPHA_SERVICE, ALPHA_MACHINE, ALPHA_JOB_C>(
+                localside::worker::station_job::<ALPHA_SERVICE, ALPHA_MACHINE, ALPHA_JOB_C, ALPHA_C>(
                     &mut service,
                     &simulator,
                 )
                 .await?;
             };
-            localside::worker::run::<WORKER_A, ALPHA_MACHINE>(&mut worker_a, &simulator).await?;
+            localside::worker::station_job::<WORKER_A, ALPHA_MACHINE, WORKER_A, ALPHA>(
+                &mut worker_a,
+                &simulator,
+            )
+            .await?;
         };
         async {
             worker_shell::<WORKER_A, A_VM, ALPHA, BETA_A, BETA_JOB_A>(
@@ -795,13 +805,17 @@ pub async fn run(path: &str) -> ShellResult<()> {
         async {
             let mut service = worker_b.recv::<Loan<BETA_SERVICE>>().await?;
             async {
-                localside::worker::station_job::<BETA_SERVICE, BETA_MACHINE, BETA_JOB_A>(
+                localside::worker::station_job::<BETA_SERVICE, BETA_MACHINE, BETA_JOB_A, BETA_A>(
                     &mut service,
                     &simulator,
                 )
                 .await?;
             };
-            localside::worker::run::<WORKER_B, BETA_MACHINE>(&mut worker_b, &simulator).await?;
+            localside::worker::station_job::<WORKER_B, BETA_MACHINE, WORKER_B, BETA>(
+                &mut worker_b,
+                &simulator,
+            )
+            .await?;
         };
         async {
             worker_shell::<WORKER_B, B_VM, BETA, GAMMA_B, GAMMA_JOB_B>(
@@ -817,13 +831,17 @@ pub async fn run(path: &str) -> ShellResult<()> {
         async {
             let mut service = worker_c.recv::<Loan<GAMMA_SERVICE>>().await?;
             async {
-                localside::worker::station_job::<GAMMA_SERVICE, GAMMA_MACHINE, GAMMA_JOB_B>(
+                localside::worker::station_job::<GAMMA_SERVICE, GAMMA_MACHINE, GAMMA_JOB_B, GAMMA_B>(
                     &mut service,
                     &simulator,
                 )
                 .await?;
             };
-            localside::worker::run::<WORKER_C, GAMMA_MACHINE>(&mut worker_c, &simulator).await?;
+            localside::worker::station_job::<WORKER_C, GAMMA_MACHINE, WORKER_C, GAMMA>(
+                &mut worker_c,
+                &simulator,
+            )
+            .await?;
         };
         async {
             worker_shell::<WORKER_C, C_VM, GAMMA, ALPHA_C, ALPHA_JOB_C>(

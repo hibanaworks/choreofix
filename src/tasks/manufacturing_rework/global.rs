@@ -1,5 +1,5 @@
 //! Each workstation serves either assigned worker first. Three of the six jobs also require a cabinet tool.
-use super::imp::{DO_JOB, INSPECT_QUALITY};
+use super::imp::{DO_JOB, INSPECT_QUALITY, PAIRED_JOB};
 use crate::shell::global::{FileExit, Loan};
 use hibana::{Endpoint, g, runtime::program::Projectable};
 
@@ -63,8 +63,9 @@ pub type Return0<'r> = g::Msg<7, Endpoint<'r, TOOL_0>>;
 pub type Return1<'r> = g::Msg<8, Endpoint<'r, TOOL_1>>;
 pub type JobIntent<const JOB: u8> = g::Msg<20, super::imp::JobArguments<JOB, DO_JOB>>;
 pub type JobResult<'a> = g::Msg<21, &'a [u8]>;
-pub type StationResult<'a, const MACHINE: u8> = g::Msg<MACHINE, &'a [u8]>;
-pub type FinishedPart<'a, const WORKER: u8> = g::Msg<WORKER, &'a [u8]>;
+pub type StationResult<'a, const FILE: u8> = g::Msg<FILE, &'a [u8]>;
+pub type FinishedPart<'a, const JOB: u8> = g::Msg<JOB, super::imp::Part<'a, JOB>>;
+pub type Sample<'a, const FILE: u8, const JOB: u8> = g::Msg<FILE, super::imp::Part<'a, JOB>>;
 pub type CheckPart<const JOB: u8> = g::Msg<JOB, super::imp::JobArguments<JOB, INSPECT_QUALITY>>;
 pub type PartReady<'a> = g::Msg<22, &'a [u8]>;
 pub type JobLoan<'r, const CAP: u8> = g::Msg<23, Endpoint<'r, CAP>>;
@@ -197,71 +198,6 @@ pub(crate) fn begin0<const WORKER: u8>() -> impl Projectable + Copy {
         g::send::<TOOL_0, DEPOT, Request0<WORKER>>(),
     )
 }
-fn begin1<const WORKER: u8>() -> impl Projectable {
-    g::seq(
-        g::send::<DEPOT, WORKER, Loan1>(),
-        g::send::<TOOL_1, DEPOT, Request1<WORKER>>(),
-    )
-}
-fn finish0<const WORKER: u8>() -> impl Projectable + Copy {
-    g::seq(
-        g::send::<DEPOT, TOOL_0, Reply0>(),
-        g::send::<WORKER, DEPOT, Return0>(),
-    )
-}
-fn finish1<const WORKER: u8>() -> impl Projectable {
-    g::seq(
-        g::send::<DEPOT, TOOL_1, Reply1>(),
-        g::send::<WORKER, DEPOT, Return1>(),
-    )
-}
-fn whole0<const WORKER: u8>() -> impl Projectable + Copy {
-    g::seq(begin0::<WORKER>(), finish0::<WORKER>())
-}
-fn whole1<const WORKER: u8>() -> impl Projectable {
-    g::seq(begin1::<WORKER>(), finish1::<WORKER>())
-}
-
-fn last_two_order<const FIRST: u8, const LAST: u8>() -> impl Projectable {
-    g::seq(
-        begin0::<FIRST>(),
-        g::route(
-            g::seq(finish0::<FIRST>(), whole0::<LAST>()),
-            g::par(finish0::<FIRST>(), whole1::<LAST>()),
-        )
-        .resolve::<ARRIVAL_1>(),
-    )
-}
-fn last_two<const A: u8, const B: u8>() -> impl Projectable {
-    g::route(last_two_order::<A, B>(), last_two_order::<B, A>()).resolve::<NEXT>()
-}
-fn two_running<const FIRST: u8, const SECOND: u8, const THIRD: u8>() -> impl Projectable {
-    g::seq(
-        begin1::<SECOND>(),
-        g::route(
-            g::par(
-                g::seq(finish0::<FIRST>(), whole0::<THIRD>()),
-                finish1::<SECOND>(),
-            ),
-            g::par(
-                finish0::<FIRST>(),
-                g::seq(finish1::<SECOND>(), whole1::<THIRD>()),
-            ),
-        )
-        .resolve::<FINISHED_FIRST>(),
-    )
-}
-fn first_job<const FIRST: u8, const A: u8, const B: u8>() -> impl Projectable {
-    g::seq(
-        begin0::<FIRST>(),
-        g::route(
-            g::seq(finish0::<FIRST>(), last_two::<A, B>()),
-            g::route(two_running::<FIRST, A, B>(), two_running::<FIRST, B, A>()).resolve::<NEXT>(),
-        )
-        .resolve::<ARRIVAL_0>(),
-    )
-}
-
 fn workstation<
     const MACHINE: u8,
     const OWNER: u8,
@@ -277,12 +213,15 @@ fn workstation<
         g::seq(
             g::send::<OWNER, WORKER, JobLoan<MACHINE>>(),
             g::seq(
-                g::send::<MACHINE, DEPOT, Intent<WORKER>>(),
+                g::send::<MACHINE, DRIVE, MachineToolWork<WORKER>>(),
                 g::seq(
-                    g::send::<DEPOT, MACHINE, StationResult<MACHINE>>(),
-                    g::par(
-                        g::send::<WORKER, OWNER, JobLoan<MACHINE>>(),
-                        g::send::<WORKER, PRIMARY_FILE, JobResult>(),
+                    g::send::<DRIVE, CABINET, MachineRequest<WORKER>>(),
+                    g::seq(
+                        g::send::<DRIVE, MACHINE, JobResult>(),
+                        g::seq(
+                            g::send::<WORKER, OWNER, JobLoan<MACHINE>>(),
+                            g::send::<WORKER, INSPECTOR, FinishedPart<WORKER>>(),
+                        ),
                     ),
                 ),
             ),
@@ -296,29 +235,36 @@ fn workstation<
                 g::send::<MACHINE, DRIVE, JobIntent<OTHER_JOB>>(),
                 g::seq(
                     g::send::<DRIVE, MACHINE, JobResult>(),
-                    g::send::<SERVICE, OWNER, JobLoan<MACHINE>>(),
+                    g::seq(
+                        g::send::<SERVICE, OWNER, JobLoan<MACHINE>>(),
+                        g::send::<SERVICE, INSPECTOR, FinishedPart<OTHER_JOB>>(),
+                    ),
                 ),
             ),
         ),
     );
     let leases = g::route(
-        g::seq(primary, secondary.roll()),
-        g::seq(secondary.roll(), primary),
+        g::seq(primary.roll(), secondary.roll()),
+        g::seq(secondary.roll(), primary.roll()),
     );
 
-    let delivery = g::par(
-        g::send::<SERVICE, OTHER_FILE, JobResult>(),
-        g::send::<SERVICE, INSPECTOR, FinishedPart<OTHER_JOB>>(),
-    );
-    let manufacture = g::seq(
-        g::send::<OTHER_FILE, SERVICE, StationJob<OTHER_JOB>>(),
-        delivery,
-    );
+    g::par(
+        leases,
+        g::par(
+            work_order::<WORKER, PRIMARY_FILE, WORKER>(),
+            work_order::<SERVICE, OTHER_FILE, OTHER_JOB>(),
+        ),
+    )
+}
+fn work_order<const SERVICE: u8, const OTHER_FILE: u8, const OTHER_JOB: u8>() -> impl Projectable {
     let measured = g::seq(
-        manufacture,
+        g::send::<OTHER_FILE, SERVICE, StationJob<OTHER_JOB>>(),
         g::seq(
-            g::send::<INSPECTOR, SERVICE, CheckPart<OTHER_JOB>>(),
-            g::send::<SERVICE, BENCH, CheckPart<OTHER_JOB>>(),
+            g::par(
+                g::send::<SERVICE, OTHER_FILE, JobResult>(),
+                g::send::<SERVICE, BENCH, Sample<OTHER_FILE, OTHER_JOB>>(),
+            ),
+            g::send::<INSPECTOR, BENCH, CheckPart<OTHER_JOB>>(),
         ),
     );
     let missed = g::seq(
@@ -330,13 +276,9 @@ fn workstation<
         g::send::<BENCH, SERVICE, Approved<OTHER_JOB>>(),
         close_job::<SERVICE, OTHER_FILE, OTHER_JOB>(),
     );
-    let other = g::seq(
+    g::seq(
         measured,
         g::route(g::seq(repair.roll(), approved), approved),
-    );
-    g::par(
-        leases,
-        g::par(g::send::<PRIMARY_FILE, WORKER, StationJob<WORKER>>(), other),
     )
 }
 
@@ -411,42 +353,49 @@ pub fn source() -> impl Projectable {
             >(),
         ),
     );
-    let serving = g::route(
-        first_job::<WORKER_A, WORKER_B, WORKER_C>(),
-        g::route(
-            first_job::<WORKER_B, WORKER_A, WORKER_C>(),
-            first_job::<WORKER_C, WORKER_A, WORKER_B>(),
-        )
-        .resolve::<FIRST_B>(),
-    )
-    .resolve::<FIRST_A>();
-    let tool_checks = g::par(
-        tool_quality::<WORKER_A, ALPHA>(),
+    g::par(
+        gauge(),
         g::par(
-            tool_quality::<WORKER_B, BETA>(),
-            tool_quality::<WORKER_C, GAMMA>(),
+            stations,
+            g::par(
+                tool_slot::<TOOL_0, 60, 61, 62>(),
+                tool_slot::<TOOL_1, 63, 64, 65>(),
+            ),
+        ),
+    )
+}
+
+pub type MachineToolWork<const JOB: u8> = g::Msg<10, super::imp::JobArguments<JOB, PAIRED_JOB>>;
+pub type SlotLoan<'r, const TOOL: u8, const TAG: u8> = g::Msg<TAG, Endpoint<'r, TOOL>>;
+pub const CABINET: u8 = 49;
+pub type StationClosed<const DRIVE: u8> = g::Msg<DRIVE, i32>;
+pub type ToolWork<const TOOL: u8, const JOB: u8> =
+    g::Msg<TOOL, super::imp::JobArguments<JOB, PAIRED_JOB>>;
+pub type ToolReply<'a, const TOOL: u8> = g::Msg<TOOL, &'a [u8]>;
+fn usage<const TOOL: u8, const TAG: u8, const JOB: u8, const DRIVE: u8>() -> impl Projectable {
+    g::seq(
+        g::send::<CABINET, DRIVE, SlotLoan<TOOL, TAG>>(),
+        g::seq(
+            g::send::<TOOL, DRIVE, ToolWork<TOOL, JOB>>(),
+            g::seq(
+                g::send::<DRIVE, TOOL, ToolReply<TOOL>>(),
+                g::send::<DRIVE, CABINET, SlotLoan<TOOL, TOOL>>(),
+            ),
+        ),
+    )
+}
+fn tool_slot<const TOOL: u8, const A: u8, const B: u8, const C: u8>() -> impl Projectable {
+    let ready = g::send::<DEPOT, CABINET, SlotLoan<TOOL, TOOL>>();
+    let used = g::route(
+        usage::<TOOL, A, WORKER_A, ALPHA_DRIVE>(),
+        g::route(
+            usage::<TOOL, B, WORKER_B, BETA_DRIVE>(),
+            usage::<TOOL, C, WORKER_C, GAMMA_DRIVE>(),
         ),
     );
-    g::par(gauge(), g::par(stations, g::seq(serving, tool_checks)))
+    let retire = g::send::<CABINET, DEPOT, SlotLoan<TOOL, TOOL>>();
+    g::seq(ready, g::route(g::seq(used.roll(), retire), retire))
 }
-
-fn tool_quality<const WORKER: u8, const FILE: u8>() -> impl Projectable {
-    g::seq(
-        g::par(
-            g::send::<WORKER, INSPECTOR, FinishedPart<WORKER>>(),
-            check_part::<WORKER, WORKER>(),
-        ),
-        disposition::<WORKER, FILE, WORKER>(),
-    )
-}
-
-fn disposition<const WORKER: u8, const STATION: u8, const JOB: u8>() -> impl Projectable {
-    g::route(
-        close_job::<WORKER, STATION, JOB>(),
-        rework_order::<WORKER, STATION, JOB>(),
-    )
-}
-
 fn close_job<const WORKER: u8, const STATION: u8, const JOB: u8>() -> impl Projectable + Copy {
     g::seq(
         g::send::<WORKER, STATION, JobUpdate>(),
@@ -463,16 +412,6 @@ fn rework_order<const WORKER: u8, const STATION: u8, const JOB: u8>() -> impl Pr
                 g::send::<WORKER, DISPATCHER, WorkOrder<JOB>>(),
                 g::send::<WORKER, STATION, JobUpdate>(),
             ),
-        ),
-    )
-}
-
-fn check_part<const SERVICE: u8, const JOB: u8>() -> impl Projectable + Copy {
-    g::seq(
-        g::send::<INSPECTOR, SERVICE, CheckPart<JOB>>(),
-        g::seq(
-            g::send::<SERVICE, BENCH, CheckPart<JOB>>(),
-            g::send::<BENCH, SERVICE, Measurement<JOB>>(),
         ),
     )
 }

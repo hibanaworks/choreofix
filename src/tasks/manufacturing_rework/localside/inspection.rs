@@ -9,76 +9,156 @@ use hibana::{Endpoint, g::Message};
 
 pub async fn bench<'run>(bench: &mut Endpoint<'run, BENCH>) -> ShellResult<i32> {
     let mut gauge = bench.recv::<Loan<GAUGE>>().await?;
+    // Physical specimens on the inspection bench; replacements carry a new artifact and attempt.
+    let mut specimens: [Option<serde_json::Value>; imp::JOBS.len()] = Default::default();
     loop {
         let ready = bench.offer().await?;
         let job = ready.label();
-        match job {
+        let arguments = match job {
             FileExit::LOGICAL_LABEL => {
                 let status = ready.recv::<FileExit>().await?;
                 bench.send::<Loan<GAUGE>>(gauge).await?;
                 return Ok(status);
             }
+            ALPHA => {
+                specimens[usize::from(WORKER_A)] =
+                    Some(imp::decode(ready.recv::<Sample<ALPHA, WORKER_A>>().await?)?);
+                continue;
+            }
+            BETA => {
+                specimens[usize::from(WORKER_B)] =
+                    Some(imp::decode(ready.recv::<Sample<BETA, WORKER_B>>().await?)?);
+                continue;
+            }
+            GAMMA => {
+                specimens[usize::from(WORKER_C)] =
+                    Some(imp::decode(ready.recv::<Sample<GAMMA, WORKER_C>>().await?)?);
+                continue;
+            }
+            BETA_A => {
+                specimens[usize::from(BETA_JOB_A)] = Some(imp::decode(
+                    ready.recv::<Sample<BETA_A, BETA_JOB_A>>().await?,
+                )?);
+                continue;
+            }
+            GAMMA_B => {
+                specimens[usize::from(GAMMA_JOB_B)] = Some(imp::decode(
+                    ready.recv::<Sample<GAMMA_B, GAMMA_JOB_B>>().await?,
+                )?);
+                continue;
+            }
+            ALPHA_C => {
+                specimens[usize::from(ALPHA_JOB_C)] = Some(imp::decode(
+                    ready.recv::<Sample<ALPHA_C, ALPHA_JOB_C>>().await?,
+                )?);
+                continue;
+            }
+            WORKER_A => ready
+                .recv::<CheckPart<WORKER_A>>()
+                .await?
+                .as_bytes()
+                .to_vec(),
+            WORKER_B => ready
+                .recv::<CheckPart<WORKER_B>>()
+                .await?
+                .as_bytes()
+                .to_vec(),
+            WORKER_C => ready
+                .recv::<CheckPart<WORKER_C>>()
+                .await?
+                .as_bytes()
+                .to_vec(),
+            BETA_JOB_A => ready
+                .recv::<CheckPart<BETA_JOB_A>>()
+                .await?
+                .as_bytes()
+                .to_vec(),
+            GAMMA_JOB_B => ready
+                .recv::<CheckPart<GAMMA_JOB_B>>()
+                .await?
+                .as_bytes()
+                .to_vec(),
+            ALPHA_JOB_C => ready
+                .recv::<CheckPart<ALPHA_JOB_C>>()
+                .await?
+                .as_bytes()
+                .to_vec(),
+            _ => return Err(ShellError::message("unknown inspection sample")),
+        };
+        let specimen = specimens[usize::from(job)]
+            .as_ref()
+            .ok_or_else(|| ShellError::message("inspection without a delivered specimen"))?;
+        let requested = imp::decode(&arguments)?;
+        imp::inspection_input(specimen, &requested)?;
+        match job {
             WORKER_A => {
-                let sample = ready.recv::<CheckPart<WORKER_A>>().await?;
                 gauge
-                    .send::<CheckPart<WORKER_A>>(&imp::JobArguments::from_bytes(sample.as_bytes())?)
-                    .await?;
+                    .send::<CheckPart<WORKER_A>>(&imp::JobArguments::from_bytes(&arguments)?)
+                    .await?
             }
             WORKER_B => {
-                let sample = ready.recv::<CheckPart<WORKER_B>>().await?;
                 gauge
-                    .send::<CheckPart<WORKER_B>>(&imp::JobArguments::from_bytes(sample.as_bytes())?)
-                    .await?;
+                    .send::<CheckPart<WORKER_B>>(&imp::JobArguments::from_bytes(&arguments)?)
+                    .await?
             }
             WORKER_C => {
-                let sample = ready.recv::<CheckPart<WORKER_C>>().await?;
                 gauge
-                    .send::<CheckPart<WORKER_C>>(&imp::JobArguments::from_bytes(sample.as_bytes())?)
-                    .await?;
+                    .send::<CheckPart<WORKER_C>>(&imp::JobArguments::from_bytes(&arguments)?)
+                    .await?
             }
             BETA_JOB_A => {
-                let sample = ready.recv::<CheckPart<BETA_JOB_A>>().await?;
                 gauge
-                    .send::<CheckPart<BETA_JOB_A>>(&imp::JobArguments::from_bytes(
-                        sample.as_bytes(),
-                    )?)
-                    .await?;
+                    .send::<CheckPart<BETA_JOB_A>>(&imp::JobArguments::from_bytes(&arguments)?)
+                    .await?
             }
             GAMMA_JOB_B => {
-                let sample = ready.recv::<CheckPart<GAMMA_JOB_B>>().await?;
                 gauge
-                    .send::<CheckPart<GAMMA_JOB_B>>(&imp::JobArguments::from_bytes(
-                        sample.as_bytes(),
-                    )?)
-                    .await?;
+                    .send::<CheckPart<GAMMA_JOB_B>>(&imp::JobArguments::from_bytes(&arguments)?)
+                    .await?
             }
             ALPHA_JOB_C => {
-                let sample = ready.recv::<CheckPart<ALPHA_JOB_C>>().await?;
                 gauge
-                    .send::<CheckPart<ALPHA_JOB_C>>(&imp::JobArguments::from_bytes(
-                        sample.as_bytes(),
-                    )?)
-                    .await?;
+                    .send::<CheckPart<ALPHA_JOB_C>>(&imp::JobArguments::from_bytes(&arguments)?)
+                    .await?
             }
-            _ => return Err(ShellError::message("unknown inspection sample")),
+            _ => unreachable!(),
         }
         let reading = gauge.recv::<InspectionResult>().await?.to_vec();
+        imp::inspected(specimen, &requested, &imp::decode(&reading)?)?;
         gauge.send::<InspectionResult>(&reading.as_slice()).await?;
         match job {
             WORKER_A => {
-                bench
-                    .send::<Measurement<WORKER_A>>(&reading.as_slice())
-                    .await?
+                if imp::decode(&reading)?["success"] == true {
+                    bench
+                        .send::<Approved<WORKER_A>>(&imp::InspectionReply::from_bytes(&reading)?)
+                        .await?;
+                } else {
+                    bench
+                        .send::<Failed<WORKER_A>>(&imp::InspectionReply::from_bytes(&reading)?)
+                        .await?;
+                }
             }
             WORKER_B => {
-                bench
-                    .send::<Measurement<WORKER_B>>(&reading.as_slice())
-                    .await?
+                if imp::decode(&reading)?["success"] == true {
+                    bench
+                        .send::<Approved<WORKER_B>>(&imp::InspectionReply::from_bytes(&reading)?)
+                        .await?;
+                } else {
+                    bench
+                        .send::<Failed<WORKER_B>>(&imp::InspectionReply::from_bytes(&reading)?)
+                        .await?;
+                }
             }
             WORKER_C => {
-                bench
-                    .send::<Measurement<WORKER_C>>(&reading.as_slice())
-                    .await?
+                if imp::decode(&reading)?["success"] == true {
+                    bench
+                        .send::<Approved<WORKER_C>>(&imp::InspectionReply::from_bytes(&reading)?)
+                        .await?;
+                } else {
+                    bench
+                        .send::<Failed<WORKER_C>>(&imp::InspectionReply::from_bytes(&reading)?)
+                        .await?;
+                }
             }
             BETA_JOB_A => {
                 if imp::decode(&reading)?["success"] == true {

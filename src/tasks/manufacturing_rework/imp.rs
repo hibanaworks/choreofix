@@ -16,6 +16,7 @@ pub const JOBS: [&str; 6] = [
 ];
 
 pub const DO_JOB: u8 = 1;
+pub const PAIRED_JOB: u8 = 3;
 pub const INSPECT_QUALITY: u8 = 2;
 
 /// Exact submitted bytes. The payload codec checks the assignment before recv commits.
@@ -36,6 +37,11 @@ impl<const JOB: u8> From<JobArguments<JOB>> for JobArguments<JOB, DO_JOB> {
         Self(arguments.0)
     }
 }
+impl<const JOB: u8> From<JobArguments<JOB>> for JobArguments<JOB, PAIRED_JOB> {
+    fn from(arguments: JobArguments<JOB>) -> Self {
+        Self(arguments.0)
+    }
+}
 impl<const JOB: u8, const OPERATION: u8> WireEncode for JobArguments<JOB, OPERATION> {
     fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
         output
@@ -50,6 +56,7 @@ impl<const JOB: u8, const OPERATION: u8> WirePayload for JobArguments<JOB, OPERA
         0 => 0xac11_1000,
         DO_JOB => 0xac11_1100,
         INSPECT_QUALITY => 0xac11_1200,
+        PAIRED_JOB => 0xac11_1300,
         _ => panic!("unknown job operation"),
     } | JOB as u32;
     type Decoded<'a> = ReceivedPayload<'a, Self>;
@@ -67,6 +74,9 @@ impl<const JOB: u8, const OPERATION: u8> WirePayload for JobArguments<JOB, OPERA
     fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> Self::Decoded<'a> {
         input
     }
+}
+impl<const JOB: u8> SimulatorOperation<2> for JobArguments<JOB, PAIRED_JOB> {
+    const RPC: (&'static str, &'static str) = (AGENTS[JOB as usize % AGENTS.len()], "do_job");
 }
 impl<const JOB: u8> SimulatorOperation for JobArguments<JOB, DO_JOB> {
     const RPC: (&'static str, &'static str) = (AGENTS[JOB as usize % AGENTS.len()], "do_job");
@@ -160,30 +170,45 @@ impl<const JOB: u8, const APPROVED: bool> WirePayload for InspectionReply<'_, JO
         input.as_bytes()
     }
 }
-/// A job's failure stream carries the measured rejection, or EOF after approval.
-pub struct FailureItem<'a, const JOB: u8>(&'a [u8]);
+/// The dispatcher receives the rejected measurement or the identity of the closed job.
+pub struct FailureItem<'a, const JOB: u8>(Option<InspectionReply<'a, JOB, false>>);
 impl<'a, const JOB: u8> FailureItem<'a, JOB> {
     pub fn closed(_: InspectionReply<JOB, true>) -> Self {
-        Self(&[])
+        Self(None)
     }
     pub fn rejected(reply: InspectionReply<'a, JOB, false>) -> Self {
-        Self(reply.0)
+        Self(Some(reply))
     }
 }
 impl<const JOB: u8> WireEncode for FailureItem<'_, JOB> {
     fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
-        self.0.encode_into(output)
+        use std::io::Write;
+        if let Some(reply) = &self.0 {
+            return reply.encode_into(output);
+        }
+        let job = JOBS.get(usize::from(JOB)).ok_or(CodecError::Malformed)?;
+        let len = output.len();
+        let mut remaining = output;
+        writeln!(remaining, r#"{{"closed":"{job}"}}"#).map_err(|_| CodecError::Truncated)?;
+        Ok(len - remaining.len())
     }
 }
 impl<const JOB: u8> WirePayload for FailureItem<'_, JOB> {
-    const SCHEMA_ID: u32 = 0xac11_4000 | JOB as u32;
+    const SCHEMA_ID: u32 = 0xac11_4100 | JOB as u32;
     type Decoded<'a> = &'a [u8];
     fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
-        if input.as_bytes().is_empty() {
-            Ok(())
-        } else {
-            InspectionReply::<JOB, false>::validate_payload(input)
+        if let Some(name) = input
+            .as_bytes()
+            .strip_prefix(b"{\"closed\":\"")
+            .and_then(|s| s.strip_suffix(b"\"}\n"))
+        {
+            return JOBS
+                .get(usize::from(JOB))
+                .filter(|job| job.as_bytes() == name)
+                .map(|_| ())
+                .ok_or(CodecError::Malformed);
         }
+        InspectionReply::<JOB, false>::validate_payload(input)
     }
     fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> &'a [u8] {
         input.as_bytes()
@@ -201,12 +226,38 @@ pub fn agent(admitted: &Value) -> ShellResult<&'static str> {
         .find(|agent| admitted["agent"] == *agent)
         .ok_or_else(|| ShellError::message("admitted worker missing"))
 }
+/// Material delivered to the inspector carries its manufacturing attempt.
+pub struct Part<'a, const JOB: u8>(&'a [u8]);
+impl<'a, const JOB: u8> Part<'a, JOB> {
+    pub fn from_bytes(bytes: &'a [u8]) -> ShellResult<Self> {
+        part_attempt(&decode(bytes)?, usize::from(JOB))?;
+        Ok(Self(bytes))
+    }
+}
+impl<const JOB: u8> WireEncode for Part<'_, JOB> {
+    fn encode_into(&self, out: &mut [u8]) -> Result<usize, CodecError> {
+        self.0.encode_into(out)
+    }
+}
+impl<const JOB: u8> WirePayload for Part<'_, JOB> {
+    const SCHEMA_ID: u32 = 0xac11_5000 | JOB as u32;
+    type Decoded<'a> = &'a [u8];
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        Part::<JOB>::from_bytes(input.as_bytes())
+            .map(|_| ())
+            .map_err(|_| CodecError::Malformed)
+    }
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> &'a [u8] {
+        input.as_bytes()
+    }
+}
+
 fn part_attempt(part: &Value, job: usize) -> ShellResult<u64> {
     let station = match job {
         0 | 5 => "STATION_ALPHA",
         1 | 3 => "STATION_BETA",
         2 | 4 => "STATION_GAMMA",
-        _ => unreachable!(),
+        _ => return Err(ShellError::message("unknown manufactured job")),
     };
     let attempt = part["attempt"].as_u64().filter(|attempt| *attempt > 0);
     if part["job_id"] != JOBS[job]
@@ -459,8 +510,24 @@ mod tests {
                     InspectionReply::<JOB, false>::from_bytes(&encoded).is_ok(),
                     usize::from(JOB) == target_index && !success
                 );
+                if let Ok(approval) = InspectionReply::<JOB, true>::from_bytes(&encoded) {
+                    let notice = FailureItem::closed(approval);
+                    let mut bytes = [0; 64];
+                    let len = notice.encode_into(&mut bytes).unwrap();
+                    assert_eq!(decode(&bytes[..len]).unwrap(), json!({"closed":target}));
+                    assert!(
+                        FailureItem::<JOB>::validate_payload(Payload::new(&bytes[..len])).is_ok()
+                    );
+                    assert!(notice.encode_into(&mut bytes[..len - 1]).is_err());
+                }
             }
+            let closed = format!("{{\"closed\":\"{target}\"}}\n");
+            assert_eq!(
+                FailureItem::<JOB>::validate_payload(Payload::new(closed.as_bytes())).is_ok(),
+                usize::from(JOB) == target_index
+            );
         }
+        assert!(FailureItem::<JOB>::validate_payload(Payload::new(&[])).is_err());
         let unknown = json!({"job_id":"unknown_job"});
         assert!(
             DispatchArguments::<JOB>::from_bytes(&serde_json::to_vec(&unknown).unwrap()).is_err()

@@ -960,7 +960,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                         }
                     };
                     async {
-                        localside::worker::station_job::<ALPHA_SERVICE,ALPHA_MACHINE,ALPHA_JOB_C>(&mut alpha_service,&simulator).await?;
+                        localside::worker::station_job::<ALPHA_SERVICE,ALPHA_MACHINE,ALPHA_JOB_C,ALPHA_C>(&mut alpha_service,&simulator).await?;
                     };
                     async {
                         localside::worker::run::<WORKER_A, ALPHA_MACHINE>(&mut a, &simulator)
@@ -975,7 +975,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                         }
                     };
                     async {
-                        localside::worker::station_job::<BETA_SERVICE,BETA_MACHINE,BETA_JOB_A>(&mut beta_service,&simulator).await?;
+                        localside::worker::station_job::<BETA_SERVICE,BETA_MACHINE,BETA_JOB_A,BETA_A>(&mut beta_service,&simulator).await?;
                     };
                     async {
                         localside::worker::run::<WORKER_B, BETA_MACHINE>(&mut b, &simulator)
@@ -990,7 +990,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                         }
                     };
                     async {
-                        localside::worker::station_job::<GAMMA_SERVICE,GAMMA_MACHINE,GAMMA_JOB_B>(&mut gamma_service,&simulator).await?;
+                        localside::worker::station_job::<GAMMA_SERVICE,GAMMA_MACHINE,GAMMA_JOB_B,GAMMA_B>(&mut gamma_service,&simulator).await?;
                     };
                     async {
                         localside::worker::run::<WORKER_C, GAMMA_MACHINE>(&mut c, &simulator)
@@ -1004,7 +1004,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                                 2 => dispatcher.recv::<FailureStream<WORKER_C>>().await?,
                                 _ => unreachable!(),
                             };
-                            assert!(notice.is_empty());
+                            assert_eq!(data::decode(notice)?, json!({"closed":data::JOBS[usize::from(job)]}));
                         }
                         for job in [ALPHA_JOB_C,BETA_JOB_A,GAMMA_JOB_B] {
                             let notice=match job {
@@ -1013,7 +1013,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                                 GAMMA_JOB_B => dispatcher.recv::<FailureStream<GAMMA_JOB_B>>().await?,
                                 _=>unreachable!(),
                             };
-                            assert!(notice.is_empty());
+                            assert_eq!(data::decode(notice)?, json!({"closed":data::JOBS[usize::from(job)]}));
                         }
                     };
                     async {

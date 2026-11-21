@@ -91,9 +91,7 @@
     },
     "runtime_exit_code": 0,
     "common_complete": true,
-    "violations": [
-
-    ]
+    "violations": []
   },
   "failure_on_same_binary": {
     "directory": "output/verification/11m-readable-closure.Gi58LwuD/arrival-orders/0-serial",
@@ -110,5 +108,216 @@
       "source_sha256": "131ee90d59bbdda2e3db1a802c78bf7e86d3cc555ca3543054d6a75d45a6ea4f"
     }
   },
-  "failed_snapshot": "output/verification/11m-readable-closure.Gi58LwuD/live-2/harness-error.json"
+  "failed_snapshot": "output/verification/11m-readable-closure.Gi58LwuD/live-2/harness-error.json",
+  "cross_arm_wait_candidate": {
+    "build": "output/verification/11m-cross-arm.qDimdI86/frozen/manufacturing-build-receipt.json",
+    "binary_sha256": "c19f34322e50a39fc6fe822e2c802e73b2fee5823ab05b2f2d7806602a1e23a6",
+    "source_manifest_sha256": "1be31aeafd899ffb8bd1e2332bed6a1a8eb2b31bb37cf923223c07b812c8158e",
+    "rust_regression": "tests/nested_parallel_reentry.rs::next_roll_choice_waits_for_the_other_delegated_views_receipt",
+    "scripted_wasm": {
+      "directory": "output/verification/11m-cross-arm.qDimdI86/arrival-orders",
+      "planned": 30,
+      "passed": [
+        {
+          "case": "0-serial",
+          "effects": 12,
+          "epf_records": 6561,
+          "violations": 0
+        },
+        {
+          "case": "0-other-station-rejections",
+          "effects": 21,
+          "epf_records": 9611,
+          "violations": 0
+        }
+      ],
+      "failed": "0-contended",
+      "failure": "Endpoint receive returned Unavailable",
+      "journal_sha256": "48daf5e59626faacd8ab0fa979733c4790aee938c9c2077c986510ebe5522692",
+      "not_run": 27
+    },
+    "diagnostic_repeat": {
+      "log": "output/verification/11m-cross-arm.qDimdI86/diagnostic-matrix/0-contended/runtime-stderr.log",
+      "sha256": "d1d0d35cd42f2c2fca2e1f01ec7e49d7614f311108891fcf07964ad3b8bfb3ae",
+      "endpoint_call": "src/tasks/manufacturing_rework/localside/worker.rs:83, recv::<SlotLoan<TOOL_0, FIRST>>()"
+    },
+    "live_model_runs_on_candidate": 0,
+    "task_qualified": false
+  },
+  "independent_inspection_read_candidate": {
+    "binary_sha256": "b72190b834c633e2cc726d9b38de03d6ecdbcd1319f8a0abc6788348a2ec6d9e",
+    "build_receipt": "output/verification/11m-projected-inspection.FZcofjus/frozen/manufacturing-build-receipt.json",
+    "model_calls": 0,
+    "scored_runs": 0,
+    "task_qualified": false,
+    "hibana_lean": {
+      "gate": "output/verification/11m-loan-wait.Kak91rNc/typed-model-gate.log",
+      "sha256": "4e7307d1442df010644a59ee0ab6138a4aa0709b3d1e8653fbfb6c38b6428dc6",
+      "static_theorems": 1316,
+      "implementation_modules": 56,
+      "endpoint_polls_matched": 15,
+      "scope": "Source-entry verdict for a single selected finite unfolding; real send and loan receive with an immediately accepting carrier. General Rust refinement and transport liveness remain open."
+    },
+    "scripted_wasm": {
+      "directory": "output/verification/11m-projected-inspection.FZcofjus/nonblocking-arrival-orders",
+      "passed_cases": [
+        {
+          "order": [
+            0,
+            1,
+            2
+          ],
+          "profile": "other-station-rejections",
+          "effects": 21,
+          "epf_records": 9644,
+          "simulator_complete": true,
+          "violations": 0
+        },
+        {
+          "order": [
+            0,
+            1,
+            2
+          ],
+          "profile": "serial",
+          "effects": 12,
+          "epf_records": 6594,
+          "simulator_complete": true,
+          "violations": 0
+        }
+      ],
+      "planned_cases": 30,
+      "failure_journal": "output/verification/11m-projected-inspection.FZcofjus/nonblocking-arrival-orders/0-contended/events.jsonl",
+      "failure_sha256": "b727411707edf84c6e3bbc79a556f0fe39ff62ee3c38021970c3daf7f3a404d7",
+      "failure": "Order zero, contended. The inspector requested beta_job_b before reading the part file and obtained a negative inspection for the correct manufactured part. The dispatcher subsequently read /service/failed/beta_job_b; no terminal reply arrived before the 30-second scripted deadline. No other order qualified on this binary."
+    }
+  },
+  "public_call_proof": {
+    "theorems": [
+      "public_candidates_exact",
+      "public_call_exact",
+      "CanResume.extends_execution",
+      "held_predecessor_blocks"
+    ],
+    "scope": "Fresh borrowed wire sends and receives, including loans, on a whole logical view of one selected finite source unfolding. The public contract does not select a remote peer or occurrence. Unavailable rules out independent progress to every matching entry on that path. General Rust refinement over all paths, fragmented borrows, resolver choices and transport states remains open.",
+    "source_hashes": {
+      "path": "output/verification/11m-public-admission.yhHuDQQo/verified-proof-sources.sha256",
+      "sha256": "b34545b4e7452da494c5b48ffdf0177c802dad1a696ef85a47a2fe0b0f0f4965"
+    },
+    "model_gate": {
+      "path": "output/verification/11m-public-admission.yhHuDQQo/final-model-gate.log",
+      "sha256": "98b293b82569ce7db46a86f37c282d92ebd4b61bea058dc8dd8cba2244719ba1"
+    },
+    "sealed_program_and_observed_histories": {
+      "path": "output/verification/11m-public-admission.yhHuDQQo/public-polls.txt",
+      "sha256": "f2dead7b4776da62adbcba4ab4c23249f03f315688e4387e0c86dceb8657fc8b"
+    },
+    "public_polls": {
+      "send": 12,
+      "receive": 3
+    },
+    "static_theorems_checked": 1316,
+    "implementation_modules_checked": 56,
+    "endpoint_regressions": {
+      "passed": 74,
+      "log": {
+        "path": "output/verification/11m-public-admission.yhHuDQQo/final-endpoint-regressions.log",
+        "sha256": "67da9947ad1887db99ca9cacd19c4c95e3051a714c4f5a7649147b470e820aab"
+      }
+    },
+    "generated_checker": {
+      "guarded_reentry_cuts": 15,
+      "log": {
+        "path": "output/verification/11m-public-admission.yhHuDQQo/shape-checker.log",
+        "sha256": "0f22c2ab8e3400db54d0714d9b59e332941751f3a2db126e93730f833361b82e"
+      }
+    },
+    "task_qualified": false,
+    "projected_suffix": {
+      "theorem": "public_unavailable_iff_no_projected_suffix",
+      "scope": "For a fresh public call on one whole view of any selected finite unfolding, recoverable refusal is equivalent to the absence of an independent projected execution to every matching occurrence. Each step checks the acting participant’s prerequisites and roll guard at that prefix, and transport acceptance where required. The runtime comparison covers the recorded public polls.",
+      "source_hashes": {
+        "path": "output/verification/11m-projected-suffix.Wlgm2T0P/sources.sha256",
+        "sha256": "aeae8c33f959355aa42fc50f174fa0e2a6a694e0a3763e7167d67b19093d8a12"
+      },
+      "model_gate": {
+        "path": "output/verification/11m-projected-suffix.Wlgm2T0P/model-gate.log",
+        "sha256": "ca9afba29ea85aebe7232e989ff3e9b7ce5f668caebbc24bd5c48d6c20bb8bab"
+      },
+      "endpoint_send_polls": 12,
+      "endpoint_receive_polls": 3
+    },
+    "wire_admission_followup": {
+      "evidence": "output/verification/11m-wire-admission.c4DWgMfF",
+      "theorem": "ProtocolCutEvidence.typed_wire_lookup_includes_each_borrowed_alias",
+      "scope": "The executable source checker includes every non-local send or receive row of the queried contract in the calling view, range and lanes. Live Rust candidate admission across unresolved branch histories remains open.",
+      "native_endpoint_tests_passed": 44,
+      "public_polls_compared_to_lean": 15,
+      "additional_blocked_carrier_polls": 4,
+      "transport_condition": "The same gauge send waits first for the sibling without polling transport, then on the carrier without a frame or communication commit, and wakes again on carrier readiness."
+    }
+  },
+  "independent_bench_projection_trial": {
+    "attempt": "Removed the delegation of the measurement bench to the inspector VM. The compiler rejected the inspector actor projection before any Wasm run. Restored the previous bench ownership.",
+    "diagnostic": "role=18; scope=31; arms=52..65|65..68",
+    "compiler_log": {
+      "path": "output/verification/11m-public-admission.yhHuDQQo/frozen/build.log",
+      "sha256": "d9dc18b5e6ec6db8275ff015f5e47383447c68b36a70bf0d0f93747eea728ba0"
+    },
+    "build_source_manifest": {
+      "path": "output/verification/11m-public-admission.yhHuDQQo/frozen/source-before.json",
+      "sha256": "e72ae773679755f9a888fc88cc063387a3dfa734b1de7c60cae6b103a9692771"
+    },
+    "restored_application_sha256": "60f4ed6f6cd2be7458e517846b9b2af87b6e35a93b76f395bdb8f412dc6d4927",
+    "wasm_cases_run": 0,
+    "model_calls": 0,
+    "task_qualified": false
+  },
+  "parallel_part_delivery_trial": {
+    "attempt": "Allowed initial part delivery to overlap later work orders. The projected program rejected ambiguous parallel endpoint selectors. The prior global was restored.",
+    "compiler_log": {
+      "path": "output/verification/11m-part-delivery.GWGarNHN/frozen/build.log",
+      "sha256": "9f8bb68b07e56bf7cc85f5ab814a888dde007d898f69a59cda7dd84ec8c54683"
+    },
+    "build_source_manifest": {
+      "path": "output/verification/11m-part-delivery.GWGarNHN/frozen/source-before.json",
+      "sha256": "fae187785160c5d1c1dd5f9a1ddbd58bc90597a3b076cc023fa64f0295aafe6e"
+    },
+    "wasm_cases_run": 0,
+    "model_calls": 0,
+    "task_qualified": false
+  },
+  "bench_specimen_delivery": {
+    "earlier_trials": [
+      "output/verification/11m-station-part.AT50d580/frozen/build.log",
+      "output/verification/11m-station-return.4RYPXfna/frozen/build.log",
+      "output/verification/11m-material-occurrence.39tEtoAk/matrix.log"
+    ],
+    "earlier_outcomes": "Both station variants failed projection on ambiguous parallel selectors. The distinct material payload passed two Wasm cases; a repeated inspection request could still be sent before the next specimen arrived in the contended case.",
+    "source_manifest_sha256": "4f87ae4fbe48272eab84eed34b09471fe6f46161f0625d7a97d3a67b2d6ad214",
+    "runtime_binary_sha256": "c3a5b1f5d4e98db5d876f1bb2e58b076beab60b2edcefe364ceb99db754861cd",
+    "build_receipt": "output/verification/11m-bench-specimens.PRdpSG3k/frozen/manufacturing-build-receipt.json",
+    "checked_runs": "output/verification/11m-bench-specimens.PRdpSG3k/orders",
+    "test_log": "output/verification/11m-bench-specimens.PRdpSG3k/matrix.log",
+    "workstation_orders": 6,
+    "profiles_per_order": 5,
+    "scripted_wasm_runs_passed": 30,
+    "simulator_completions": 30,
+    "manufacturing_effects": 234,
+    "inspection_effects": 234,
+    "rework_dispatches": 54,
+    "captured_records": 248625,
+    "audit_violations": 0,
+    "model_calls": 0,
+    "task_qualified": false,
+    "live_depth_two_on_frozen_binary": {
+      "directory": "output/verification/11m-live-specimens.I3vsmLta/live-2",
+      "status": "operator_interrupted",
+      "reason": "Prioritized verification of open-choice send admission; the guarded validation slot was needed for the source model and Endpoint regression.",
+      "physical_journal_sha256": "745f61298346666aae0dd92c1cf4e4f4151a24dfc957dd32618c63a93b72f166",
+      "model_journal_sha256": "4db8b731c8f06ccd27bfc5c1dab392ae2845dde5e61844dd293369ff0266581a",
+      "interruption_record_sha256": "c0ab056fb09ea64593716e8b1b4bce16681965834ae061488f2a71968c9a7d98",
+      "task_qualified": false
+    }
+  }
 }

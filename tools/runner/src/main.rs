@@ -403,7 +403,7 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
                 "read-only /service/parts/<job_id> delivers the finished part; write-only /service/inspect_quality/<job_id> accepts {\"job_id\":\"<job_id>\"}; read-only /service/inspection_result delivers the actual gauge reading"
             }
             "DISPATCHER" => {
-                "read-only /service/failed/<job_id> returns its failed inspection as JSON, or end-of-file (zero bytes) when the job passes; /service/dispatch_rework/<job_id> accepts {\"job_id\":\"<job_id>\"} with optional reason on write and delivers the actual order on read"
+                "read-only /service/failed/<job_id> delivers the actual failed inspection as JSON, or {\"closed\":\"<job_id>\"} on final approval. Each delivery can be read once. /service/dispatch_rework/<job_id> accepts {\"job_id\":\"<job_id>\"} with optional reason on write and delivers the actual order on read"
             }
             _ => return Err("unknown workshop participant".into()),
         }
