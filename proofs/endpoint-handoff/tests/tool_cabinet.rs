@@ -619,6 +619,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
             let mut alpha = caller.enter(session, &programs.alpha)?;
             let mut beta = caller.enter(session, &programs.beta)?;
             let mut gamma = caller.enter(session, &programs.gamma)?;
+            let mut inspector = caller.enter(session, &programs.inspector)?;
             let delays: [Duration; 3] = std::array::from_fn(|worker| {
                 Duration::from_millis(durations[order.iter().position(|id| *id == worker).unwrap()])
             });
@@ -651,6 +652,31 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                     };
                     async {
                         localside::worker::run(&mut c).await?;
+                    };
+                    async {
+                        for _ in data::AGENTS {
+                            let part = inspector.offer().await?;
+                            let (worker, bytes) = match part.label() {
+                                WORKER_A => (
+                                    WORKER_A,
+                                    part.recv::<FinishedPart<WORKER_A>>().await?.to_vec(),
+                                ),
+                                WORKER_B => (
+                                    WORKER_B,
+                                    part.recv::<FinishedPart<WORKER_B>>().await?.to_vec(),
+                                ),
+                                WORKER_C => (
+                                    WORKER_C,
+                                    part.recv::<FinishedPart<WORKER_C>>().await?.to_vec(),
+                                ),
+                                _ => return Err(ShellError::message("unexpected finished part")),
+                            };
+                            data::inspection_input(
+                                &data::decode(&bytes)?,
+                                &json!({"job_id":data::JOBS[usize::from(worker)]}),
+                            )?;
+                        }
+                        Ok::<(), ShellError>(())
                     };
                     async {
                         bus.fixture_peer::<3>(&effects, &["do_job"]).await?;

@@ -38,6 +38,7 @@ pub type Return0<'r> = g::Msg<7, Endpoint<'r, TOOL_0>>;
 pub type Return1<'r> = g::Msg<8, Endpoint<'r, TOOL_1>>;
 pub type JobIntent<const JOB: u8> = g::Msg<20, super::imp::JobArguments<JOB, DO_JOB>>;
 pub type JobResult<'a> = g::Msg<21, &'a [u8]>;
+pub type FinishedPart<'a, const WORKER: u8> = g::Msg<WORKER, &'a [u8]>;
 pub type PartReady<'a> = g::Msg<22, &'a [u8]>;
 pub type JobLoan<'r, const CAP: u8> = g::Msg<23, Endpoint<'r, CAP>>;
 pub type InspectRequest<const JOB: u8> = g::Msg<24, super::imp::JobArguments<JOB, INSPECT_QUALITY>>;
@@ -241,10 +242,18 @@ pub fn source() -> impl Projectable {
         .resolve::<FIRST_B>(),
     )
     .resolve::<FIRST_A>();
-    g::par(intents, serving)
+    let parts = g::par(
+        g::send::<WORKER_A, INSPECTOR, FinishedPart<WORKER_A>>(),
+        g::par(
+            g::send::<WORKER_B, INSPECTOR, FinishedPart<WORKER_B>>(),
+            g::send::<WORKER_C, INSPECTOR, FinishedPart<WORKER_C>>(),
+        ),
+    );
+    g::seq(g::par(intents, serving), parts)
 }
 
 pub struct Programs {
+    pub inspector: RoleProgram<INSPECTOR>,
     pub a: RoleProgram<WORKER_A>,
     pub b: RoleProgram<WORKER_B>,
     pub c: RoleProgram<WORKER_C>,
@@ -258,6 +267,7 @@ pub struct Programs {
 pub fn programs() -> Programs {
     let source = source();
     Programs {
+        inspector: project::<INSPECTOR>(&source),
         a: project::<WORKER_A>(&source),
         b: project::<WORKER_B>(&source),
         c: project::<WORKER_C>(&source),

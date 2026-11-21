@@ -1,0 +1,300 @@
+{
+  "task": "11M",
+  "scope": "Three tool-using jobs, three workstation wash guests and one inspector wash guest. The inspector reads the actual part from each job through a projected file. The additional three jobs, inspection decisions and rework have not been qualified together.",
+  "archive": "output/verification/11m-inspector-20261121.5bm8mO",
+  "case_directory": "parts-cases",
+  "source_manifest_sha256": "8b175ad667af3a2939f02405684c7e1dfc8b2e0fc8e2f356f0d244443c673a3d",
+  "build_receipt_sha256": "4c97fdf81af376af51f0906257d8ec7a9769bcf56adcf0f6476c6b51fd7ecef7",
+  "binaries_sha256": {
+    "native": "2609090b5b5660a150a7d06d4f8b2eb9918ff65f80bf6adfb3ff9f05b4e7e699",
+    "runner": "dfc0be873f31dbe76ce981113af52804714397837b0d99fc260b9e4b481b6272",
+    "manufacturing-wasi": "c40087bb383d5ca9c56be2e331b7aa8a866582b25b3d33f965907c63765bca8b",
+    "hibana-wash.wasm": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca"
+  },
+  "model_calls": 0,
+  "live_task_qualified": false,
+  "scored_comparison": false,
+  "wasm_trials": 12,
+  "simulator_effects": 36,
+  "inspector_parts_received": 36,
+  "epf_records": 20020,
+  "early_reads_refused": 12,
+  "cases": [
+    {
+      "case": "0-contended",
+      "workstation_submission_order": [
+        "WORKER_A",
+        "WORKER_B",
+        "WORKER_C"
+      ],
+      "inspector_read_order": [
+        "gamma_job_c",
+        "beta_job_b",
+        "alpha_job_a"
+      ],
+      "epf_records": 1667,
+      "simulator_effects": 3,
+      "early_reads_refused": 1,
+      "simultaneous_jobs": 2,
+      "sha256": {
+        "checked.json": "988d960ba906d0161a3c2f04dfaa06145ce21c5ebe2bcf044b559f0f76e4db09",
+        "events.jsonl": "392d90dbb809a4960c6f9f32aace63bb7620da9920643d6dd8d9e9d30f5808af",
+        "projection.json": "36bfa4080c964fc3c03b6f7e4dc2ea2fce48fc6bd48c28e868ecf4843b2698c5",
+        "runtime-result.json": "9cdb629a93285e955f0e441edbca0aa85ad2bfc8e506c255428d5b7020a59a1e"
+      }
+    },
+    {
+      "case": "0-serial",
+      "workstation_submission_order": [
+        "WORKER_A",
+        "WORKER_B",
+        "WORKER_C"
+      ],
+      "inspector_read_order": [
+        "alpha_job_a",
+        "beta_job_b",
+        "gamma_job_c"
+      ],
+      "epf_records": 1667,
+      "simulator_effects": 3,
+      "early_reads_refused": 1,
+      "simultaneous_jobs": 1,
+      "sha256": {
+        "checked.json": "40f703cbbeeefbe351c916aef3451b743ac4680c8e6e76f0c6cbb6c064bba199",
+        "events.jsonl": "979dc376a86df67bea67906255859b2ae0e020e4e9ad5bc8e73b2bcc4689e65f",
+        "projection.json": "36bfa4080c964fc3c03b6f7e4dc2ea2fce48fc6bd48c28e868ecf4843b2698c5",
+        "runtime-result.json": "f3a12c82c395fbc349078e77f71c9c6ed37a37e19b2c5f42ccf1d9aeeb3c5f13"
+      }
+    },
+    {
+      "case": "1-contended",
+      "workstation_submission_order": [
+        "WORKER_A",
+        "WORKER_C",
+        "WORKER_B"
+      ],
+      "inspector_read_order": [
+        "beta_job_b",
+        "gamma_job_c",
+        "alpha_job_a"
+      ],
+      "epf_records": 1667,
+      "simulator_effects": 3,
+      "early_reads_refused": 1,
+      "simultaneous_jobs": 2,
+      "sha256": {
+        "checked.json": "af900e5e18a7d09e343f271ab358e1b86d87efa73b68e9b89b3adb31335fb7c4",
+        "events.jsonl": "07ed53d2ee5b4f7494791acdfeeab74386d2cee19d3f7acb5699fc71be30a579",
+        "projection.json": "36bfa4080c964fc3c03b6f7e4dc2ea2fce48fc6bd48c28e868ecf4843b2698c5",
+        "runtime-result.json": "e43b9b0e4a82fa06f10a0c85b9a840a8b3603726e5aae2ce41c8104d224cf23d"
+      }
+    },
+    {
+      "case": "1-serial",
+      "workstation_submission_order": [
+        "WORKER_A",
+        "WORKER_C",
+        "WORKER_B"
+      ],
+      "inspector_read_order": [
+        "alpha_job_a",
+        "gamma_job_c",
+        "beta_job_b"
+      ],
+      "epf_records": 1667,
+      "simulator_effects": 3,
+      "early_reads_refused": 1,
+      "simultaneous_jobs": 1,
+      "sha256": {
+        "checked.json": "348d800b9745a1b76981b0e48a0f105204801fd0d2f943b8074161e203db02e9",
+        "events.jsonl": "4f35fb3ce4e56642f7da9bba5a2deaab5a6f32976adb7f6d81f879468b00848e",
+        "projection.json": "36bfa4080c964fc3c03b6f7e4dc2ea2fce48fc6bd48c28e868ecf4843b2698c5",
+        "runtime-result.json": "ccdac77b6a3f97ad6de4647aa7f2eb9c07ab49f738793a0851e053e5539ea74e"
+      }
+    },
+    {
+      "case": "2-contended",
+      "workstation_submission_order": [
+        "WORKER_B",
+        "WORKER_A",
+        "WORKER_C"
+      ],
+      "inspector_read_order": [
+        "gamma_job_c",
+        "alpha_job_a",
+        "beta_job_b"
+      ],
+      "epf_records": 1669,
+      "simulator_effects": 3,
+      "early_reads_refused": 1,
+      "simultaneous_jobs": 2,
+      "sha256": {
+        "checked.json": "c136b2c1eebc54fa996ccab9e32f741114486651a8c57d180a3e8ba34c5e7be0",
+        "events.jsonl": "47e521c2bd02453ff621035a5621f17c35cd118da8e666b00126eb762e783998",
+        "projection.json": "36bfa4080c964fc3c03b6f7e4dc2ea2fce48fc6bd48c28e868ecf4843b2698c5",
+        "runtime-result.json": "47ea7764a7ee94937dbc75dacc3f8a8992385e8e39a2836d33318104e594f01c"
+      }
+    },
+    {
+      "case": "2-serial",
+      "workstation_submission_order": [
+        "WORKER_B",
+        "WORKER_A",
+        "WORKER_C"
+      ],
+      "inspector_read_order": [
+        "beta_job_b",
+        "alpha_job_a",
+        "gamma_job_c"
+      ],
+      "epf_records": 1669,
+      "simulator_effects": 3,
+      "early_reads_refused": 1,
+      "simultaneous_jobs": 1,
+      "sha256": {
+        "checked.json": "6f1ede651be9a4e0b4ae7db7e525773885b034995dacd5fbc411784f70b67ff4",
+        "events.jsonl": "4219e017b3ef77bc8bdcc2bd2bd305a04d91a9406c0837cf400bb411ea9a3282",
+        "projection.json": "36bfa4080c964fc3c03b6f7e4dc2ea2fce48fc6bd48c28e868ecf4843b2698c5",
+        "runtime-result.json": "310df488627ee1e9210204278af364f8f53e5ecbcbddf231fa9116cf55522081"
+      }
+    },
+    {
+      "case": "3-contended",
+      "workstation_submission_order": [
+        "WORKER_B",
+        "WORKER_C",
+        "WORKER_A"
+      ],
+      "inspector_read_order": [
+        "alpha_job_a",
+        "gamma_job_c",
+        "beta_job_b"
+      ],
+      "epf_records": 1669,
+      "simulator_effects": 3,
+      "early_reads_refused": 1,
+      "simultaneous_jobs": 2,
+      "sha256": {
+        "checked.json": "c849f6e87b22784e0b5f4fa13cf0dfd320b19eb68c824cc622528fabb726027e",
+        "events.jsonl": "fd9e6aacec4c9e9ff60fd40cc319b3a483acf1ab8fce024f040f8313cbdcebf9",
+        "projection.json": "36bfa4080c964fc3c03b6f7e4dc2ea2fce48fc6bd48c28e868ecf4843b2698c5",
+        "runtime-result.json": "b30cc876778c92948f31520643dec4e84c82517f0104f9da9e288e295d7e9e98"
+      }
+    },
+    {
+      "case": "3-serial",
+      "workstation_submission_order": [
+        "WORKER_B",
+        "WORKER_C",
+        "WORKER_A"
+      ],
+      "inspector_read_order": [
+        "beta_job_b",
+        "gamma_job_c",
+        "alpha_job_a"
+      ],
+      "epf_records": 1669,
+      "simulator_effects": 3,
+      "early_reads_refused": 1,
+      "simultaneous_jobs": 1,
+      "sha256": {
+        "checked.json": "f665092ce86eb37fd3357e40b014fbaa6ad802b4fc00aa96571fd6d6215b3d49",
+        "events.jsonl": "a6f79a8dd898f9bb02ce9f09d0b8f85e0d4816654a1806a6be7f4e61e5e3c4a6",
+        "projection.json": "36bfa4080c964fc3c03b6f7e4dc2ea2fce48fc6bd48c28e868ecf4843b2698c5",
+        "runtime-result.json": "417a7db51e721f3ef83fa1500bb4bd5ff73eabb7c3da485f7035ecdff7ca7612"
+      }
+    },
+    {
+      "case": "4-contended",
+      "workstation_submission_order": [
+        "WORKER_C",
+        "WORKER_A",
+        "WORKER_B"
+      ],
+      "inspector_read_order": [
+        "beta_job_b",
+        "alpha_job_a",
+        "gamma_job_c"
+      ],
+      "epf_records": 1669,
+      "simulator_effects": 3,
+      "early_reads_refused": 1,
+      "simultaneous_jobs": 2,
+      "sha256": {
+        "checked.json": "94259f74b1b81645f0664db7481cbb5ce6053443d5f491c5a84f8e0bd43e0a0d",
+        "events.jsonl": "cae826c38b109221efe58e89874f96da62882cdf514422bbbed9ae2e204b9ce3",
+        "projection.json": "36bfa4080c964fc3c03b6f7e4dc2ea2fce48fc6bd48c28e868ecf4843b2698c5",
+        "runtime-result.json": "caa5d86c637b8c13106eef92f09c93d60cf68c1c923b29a30fe8efdb725da496"
+      }
+    },
+    {
+      "case": "4-serial",
+      "workstation_submission_order": [
+        "WORKER_C",
+        "WORKER_A",
+        "WORKER_B"
+      ],
+      "inspector_read_order": [
+        "gamma_job_c",
+        "alpha_job_a",
+        "beta_job_b"
+      ],
+      "epf_records": 1669,
+      "simulator_effects": 3,
+      "early_reads_refused": 1,
+      "simultaneous_jobs": 1,
+      "sha256": {
+        "checked.json": "48d2b40601a2e5da95bc9b45918881a9ad47f902ae76d121b6a974c95ee7dca8",
+        "events.jsonl": "25e8c8c40481e8f9b192a45f2b89f1412f9e309a9d9576944764575bd349e1c5",
+        "projection.json": "36bfa4080c964fc3c03b6f7e4dc2ea2fce48fc6bd48c28e868ecf4843b2698c5",
+        "runtime-result.json": "56e17d673dcfd46d82caa9866c515692477b3601fbcdc2db6b873c356e08d514"
+      }
+    },
+    {
+      "case": "5-contended",
+      "workstation_submission_order": [
+        "WORKER_C",
+        "WORKER_B",
+        "WORKER_A"
+      ],
+      "inspector_read_order": [
+        "alpha_job_a",
+        "beta_job_b",
+        "gamma_job_c"
+      ],
+      "epf_records": 1669,
+      "simulator_effects": 3,
+      "early_reads_refused": 1,
+      "simultaneous_jobs": 2,
+      "sha256": {
+        "checked.json": "dfc39a348f35c7b170c344c188b1629ce1a02029a429a190cc7006962cda8508",
+        "events.jsonl": "08eb81df65626e5747f229f5fca9cfd4c240c9ee96f579c7e0b66ceba0b3c8a8",
+        "projection.json": "36bfa4080c964fc3c03b6f7e4dc2ea2fce48fc6bd48c28e868ecf4843b2698c5",
+        "runtime-result.json": "3ef3f9d31ff84c300f80d65ac7c9a451f66fbf1e90022ef8919706fa16d8bc6a"
+      }
+    },
+    {
+      "case": "5-serial",
+      "workstation_submission_order": [
+        "WORKER_C",
+        "WORKER_B",
+        "WORKER_A"
+      ],
+      "inspector_read_order": [
+        "gamma_job_c",
+        "beta_job_b",
+        "alpha_job_a"
+      ],
+      "epf_records": 1669,
+      "simulator_effects": 3,
+      "early_reads_refused": 1,
+      "simultaneous_jobs": 1,
+      "sha256": {
+        "checked.json": "56f7ba177a06aad3c6a562de3a389a7e231f818f6be4964b785accf69ce08c02",
+        "events.jsonl": "22ad48a34bd0ae1a8951c6c69fef3346b20f326b7cbd3a1609a744702960803c",
+        "projection.json": "36bfa4080c964fc3c03b6f7e4dc2ea2fce48fc6bd48c28e868ecf4843b2698c5",
+        "runtime-result.json": "9d33b021921287705d940d327500b4e893a3e653d218e09da993687dd02b042a"
+      }
+    }
+  ]
+}

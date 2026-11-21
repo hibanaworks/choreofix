@@ -2437,6 +2437,8 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
                 async {
                     async {
                         let mut parts = Vec::new();
+                        let early = guest.command("INSPECTOR", "dd if=/service/parts/alpha_job_a iflag=nonblock".into()).await?;
+                        assert!(early["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{early}");
                         for &i in &order {
                             let (agent, job, _) = jobs[i];
                             let invalid = json!({"job_id":jobs[(i+1)%3].1});
@@ -2461,6 +2463,8 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
                                 let part = shell_json_result(
                                     &guest.command(agent, "cat /service/do_job".into()).await?,
                                 )?;
+                                let delivered = shell_json_result(&guest.command("INSPECTOR", format!("cat /service/parts/{job}")).await?)?;
+                                assert_eq!(delivered, part["data"]["part"]);
                                 parts.push((i, part));
                             }
                         }
@@ -2473,7 +2477,13 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
                                 )?;
                                 parts.push((i, part));
                             }
+                            for (i, part) in &parts {
+                                let job = jobs[*i].1;
+                                let delivered = shell_json_result(&guest.command("INSPECTOR", format!("cat /service/parts/{job}")).await?)?;
+                                assert_eq!(delivered, part["data"]["part"]);
+                            }
                         }
+                        assert_eq!(guest.command("INSPECTOR", "exit 0".into()).await?["exit_status"], 0);
                         for &(agent, job, _) in &jobs {
                             let args = json!({"job_id":job});
                             let repeat = guest.command(agent, format!("printf '%s' '{args}' | dd of=/service/do_job oflag=nonblock")).await?;
@@ -2548,6 +2558,9 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
                 let depot = &roles["DEPOT"];
                 let submitted = find(&[35], vm, worker)?;
                 let returned = find(&[21], worker, vm)?;
+                let delivered = find(&[i as u8], worker, &roles["INSPECTOR_VM"])?;
+                assert_eq!(delivered["receive_commit"]["view"], roles["INSPECTOR"]);
+                assert_eq!(json_frame(&rows, delivered)?.1, part["data"]["part"]);
                 assert_eq!(submitted["send_view"], roles[station]);
                 assert_eq!(returned["receive_commit"]["view"], roles[station]);
                 let using_tool = find(&[3, 4], worker, depot)?;
@@ -2570,6 +2583,12 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
                         .ok_or("tool result receipt")?
                         < json_frame(&rows, returned)?.0 as u64
                 );
+                assert!(
+                    tool_reply["receive_commit"]["journal_row"]
+                        .as_u64()
+                        .ok_or("missing tool reply")?
+                        < json_frame(&rows, delivered)?.0 as u64
+                );
                 let event = events
                     .iter()
                     .find(|e| e["agent"] == agent)
@@ -2587,7 +2606,7 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
                     part["data"]["part"]["station"],
                     format!("STATION_{station}")
                 );
-                effects.push(json!({"worker":agent,"station_request":submitted["frame_id"],"station_result":returned["frame_id"],"tool":using_tool["send_view"],"effect":effect}));
+                effects.push(json!({"worker":agent,"station_request":submitted["frame_id"],"station_result":returned["frame_id"],"part_delivery":delivered["frame_id"],"tool":using_tool["send_view"],"effect":effect}));
             }
             if !batch {
                 assert_eq!(

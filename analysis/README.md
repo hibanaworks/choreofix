@@ -263,6 +263,11 @@ submission. All 36 effects were traced back to the station and tool receives.
 The other three jobs and the inspection/rework cycle still require a combined
 five-participant run.
 
+The [11M inspector trials](11m-inspector-parts.json) added a fourth wash guest.
+Across 12 scripted runs the inspector read all 36 parts, including in reverse
+submission order after all three workers submitted. EPF checked 20,020
+records. Each part read through wash matched the neutral simulator's result.
+
 The cohort-wide measurement is reproducible from the same source-bound trials.
 From the repository root, supply the verified cohort and a new output file:
 
