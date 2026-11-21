@@ -1148,5 +1148,194 @@
       ],
       "comparison": "Full reports matched the archives, with only the new verifier hash substituted for 6H. The second revision changes mutation entry points and their imports."
     }
+  },
+  "validated_journal": {
+    "runner_revision": "139797cbc69a570c547054deaab8fafe7948c73f",
+    "epf_revision": "a75502133c5b67a2bba6546de3338b6a4c8980eb",
+    "verifier_sha256": "cc53c129f0805cad0fcd6a0d487b61a6c8e48e6d3f496d251aa1896e9031bba2",
+    "raw_directory": "output/verification/11m-source-20261122/seed-diagnosis",
+    "verifier_executable": "output/verification/11m-source-20261122/seed-diagnosis/verifier",
+    "epf_checks": {
+      "native": "Native tests and doctests, Clippy, host and thumbv6m no_std builds passed. The Lean stage stopped on disk exhaustion and passed when resumed on the same source.",
+      "lean": "All six EPF modules passed the compiled theorem and axiom check.",
+      "miri": "The new delivery_across_reentry_compares_each_endpoint_to_its_own_visit regression passed strict-provenance Miri on nightly-2026-10-12. The complete Miri matrix was not rerun."
+    },
+    "checks": "All 34 task checkers now receive a validated journal. The reader selects the checker from the compiled task, validates the original task roster and correlates EPF receives, simulator RPC observations and the score envelope. The task still checks the physical resource, arguments and actual result.",
+    "unit_tests_passed": 59,
+    "opt_in_tests_omitted_by_cargo_test": 144,
+    "all_targets_clippy_deny_warnings": true,
+    "replay": {
+      "command": "--audit TASK EVENTS",
+      "inputs": "cases above, with hashes checked against the archived journals and projections",
+      "reports_checked": 40,
+      "actual_effects": 718,
+      "byte_identical_to_previous": 39,
+      "unchanged_except_verifier_sha256": [
+        "6H"
+      ],
+      "6H_current_report_sha256": "927958414974684bc4abd08357d36ae0e0ae0148b65c8f7708aeb20a2efa2e5e",
+      "inventory_sha256": "1f98f7a72a1bfaf931d53dec04bc71ee7304c47cb60fc7b3ea328726213b7b2f"
+    },
+    "changed_journals": {
+      "count": 8,
+      "protocol_accepts_all": true,
+      "effect_audit_rejects_all": true,
+      "cases": [
+        {
+          "task": "6E",
+          "change": "drop a scored occurrence",
+          "new_journal_sha256": "32d9f7aa8f1fe05d7eb320999f24945149cf10a6ff9fdac223f4fffc9fcc6685"
+        },
+        {
+          "task": "16E",
+          "change": "repeat a scored occurrence",
+          "new_journal_sha256": "7dad8a7bc3d3487849098a4ac51b3eb5bde2de8591351b687eecfcf19334ad6e"
+        },
+        {
+          "task": "9E",
+          "change": "omit the violation list",
+          "new_journal_sha256": "9f0916e6c86747fb9cedbdd63656f2b3c58a9a7e70c5ae662745fb8e25d385a0"
+        },
+        {
+          "task": "3E",
+          "change": "add a simulator violation",
+          "new_journal_sha256": "5bed9e30dca0219fa8797d361c6bd49e5f6d8ffa301a818975279c8fb67d1632"
+        },
+        {
+          "task": "8E",
+          "change": "record a non-boolean completion",
+          "new_journal_sha256": "96eb375a170b300cb8ac0da7e66de3366203f50d6fff00cd9533a9f8039cd888"
+        },
+        {
+          "task": "11E",
+          "change": "replace fixture origin",
+          "new_journal_sha256": "39b1ed985853c75658e92127a1e69d1bb96ed76bc25d7a3602bc35e970706cd7"
+        },
+        {
+          "task": "4H",
+          "change": "remove a fixture participant",
+          "new_journal_sha256": "0dbf6f523028fef0f52dc5134d6a12c866add41f95959ca7d790f67419e3a93b"
+        },
+        {
+          "task": "6E",
+          "change": "replace the simulator result",
+          "new_journal_sha256": "42b3007ba7c45874ba9da61de42def3f8fcd94e88cc118414589e33bc4e368d7"
+        }
+      ],
+      "inventory_sha256": "e3095c9f4b811aaf5e1d7f35a8e0d3ac5cdda119d9c812cd00a81600238bc0ac"
+    },
+    "mutation_suites": {
+      "commands": [
+        {
+          "task": "1E",
+          "command": "--check-protocol-mutants",
+          "rejected": 122
+        },
+        {
+          "task": "2E",
+          "command": "--check-writing-mutants",
+          "rejected": 119
+        },
+        {
+          "task": "3E",
+          "command": "--check-report-mutants",
+          "rejected": 193
+        },
+        {
+          "task": "6E",
+          "command": "--check-review-mutants",
+          "rejected": 140
+        },
+        {
+          "task": "12E",
+          "command": "--check-kitchen-mutants",
+          "rejected": 95
+        },
+        {
+          "task": "11E",
+          "command": "--check-manufacturing-mutants",
+          "rejected": 68
+        },
+        {
+          "task": "5E",
+          "command": "--check-medical-mutants",
+          "rejected": 225
+        },
+        {
+          "task": "5M",
+          "command": "--check-multi-specialty-mutants",
+          "rejected": 306
+        },
+        {
+          "task": "5H",
+          "command": "--check-critical-care-mutants",
+          "rejected": 300
+        },
+        {
+          "task": "6H",
+          "command": "--check-staged-integration-mutants",
+          "rejected": 506
+        },
+        {
+          "task": "7E",
+          "command": "--check-document-mutants",
+          "rejected": 122
+        },
+        {
+          "task": "10E",
+          "command": "--check-build-mutants",
+          "rejected": 69
+        },
+        {
+          "task": "6M",
+          "command": "--check-feature-delivery-mutants",
+          "rejected": 518
+        },
+        {
+          "task": "16E",
+          "command": "--check-cicd-mutants",
+          "rejected": 16
+        },
+        {
+          "task": "8E",
+          "command": "--check-api-mutants",
+          "rejected": 18
+        },
+        {
+          "task": "13M",
+          "command": "--check-lab-quality-mutants",
+          "rejected": 9
+        },
+        {
+          "task": "10M",
+          "command": "--check-cascading-build-mutants",
+          "rejected": 368
+        }
+      ],
+      "rejected": 3194,
+      "inventory_sha256": "583e2c9c87c1ab81cab184a2fd80caea66fe461ca2cfd13534652dd382486f2d"
+    },
+    "workshop_scripted_replay": {
+      "checked_archived_runs": 30,
+      "matched_effects": 522,
+      "inventory_sha256": "bead5dcf14e2f3beac98df57f3b27efc8679a13d0916cc7745715284540a45e9"
+    },
+    "workshop_live_replay": "analysis/11m-source-20261122.json, live_depth_one.offline_audit",
+    "tracked_rust_lines": {
+      "before_consolidation": {
+        "task_audit_files": 19993,
+        "all_tools": 48709
+      },
+      "previous": {
+        "task_audit_files": 18092,
+        "all_tools": 47160
+      },
+      "current": {
+        "task_audit_files": 17825,
+        "all_tools": 47031
+      }
+    },
+    "scope": "Offline replay. No new model calls, qualifications or scored runs. This comparison tests the behavior of the effect checkers on these inputs. It does not establish independent correctness of task-specific rules."
   }
+
 }

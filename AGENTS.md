@@ -63,6 +63,10 @@ disclose task-specific matching rules and shared identities. A transport
 preview is not a committed request. Missing capture or receive evidence is not
 permission to fall back to the former auditor, and a valid finite source prefix
 alone does not establish a complete application effect.
+Pass the validated journal to each task effect checker. Select the checker from the
+compiled task in the common reader, pair it with the original participant roster,
+and use the same entry point for record mutations. Keep task-specific code for
+physical resource, argument and result correspondence.
 Do not repeat EPF's operation-to-operation ordering or delegation-envelope
 checks in effect auditors. Check the actual request/effect/result boundary,
 file data, physical integration identities and completion evidence instead.

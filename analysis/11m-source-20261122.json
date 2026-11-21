@@ -120,20 +120,299 @@
     "scored": false,
     "setup_attempt": "output/verification/11m-source-20261122/live-depth1/harness-error.json",
     "offline_audit": {
-      "status": "interrupted during EPF source execution search, before any effect audit verdict",
-      "elapsed_at_interruption_seconds": 911,
-      "reason": "Release the shared validation slot to replay the saved cross-task audit corpus",
-      "process_observation": "output/verification/11m-source-20261122/live-depth1-checked-audit-interruption.txt",
-      "stack_sample": "output/verification/11m-source-20261122/live-depth1-checked-audit-interruption.sample",
-      "occurrence_pruning_trial": {
-        "raw_directory": "output/verification/11m-source-20261122/replay-latest",
-        "journal_sha256": "615c9eb0ccfcd83fd2fae92787d5e4381967bb383602a3666beb95517be57ea8",
-        "candidate_patch_sha256": "eba466de8fa280b40aed099b5d74c417c2b416f6f6da56e0150d56cd2854724c",
-        "candidate_verifier_sha256": "3c65b4524319d108e1800cbffac8d48b92e18ac42abe4ee4bfc662e517884ffd",
-        "elapsed_observed_seconds": 917,
-        "cpu_observed_seconds": 915.2,
-        "outcome": "Interrupted with no audit verdict. The candidate was removed from the EPF source; the journal auditor uses the unchanged pinned EPF."
-      }
+      "status": "passed",
+      "report": "output/verification/11m-source-20261122/seed-diagnosis/final-11M.json",
+      "report_sha256": "44fe9071fd4e3b9b64f576025d9d940313a1b5367f735d08b3b020428ef8bd3a",
+      "command": "choreofix-experiments --audit-run output/verification/11m-source-20261122/live-depth1-checked",
+      "runner_revision": "139797cbc69a570c547054deaab8fafe7948c73f",
+      "epf_revision": "a75502133c5b67a2bba6546de3338b6a4c8980eb",
+      "verifier_binary_sha256": "cc53c129f0805cad0fcd6a0d487b61a6c8e48e6d3f496d251aa1896e9031bba2",
+      "events_sha256": "615c9eb0ccfcd83fd2fae92787d5e4381967bb383602a3666beb95517be57ea8",
+      "capture_records": 11345,
+      "matched_effects": 15,
+      "simulator_complete": true,
+      "violations": 0,
+      "new_model_calls": 0,
+      "previous_attempt": {
+        "status": "interrupted during EPF source execution search, before any effect audit verdict",
+        "elapsed_at_interruption_seconds": 911,
+        "reason": "Release the shared validation slot to replay the saved cross-task audit corpus",
+        "process_observation": "output/verification/11m-source-20261122/live-depth1-checked-audit-interruption.txt",
+        "stack_sample": "output/verification/11m-source-20261122/live-depth1-checked-audit-interruption.sample",
+        "occurrence_pruning_trial": {
+          "raw_directory": "output/verification/11m-source-20261122/replay-latest",
+          "journal_sha256": "615c9eb0ccfcd83fd2fae92787d5e4381967bb383602a3666beb95517be57ea8",
+          "candidate_patch_sha256": "eba466de8fa280b40aed099b5d74c417c2b416f6f6da56e0150d56cd2854724c",
+          "candidate_verifier_sha256": "3c65b4524319d108e1800cbffac8d48b92e18ac42abe4ee4bfc662e517884ffd",
+          "elapsed_observed_seconds": 917,
+          "cpu_observed_seconds": 915.2,
+          "outcome": "Interrupted with no audit verdict. The candidate was removed from the EPF source; the journal auditor uses the unchanged pinned EPF."
+        }
+      },
+      "effect_receipts": [
+        {
+          "agent": "WORKER_A",
+          "effect_end_row": 2234,
+          "effect_start_row": 1406,
+          "frames": [
+            202,
+            205,
+            208,
+            209,
+            211,
+            339,
+            341,
+            345,
+            343,
+            344
+          ],
+          "job": "alpha_job_a",
+          "rpc_id": 17,
+          "tool": "do_job"
+        },
+        {
+          "agent": "WORKER_B",
+          "effect_end_row": 3562,
+          "effect_start_row": 2731,
+          "frames": [
+            407,
+            410,
+            413,
+            414,
+            416,
+            545,
+            547,
+            551,
+            549,
+            550
+          ],
+          "job": "beta_job_b",
+          "rpc_id": 25,
+          "tool": "do_job"
+        },
+        {
+          "agent": "INSPECTOR",
+          "effect_end_row": 3256,
+          "effect_start_row": 3145,
+          "frames": [
+            476,
+            480,
+            497,
+            498,
+            499,
+            500
+          ],
+          "job": "alpha_job_a",
+          "rpc_id": 26,
+          "tool": "inspect_quality"
+        },
+        {
+          "agent": "WORKER_C",
+          "effect_end_row": 3794,
+          "effect_start_row": 3561,
+          "frames": [
+            535,
+            538,
+            541,
+            542,
+            544,
+            582,
+            584,
+            588,
+            586,
+            587
+          ],
+          "job": "gamma_job_c",
+          "rpc_id": 31,
+          "tool": "do_job"
+        },
+        {
+          "agent": "DISPATCHER",
+          "effect_end_row": 4990,
+          "effect_start_row": 4839,
+          "frames": [
+            739,
+            766,
+            767
+          ],
+          "job": "alpha_job_a",
+          "rpc_id": 40,
+          "tool": "dispatch_rework"
+        },
+        {
+          "agent": "WORKER_C",
+          "effect_end_row": 5517,
+          "effect_start_row": 4944,
+          "frames": [
+            752,
+            755,
+            758,
+            846,
+            850,
+            848,
+            849
+          ],
+          "job": "alpha_job_c",
+          "rpc_id": 43,
+          "tool": "do_job"
+        },
+        {
+          "agent": "WORKER_A",
+          "effect_end_row": 6511,
+          "effect_start_row": 5893,
+          "frames": [
+            894,
+            897,
+            900,
+            901,
+            903,
+            999,
+            1001,
+            1005,
+            1003,
+            1004
+          ],
+          "job": "alpha_job_a",
+          "rpc_id": 50,
+          "tool": "do_job"
+        },
+        {
+          "agent": "INSPECTOR",
+          "effect_end_row": 6337,
+          "effect_start_row": 6277,
+          "frames": [
+            957,
+            961,
+            972,
+            973,
+            974,
+            976,
+            977
+          ],
+          "job": "beta_job_b",
+          "rpc_id": 51,
+          "tool": "inspect_quality"
+        },
+        {
+          "agent": "INSPECTOR",
+          "effect_end_row": 7587,
+          "effect_start_row": 7565,
+          "frames": [
+            1157,
+            1161,
+            1165,
+            1166,
+            1167,
+            1169,
+            1170
+          ],
+          "job": "gamma_job_c",
+          "rpc_id": 57,
+          "tool": "inspect_quality"
+        },
+        {
+          "agent": "INSPECTOR",
+          "effect_end_row": 9506,
+          "effect_start_row": 9170,
+          "frames": [
+            1402,
+            1406,
+            1458,
+            1459,
+            1460,
+            1462,
+            1463
+          ],
+          "job": "alpha_job_a",
+          "rpc_id": 63,
+          "tool": "inspect_quality"
+        },
+        {
+          "agent": "INSPECTOR",
+          "effect_end_row": 10308,
+          "effect_start_row": 10068,
+          "frames": [
+            1540,
+            1544,
+            1581,
+            1582,
+            1583,
+            1585,
+            1586
+          ],
+          "job": "alpha_job_c",
+          "rpc_id": 67,
+          "tool": "inspect_quality"
+        },
+        {
+          "agent": "WORKER_A",
+          "effect_end_row": 11051,
+          "effect_start_row": 10886,
+          "frames": [
+            1663,
+            1666,
+            1669,
+            1695,
+            1699,
+            1697,
+            1698
+          ],
+          "job": "beta_job_a",
+          "rpc_id": 75,
+          "tool": "do_job"
+        },
+        {
+          "agent": "INSPECTOR",
+          "effect_end_row": 11863,
+          "effect_start_row": 11818,
+          "frames": [
+            1807,
+            1811,
+            1820,
+            1821,
+            1822,
+            1824,
+            1825
+          ],
+          "job": "beta_job_a",
+          "rpc_id": 80,
+          "tool": "inspect_quality"
+        },
+        {
+          "agent": "WORKER_B",
+          "effect_end_row": 12590,
+          "effect_start_row": 12567,
+          "frames": [
+            1922,
+            1925,
+            1928,
+            1932,
+            1936,
+            1934,
+            1935
+          ],
+          "job": "gamma_job_b",
+          "rpc_id": 88,
+          "tool": "do_job"
+        },
+        {
+          "agent": "INSPECTOR",
+          "effect_end_row": 13182,
+          "effect_start_row": 13160,
+          "frames": [
+            2015,
+            2019,
+            2023,
+            2024,
+            2025,
+            2027,
+            2028
+          ],
+          "job": "gamma_job_b",
+          "rpc_id": 91,
+          "tool": "inspect_quality"
+        }
+      ]
     }
   }
 }
