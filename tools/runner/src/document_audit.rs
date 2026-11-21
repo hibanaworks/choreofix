@@ -40,6 +40,7 @@ fn snapshot(calls: &[&Call], before: usize) -> Result<Value> {
 }
 
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    journal.check_session(&journal.projection["compiled"]["session"])?;
     let dynamic = journal.execution;
     let artifact = journal.projection;
     let compiled = &artifact["compiled"];
@@ -51,7 +52,6 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     let editor = name("roles", "EDITOR")?;
     let writer_a = name("roles", "WRITER_A")?;
     let editor_file = name("roles", "ALLOCATION_FILE")?;
-    let session = compiled["session"].as_u64().ok_or("document session")?;
     let crate::journal::Journal {
         frames,
         calls,
@@ -59,10 +59,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         simulator_complete,
         ..
     } = journal;
-    if frames.values().any(|f| f.identity["session"] != session)
-        || calls.is_empty()
-        || !simulator_complete
-    {
+    if calls.is_empty() || !simulator_complete {
         return Err("document session or completion differs".into());
     }
     let mut ordered = calls.values().collect::<Vec<_>>();
@@ -486,17 +483,13 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     ]);
     if let Some((id, frame)) = frames.iter().find(|(id, frame)| {
         required.contains(&frame.logical_label)
-            && frame.identity["source"]
-                .as_u64()
-                .is_some_and(|role| business_roles.contains(&role))
-            && frame.identity["target"]
-                .as_u64()
-                .is_some_and(|role| business_roles.contains(&role))
+            && business_roles.contains(&frame.source)
+            && business_roles.contains(&frame.target)
             && !used.contains(id)
     }) {
         return Err(format!(
-            "unused document request, receipt or result: frame {id}, identity {}",
-            frame.identity
+            "unused document request, receipt or result: frame {id}, {} -> {}, label {}",
+            frame.source, frame.target, frame.logical_label
         )
         .into());
     }

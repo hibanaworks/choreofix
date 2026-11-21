@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use std::{collections::BTreeSet, ops::Range};
 
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    journal.check_session(&journal.projection["compiled"]["session"])?;
     let rows = journal.records();
     let compiled = &journal.projection["compiled"];
     let fixture = journal.fixture();
@@ -14,11 +15,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     let label = |name: &str| crate::projection::named_id(&compiled["labels"], name).map(u64::from);
     let frames = &journal.frames;
     let events = journal.scored_events;
-    if !journal.simulator_complete
-        || frames
-            .values()
-            .any(|frame| frame.identity["session"] != compiled["session"])
-    {
+    if !journal.simulator_complete {
         return Err("incomplete full-stack score or resource violation".into());
     }
     let pairs = ["DB", "BACKEND", "FRONTEND", "REVIEW", "TEST"]

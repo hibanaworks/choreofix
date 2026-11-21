@@ -304,11 +304,7 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
         );
     }
     if history.frames.iter().any(|(id, frame)| {
-        let key = (
-            frame.identity["source"].as_u64().unwrap_or(u64::MAX),
-            frame.identity["target"].as_u64().unwrap_or(u64::MAX),
-            u64::from(frame.logical_label),
-        );
+        let key = (frame.source, frame.target, u64::from(frame.logical_label));
         effect_edges.contains(&key) && !used_frames.contains(id)
     }) {
         return Err("unused 14H effect frame".into());

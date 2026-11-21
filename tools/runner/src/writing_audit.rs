@@ -120,10 +120,10 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
                             .as_u64()
                             .ok_or("section service")?;
                     let primary = headers.values().any(|h| {
-                        u64::from(h[1]) == service
-                            && u64::from(h[2]) == role
-                            && h[3] == request_label
-                            && h[4] == 0
+                        u64::from(h.source) == service
+                            && u64::from(h.target) == role
+                            && h.label == request_label
+                            && h.delegated_role.is_none()
                     });
                     sections.push((primary, service));
                 }
@@ -270,11 +270,9 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         business.insert(compiled["editor"].as_u64().ok_or("editor role")?);
     }
     for (id, frame) in &journal.frames {
-        let wire = u16::try_from(frame.identity["frame_label"].as_u64().ok_or("wire label")?)?;
-        let header = headers.get(&wire).ok_or("compiled frame")?;
-        if header[4] == 0
-            && business.contains(&u64::from(header[1]))
-            && business.contains(&u64::from(header[2]))
+        if frame.delegated_role.is_none()
+            && business.contains(&frame.source)
+            && business.contains(&frame.target)
             && !used.contains(id)
         {
             return Err("extra or unused writing request/result".into());
@@ -291,17 +289,10 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
             .frames
             .values()
             .filter(|frame| {
-                let Some(wire) = frame.identity["frame_label"]
-                    .as_u64()
-                    .and_then(|n| u16::try_from(n).ok())
-                else {
-                    return false;
-                };
-                headers.get(&wire).is_some_and(|h| {
-                    h[4] == 1
-                        && resource["role"] == h[5]
-                        && frame.identity["target"] == resource["service"]
-                })
+                frame
+                    .delegated_role
+                    .is_some_and(|role| resource["role"] == role)
+                    && frame.target == resource["service"]
             })
             .count();
         if returned != 2 {

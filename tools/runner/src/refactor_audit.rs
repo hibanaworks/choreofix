@@ -88,6 +88,7 @@ fn checked(value: &Value, module: &str, hash: &str) -> Result<()> {
     Ok(())
 }
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    journal.check_session(&journal.projection["compiled"]["session"])?;
     let dynamic = journal.execution;
     let projection = journal.projection;
     let c = &projection["compiled"];
@@ -102,12 +103,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         simulator_complete,
         ..
     } = journal;
-    if !simulator_complete
-        || calls.len() != 12
-        || frames
-            .values()
-            .any(|f| f.identity["session"] != c["session"])
-    {
+    if !simulator_complete || calls.len() != 12 {
         return Err(
             "incomplete/foreign refactor run, extra effects or common-world violation".into(),
         );
@@ -411,11 +407,11 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     .map(role)
     .collect::<Result<BTreeSet<_>>>()?;
     for frame in frames.values() {
-        let from = frame.identity["source"].as_u64().ok_or("frame source")?;
-        let to = frame.identity["target"].as_u64().ok_or("frame target")?;
+        let from = frame.source;
+        let to = frame.target;
         if business_roles.contains(&from)
             && business_roles.contains(&to)
-            && frame.identity["delegated_role"].is_null()
+            && frame.delegated_role.is_none()
             && ![label("ReviewExit")?, label("TestExit")?, label("RepoExit")?]
                 .contains(&u64::from(frame.logical_label))
             && !used.contains(&frame.sent)
@@ -463,7 +459,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
     let contracts = crate::projection::contracts(&artifact["compiled"])?;
     let publication_wire = one(contracts
         .iter()
-        .filter(|(_, header)| header[3] == publication_label))?
+        .filter(|(_, header)| header.label == publication_label))?
     .0;
     let publication = rows
         .iter()

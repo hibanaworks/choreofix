@@ -37,6 +37,7 @@ fn panel(calls: &[&Call], actor: &str, before: usize) -> Result<Value> {
 }
 
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    journal.check_session(&journal.projection["compiled"]["session"])?;
     let dynamic = journal.execution;
     let artifact = journal.projection;
     let compiled = &artifact["compiled"];
@@ -51,12 +52,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         simulator_complete,
         ..
     } = journal;
-    if calls.len() < 6
-        || !simulator_complete
-        || frames
-            .values()
-            .any(|frame| frame.identity["session"] != compiled["session"])
-    {
+    if calls.len() < 6 || !simulator_complete {
         return Err("incomplete or unsafe consultation outcome".into());
     }
     let business = |frame: &Frame| {
@@ -379,16 +375,11 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let (rows, artifact) = (evidence.rows, evidence.projection);
     let dynamic = &baseline["dynamic_protocol"];
     let journal = crate::journal::read(&rows, &artifact, dynamic)?;
-    let contracts = crate::projection::contracts(&artifact["compiled"])?;
     let selected = journal
         .frames
         .iter()
         .filter_map(|(id, frame)| {
-            let wire = frame.identity["frame_label"]
-                .as_u64()
-                .and_then(|wire| u16::try_from(wire).ok())?;
-            let header = contracts.get(&wire)?;
-            (header[4] == 0
+            (frame.delegated_role.is_none()
                 && artifact["compiled"]["labels"]
                     .as_object()?
                     .values()

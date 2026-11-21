@@ -72,7 +72,14 @@ fn rows(artifact: &Value) -> Vec<Value> {
 fn accepted_frame_must_match_its_compiled_header() -> Result<()> {
     let artifact = artifact();
     let original = rows(&artifact);
-    assert_eq!(frames(&artifact, &original)?, BTreeMap::from([(8, 7)]));
+    let observed = frames(&artifact, &original)?;
+    assert_eq!(observed.len(), 1);
+    assert_eq!((observed[&8].label, observed[&8].delegated_role), (7, None));
+    let mut annotated = original.clone();
+    annotated[1]["message"]["delegated_role"] = json!(13);
+    assert_eq!(frames(&artifact, &annotated)?, observed);
+    annotated.push(annotated[1].clone());
+    assert!(frames(&artifact, &annotated).is_err());
     for (field, value) in [
         ("frame_label", 65535),
         ("lane", 3),
@@ -140,7 +147,12 @@ fn an_owned_payload_preserves_the_full_occurrence_and_resource() -> Result<()> {
         message["target"] = json!(0);
         message["payload"] = json!([13, 1, 0]);
     }
-    assert_eq!(frames(&artifact, &rows)?, BTreeMap::from([(8, 10)]));
+    let observed = frames(&artifact, &rows)?;
+    assert_eq!(observed.len(), 1);
+    assert_eq!(
+        (observed[&8].label, observed[&8].delegated_role),
+        (10, Some(13))
+    );
     for payload in [json!([13, 0, 0]), json!([12, 1, 0]), json!([13, 1, 0, 0])] {
         let mut changed = rows.clone();
         for row in &mut changed[1..] {
@@ -295,7 +307,9 @@ fn cicd_frames_use_both_compiled_resource_bindings_and_reject_coherent_header_ch
         row["message"]["session"] = json!(16);
         row["message"]["target"] = json!(3);
     }
-    assert_eq!(frames(&artifact, &original)?, BTreeMap::from([(8, 7)]));
+    let observed = frames(&artifact, &original)?;
+    assert_eq!(observed.len(), 1);
+    assert_eq!((observed[&8].label, observed[&8].delegated_role), (7, None));
     for (wire, lane, source, target, resource) in [(256, 3, 6, 0, 11), (257, 4, 7, 2, 12)] {
         let mut delegated = original.clone();
         for row in &mut delegated[1..] {
@@ -306,7 +320,12 @@ fn cicd_frames_use_both_compiled_resource_bindings_and_reject_coherent_header_ch
             frame["target"] = json!(target);
             frame["payload"] = json!([resource, 1, wire & 255]);
         }
-        assert_eq!(frames(&artifact, &delegated)?, BTreeMap::from([(8, 10)]));
+        let observed = frames(&artifact, &delegated)?;
+        assert_eq!(observed.len(), 1);
+        assert_eq!(
+            (observed[&8].label, observed[&8].delegated_role),
+            (10, Some(resource))
+        );
         for (field, value) in [("frame_label", 65535), ("lane", 255)] {
             let mut changed = delegated.clone();
             for row in &mut changed[1..] {

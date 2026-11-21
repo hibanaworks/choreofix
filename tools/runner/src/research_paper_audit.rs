@@ -1,5 +1,5 @@
 //! Join the 3M operation files, their committed Endpoint receives and real effects.
-use crate::{evidence::Result, journal, projection};
+use crate::{evidence::Result, journal};
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, ops::Range};
 
@@ -36,7 +36,6 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
     let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
     let label = |table: &Value, name: &str| crate::projection::named_id(table, name).map(u64::from);
     let labels = &compiled["labels"];
-    let contracts = projection::contracts(compiled)?;
     let evaluated = history.scored_events;
     if !history.simulator_complete {
         return Err("incomplete paper score or resource violation".into());
@@ -72,11 +71,7 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
                     && u64::from(frame.logical_label) == message
                     && within.contains(&frame.received)
                     && resource.is_none_or(|resource| {
-                        frame.identity["frame_label"]
-                            .as_u64()
-                            .and_then(|wire| u16::try_from(wire).ok())
-                            .and_then(|wire| contracts.get(&wire))
-                            .is_some_and(|meta| meta[4] == 1 && u64::from(meta[5]) == resource)
+                        frame.delegated_role.map(u64::from) == Some(resource)
                     })
             })
             .min_by_key(|(_, frame)| frame.received)
@@ -337,8 +332,8 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
     .collect::<std::result::Result<BTreeSet<_>, _>>()?;
     if publication.is_none()
         || history.frames.iter().any(|(id, frame)| {
-            let source = frame.identity["source"].as_u64().unwrap_or(u64::MAX);
-            let target = frame.identity["target"].as_u64().unwrap_or(u64::MAX);
+            let source = frame.source;
+            let target = frame.target;
             ((paper_files.contains(&source) && services.contains(&target))
                 || (paper_files.contains(&target) && services.contains(&source)))
                 && !used.contains(id)

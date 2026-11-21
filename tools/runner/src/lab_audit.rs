@@ -45,6 +45,7 @@ fn frame<'a>(
     Ok(frame)
 }
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    journal.check_session(&journal.projection["compiled"]["session"])?;
     let dynamic = journal.execution;
     let compiled = &journal.projection["compiled"];
     let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
@@ -59,13 +60,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         ..
     } = journal;
     let events = scored_events;
-    if calls.len() != 8
-        || events.len() != 8
-        || !simulator_complete
-        || frames
-            .values()
-            .any(|f| f.identity["session"] != compiled["session"])
-    {
+    if calls.len() != 8 || events.len() != 8 || !simulator_complete {
         return Err(
             "incomplete laboratory world, extra effects or a physical resource violation".into(),
         );
@@ -403,8 +398,8 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     .map(role)
     .collect::<Result<BTreeSet<_>>>()?;
     for frame in frames.values() {
-        if business.contains(&frame.identity["source"].as_u64().ok_or("frame source")?)
-            && business.contains(&frame.identity["target"].as_u64().ok_or("frame target")?)
+        if business.contains(&frame.source)
+            && business.contains(&frame.target)
             && !used.contains(&frame.sent)
         {
             return Err("unused or extra scientific request/result".into());
@@ -443,7 +438,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
         .ok_or("actual final result")?;
     let actual_label = artifact["compiled"]["labels"]["FinalOperation"].clone();
     let headers = crate::projection::contracts(&artifact["compiled"])?;
-    let wire = one(headers.iter().filter(|(_, h)| h[3] == actual_label))?.0;
+    let wire = one(headers.iter().filter(|(_, h)| h.label == actual_label))?.0;
     let packet = rows
         .iter()
         .position(|r| {

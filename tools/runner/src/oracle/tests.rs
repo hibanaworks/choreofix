@@ -1374,7 +1374,10 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
             .lines()
             .map(serde_json::from_str)
             .collect::<std::result::Result<Vec<Value>, _>>()?;
-        let labels = projection::frames(&artifact, &rows)?;
+        let labels = projection::frames(&artifact, &rows)?
+            .into_iter()
+            .map(|(id, wire)| (id, wire.label))
+            .collect();
         let (guest_calls, fixture_calls): (Vec<_>, Vec<_>) = rows
             .iter()
             .filter(|r| r["direction"] == "domain_start")

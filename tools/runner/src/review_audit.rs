@@ -45,6 +45,7 @@ fn business_roles(projection: &Value) -> Result<BTreeSet<u64>> {
 }
 
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    journal.check_session(&json!(6))?;
     let dynamic = journal.execution;
     let projection = journal.projection;
     let rows = journal.records();
@@ -61,9 +62,6 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         simulator_complete,
         ..
     } = journal;
-    if frames.values().any(|frame| frame.identity["session"] != 6) {
-        return Err("wrong session".into());
-    }
     for call in calls.values() {
         let m = call.request;
         let actor = actors
@@ -318,14 +316,8 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     let actual_json = frames
         .values()
         .filter(|f| {
-            let Some(from) = f.identity["source"].as_u64() else {
-                return false;
-            };
-            let Some(to) = f.identity["target"].as_u64() else {
-                return false;
-            };
-            business.contains(&from)
-                && business.contains(&to)
+            business.contains(&f.source)
+                && business.contains(&f.target)
                 && serde_json::from_slice::<Value>(&f.bytes).is_ok_and(|v| v.is_object())
         })
         .map(|f| f.sent)
@@ -374,14 +366,8 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .frames
         .iter()
         .filter(|(_, f)| {
-            let Some(from) = f.identity["source"].as_u64() else {
-                return false;
-            };
-            let Some(to) = f.identity["target"].as_u64() else {
-                return false;
-            };
-            business.contains(&from)
-                && business.contains(&to)
+            business.contains(&f.source)
+                && business.contains(&f.target)
                 && serde_json::from_slice::<Value>(&f.bytes).is_ok_and(|v| v.is_object())
         })
         .map(|(&id, _)| id)

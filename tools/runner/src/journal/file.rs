@@ -2,6 +2,34 @@
 use super::Frame;
 use crate::evidence::Result;
 use hibana_wasip1_runtime::protocol;
+use std::collections::BTreeMap;
+
+type ObservedFrame<'a> = (u64, &'a Frame<'a>);
+
+/// Pair a descriptor's requests and replies in receive-commit order on each side.
+/// The caller selects the file's projected operations and checks each pair.
+pub(crate) fn exchanges<'a>(
+    frames: &'a BTreeMap<u64, Frame<'a>>,
+    request: impl Fn(&Frame) -> bool,
+    reply: impl Fn(&Frame) -> bool,
+) -> Result<impl ExactSizeIterator<Item = (ObservedFrame<'a>, ObservedFrame<'a>)>> {
+    let mut requests = Vec::new();
+    let mut replies = Vec::new();
+    for (&id, frame) in frames {
+        match (request(frame), reply(frame)) {
+            (true, false) => requests.push((id, frame)),
+            (false, true) => replies.push((id, frame)),
+            (false, false) => {}
+            (true, true) => return Err("file observation matches both request and reply".into()),
+        }
+    }
+    if requests.len() != replies.len() {
+        return Err("unpaired file requests and replies".into());
+    }
+    requests.sort_by_key(|(_, f)| f.received);
+    replies.sort_by_key(|(_, f)| f.received);
+    Ok(requests.into_iter().zip(replies))
+}
 
 pub(crate) fn same_path(bytes: &[u8], path: &str) -> bool {
     use hibana_wasip1_runtime::choreofs::{ChoreoFsObject, ChoreoFsObjectSet, FdSpec, ObjectId};
@@ -117,7 +145,9 @@ mod tests {
     fn frame(bytes: &[u8]) -> Frame<'static> {
         Frame {
             logical_label: 0,
-            identity: &Value::Null,
+            source: 0,
+            target: 0,
+            delegated_role: None,
             bytes: bytes.to_vec(),
             sent: 0,
             first_poll: 0,
@@ -155,6 +185,27 @@ mod tests {
         file.open(&open, &opened, |p| p == b"x")?;
         file.read(&read, &frame(&[7, 0, 0, 0]))?;
         assert!(file.close(&frame(&[7]), &frame(&[6, 0, 0])).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn file_pairs_follow_receive_order_and_require_both_sides() -> Result<()> {
+        let mut frames = BTreeMap::new();
+        for (id, label, received) in [(1, 0, 7), (2, 1, 10), (3, 0, 2), (4, 1, 5)] {
+            let mut observed = frame(&[]);
+            observed.logical_label = label;
+            observed.received = received;
+            frames.insert(id, observed);
+        }
+        let request = |f: &Frame| f.logical_label == 0;
+        let reply = |f: &Frame| f.logical_label == 1;
+        let ids: Vec<_> = exchanges(&frames, request, reply)?
+            .map(|((req, _), (ret, _))| (req, ret))
+            .collect();
+        assert_eq!(ids, [(3, 4), (1, 2)]);
+        assert!(exchanges(&frames, request, request).is_err());
+        frames.remove(&2);
+        assert!(exchanges(&frames, request, reply).is_err());
         Ok(())
     }
 }

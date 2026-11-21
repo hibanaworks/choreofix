@@ -64,16 +64,13 @@ const BUSINESS_ROLES: [&str; 18] = [
 ];
 
 fn business(frame: &Frame, roles: &BTreeSet<u64>) -> bool {
-    frame.identity["source"]
-        .as_u64()
-        .is_some_and(|r| roles.contains(&r))
-        && frame.identity["target"]
-            .as_u64()
-            .is_some_and(|r| roles.contains(&r))
+    roles.contains(&frame.source)
+        && roles.contains(&frame.target)
         && frame.value().is_ok_and(|v| v.is_object())
 }
 
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    journal.check_session(&journal.projection["compiled"]["session"])?;
     let dynamic = journal.execution;
     let rows = journal.records();
     let compiled = &journal.projection["compiled"];
@@ -89,11 +86,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         simulator_complete,
         ..
     } = journal;
-    if !simulator_complete
-        || frames
-            .values()
-            .any(|f| f.identity["session"] != compiled["session"])
-    {
+    if !simulator_complete {
         return Err("development completion, session or actual violation".into());
     }
     let pairs = [

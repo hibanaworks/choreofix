@@ -306,11 +306,7 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
         );
     }
     for (id, f) in &history.frames {
-        let edge = (
-            f.identity["source"].as_u64().ok_or("frame source")?,
-            f.identity["target"].as_u64().ok_or("frame target")?,
-            f.logical_label,
-        );
+        let edge = (f.source, f.target, f.logical_label);
         if !spent.contains(id)
             && (request_edges.contains(&edge) || f.value().is_ok_and(|v| v.is_object()))
         {

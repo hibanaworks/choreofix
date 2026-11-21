@@ -916,8 +916,7 @@ async fn publication_case(
         ("CHAPTER_4", "EvaluationToPartI"),
     ] {
         let (_, accepted) = one(journal.frames.iter().filter(|(_, frame)| {
-            frame.identity["target"] == file
-                && compiled["labels"][label] == u64::from(frame.logical_label)
+            frame.target == file && compiled["labels"][label] == u64::from(frame.logical_label)
         }))?;
         let current = accepted.value()?;
         let review = journal
@@ -1449,7 +1448,7 @@ async fn publication_case(
             .frames
             .iter()
             .filter(|(_, frame)| {
-                frame.identity["target"] == file
+                frame.target == file
                     && u64::from(frame.logical_label) == label
                     && frame.value().is_ok_and(|payload| {
                         !(message == "FactInput" && payload["sections"].is_object())

@@ -73,19 +73,14 @@ pub(super) fn operation(
 }
 
 pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
+    history.check_session(&history.projection["compiled"]["session"])?;
     let dynamic = history.execution;
     let compiled = &history.projection["compiled"];
     let actors = history.participants;
     let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
     let label = |name: &str| crate::projection::named_id(&compiled["labels"], name).map(u64::from);
     let evaluated = history.scored_events;
-    if history.calls.len() != 13
-        || !history.simulator_complete
-        || history
-            .frames
-            .values()
-            .any(|frame| frame.identity["session"] != compiled["session"])
-    {
+    if history.calls.len() != 13 || !history.simulator_complete {
         return Err("discovery history has missing effects or resource violations".into());
     }
     journal::check_close_pairs(

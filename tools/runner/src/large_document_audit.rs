@@ -200,9 +200,7 @@ pub(crate) fn effects(compiled: &Value, history: &Journal) -> Result<Value> {
                 && frame.value().is_ok_and(|value| value == *args)
         }))
         .map_err(|err| format!("7H request {agent} {tool} {section}: {err}"))?;
-        let to = request.identity["target"]
-            .as_u64()
-            .ok_or("7H request target")?;
+        let to = request.target;
         let target = if to == primary {
             target
         } else {

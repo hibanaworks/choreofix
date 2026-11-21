@@ -10,6 +10,7 @@ type Edge = (&'static str, &'static str, &'static str);
 type Instrument = (&'static str, &'static str, &'static str, &'static str);
 
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    journal.check_session(&journal.projection["compiled"]["session"])?;
     let dynamic = journal.execution;
     let artifact = journal.projection;
     let rows = journal.records();
@@ -25,12 +26,6 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         ..
     } = journal;
     let score_events = scored_events;
-    if frames
-        .values()
-        .any(|frame| frame.identity["session"] != compiled["session"])
-    {
-        return Err("incomplete scientific history or physical resource violation".into());
-    }
     let pairs = [
         ("CHEM_VM", "CHEMIST_IO"),
         ("BIO_VM", "BIOLOGIST_IO"),
@@ -403,12 +398,8 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         terminal
     };
     for (&id, frame) in &frames {
-        let from = frame.identity["source"]
-            .as_u64()
-            .ok_or("scientific source role")?;
-        let to = frame.identity["target"]
-            .as_u64()
-            .ok_or("scientific target role")?;
+        let from = frame.source;
+        let to = frame.target;
         if relevant.contains(&(from, to, u64::from(frame.logical_label))) && !used.contains(&id) {
             return Err(format!("unmatched scientific request or result frame {id}").into());
         }

@@ -13,6 +13,7 @@ fn number(value: &Value) -> Result<u64> {
 }
 
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    journal.check_session(&journal.projection["compiled"]["session"])?;
     let dynamic = journal.execution;
     let compiled = &journal.projection["compiled"];
     let actors = journal.participants;
@@ -24,12 +25,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     let repo = role("REPO")?;
     let environment = role("TEST_ENV")?;
     let frames = &journal.frames;
-    if frames
-        .values()
-        .any(|f| f.identity["session"] != compiled["session"])
-        || !journal.simulator_complete
-        || journal.calls.is_empty()
-    {
+    if !journal.simulator_complete || journal.calls.is_empty() {
         return Err("coordination completion or session differs".into());
     }
     let contract_label = label("Contract")?;
@@ -93,9 +89,9 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
                 )
             })
             .transpose()?;
-        let mut requests = frames
-            .iter()
-            .filter(|(_, f)| {
+        let exchanges = crate::journal::file::exchanges(
+            frames,
+            |f| {
                 (f.direction(file, metadata)
                     && matches!(
                         f.logical_label,
@@ -106,12 +102,8 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
                     ))
                     || (f.direction(file, control)
                         && f.logical_label == protocol::LABEL_WASI_FD_CLOSE_OBJECT)
-            })
-            .map(|(&id, f)| (f.received, id, f))
-            .collect::<Vec<_>>();
-        let mut replies = frames
-            .iter()
-            .filter(|(_, f)| {
+            },
+            |f| {
                 (f.direction(metadata, file)
                     && matches!(
                         f.logical_label,
@@ -126,16 +118,13 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
                             protocol::LABEL_WASI_FD_CLOSE_OBJECT_RET
                                 | protocol::LABEL_WASI_FD_CLOSE_REJECTED
                         ))
-            })
-            .map(|(&id, f)| (f.received, id, f))
-            .collect::<Vec<_>>();
-        requests.sort_by_key(|&(at, _, _)| at);
-        replies.sort_by_key(|&(at, _, _)| at);
-        if requests.len() != replies.len() || requests.is_empty() {
-            return Err("unpaired file operations".into());
+            },
+        )?;
+        if exchanges.len() == 0 {
+            return Err("no file operations".into());
         }
         let mut contents = FileContents::new(fd);
-        for ((_, request_id, request), (_, reply_id, reply)) in requests.into_iter().zip(replies) {
+        for ((request_id, request), (reply_id, reply)) in exchanges {
             let request_at = request.received;
             let reply_at = frames[&reply_id].first_poll;
             let receiver = metadata;
@@ -439,7 +428,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         let returned = frames
             .values()
             .filter(|f| {
-                f.identity["target"] == store
+                f.target == store
                     && f.logical_label == 10
                     && f.bytes.first().copied().map(u64::from) == Some(resource)
             })

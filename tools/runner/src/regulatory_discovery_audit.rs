@@ -7,6 +7,7 @@ use std::{
 };
 
 pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
+    history.check_session(&history.projection["compiled"]["session"])?;
     let dynamic = history.execution;
     let artifact = history.projection;
     let rows = history.records();
@@ -16,12 +17,7 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
     let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
     let label = |name: &str| crate::projection::named_id(&compiled["labels"], name).map(u64::from);
     let evaluated = history.scored_events;
-    if !history.simulator_complete
-        || history
-            .frames
-            .values()
-            .any(|frame| frame.identity["session"] != compiled["session"])
-    {
+    if !history.simulator_complete {
         return Err("incomplete regulatory score or resource violation".into());
     }
     journal::check_close_pairs(
@@ -350,11 +346,7 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
         choices.push(choice);
     }
     if history.frames.iter().any(|(id, frame)| {
-        let key = (
-            frame.identity["source"].as_u64().unwrap_or(u64::MAX),
-            frame.identity["target"].as_u64().unwrap_or(u64::MAX),
-            u64::from(frame.logical_label),
-        );
+        let key = (frame.source, frame.target, u64::from(frame.logical_label));
         checked_edges.contains(&key) && !consumed.contains(id)
     }) {
         return Err("unused committed effect request or response".into());

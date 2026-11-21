@@ -67,11 +67,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     // neither protocol progress nor resource permissions.
     let mut frames_by_contract = BTreeMap::<_, Vec<_>>::new();
     for (&id, frame) in &journal.frames {
-        let key = (
-            frame.identity["source"].as_u64().ok_or("frame source")?,
-            frame.identity["target"].as_u64().ok_or("frame target")?,
-            u64::from(frame.logical_label),
-        );
+        let key = (frame.source, frame.target, u64::from(frame.logical_label));
         frames_by_contract.entry(key).or_default().push((id, frame));
     }
     let frames_for = |key| frames_by_contract.get(&key).into_iter().flatten().copied();
@@ -170,10 +166,10 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
                             .as_u64()
                             .ok_or("module service")?;
                     let primary = headers.values().any(|header| {
-                        u64::from(header[1]) == service
-                            && u64::from(header[2]) == role
-                            && u64::from(header[3]) == request_label
-                            && header[4] == 0
+                        u64::from(header.source) == service
+                            && u64::from(header.target) == role
+                            && u64::from(header.label) == request_label
+                            && header.delegated_role.is_none()
                     });
                     sources.push((primary, service));
                 }
@@ -212,10 +208,10 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
                     .as_u64()
                     .ok_or("module request endpoint")?;
                 let primary = headers.values().any(|h| {
-                    u64::from(h[1]) == service
-                        && u64::from(h[2]) == role
-                        && u64::from(h[3]) == request_label
-                        && h[4] == 0
+                    u64::from(h.source) == service
+                        && u64::from(h.target) == role
+                        && u64::from(h.label) == request_label
+                        && h.delegated_role.is_none()
                 });
                 owners.push((primary, service, inbox));
             }
@@ -442,11 +438,9 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         }
     }
     for (id, frame) in &journal.frames {
-        let wire = u16::try_from(frame.identity["frame_label"].as_u64().ok_or("wire label")?)?;
-        let header = headers.get(&wire).ok_or("compiled frame")?;
-        if header[4] == 0
-            && business.contains(&u64::from(header[1]))
-            && business.contains(&u64::from(header[2]))
+        if frame.delegated_role.is_none()
+            && business.contains(&frame.source)
+            && business.contains(&frame.target)
             && !used.contains(id)
         {
             return Err("extra or unused codebase request/result".into());
@@ -459,12 +453,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
             .frames
             .values()
             .filter(|f| {
-                f.identity["target"] == binding["service"]
-                    && f.identity["frame_label"]
-                        .as_u64()
-                        .and_then(|v| u16::try_from(v).ok())
-                        .and_then(|wire| headers.get(&wire))
-                        .is_some_and(|h| h[4] == 1 && u64::from(h[5]) == role)
+                f.target == binding["service"] && f.delegated_role.map(u64::from) == Some(role)
             })
             .count();
         if Some(&count) != expected_returns.get(&role) {

@@ -23,6 +23,7 @@ fn take_frame<'a>(
     Ok((id, frame))
 }
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    journal.check_session(&journal.projection["compiled"]["session"])?;
     let dynamic = journal.execution;
     let compiled = &journal.projection["compiled"];
 
@@ -36,12 +37,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         simulator_complete,
         ..
     } = journal;
-    if calls.len() != 5
-        || !simulator_complete
-        || frames
-            .values()
-            .any(|frame| frame.identity["session"] != compiled["session"])
-    {
+    if calls.len() != 5 || !simulator_complete {
         return Err("manufacturing completion, session or effect population differs".into());
     }
     let mut used = BTreeSet::new();

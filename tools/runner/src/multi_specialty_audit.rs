@@ -13,7 +13,7 @@ fn clinical_frame(frame: &Frame, compiled: &Value) -> bool {
     let infrastructure = compiled["roles"].as_object().is_some_and(|roles| {
         roles.iter().any(|(name, role)| {
             (name.ends_with("_DATA") || name.ends_with("_IO") || name.ends_with("_VM"))
-                && (*role == frame.identity["source"] || *role == frame.identity["target"])
+                && (*role == frame.source || *role == frame.target)
         })
     });
     !infrastructure
@@ -76,6 +76,7 @@ fn case(calls: &[&Call], before: usize) -> Result<Value> {
     )
 }
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    journal.check_session(&journal.projection["compiled"]["session"])?;
     let dynamic = journal.execution;
     let artifact = journal.projection;
     let compiled = &artifact["compiled"];
@@ -89,12 +90,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         simulator_complete,
         ..
     } = journal;
-    if calls.len() < 12
-        || !simulator_complete
-        || frames
-            .values()
-            .any(|f| f.identity["session"] != compiled["session"])
-    {
+    if calls.len() < 12 || !simulator_complete {
         return Err("incomplete or unsafe multi-specialty outcome".into());
     }
     let business = |frame: &Frame| clinical_frame(frame, compiled);
@@ -537,7 +533,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
                 completed(&ordered, "ER_DOCTOR", "assess_patient", None, f.sent)?.clone()
             }
             "PanelPartial" | "PanelComplete" => {
-                let owner = f.identity["source"].as_u64().ok_or("panel owner")?;
+                let owner = f.source;
                 let actor = if owner == role("GENERAL_SERVICE")? {
                     "ER_DOCTOR"
                 } else if owner == role("CARDIAC_SERVICE")? {
@@ -648,14 +644,11 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let (rows, artifact) = (evidence.rows, evidence.projection);
     let dynamic = &baseline["dynamic_protocol"];
     let journal = crate::journal::read(&rows, &artifact, dynamic)?;
-    let contracts = crate::projection::contracts(&artifact["compiled"])?;
     let selected = journal
         .frames
         .iter()
         .filter_map(|(id, f)| {
-            let wire = u16::try_from(f.identity["frame_label"].as_u64()?).ok()?;
-            let header = contracts.get(&wire)?;
-            (header[4] == 0
+            (f.delegated_role.is_none()
                 && clinical_frame(f, &artifact["compiled"])
                 && artifact["compiled"]["labels"]
                     .as_object()?

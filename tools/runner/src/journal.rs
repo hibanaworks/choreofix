@@ -14,7 +14,9 @@ use std::{
 
 pub(crate) struct Frame<'a> {
     pub(crate) logical_label: u8,
-    pub(crate) identity: &'a Value,
+    pub(crate) source: u64,
+    pub(crate) target: u64,
+    pub(crate) delegated_role: Option<u8>,
     pub(crate) bytes: Vec<u8>,
     pub(crate) sent: usize,
     pub(crate) first_poll: usize,
@@ -23,7 +25,7 @@ pub(crate) struct Frame<'a> {
 }
 impl Frame<'_> {
     pub(crate) fn direction(&self, from: u64, to: u64) -> bool {
-        self.identity["source"] == from && self.identity["target"] == to
+        self.source == from && self.target == to
     }
     pub(crate) fn validate<P: WirePayload>(&self) -> Result<()> {
         P::validate_payload(Payload::new(&self.bytes))
@@ -330,6 +332,21 @@ pub(crate) struct Journal<'a> {
 }
 
 impl<'a> Journal<'a> {
+    /// Check the captured session even when it has no transport frames.
+    pub(crate) fn check_session(&self, expected: &Value) -> Result<()> {
+        let expected = expected
+            .as_u64()
+            .and_then(|id| u32::try_from(id).ok())
+            .ok_or("expected session ID")?;
+        let sessions = self.execution["sessions"]
+            .as_array()
+            .ok_or("EPF sessions")?;
+        if !matches!(sessions.as_slice(), [one] if one["session"] == expected) {
+            return Err("captured sessions differ from the expected task session".into());
+        }
+        Ok(())
+    }
+
     pub(crate) fn records(&self) -> &'a [Value] {
         self.rows
     }
@@ -383,7 +400,7 @@ fn read_task<'a>(
 
 fn from_receipts<'a>(
     rows: &'a [Value],
-    (projection, labels): (&'a Value, &BTreeMap<u64, u8>),
+    (projection, labels): (&'a Value, &BTreeMap<u64, crate::projection::WireContract>),
     actors: &'a [Value],
     dynamic: &'a Value,
 ) -> Result<Journal<'a>> {
@@ -441,11 +458,14 @@ fn from_receipts<'a>(
                             .ok_or("frame byte")
                     })
                     .collect::<std::result::Result<Vec<_>, _>>()?;
+                let contract = labels.get(&id).ok_or("unmapped frame")?;
                 frames.insert(
                     id,
                     Frame {
-                        logical_label: *labels.get(&id).ok_or("unmapped frame")?,
-                        identity: m,
+                        logical_label: contract.label,
+                        source: u64::from(contract.source),
+                        target: u64::from(contract.target),
+                        delegated_role: contract.delegated_role,
                         bytes,
                         sent: index,
                         first_poll,
@@ -624,6 +644,15 @@ mod tests {
         let journal = from_receipts(&rows, (&artifact, &labels), &actors, &checked)?;
         assert_eq!(journal.frames[&19].received, 4);
         assert_eq!(journal.frames[&19].first_poll, 1);
+        journal.check_session(&json!(1))?;
+        assert!(journal.check_session(&json!(2)).is_err());
+        let mut extra_session = checked.clone();
+        extra_session["sessions"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"session":2,"acceptances":[]}));
+        let extra = from_receipts(&rows, (&artifact, &labels), &actors, &extra_session)?;
+        assert!(extra.check_session(&json!(1)).is_err());
         let mut duplicate = checked.clone();
         duplicate["sessions"][0]["acceptances"]
             .as_array_mut()
@@ -909,7 +938,9 @@ mod tests {
     fn close_records_cannot_reuse_a_request_or_substitute_another_syscall() {
         let request = Frame {
             logical_label: protocol::LABEL_WASI_FD_CLOSE,
-            identity: &json!({"source":0,"target":8}),
+            source: 0,
+            target: 8,
+            delegated_role: None,
             bytes: vec![6],
             sent: 0,
             received: 1,
@@ -918,7 +949,9 @@ mod tests {
         };
         let reply = Frame {
             logical_label: protocol::LABEL_WASI_FD_CLOSE_RET,
-            identity: &json!({"source":8,"target":0}),
+            source: 8,
+            target: 0,
+            delegated_role: None,
             bytes: vec![6, 0, 0],
             sent: 2,
             received: 3,
@@ -940,12 +973,14 @@ mod tests {
         frames.get_mut(&2).unwrap().bytes[0] = 4;
         assert!(check_close_pairs(&frames, &[(0, 8)]).is_err());
         frames.get_mut(&2).unwrap().bytes[0] = 6;
-        let third_identity = json!({"source":8,"target":0});
+
         frames.insert(
             3,
             Frame {
                 logical_label: protocol::LABEL_WASI_FD_CLOSE_RET,
-                identity: &third_identity,
+                source: 8,
+                target: 0,
+                delegated_role: None,
                 bytes: vec![6, 0, 0],
                 sent: 4,
                 received: 5,

@@ -26,16 +26,8 @@ fn clinical_frames(compiled: &Value) -> Result<impl Fn(&Frame) -> bool> {
             .ok_or("compiled label")? as usize] = true;
     }
     Ok(move |frame: &Frame| {
-        let (Some(from), Some(to)) = (
-            frame.identity["source"].as_u64(),
-            frame.identity["target"].as_u64(),
-        ) else {
-            return false;
-        };
-        from < 256
-            && to < 256
-            && !infrastructure[from as usize]
-            && !infrastructure[to as usize]
+        !infrastructure[frame.source as usize]
+            && !infrastructure[frame.target as usize]
             && labels[frame.logical_label as usize]
     })
 }
@@ -101,6 +93,7 @@ fn findings(calls: &[&Call], patient: &str, before: usize) -> Result<Value> {
     Ok(value)
 }
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    journal.check_session(&journal.projection["compiled"]["session"])?;
     let dynamic = journal.execution;
     let artifact = journal.projection;
     let compiled = &artifact["compiled"];
@@ -114,12 +107,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         simulator_complete,
         ..
     } = journal;
-    if calls.len() < 16
-        || !simulator_complete
-        || frames
-            .values()
-            .any(|f| f.identity["session"] != compiled["session"])
-    {
+    if calls.len() < 16 || !simulator_complete {
         return Err("incomplete or unsafe critical-care outcome".into());
     }
     let business = clinical_frames(compiled)?;
@@ -581,9 +569,9 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
                 json!({"result":completed(&ordered,("ER_DOCTOR_B","diagnose","patient_b",None),frame.sent)?,"findings":findings(&ordered,"patient_b",frame.sent)?})
             }
             "PanelPartial" | "PanelComplete" => {
-                let (doctor, patient) = if frame.identity["source"] == role("PATIENT_A_SERVICE")? {
+                let (doctor, patient) = if frame.source == role("PATIENT_A_SERVICE")? {
                     ("ER_DOCTOR_A", "patient_a")
-                } else if frame.identity["source"] == role("PATIENT_B_SERVICE")? {
+                } else if frame.source == role("PATIENT_B_SERVICE")? {
                     ("ER_DOCTOR_B", "patient_b")
                 } else {
                     return Err("foreign panel data sender".into());
@@ -660,16 +648,11 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let (rows, artifact) = (evidence.rows, evidence.projection);
     let dynamic = &baseline["dynamic_protocol"];
     let journal = crate::journal::read(&rows, &artifact, dynamic)?;
-    let contracts = crate::projection::contracts(&artifact["compiled"])?;
     let business = clinical_frames(&artifact["compiled"])?;
     let selected = journal
         .frames
         .iter()
-        .filter_map(|(id, f)| {
-            let wire = u16::try_from(f.identity["frame_label"].as_u64()?).ok()?;
-            let header = contracts.get(&wire)?;
-            (header[4] == 0 && business(f)).then_some(*id)
-        })
+        .filter_map(|(id, f)| (f.delegated_role.is_none() && business(f)).then_some(*id))
         .collect::<Vec<_>>();
     fs::create_dir(output)?;
     let verdicts = crate::journal::json_frame_mutants(&rows, &selected, |changed| {

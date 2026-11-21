@@ -9,6 +9,7 @@ use std::{
 };
 
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    journal.check_session(&journal.projection["compiled"]["session"])?;
     let dynamic = journal.execution;
     let artifact = journal.projection;
     let compiled = &artifact["compiled"];
@@ -45,12 +46,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         simulator_complete,
         ..
     } = journal;
-    if calls.is_empty()
-        || !simulator_complete
-        || frames
-            .values()
-            .any(|f| f.identity["session"] != compiled["session"])
-    {
+    if calls.is_empty() || !simulator_complete {
         return Err("incomplete cascading build execution".into());
     }
     let mut used = BTreeSet::new();
@@ -694,8 +690,8 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     .map(label)
     .collect::<Result<BTreeSet<_>>>()?;
     for frame in frames.values() {
-        let source = frame.identity["source"].as_u64().ok_or("frame source")?;
-        let target = frame.identity["target"].as_u64().ok_or("frame target")?;
+        let source = frame.source;
+        let target = frame.target;
         let forwarded = if notice_inputs.contains(&frame.logical_label)
             && [compiler, service, integrator].contains(&source)
             && builder_roles.contains(&target)
@@ -788,12 +784,8 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     .collect::<Result<BTreeSet<_>>>()?;
     if frames.iter().any(|(id, f)| {
         json_labels.contains(&f.logical_label)
-            && f.identity["source"]
-                .as_u64()
-                .is_some_and(|v| business.contains(&v))
-            && f.identity["target"]
-                .as_u64()
-                .is_some_and(|v| business.contains(&v))
+            && business.contains(&f.source)
+            && business.contains(&f.target)
             && !used.contains(id)
     }) {
         return Err("unmatched or extra actual business request/result".into());
@@ -857,7 +849,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .iter()
         .find(|m| {
             m["frame_id"].as_u64().is_some_and(|id| {
-                labels.get(&id).copied().map(u64::from)
+                labels.get(&id).map(|wire| u64::from(wire.label))
                     == artifact["compiled"]["labels"]["AllForCompiler"].as_u64()
             })
         })
@@ -870,9 +862,9 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let candidates = sends
         .iter()
         .filter(|m| {
-            m["frame_id"]
-                .as_u64()
-                .is_some_and(|id| labels.get(&id).copied().map(u64::from) == Some(repair_label))
+            m["frame_id"].as_u64().is_some_and(|id| {
+                labels.get(&id).map(|wire| u64::from(wire.label)) == Some(repair_label)
+            })
         })
         .copied()
         .collect::<Vec<_>>();
@@ -908,7 +900,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .iter()
         .find_map(|frame| {
             let id = frame["frame_id"].as_u64()?;
-            if labels.get(&id).copied().map(u64::from) != Some(choice_label) {
+            if labels.get(&id).map(|wire| u64::from(wire.label)) != Some(choice_label) {
                 return None;
             }
             ["module_a", "module_b", "module_c"]

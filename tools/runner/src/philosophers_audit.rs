@@ -13,6 +13,7 @@ use std::{
 };
 
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    journal.check_session(&json!(crate::philosopher_identity::SESSION))?;
     let dynamic = journal.execution;
     let projection = journal.projection;
     use crate::philosopher_identity::{AGENTS, THINK_COMPLETED, THINK_REQUEST, roles};
@@ -140,15 +141,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     let selects_meals = programs.iter().any(|program| program["role"] == table);
     let grants_to_forks = crate::projection::contracts(&projection["compiled"])?
         .values()
-        .any(|header| header[1] == roles::TABLE && header[2] == roles::FORK_A);
-    if dynamic["sessions"]
-        .as_array()
-        .ok_or("EPF sessions")?
-        .iter()
-        .any(|session| session["session"] != crate::philosopher_identity::SESSION)
-    {
-        return Err("different dining session".into());
-    }
+        .any(|header| header.source == roles::TABLE && header.target == roles::FORK_A);
     let forks: BTreeMap<_, _> = layout
         .iter()
         .map(|(name, ids)| (*name, (u64::from(ids[1]), u64::from(ids[4]))))
@@ -204,10 +197,9 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
                 }
                 Some(id)
             };
-            let mut requests = journal
-                .frames
-                .iter()
-                .filter(|(_, frame)| {
+            let exchanges = crate::journal::file::exchanges(
+                &journal.frames,
+                |frame| {
                     (frame.direction(view, owner)
                         && matches!(
                             frame.logical_label,
@@ -219,13 +211,8 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
                         || (frame.direction(view, controller)
                             && (frame.logical_label == protocol::LABEL_WASI_FD_CLOSE_OBJECT
                                 || (tool == "think" && frame.logical_label == THINK_REQUEST)))
-                })
-                .map(|(&id, frame)| (frame.received, id, frame))
-                .collect::<Vec<_>>();
-            let mut replies = journal
-                .frames
-                .iter()
-                .filter(|(_, frame)| {
+                },
+                |frame| {
                     (frame.direction(owner, view)
                         && matches!(
                             frame.logical_label,
@@ -243,20 +230,14 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
                         || (tool == "think"
                             && frame.direction(controller, view)
                             && frame.logical_label == THINK_COMPLETED)
-                })
-                .map(|(&id, frame)| (frame.received, id, frame))
-                .collect::<Vec<_>>();
-            requests.sort_by_key(|&(at, _, _)| at);
-            replies.sort_by_key(|&(at, _, _)| at);
-            if requests.len() != replies.len() {
-                return Err("unpaired object I/O observations".into());
-            }
+                },
+            )?;
             // Reconstruct descriptor data only. EPF owns the dynamic protocol
             // interpretation; no stage, next-operation or owner state is here.
             let mut contents = FileContents::new(fd);
-            for ((at, request_id, request), (replied, reply_id, reply)) in
-                requests.into_iter().zip(replies)
-            {
+            for ((request_id, request), (reply_id, reply)) in exchanges {
+                let at = request.received;
+                let replied = reply.received;
                 if journal.frames[&request_id].receipt["send_actor"] != vm
                     || journal.frames[&request_id].receipt["receive_commit"]["actor"] != owner
                     || journal.frames[&reply_id].receipt["send_actor"] != owner
@@ -591,10 +572,10 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     }
     for (&id, frame) in &journal.frames {
         if forks.values().any(|&(owner, resource)| {
-            frame.identity["source"] == owner
-                || frame.identity["target"] == owner
-                || frame.identity["source"] == resource
-                || frame.identity["target"] == resource
+            frame.source == owner
+                || frame.target == owner
+                || frame.source == resource
+                || frame.target == resource
         }) && !used.contains(&id)
         {
             return Err("unused or excessive physical resource frame".into());
@@ -783,9 +764,9 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
                         } else {
                             "target"
                         }] == close["source"]
-                        && m["frame_id"]
-                            .as_u64()
-                            .is_some_and(|id| labels.get(&id) == Some(&label))
+                        && m["frame_id"].as_u64().is_some_and(|id| {
+                            labels.get(&id).is_some_and(|wire| wire.label == label)
+                        })
                         && m["payload"]
                             .as_array()
                             .is_some_and(|bytes| bytes.len() > 5 && bytes[0] == close["payload"][0])

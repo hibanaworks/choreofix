@@ -1,5 +1,5 @@
 //! Bind each survey effect to its committed file operation and chapter evidence.
-use crate::{evidence::Result, journal, projection};
+use crate::{evidence::Result, journal};
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, ops::Range};
 
@@ -42,7 +42,6 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
     let actors = history.participants;
 
     let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
-    let contracts = projection::contracts(compiled)?;
     let scores = history.scored_events;
     if !history.simulator_complete {
         return Err("incomplete survey score or world violation".into());
@@ -78,11 +77,7 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
                     && frame.logical_label == label
                     && within.contains(&frame.received)
                     && owned.is_none_or(|resource| {
-                        frame.identity["frame_label"]
-                            .as_u64()
-                            .and_then(|v| u16::try_from(v).ok())
-                            .and_then(|wire| contracts.get(&wire))
-                            .is_some_and(|meta| meta[4] == 1 && u64::from(meta[5]) == resource)
+                        frame.delegated_role.map(u64::from) == Some(resource)
                     })
             })
             .min_by_key(|(_, frame)| frame.received)

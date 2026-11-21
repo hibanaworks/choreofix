@@ -8,6 +8,7 @@ use std::{
 };
 
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    journal.check_session(&journal.projection["compiled"]["session"])?;
     let dynamic = journal.execution;
     let compiled = &journal.projection["compiled"];
 
@@ -16,7 +17,6 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     let service = name("roles", "BUILD_SERVICE")?;
     let core = name("roles", "CORE_LIB")?;
     let types = name("roles", "SHARED_TYPES")?;
-    let session = compiled["session"].as_u64().ok_or("build session")?;
     let crate::journal::Journal {
         frames,
         calls,
@@ -24,10 +24,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         simulator_complete,
         ..
     } = journal;
-    if calls.is_empty()
-        || frames.values().any(|f| f.identity["session"] != session)
-        || !simulator_complete
-    {
+    if calls.is_empty() || !simulator_complete {
         return Err("shared build completion or session differs".into());
     }
     let mut used = BTreeSet::new();

@@ -18,19 +18,14 @@ fn field(v: &Value) -> Result<u64> {
         .ok_or_else(|| "invalid compiled operation field".into())
 }
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    journal.check_session(&journal.projection["compiled"]["session"])?;
     let dynamic = journal.execution;
     let compiled = &journal.projection["compiled"];
     let fixture = journal.fixture();
     let actors = journal.participants;
 
     let frames = &journal.frames;
-    if frames
-        .values()
-        .any(|f| f.identity["session"] != compiled["session"])
-        || journal.calls.len() != 3
-        || !journal.simulator_complete
-        || journal.scored_events.len() != 3
-    {
+    if journal.calls.len() != 3 || !journal.simulator_complete || journal.scored_events.len() != 3 {
         return Err("CI/CD completion or score differs".into());
     }
     let operations = compiled["operation_files"]
@@ -64,9 +59,9 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         if original["tool"] != tool {
             return Err("operation differs from assignment".into());
         }
-        let mut requests = frames
-            .iter()
-            .filter(|(_, f)| {
+        let exchanges = crate::journal::file::exchanges(
+            frames,
+            |f| {
                 (f.direction(file, owner)
                     && matches!(
                         f.logical_label,
@@ -76,12 +71,8 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
                     ))
                     || (f.direction(file, control)
                         && f.logical_label == protocol::LABEL_WASI_FD_CLOSE_OBJECT)
-            })
-            .map(|(&id, f)| (f.received, id, f))
-            .collect::<Vec<_>>();
-        let mut replies = frames
-            .iter()
-            .filter(|(_, f)| {
+            },
+            |f| {
                 (f.direction(owner, file)
                     && matches!(
                         f.logical_label,
@@ -95,16 +86,13 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
                             protocol::LABEL_WASI_FD_CLOSE_OBJECT_RET
                                 | protocol::LABEL_WASI_FD_CLOSE_REJECTED
                         ))
-            })
-            .map(|(&id, f)| (f.received, id, f))
-            .collect::<Vec<_>>();
-        requests.sort_by_key(|&(at, _, _)| at);
-        replies.sort_by_key(|&(at, _, _)| at);
-        if requests.is_empty() || requests.len() != replies.len() {
-            return Err("unpaired operation file data".into());
+            },
+        )?;
+        if exchanges.len() == 0 {
+            return Err("no file operations".into());
         }
         let mut contents = FileContents::new(fd);
-        for ((_, request_id, request), (_, reply_id, reply)) in requests.into_iter().zip(replies) {
+        for ((request_id, request), (reply_id, reply)) in exchanges {
             let request_at = request.received;
             let reply_at = frames[&reply_id].first_poll;
             if journal.frames[&request_id].receipt["send_actor"] != guest
@@ -349,8 +337,8 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                         }
                         let logical = m["frame_id"]
                             .as_u64()
-                            .and_then(|id| labels.get(&id).copied())
-                            .map(u64::from);
+                            .and_then(|id| labels.get(&id))
+                            .map(|wire| u64::from(wire.label));
                         match kind {
                             "missing_loan" | "wrong_loan_resource" => {
                                 m["source"] == owner

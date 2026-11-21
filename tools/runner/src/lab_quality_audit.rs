@@ -261,6 +261,7 @@ fn quality(context: (&Calls, usize), value: &Value) -> Result<Value> {
     Ok(inputs)
 }
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    journal.check_session(&journal.projection["compiled"]["session"])?;
     let dynamic = journal.execution;
     let artifact = journal.projection;
     let compiled = &artifact["compiled"];
@@ -276,11 +277,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         ..
     } = journal;
     let events = scored_events;
-    if !simulator_complete
-        || frames
-            .values()
-            .any(|f| f.identity["session"] != compiled["session"])
-    {
+    if !simulator_complete {
         return Err("incomplete QC world or physical resource violation".into());
     }
     let pairs = [
@@ -1097,14 +1094,14 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         .map(|(_, v)| v.as_u64().ok_or_else(|| "business label".into()))
         .collect::<Result<BTreeSet<_>>>()?;
     for f in frames.values() {
-        if business.contains(&f.identity["source"].as_u64().ok_or("frame source")?)
-            && business.contains(&f.identity["target"].as_u64().ok_or("frame target")?)
+        if business.contains(&f.source)
+            && business.contains(&f.target)
             && business_labels.contains(&u64::from(f.logical_label))
             && !used.contains(&f.sent)
         {
             return Err(format!(
                 "unused scientific request/result {} -> {} label {}",
-                f.identity["source"], f.identity["target"], f.logical_label
+                f.source, f.target, f.logical_label
             )
             .into());
         }
@@ -1155,7 +1152,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
     let contract = crate::projection::contracts(&artifact["compiled"])?;
     let final_wires = contract
         .iter()
-        .filter(|(_, h)| h[3] == artifact["compiled"]["labels"]["SpecRequest"])
+        .filter(|(_, h)| h.label == artifact["compiled"]["labels"]["SpecRequest"])
         .map(|(wire, _)| *wire)
         .collect::<BTreeSet<_>>();
     let final_frame = rows
@@ -1229,7 +1226,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
             "missing_qc_file_request" => {
                 let wires = contract
                     .iter()
-                    .filter(|(_, h)| h[3] == artifact["compiled"]["labels"]["FileQcChemist"])
+                    .filter(|(_, h)| h.label == artifact["compiled"]["labels"]["FileQcChemist"])
                     .map(|(wire, _)| *wire)
                     .collect::<BTreeSet<_>>();
                 let at = changed

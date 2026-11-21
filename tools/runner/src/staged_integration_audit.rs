@@ -70,6 +70,7 @@ fn input<'a>(
 }
 
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    journal.check_session(&journal.projection["compiled"]["session"])?;
     let dynamic = journal.execution;
     let rows = journal.records();
     let compiled = &journal.projection["compiled"];
@@ -85,11 +86,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         simulator_complete,
         ..
     } = journal;
-    if !simulator_complete
-        || frames
-            .values()
-            .any(|frame| frame.identity["session"] != compiled["session"])
-    {
+    if !simulator_complete {
         return Err("incomplete run, foreign session or actual simulator violation".into());
     }
     let pairs = ["A", "B", "C", "REVIEW", "TEST", "CI", "RELEASE"]
@@ -766,12 +763,8 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     let actual = frames
         .values()
         .filter(|frame| {
-            frame.identity["source"]
-                .as_u64()
-                .is_some_and(|role| business_roles.contains(&role))
-                && frame.identity["target"]
-                    .as_u64()
-                    .is_some_and(|role| business_roles.contains(&role))
+            business_roles.contains(&frame.source)
+                && business_roles.contains(&frame.target)
                 && frame.value().is_ok_and(|value| value.is_object())
         })
         .map(|frame| frame.sent)
@@ -838,12 +831,8 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .frames
         .iter()
         .filter(|(_, frame)| {
-            frame.identity["source"]
-                .as_u64()
-                .is_some_and(|r| roles.contains(&r))
-                && frame.identity["target"]
-                    .as_u64()
-                    .is_some_and(|r| roles.contains(&r))
+            roles.contains(&frame.source)
+                && roles.contains(&frame.target)
                 && frame.value().is_ok_and(|value| value.is_object())
         })
         .map(|(&id, _)| id)

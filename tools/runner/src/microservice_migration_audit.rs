@@ -346,10 +346,7 @@ pub(super) fn preparation(history: &journal::Journal, roles: &Value) -> Result<V
         if used.contains(id) {
             continue;
         }
-        let edge = (
-            frame.identity["source"].as_u64().ok_or("frame source")?,
-            frame.identity["target"].as_u64().ok_or("frame target")?,
-        );
+        let edge = (frame.source, frame.target);
         if let Ok(value) = frame.value()
             && value.is_object()
             && (request_edges.contains(&edge)

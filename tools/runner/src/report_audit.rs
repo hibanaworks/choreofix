@@ -156,13 +156,13 @@ fn scoped(snapshot: &Value, scope: &str) -> Value {
     json!({"sections":{scope:snapshot["sections"][scope]},"references":{scope:snapshot["references"][scope]}})
 }
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    journal.check_session(&journal.projection["compiled"]["session"])?;
     let dynamic = journal.execution;
     let artifact = journal.projection;
     let compiled = &artifact["compiled"];
     let fixture = journal.fixture();
     let actors = journal.participants;
 
-    let headers = crate::projection::contracts(compiled)?;
     let crate::journal::Journal {
         frames,
         calls,
@@ -170,13 +170,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         simulator_complete,
         ..
     } = journal;
-    let session = compiled["session"].as_u64().ok_or("report session")?;
-    if frames
-        .values()
-        .any(|frame| frame.identity["session"] != session)
-        || calls.is_empty()
-        || !simulator_complete
-    {
+    if calls.is_empty() || !simulator_complete {
         return Err("report session or actual outcome differs".into());
     }
     let role = |key| name(compiled, "roles", key);
@@ -642,14 +636,9 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         role("REVIEW_B")?,
     ];
     for (id, frame) in &frames {
-        let wire = frame.identity["frame_label"]
-            .as_u64()
-            .and_then(|n| u16::try_from(n).ok())
-            .ok_or("report wire identity")?;
-        let header = headers.get(&wire).ok_or("report compiled header")?;
-        if header[4] == 0
-            && business.contains(&u64::from(header[1]))
-            && business.contains(&u64::from(header[2]))
+        if frame.delegated_role.is_none()
+            && business.contains(&frame.source)
+            && business.contains(&frame.target)
             && !used.contains(id)
         {
             return Err("unused or extra report request or result".into());
@@ -718,14 +707,14 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         },
     )?;
     let request = one(journal.frames.values().filter(|frame| {
-        frame.identity["source"] == file
+        frame.source == file
             && frame
                 .value()
                 .is_ok_and(|value| value == call.request["arguments"])
     }))?;
     let (result_at, result) = call.result;
     let reply = one(journal.frames.values().filter(|frame| {
-        frame.identity["target"] == file && frame.value().is_ok_and(|value| value == *result)
+        frame.target == file && frame.value().is_ok_and(|value| value == *result)
     }))?;
     for (kind, from, to) in [
         (

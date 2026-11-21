@@ -108,9 +108,9 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         }))?;
         returned.insert(file);
 
-        let mut requests = frames
-            .iter()
-            .filter(|(_, frame)| {
+        let exchanges = crate::journal::file::exchanges(
+            frames,
+            |frame| {
                 (frame.direction(file, owner)
                     && matches!(
                         frame.logical_label,
@@ -120,12 +120,8 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
                             | protocol::LABEL_WASI_FD_CLOSE
                     ))
                     || (frame.direction(file, controller) && frame.logical_label == file_label)
-            })
-            .map(|(&id, frame)| (frame.received, id, frame))
-            .collect::<Vec<_>>();
-        let mut replies = frames
-            .iter()
-            .filter(|(_, frame)| {
+            },
+            |frame| {
                 (frame.direction(owner, file)
                     && matches!(
                         frame.logical_label,
@@ -135,16 +131,10 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
                             | protocol::LABEL_WASI_FD_CLOSE_RET
                     ))
                     || (frame.direction(owner, file) && frame.logical_label == 165)
-            })
-            .map(|(&id, frame)| (frame.received, id, frame))
-            .collect::<Vec<_>>();
-        requests.sort_by_key(|&(at, _, _)| at);
-        replies.sort_by_key(|&(at, _, _)| at);
-        if requests.len() != replies.len() {
-            return Err("unpaired operation-file requests and replies".into());
-        }
+            },
+        )?;
         let mut contents = FileContents::new(service_fd);
-        for ((_, request_id, request), (_, reply_id, reply)) in requests.into_iter().zip(replies) {
+        for ((request_id, request), (reply_id, reply)) in exchanges {
             let receiver = if request.logical_label == file_label {
                 controller
             } else {
@@ -294,30 +284,22 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
         {
             return Err("outcome notification differs from the actual test result".into());
         }
-        let mut requests = frames
-            .values()
-            .filter(|f| {
+        let exchanges = crate::journal::file::exchanges(
+            frames,
+            |f| {
                 (f.direction(file, owner) && f.logical_label == protocol::LABEL_WASI_PATH_OPEN)
                     || (f.direction(file, read) && f.logical_label == protocol::LABEL_WASI_FD_READ)
-            })
-            .collect::<Vec<_>>();
-        let mut replies = frames
-            .values()
-            .filter(|f| {
+            },
+            |f| {
                 (f.direction(owner, file) && f.logical_label == protocol::LABEL_WASI_PATH_OPEN_RET)
                     || (f.direction(read, file)
                         && f.logical_label == protocol::LABEL_WASI_FD_READ_RET)
-            })
-            .collect::<Vec<_>>();
-        requests.sort_by_key(|f| f.received);
-        replies.sort_by_key(|f| f.received);
-        if requests.len() != replies.len() {
-            return Err("unpaired outcome file I/O".into());
-        }
+            },
+        )?;
         let canonical = serde_json::to_vec(test_result)?;
         let mut offset = 0usize;
         let mut complete = 0;
-        for (request, reply) in requests.into_iter().zip(replies) {
+        for ((_, request), (_, reply)) in exchanges {
             if request.logical_label == protocol::LABEL_WASI_PATH_OPEN {
                 request.validate::<protocol::PathOpenReq>()?;
                 reply.validate::<protocol::PathOpenedRet>()?;

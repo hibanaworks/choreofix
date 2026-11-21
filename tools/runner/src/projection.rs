@@ -16,9 +16,9 @@ pub use dynamic::check as check_dynamic;
 // The canonical TapEvent identifiers and packed fields are documented by
 // hibana::runtime::tap. EPF checks the immutable source and captured history;
 // the auditor never drives application Endpoints.
-const LOCAL: u64 = 0x0300;
-const SEND: u64 = 0x0301;
-const RECV: u64 = 0x0302;
+const LOCAL: u64 = hibana::runtime::tap::PROJECTED_LOCAL as u64;
+const SEND: u64 = hibana::runtime::tap::PROJECTED_SEND as u64;
+const RECV: u64 = hibana::runtime::tap::PROJECTED_RECV as u64;
 
 /// Logical roles and message labels in the compiled projection are both one byte.
 pub(crate) fn named_id(names: &Value, name: &str) -> Result<u8> {
@@ -28,7 +28,16 @@ pub(crate) fn named_id(names: &Value, name: &str) -> Result<u8> {
         .ok_or_else(|| format!("missing or invalid projected ID for {name}").into())
 }
 
-pub(crate) fn contracts(compiled: &Value) -> Result<BTreeMap<u16, [u8; 6]>> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WireContract {
+    lane: u8,
+    pub(crate) source: u8,
+    pub(crate) target: u8,
+    pub(crate) label: u8,
+    pub(crate) delegated_role: Option<u8>,
+}
+
+pub(crate) fn contracts(compiled: &Value) -> Result<BTreeMap<u16, WireContract>> {
     if compiled["type"] != "compiled_projection"
         || compiled["format_version"] != 1
         || !choreofix_inputs::task_ids()
@@ -101,22 +110,22 @@ pub(crate) fn contracts(compiled: &Value) -> Result<BTreeMap<u16, [u8; 6]>> {
             }
             actor_rows.push([at, kind, packed, peers]);
             let wire = (packed >> 16) as u16;
-            let header = [
-                (packed >> 8) as u8,
-                (peers >> 24) as u8,
-                (peers >> 16) as u8,
-                packed as u8,
-                (peers >> 8) as u8,
-                peers as u8,
-            ];
-            if header[4] == 1 {
-                resources.insert(u64::from(header[5]));
-            }
-            if !seen.insert((wire, kind))
-                || header[4] > 1
-                || (header[4] == 0 && header[5] != 0)
-                || ((kind == LOCAL) != (header[1] == header[2]))
-            {
+            let delegated_role = match ((peers >> 8) as u8, peers as u8) {
+                (0, 0) => None,
+                (1, role) => {
+                    resources.insert(u64::from(role));
+                    Some(role)
+                }
+                _ => return Err("invalid compiled payload kind or delegated role".into()),
+            };
+            let header = WireContract {
+                lane: (packed >> 8) as u8,
+                source: (peers >> 24) as u8,
+                target: (peers >> 16) as u8,
+                label: packed as u8,
+                delegated_role,
+            };
+            if !seen.insert((wire, kind)) || ((kind == LOCAL) != (header.source == header.target)) {
                 return Err("duplicate or malformed compiled operation".into());
             }
             if headers
@@ -251,11 +260,11 @@ pub fn load(events: &Path) -> Result<(Value, String)> {
     Ok((artifact, projection_hash))
 }
 
-/// Return each frame's logical message label after checking every observation.
+/// Associate each transport acceptance with its compiled wire contract.
 /// This checks static membership, not dynamic branch or iteration eligibility.
-pub fn frames(artifact: &Value, rows: &[Value]) -> Result<BTreeMap<u64, u8>> {
+pub(crate) fn frames(artifact: &Value, rows: &[Value]) -> Result<BTreeMap<u64, WireContract>> {
     let headers = contracts(&artifact["compiled"])?;
-    let mut labels = BTreeMap::new();
+    let mut observed_frames = BTreeMap::new();
     let mut observed = false;
     for row in rows {
         if row["direction"] != "runtime" {
@@ -264,7 +273,7 @@ pub fn frames(artifact: &Value, rows: &[Value]) -> Result<BTreeMap<u64, u8>> {
         let message = &row["message"];
         match message["type"].as_str() {
             Some("compiled_projection") => {
-                if observed || !labels.is_empty() || message != &artifact["compiled"] {
+                if observed || !observed_frames.is_empty() || message != &artifact["compiled"] {
                     return Err("runtime projection differs from the frozen artifact".into());
                 }
                 observed = true;
@@ -286,16 +295,20 @@ pub fn frames(artifact: &Value, rows: &[Value]) -> Result<BTreeMap<u64, u8>> {
                 let header = headers
                     .get(&wire)
                     .ok_or("frame label absent from compiled projection")?;
-                for (field, expected) in ["lane", "source", "target"].into_iter().zip(header) {
-                    if message[field] != *expected {
+                for (field, expected) in [
+                    ("lane", header.lane),
+                    ("source", header.source),
+                    ("target", header.target),
+                ] {
+                    if message[field] != expected {
                         return Err(
                             format!("frame {field} differs from compiled projection").into()
                         );
                     }
                 }
-                if header[4] == 1 {
+                if let Some(role) = header.delegated_role {
                     let [high, low] = wire.to_be_bytes();
-                    if message["payload"] != json!([header[5], high, low]) {
+                    if message["payload"] != json!([role, high, low]) {
                         return Err(
                             "delegation payload differs from compiled resource and occurrence"
                                 .into(),
@@ -303,11 +316,8 @@ pub fn frames(artifact: &Value, rows: &[Value]) -> Result<BTreeMap<u64, u8>> {
                     }
                 }
                 let id = message["frame_id"].as_u64().ok_or("frame ID")?;
-                if labels
-                    .insert(id, header[3])
-                    .is_some_and(|previous| previous != header[3])
-                {
-                    return Err("frame changed its compiled message contract".into());
+                if observed_frames.insert(id, *header).is_some() {
+                    return Err("duplicate transport acceptance for one frame ID".into());
                 }
             }
             _ => {}
@@ -316,7 +326,7 @@ pub fn frames(artifact: &Value, rows: &[Value]) -> Result<BTreeMap<u64, u8>> {
     if !observed {
         return Err("missing runtime projection observation".into());
     }
-    Ok(labels)
+    Ok(observed_frames)
 }
 
 #[cfg(test)]
