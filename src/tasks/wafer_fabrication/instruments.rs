@@ -38,6 +38,8 @@ pub type EtchFailed<'a> = g::Msg<71, ReviewReply<'a, false>>;
 pub const CD: u8 = 50;
 pub const THICKNESS: u8 = 51;
 pub const PROFILE: u8 = 52;
+pub const ALIGNMENT_CHECK: u8 = 72;
+pub const THICKNESS_VERIFICATION: u8 = 73;
 pub type Dimension<const KIND: u8> = g::Msg<KIND, InstrumentRequest<KIND>>;
 pub type Reading<'a, const KIND: u8> = g::Msg<KIND, &'a [u8]>;
 pub type MeasurementReport<'a, const KIND: u8> = g::Msg<KIND, WaferReading<'a, KIND>>;
@@ -47,6 +49,8 @@ fn dimension_name(kind: u8) -> Option<&'static str> {
         CD => Some("cd_measurement"),
         THICKNESS => Some("thickness_measurement"),
         PROFILE => Some("profile_measurement"),
+        ALIGNMENT_CHECK => Some("alignment_check"),
+        THICKNESS_VERIFICATION => Some("thickness_verification"),
         _ => None,
     }
 }
@@ -236,4 +240,12 @@ impl SimulatorOperation for InstrumentRequest<THICKNESS> {
 }
 impl SimulatorOperation for InstrumentRequest<PROFILE> {
     const RPC: (&'static str, &'static str) = ("METROLOGY_ENGINEER", "run_metrology_measurement");
+}
+
+impl SimulatorOperation for InstrumentRequest<ALIGNMENT_CHECK> {
+    const RPC: (&'static str, &'static str) = ("LITHOGRAPHER", "run_metrology_measurement");
+}
+
+impl SimulatorOperation for InstrumentRequest<THICKNESS_VERIFICATION> {
+    const RPC: (&'static str, &'static str) = ("DEPOSITOR", "run_metrology_measurement");
 }

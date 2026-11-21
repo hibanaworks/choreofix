@@ -1,0 +1,142 @@
+{
+  "task": "15E",
+  "scope": "Seven scripted trials with six Wasm guests per trial. The lithographer and depositor submit their own final measurements. Six types of measurement use one probe Endpoint. Four fabrication operations still use the fixture.",
+  "archive": "output/verification/15e-metrology.w81Mn6",
+  "runs_directory": "wasm-owner",
+  "runtime_sha256": "25dc81388442382b1292015196e0f059f881927041b199f2a4a0637f0cc99fd5",
+  "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+  "test_binary_sha256": "1e09e9d1f553b701fecfd847a0038ed4221edece411c607aefe5440c067dea0d",
+  "build_receipt_sha256": "3502b036fdccd21a467266c019aa6294ac566a7dbae2f80f0eae5e1b158232af",
+  "source_manifest_sha256": "5fd7077b0e482f06a567ceae57870ff1e61c5ef840b13fb0c2a6d31efec129ec",
+  "model_calls": 0,
+  "scored_comparison": false,
+  "live_task_qualified": false,
+  "totals": {
+    "guest_effects": 112,
+    "fixture_effects": 30,
+    "epf_records": 51635,
+    "measurements": 53,
+    "failed_measurements": 4
+  },
+  "cases": [
+    {
+      "case": "dep-litho-etch",
+      "result_sha256": "cf05fe63ea8bcdb00553f7859c7e25bbb6cd7b42bb2b507cfb7d1c8220f12a36",
+      "events_sha256": "289534400754eb987e779971ec93991b64ded89295b1f4c98c84d29a610d0f71",
+      "guest_effects": 15,
+      "fixture_effects": 4,
+      "epf_records": 7359,
+      "simulator_complete": true,
+      "simulator_violations": 0,
+      "measurements": 7,
+      "failed_measurements": 0,
+      "final_measurement_order": [
+        "thickness_verification",
+        "alignment_check",
+        "overlay_alignment"
+      ]
+    },
+    {
+      "case": "etch-dep-litho",
+      "result_sha256": "7f3bd07d61e65e64ed76f0986437803de0c80a5a0eedb3294ae1ffcc23cb9f94",
+      "events_sha256": "a37cb3ae4e7e07da08e587205d7889cff45859270f7cc7427f2dcfc06fd89407",
+      "guest_effects": 15,
+      "fixture_effects": 4,
+      "epf_records": 7348,
+      "simulator_complete": true,
+      "simulator_violations": 0,
+      "measurements": 7,
+      "failed_measurements": 0,
+      "final_measurement_order": [
+        "overlay_alignment",
+        "thickness_verification",
+        "alignment_check"
+      ]
+    },
+    {
+      "case": "etch-first",
+      "result_sha256": "b691fb2e06329f9a94ec6870d4c836cba4e081437a55487a5127be57e1bbe172",
+      "events_sha256": "b6a9bfd19ffe7c74fc76cad4c7174354cbe332aa9a9774d84a7dc3eb16a47579",
+      "guest_effects": 15,
+      "fixture_effects": 4,
+      "epf_records": 6985,
+      "simulator_complete": true,
+      "simulator_violations": 0,
+      "measurements": 7,
+      "failed_measurements": 0,
+      "final_measurement_order": [
+        "thickness_verification",
+        "overlay_alignment",
+        "alignment_check"
+      ]
+    },
+    {
+      "case": "film-first",
+      "result_sha256": "76a15cc17aa1a8cc12722e11796574abfad4544fcf94a1d4a5270427c0119854",
+      "events_sha256": "a2f696fb5dfd3c7a8c2db6d0a9562b881157f265d4f8f36d2ec3d11eeaa239e0",
+      "guest_effects": 15,
+      "fixture_effects": 4,
+      "epf_records": 6985,
+      "simulator_complete": true,
+      "simulator_violations": 0,
+      "measurements": 7,
+      "failed_measurements": 0,
+      "final_measurement_order": [
+        "alignment_check",
+        "thickness_verification",
+        "overlay_alignment"
+      ]
+    },
+    {
+      "case": "litho-etch-dep",
+      "result_sha256": "7841dddb35d11a80a23238380e8e6c44b9df6ca91332cacf805cf2127be13a6b",
+      "events_sha256": "4d51d0e81c4747858abefaacef477a24c6e421b57cac6edbdd26b726ca94030e",
+      "guest_effects": 17,
+      "fixture_effects": 6,
+      "epf_records": 7889,
+      "simulator_complete": true,
+      "simulator_violations": 0,
+      "measurements": 7,
+      "failed_measurements": 0,
+      "final_measurement_order": [
+        "alignment_check",
+        "overlay_alignment",
+        "thickness_verification"
+      ]
+    },
+    {
+      "case": "overlay-retry",
+      "result_sha256": "bfdeb90f6cc09f51b193a50b164acd86959a47b5c60309d7f1103dbf1610e77d",
+      "events_sha256": "a50e8f59f17d3bf57efda9028e358717fe8734a38b92ea723d2516e7fe42fe17",
+      "guest_effects": 19,
+      "fixture_effects": 4,
+      "epf_records": 7852,
+      "simulator_complete": true,
+      "simulator_violations": 0,
+      "measurements": 11,
+      "failed_measurements": 4,
+      "final_measurement_order": [
+        "overlay_alignment",
+        "alignment_check",
+        "thickness_verification"
+      ]
+    },
+    {
+      "case": "reactive-etch-retry",
+      "result_sha256": "a344a459e61b7e9b65b36c8efa9098942339a5ab1ee524183238ab9f18cb1e2e",
+      "events_sha256": "2a1a61ec664dfbaf47860fbd7c4c345d7744d4b9e813e13dfffc09f99a9fb7a8",
+      "guest_effects": 16,
+      "fixture_effects": 4,
+      "epf_records": 7217,
+      "simulator_complete": true,
+      "simulator_violations": 0,
+      "measurements": 7,
+      "failed_measurements": 0,
+      "final_measurement_order": [
+        "overlay_alignment",
+        "alignment_check",
+        "thickness_verification"
+      ]
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 use choreofix::{
-    imp::json::encode,
+    imp::json::{decode, encode},
     imp::projection::rows,
     shell::{
         GUEST_MEMORY_BYTES, ShellError, ShellResult,
@@ -58,6 +58,9 @@ const MEASURE_FILES: u8 = 30;
 const MEASURE_TERM: u8 = 31;
 const ETCH_OPERATOR: u8 = 33;
 const ETCH_STATION: u8 = 34;
+const PROBE: u8 = 35;
+const READOUT: u8 = 36;
+type SampleResult<'a> = g::Msg<74, &'a [u8]>;
 type FabReady<'a, const FAB: u8> = g::Msg<FAB, &'a [u8]>;
 type Confirmation<'a, const LABEL: u8> = g::Msg<LABEL, WaferReading<'a, MONITOR>>;
 const CONFIRM_LITHO: u8 = 40;
@@ -122,7 +125,7 @@ async fn main() -> ShellResult<()> {
     let path = std::env::args()
         .nth(1)
         .ok_or_else(|| ShellError::message("usage: wafer-wasi GUEST.wasm"))?;
-    let probe = g::send::<WAFER, STAGE, Measure>();
+    let probe = g::send::<WAFER, METROLOGY, Measure>();
     let reading = g::send::<STEPPER, WAFER, Measured>();
     let failed = g::seq(
         g::send::<STAGE, STEPPER, OverlayFailed>(),
@@ -209,15 +212,26 @@ async fn main() -> ShellResult<()> {
         etch_request,
         g::route(loaded, g::seq(retry_etch.roll(), loaded)),
     );
-    let confirmations = g::par(
+    let fabricator_confirmations = g::par(
         g::par(
-            g::send::<CONTROL_FILE, LITHO_INBOX, Confirmation<CONFIRM_LITHO>>(),
-            g::send::<CONTROL_FILE, DEP_INBOX, Confirmation<CONFIRM_DEP>>(),
+            g::seq(
+                g::send::<CONTROL_FILE, LITHO_INBOX, Confirmation<CONFIRM_LITHO>>(),
+                g::seq(
+                    g::send::<LITHO_INBOX, METROLOGY, Dimension<ALIGNMENT_CHECK>>(),
+                    g::send::<METROLOGY, LITHO_INBOX, Reading<ALIGNMENT_CHECK>>(),
+                )
+                .roll(),
+            ),
+            g::seq(
+                g::send::<CONTROL_FILE, DEP_INBOX, Confirmation<CONFIRM_DEP>>(),
+                g::seq(
+                    g::send::<DEP_INBOX, METROLOGY, Dimension<THICKNESS_VERIFICATION>>(),
+                    g::send::<METROLOGY, DEP_INBOX, Reading<THICKNESS_VERIFICATION>>(),
+                )
+                .roll(),
+            ),
         ),
-        g::par(
-            g::send::<CONTROL_FILE, ETCH_INBOX, Confirmation<CONFIRM_ETCH>>(),
-            g::send::<CONTROL_FILE, WAFER, Confirmation<ALL_VALIDATED>>(),
-        ),
+        g::send::<CONTROL_FILE, ETCH_INBOX, Confirmation<CONFIRM_ETCH>>(),
     );
     let notices = g::par(
         g::send::<WAFER, LITHO_INBOX, Disposition<LITHO_INBOX>>(),
@@ -273,7 +287,13 @@ async fn main() -> ShellResult<()> {
                                 ),
                                 validation,
                             ),
-                            g::seq(confirmations, g::seq(alignment, g::seq(checks(), notices))),
+                            g::par(
+                                fabricator_confirmations,
+                                g::seq(
+                                    g::send::<CONTROL_FILE, WAFER, Confirmation<ALL_VALIDATED>>(),
+                                    g::seq(alignment, g::seq(checks(), notices)),
+                                ),
+                            ),
                         ),
                         g::seq(
                             file_metadata::<WAFER, ALIGNER>().roll(),
@@ -289,6 +309,33 @@ async fn main() -> ShellResult<()> {
             ),
         ),
     );
+    // Every measurement, including measurement with a borrowed stage, uses this
+    // one probe. Its next request follows the electronics' actual reply.
+    let sample = g::route(
+        g::route(
+            g::send::<PROBE, READOUT, Dimension<CD>>(),
+            g::route(
+                g::send::<PROBE, READOUT, Dimension<THICKNESS>>(),
+                g::send::<PROBE, READOUT, Dimension<PROFILE>>(),
+            ),
+        ),
+        g::route(
+            g::send::<PROBE, READOUT, Measure>(),
+            g::route(
+                g::send::<PROBE, READOUT, Dimension<ALIGNMENT_CHECK>>(),
+                g::send::<PROBE, READOUT, Dimension<THICKNESS_VERIFICATION>>(),
+            ),
+        ),
+    );
+    let source = g::seq(
+        g::send::<READOUT, METROLOGY, Loan<PROBE>>(),
+        g::par(
+            source,
+            g::seq(sample, g::send::<READOUT, PROBE, SampleResult>()).roll(),
+        ),
+    );
+    let p_probe = project::<PROBE>(&source);
+    let p_readout = project::<READOUT>(&source);
     let aligner = project::<ALIGNER>(&source);
     let engineer = project::<ENGINEER>(&source);
     let wafer = project::<WAFER>(&source);
@@ -324,21 +371,50 @@ async fn main() -> ShellResult<()> {
     let p_measure_file = project::<MEASURE_FILE>(&source);
     let p_measure_files = project::<MEASURE_FILES>(&source);
     let p_measure_term = project::<MEASURE_TERM>(&source);
+    let roles = std::collections::BTreeMap::from([
+        ("PROBE", PROBE),
+        ("READOUT", READOUT),
+        ("ALIGNER", ALIGNER),
+        ("ENGINEER", ENGINEER),
+        ("WAFER", WAFER),
+        ("TERMINAL", TERMINAL),
+        ("DEPOSITION_CHAMBER", DEPOSITION_CHAMBER),
+        ("ETCH_CHAMBER", ETCH_CHAMBER),
+        ("STEPPER", STEPPER),
+        ("METROLOGY", METROLOGY),
+        ("STAGE", STAGE),
+        ("CVD_STAGE", CVD_STAGE),
+        ("LITHO", LITHO),
+        ("LITHO_INBOX", LITHO_INBOX),
+        ("LITHO_FILES", LITHO_FILES),
+        ("LITHO_TERM", LITHO_TERM),
+        ("DEP", DEP),
+        ("DEP_INBOX", DEP_INBOX),
+        ("DEP_FILES", DEP_FILES),
+        ("DEP_TERM", DEP_TERM),
+        ("ETCH", ETCH),
+        ("ETCH_INBOX", ETCH_INBOX),
+        ("ETCH_FILES", ETCH_FILES),
+        ("ETCH_TERM", ETCH_TERM),
+        ("ETCH_OPERATOR", ETCH_OPERATOR),
+        ("ETCH_STATION", ETCH_STATION),
+        ("MONITOR", MONITOR),
+        ("CONTROL_OPERATOR", CONTROL_OPERATOR),
+        ("MONITOR_STATION", MONITOR_STATION),
+        ("CONTROL", CONTROL),
+        ("CONTROL_FILE", CONTROL_FILE),
+        ("CONTROL_FILES", CONTROL_FILES),
+        ("CONTROL_TERM", CONTROL_TERM),
+        ("MEASURER", MEASURER),
+        ("MEASURE_FILE", MEASURE_FILE),
+        ("MEASURE_FILES", MEASURE_FILES),
+        ("MEASURE_TERM", MEASURE_TERM),
+    ]);
     let projection = json!({
         "type":"compiled_projection", "format_version":1, "task":"15E", "session":SESSION,
-        "roles":{
-            "ALIGNER":ALIGNER, "ENGINEER":ENGINEER, "WAFER":WAFER, "TERMINAL":TERMINAL,
-            "DEPOSITION_CHAMBER":DEPOSITION_CHAMBER, "ETCH_CHAMBER":ETCH_CHAMBER,
-            "STEPPER":STEPPER, "METROLOGY":METROLOGY, "STAGE":STAGE, "CVD_STAGE":CVD_STAGE,
-            "LITHO":LITHO, "LITHO_INBOX":LITHO_INBOX, "LITHO_FILES":LITHO_FILES, "LITHO_TERM":LITHO_TERM,
-            "DEP":DEP, "DEP_INBOX":DEP_INBOX, "DEP_FILES":DEP_FILES, "DEP_TERM":DEP_TERM,
-            "ETCH":ETCH, "ETCH_INBOX":ETCH_INBOX, "ETCH_FILES":ETCH_FILES, "ETCH_TERM":ETCH_TERM,
-            "ETCH_OPERATOR":ETCH_OPERATOR, "ETCH_STATION":ETCH_STATION,
-            "MONITOR":MONITOR,"CONTROL_OPERATOR":CONTROL_OPERATOR,"MONITOR_STATION":MONITOR_STATION,"CONTROL":CONTROL,"CONTROL_FILE":CONTROL_FILE,"CONTROL_FILES":CONTROL_FILES,"CONTROL_TERM":CONTROL_TERM,
-            "MEASURER":MEASURER,"MEASURE_FILE":MEASURE_FILE,"MEASURE_FILES":MEASURE_FILES,"MEASURE_TERM":MEASURE_TERM
-        },
+        "roles":roles,
         "programs":[
-            rows(&aligner), rows(&engineer), rows(&wafer), rows(&deposition_chamber),
+            rows(&p_probe), rows(&p_readout), rows(&aligner), rows(&engineer), rows(&wafer), rows(&deposition_chamber),
             rows(&etch_chamber), rows(&etch_operator), rows(&etch_station), rows(&terminal), rows(&stepper), rows(&metrology), rows(&stage),
             rows(&p_litho), rows(&p_litho_inbox), rows(&p_litho_files), rows(&p_litho_term),
             rows(&p_dep), rows(&p_dep_inbox), rows(&p_dep_files), rows(&p_dep_term),
@@ -373,6 +449,7 @@ async fn main() -> ShellResult<()> {
             "METROLOGY_ENGINEER",
         ],
         [
+            (session, PROBE),
             (session, WAFER),
             (session, STAGE),
             (session, CVD_STAGE),
@@ -422,6 +499,7 @@ async fn main() -> ShellResult<()> {
         VALIDATION_FILE,
         READY_FILE,
         instrument(b"service/run_stepper_exposure", 7),
+        instrument(b"service/run_metrology_measurement", 8),
     ];
     let depositor_files = [
         INBOX_FILE,
@@ -429,6 +507,7 @@ async fn main() -> ShellResult<()> {
         READY_FILE,
         instrument(b"service/run_deposition", 7),
         instrument(b"service/check_monitoring", 8),
+        instrument(b"service/run_metrology_measurement", 9),
     ];
     let etcher_files = [
         INBOX_FILE,
@@ -486,7 +565,6 @@ async fn main() -> ShellResult<()> {
         let mut etch_station = rv.enter(session, &etch_station)?;
         let mut terminal = rv.enter(session, &terminal)?;
         let mut stepper = rv.enter(session, &stepper)?;
-        let mut metrology = rv.enter(session, &metrology)?;
         let mut stage = rv.enter(session, &stage)?;
         let mut cvd_stage = rv.enter(session, &cvd_stage)?;
         let mut operator = rv.enter(session, &p_control_operator)?;
@@ -513,7 +591,9 @@ async fn main() -> ShellResult<()> {
                 mut ready,
                 mut expose,
                 mut exposed,
-            ] = [(); 5].map(|_| vec![0; GUEST_MEMORY_BYTES]);
+                mut alignment_request,
+                mut alignment_reading,
+            ] = [(); 7].map(|_| vec![0; GUEST_MEMORY_BYTES]);
             let file = ChoreoFsFile::new(INBOX_FILE, inbox)
                 .read_as::<Disposition<LITHO_INBOX>>(&mut disposition)
                 .file(VALIDATION_FILE)?
@@ -522,7 +602,10 @@ async fn main() -> ShellResult<()> {
                 .write_as::<FabReady<LITHO_INBOX>>(&mut ready)
                 .file(litho_files[3])?
                 .write_as::<Expose>(&mut expose)
-                .read_as::<Exposed>(&mut exposed);
+                .read_as::<Exposed>(&mut exposed)
+                .file(litho_files[4])?
+                .write_as::<Dimension<ALIGNMENT_CHECK>>(&mut alignment_request)
+                .read_as::<Reading<ALIGNMENT_CHECK>>(&mut alignment_reading);
             let files = ChoreoFsFiles::new(vm).file(file)?;
             let mut memory = vec![0; GUEST_MEMORY_BYTES];
             let mut storage = Box::new(HibanaWasiGuestStorage::uninit());
@@ -555,7 +638,9 @@ async fn main() -> ShellResult<()> {
                 mut grown,
                 mut rate,
                 mut checked,
-            ] = [(); 7].map(|_| vec![0; GUEST_MEMORY_BYTES]);
+                mut thickness_request,
+                mut thickness_reading,
+            ] = [(); 9].map(|_| vec![0; GUEST_MEMORY_BYTES]);
             let file = ChoreoFsFile::new(INBOX_FILE, inbox)
                 .read_as::<Disposition<DEP_INBOX>>(&mut disposition)
                 .file(VALIDATION_FILE)?
@@ -567,7 +652,10 @@ async fn main() -> ShellResult<()> {
                 .read_as::<Grown>(&mut grown)
                 .file(depositor_files[4])?
                 .write_as::<Rate>(&mut rate)
-                .read_as::<RateResult>(&mut checked);
+                .read_as::<RateResult>(&mut checked)
+                .file(depositor_files[5])?
+                .write_as::<Dimension<THICKNESS_VERIFICATION>>(&mut thickness_request)
+                .read_as::<Reading<THICKNESS_VERIFICATION>>(&mut thickness_reading);
             let files = ChoreoFsFiles::new(vm).file(file)?;
             let mut memory = vec![0; GUEST_MEMORY_BYTES];
             let mut storage = Box::new(HibanaWasiGuestStorage::uninit());
@@ -831,57 +919,6 @@ async fn main() -> ShellResult<()> {
             Ok(())
         };
         async {
-            let mut stage = loop {
-                let request = metrology.offer().await?;
-                match request.label() {
-                    CD => {
-                        let measured = effects
-                            .apply(request.recv::<Dimension<CD>>().await?)
-                            .await?;
-                        metrology
-                            .send::<Reading<CD>>(&encode(&measured)?.as_slice())
-                            .await?;
-                    }
-                    THICKNESS => {
-                        let measured = effects
-                            .apply(request.recv::<Dimension<THICKNESS>>().await?)
-                            .await?;
-                        metrology
-                            .send::<Reading<THICKNESS>>(&encode(&measured)?.as_slice())
-                            .await?;
-                    }
-                    PROFILE => {
-                        let measured = effects
-                            .apply(request.recv::<Dimension<PROFILE>>().await?)
-                            .await?;
-                        metrology
-                            .send::<Reading<PROFILE>>(&encode(&measured)?.as_slice())
-                            .await?;
-                    }
-                    Loan::<STAGE>::LOGICAL_LABEL => break request.recv::<Loan<STAGE>>().await?,
-                    label => {
-                        return Err(ShellError::message(format!(
-                            "unexpected metrology operation {label}"
-                        )));
-                    }
-                }
-            };
-            loop {
-                let actual = effects.apply(stage.recv::<Measure>().await?).await?;
-                let bytes = encode(&actual)?;
-                if actual["success"] == true {
-                    stage
-                        .send::<OverlayPassed>(&ReviewReply::from_bytes(&bytes)?)
-                        .await?;
-                    metrology.send::<Loan<STAGE>>(stage).await?;
-                    return Ok(());
-                }
-                stage
-                    .send::<OverlayFailed>(&ReviewReply::from_bytes(&bytes)?)
-                    .await?;
-            }
-        };
-        async {
             localside::file_metadata::run(&mut aligner, wafer, files).await?;
             let _returned = aligner.recv::<Loan<WAFER>>().await?;
             Ok(())
@@ -1020,7 +1057,133 @@ async fn main() -> ShellResult<()> {
         };
         Ok(())
     };
-    let result = hibana_runtime::race(trial, io.run(bus)).await;
+    let instruments = async {
+        async {
+            let mut electronics = rv.enter(session, &p_readout)?;
+            let probe = rv.enter(session, &p_probe)?;
+            electronics.send::<Loan<PROBE>>(probe).await?;
+            loop {
+                let request = electronics.offer().await?;
+                let result = match request.label() {
+                    CD => {
+                        effects
+                            .apply(request.recv::<Dimension<CD>>().await?)
+                            .await?
+                    }
+                    THICKNESS => {
+                        effects
+                            .apply(request.recv::<Dimension<THICKNESS>>().await?)
+                            .await?
+                    }
+                    PROFILE => {
+                        effects
+                            .apply(request.recv::<Dimension<PROFILE>>().await?)
+                            .await?
+                    }
+                    ALIGNMENT_CHECK => {
+                        effects
+                            .apply(request.recv::<Dimension<ALIGNMENT_CHECK>>().await?)
+                            .await?
+                    }
+                    THICKNESS_VERIFICATION => {
+                        effects
+                            .apply(request.recv::<Dimension<THICKNESS_VERIFICATION>>().await?)
+                            .await?
+                    }
+                    Measure::LOGICAL_LABEL => {
+                        effects.apply(request.recv::<Measure>().await?).await?
+                    }
+                    label => {
+                        return Err(ShellError::message(format!(
+                            "unexpected probe request {label}"
+                        )));
+                    }
+                };
+                electronics
+                    .send::<SampleResult>(&encode(&result)?.as_slice())
+                    .await?;
+            }
+        };
+        let mut metrology = rv.enter(session, &metrology)?;
+        let mut probe = metrology.recv::<Loan<PROBE>>().await?;
+        let mut mounted = None;
+        loop {
+            let request = metrology.offer().await?;
+            match request.label() {
+                CD => {
+                    let received = request.recv::<Dimension<CD>>().await?;
+                    let sample = InstrumentRequest::<CD>::try_from(received.as_bytes())?;
+                    probe.send::<Dimension<CD>>(&sample).await?;
+                    let result = probe.recv::<SampleResult>().await?;
+                    metrology.send::<Reading<CD>>(&result).await?;
+                }
+                THICKNESS => {
+                    let received = request.recv::<Dimension<THICKNESS>>().await?;
+                    let sample = InstrumentRequest::<THICKNESS>::try_from(received.as_bytes())?;
+                    probe.send::<Dimension<THICKNESS>>(&sample).await?;
+                    let result = probe.recv::<SampleResult>().await?;
+                    metrology.send::<Reading<THICKNESS>>(&result).await?;
+                }
+                PROFILE => {
+                    let received = request.recv::<Dimension<PROFILE>>().await?;
+                    let sample = InstrumentRequest::<PROFILE>::try_from(received.as_bytes())?;
+                    probe.send::<Dimension<PROFILE>>(&sample).await?;
+                    let result = probe.recv::<SampleResult>().await?;
+                    metrology.send::<Reading<PROFILE>>(&result).await?;
+                }
+                ALIGNMENT_CHECK => {
+                    let received = request.recv::<Dimension<ALIGNMENT_CHECK>>().await?;
+                    let sample =
+                        InstrumentRequest::<ALIGNMENT_CHECK>::try_from(received.as_bytes())?;
+                    probe.send::<Dimension<ALIGNMENT_CHECK>>(&sample).await?;
+                    let result = probe.recv::<SampleResult>().await?;
+                    metrology.send::<Reading<ALIGNMENT_CHECK>>(&result).await?;
+                }
+                THICKNESS_VERIFICATION => {
+                    let received = request.recv::<Dimension<THICKNESS_VERIFICATION>>().await?;
+                    let sample =
+                        InstrumentRequest::<THICKNESS_VERIFICATION>::try_from(received.as_bytes())?;
+                    probe
+                        .send::<Dimension<THICKNESS_VERIFICATION>>(&sample)
+                        .await?;
+                    let result = probe.recv::<SampleResult>().await?;
+                    metrology
+                        .send::<Reading<THICKNESS_VERIFICATION>>(&result)
+                        .await?;
+                }
+                Loan::<STAGE>::LOGICAL_LABEL => {
+                    mounted = Some(request.recv::<Loan<STAGE>>().await?);
+                }
+                Measure::LOGICAL_LABEL => {
+                    let received = request.recv::<Measure>().await?;
+                    let stage = mounted
+                        .as_mut()
+                        .ok_or_else(|| ShellError::message("overlay has no mounted stage"))?;
+                    let sample = InstrumentRequest::<METROLOGY>::try_from(received.as_bytes())?;
+                    probe.send::<Measure>(&sample).await?;
+                    let result = probe.recv::<SampleResult>().await?;
+                    if decode(result)?["success"] == true {
+                        stage
+                            .send::<OverlayPassed>(&ReviewReply::from_bytes(result)?)
+                            .await?;
+                        metrology
+                            .send::<Loan<STAGE>>(mounted.take().expect("borrowed mounted stage"))
+                            .await?;
+                    } else {
+                        stage
+                            .send::<OverlayFailed>(&ReviewReply::from_bytes(result)?)
+                            .await?;
+                    }
+                }
+                label => {
+                    return Err(ShellError::message(format!(
+                        "unexpected metrology request {label}"
+                    )));
+                }
+            }
+        }
+    };
+    let result = hibana_runtime::race(hibana_runtime::race(trial, instruments), io.run(bus)).await;
     bus.checkpoint(SESSION, tap.checkpoint());
     io.finish(bus, result, Some("reference_wafer_integration"))
         .await
