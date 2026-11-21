@@ -615,35 +615,23 @@ async fn run_wash_order(
             assert_eq!(receipts[&id]["send_actor"], reviewer);
             assert_eq!(receipts[&id]["receive_commit"]["actor"], reviewer_vm);
             entry["reviewer_read"] = receipts[&id].clone();
-            let devops = role("DEVOPS".to_owned())?;
-            let devops_file = role("DEVOPS_FILE".to_owned())?;
-            let devops_vm = role("DEVOPS_VM".to_owned())?;
-            let (&candidate, sent) = journal::one(history.frames.iter().filter(|(_, f)| {
-                f.direction(tester, devops)
-                    && u64::from(f.logical_label) == tester
-                    && f.sent > completed
-                    && f.value().is_ok_and(|v| v == *value)
-            }))?;
-            let (&loan, transfer) = journal::one(history.frames.iter().filter(|(_, f)| {
-                f.direction(tester, devops)
-                    && f.logical_label == 47
-                    && f.bytes.len() == 3
-                    && f.bytes[0] as u64 == service
-                    && f.sent > sent.sent
-            }))?;
-            let granted = transfer.received()?;
-            assert!(sent.received()? < granted);
-            let (&delivery, _) = journal::one(history.frames.iter().filter(|(_, f)| {
-                f.direction(service, devops_file)
-                    && u64::from(f.logical_label) == tester
-                    && f.sent > granted
-                    && f.value().is_ok_and(|v| v == *value)
-            }))?;
-            assert_eq!(receipts[&loan]["receive_commit"]["actor"], devops);
-            assert_eq!(receipts[&delivery]["send_actor"], devops);
-            assert_eq!(receipts[&delivery]["receive_commit"]["actor"], devops_vm);
-            entry["staging_candidate"] = json!({"test_result":receipts[&candidate],
-                "service_loan":receipts[&loan],"devops_shell_read":receipts[&delivery]});
+            let checked = journal::one(
+                effects["effects"]
+                    .as_array()
+                    .ok_or("effect receipts")?
+                    .iter()
+                    .filter(|e| {
+                        e["tool"] == "run_tests" && e["receipt"] == value["data"]["receipt"]
+                    }),
+            )?;
+            let mut staging = serde_json::Map::new();
+            for field in ["test_result", "service_loan", "devops_shell_read"] {
+                let frame = checked["staging_candidate"][field]
+                    .as_u64()
+                    .ok_or("staging handoff frame")?;
+                staging.insert(field.into(), receipts[&frame].clone());
+            }
+            entry["staging_candidate"] = Value::Object(staging);
         }
         test_results.push(entry);
     }

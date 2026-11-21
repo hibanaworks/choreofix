@@ -277,11 +277,57 @@ pub(super) fn preparation(
         {
             return Err("4H retry reused the rejected candidate".into());
         }
+        let mut entry = json!({"rpc":id,"tool":tool,"service":subject,"receipt":receipt,
+            "file_request":request,"effect_request":effect_request,"reply":reply});
+        if tool == "run_tests" && result["success"] == true {
+            let tester = role(&tester)?;
+            let service = role(&service)?;
+            let devops = role("DEVOPS")?;
+            let file = role("DEVOPS_FILE")?;
+            let (candidate, informed) = committed(
+                tester,
+                devops,
+                tester,
+                devops,
+                result,
+                Some(completed),
+                None,
+            )?;
+            let (&loan, transfer) = journal::one(history.frames.iter().filter(|(_, f)| {
+                f.direction(tester, devops)
+                    && f.logical_label == 47
+                    && matches!(f.bytes.as_slice(), [view, _, _] if u64::from(*view) == service)
+                    && f.sent > history.frames[&candidate].sent
+            }))?;
+            let granted = transfer.received()?;
+            let (delivery, _) = committed(
+                service,
+                file,
+                devops,
+                role("DEVOPS_VM")?,
+                result,
+                Some(granted),
+                None,
+            )?;
+            let owned = receipts
+                .get(&loan)
+                .ok_or("missing service transfer commit")?;
+            if informed >= granted
+                || owned["send_actor"] != tester
+                || owned["receive_commit"]["actor"] != devops
+                || u64::from(history.frames[&candidate].logical_label) != tester
+                || u64::from(history.frames[&delivery].logical_label) != tester
+                || !used.insert(loan)
+            {
+                return Err("test result and service transfer to DevOps disagree".into());
+            }
+            reply_edges.insert((tester, devops, tool));
+            reply_edges.insert((service, file, tool));
+            entry["staging_candidate"] =
+                json!({"test_result":candidate,"service_loan":loan,"devops_shell_read":delivery});
+        }
         latest.insert((tool, subject), (completed, result));
-        correspondence.push(
-            json!({"rpc":id,"tool":tool,"service":subject,"receipt":receipt,
-            "file_request":request,"effect_request":effect_request,"reply":reply}),
-        );
+        correspondence.push(entry);
     }
     for (id, frame) in &history.frames {
         if used.contains(id) {

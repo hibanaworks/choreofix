@@ -358,5 +358,20 @@
       "schema_receipts_sha256": "a1f1670b98cb0a59f2cde052b8b4d3e66c64a19c0cc06a2c245a661f06b6a958",
       "result_sha256": "1a8de0640ad1d8b8c38907601fa43c7f5c4c0d75919e6e6d8a304f2ad3c6099a"
     }
-  ]
+  ],
+  "handoff_reaudit": {
+    "runner_sha256": "ffcc29455bb5a0ea17bf1d1acab3d556bc9083a654fed4e2e1292d1a3da436b9",
+    "audit_source_sha256": "51f0ae2d066d1d768707d8bedf25caacbe89db42318289189f6db599c090e508",
+    "matched_original_journals": 42,
+    "effects": 576,
+    "positive_tests_with_service_transfer_and_guest_delivery": 126,
+    "epf_records": 233130,
+    "substituted_payloads_rejected": [
+      "test_result",
+      "devops_shell_read"
+    ],
+    "mutation_case": "abc-tests-abc",
+    "new_model_runs": 0,
+    "new_qualifications": 0
+  }
 }
