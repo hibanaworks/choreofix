@@ -11,7 +11,7 @@ type Edge = (&'static str, &'static str, &'static str);
 pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
     let dynamic = history.execution;
     let artifact = history.projection;
-    let rows = history.records();
+    let journal_end = history.row_count();
     let compiled = &artifact["compiled"];
     let scored = history.scored_events;
     if !history.simulator_complete {
@@ -158,7 +158,7 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
             _ => return Err("unassigned 7M effect".into()),
         };
         let admitted = take(request, 0..call.emitted, args)?;
-        let replied = take(reply, returned + 1..rows.len(), result)?;
+        let replied = take(reply, returned + 1..journal_end, result)?;
         let authorities = match tool {
             "insert_figure" => vec![
                 take(
@@ -205,17 +205,17 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
                     )?,
                     take(
                         ("DOCUMENT_OWNER", "FACT_FILE", "fact_outcome"),
-                        returned + 1..rows.len(),
+                        returned + 1..journal_end,
                         result,
                     )?,
                     take(
                         ("DOCUMENT_OWNER", "WRITER_FILE", "writer_a_outcome"),
-                        returned + 1..rows.len(),
+                        returned + 1..journal_end,
                         result,
                     )?,
                     take(
                         ("DOCUMENT_OWNER", "WRITER_B_FILE", "writer_b_outcome"),
-                        returned + 1..rows.len(),
+                        returned + 1..journal_end,
                         result,
                     )?,
                 ]

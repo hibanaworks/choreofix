@@ -347,8 +347,27 @@ impl<'a> Journal<'a> {
         Ok(())
     }
 
-    pub(crate) fn records(&self) -> &'a [Value] {
-        self.rows
+    pub(crate) fn row_count(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// Journal positions of runtime decisions, for matching an actual result to its resolver.
+    pub(crate) fn resolver_decisions(
+        &self,
+    ) -> Result<Vec<(usize, hibana::runtime::tap::TapEvent)>> {
+        use hibana::runtime::tap::RESOLVER_AUDIT;
+        let mut decisions = Vec::new();
+        for (at, row) in self.rows.iter().enumerate() {
+            let message = &row["message"];
+            if row["direction"] == "runtime" && message["type"] == "protocol_capture" {
+                for record in message["records"].as_array().ok_or("capture records")? {
+                    if record[1] == RESOLVER_AUDIT {
+                        decisions.push((at, crate::projection::tap_event(record)?));
+                    }
+                }
+            }
+        }
+        Ok(decisions)
     }
 
     pub(crate) fn fixture(&self) -> &'a Value {
@@ -644,6 +663,17 @@ mod tests {
         let journal = from_receipts(&rows, (&artifact, &labels), &actors, &checked)?;
         assert_eq!(journal.frames[&19].received, 4);
         assert_eq!(journal.frames[&19].first_poll, 1);
+        // Another journal writer can use the same message shape; only the runtime
+        // produces the decisions checked by EPF.
+        let mut foreign = rows.clone();
+        foreign.push(
+            json!({"direction":"simulator","message":{"type":"protocol_capture",
+            "producer":42,"records":[[3,tap::RESOLVER_AUDIT,7u16<<8,1,300]]}}),
+        );
+        let witness = crate::projection::check_dynamic(&artifact, &foreign)?;
+        let foreign = from_receipts(&foreign, (&artifact, &labels), &actors, &witness)?;
+        assert!(foreign.resolver_decisions()?.is_empty());
+        assert_eq!(foreign.row_count(), rows.len() + 1);
         journal.check_session(&json!(1))?;
         assert!(journal.check_session(&json!(2)).is_err());
         let mut extra_session = checked.clone();

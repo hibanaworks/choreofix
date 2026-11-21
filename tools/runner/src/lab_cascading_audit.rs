@@ -13,7 +13,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     journal.check_session(&journal.projection["compiled"]["session"])?;
     let dynamic = journal.execution;
     let artifact = journal.projection;
-    let rows = journal.records();
+    let journal_end = journal.row_count();
     let compiled = &artifact["compiled"];
     let actors = journal.participants;
     let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
@@ -293,7 +293,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
                 return Err(format!("{request} differs from the admitted scientific input").into());
             }
             packet = Some(actual);
-            let (at, actual) = take((owner, resource, reply), returned + 1..rows.len())?;
+            let (at, actual) = take((owner, resource, reply), returned + 1..journal_end)?;
             if &actual != output {
                 return Err(
                     format!("{reply} differs from the actual scientific effect result").into(),
@@ -301,7 +301,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
             }
             replied = replied.max(at);
         }
-        let (_, displayed) = take((carrier, file, reply), replied + 1..rows.len())?;
+        let (_, displayed) = take((carrier, file, reply), replied + 1..journal_end)?;
         if &displayed != output {
             return Err(format!("{reply} differs from the actual scientific effect result").into());
         }
@@ -315,7 +315,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
             _ => None,
         };
         if let Some((edge, key)) = material {
-            let (_, batch) = take(edge, returned + 1..rows.len())?;
+            let (_, batch) = take(edge, returned + 1..journal_end)?;
             if &batch[key] != output {
                 return Err(format!("{} differs from the actual {key} result", edge.2).into());
             }
@@ -338,7 +338,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
             _ => &[],
         };
         for &edge in notices {
-            let (_, notice) = take(edge, returned + 1..rows.len())?;
+            let (_, notice) = take(edge, returned + 1..journal_end)?;
             if &notice != output {
                 return Err(
                     format!("{} differs from the actual QC or synthesis result", edge.2).into(),
@@ -376,7 +376,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     let expected = if let Some((returned, validation)) = final_validation {
         let (_, received) = take(
             ("CHEM_CONTROL", "QC", "FinalValidated"),
-            returned + 1..rows.len(),
+            returned + 1..journal_end,
         )?;
         if &received != validation {
             return Err("QC received a different final validation result".into());
@@ -388,7 +388,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
             ("ANALYST_FILE", "FileAnalystBatch"),
             ("QC_FILE", "FileQcQuality"),
         ] {
-            let (_, received) = take(("QC", file, name), at + 1..rows.len())?;
+            let (_, received) = take(("QC", file, name), at + 1..journal_end)?;
             if &received != terminal {
                 return Err(
                     format!("{name} differs from the actual exhausted-stock result").into(),

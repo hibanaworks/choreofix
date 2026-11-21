@@ -37,7 +37,7 @@ const CHAPTERS: [(&str, &str, &str, &str, &str); 4] = [
 pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
     let dynamic = history.execution;
     let artifact = history.projection;
-    let rows = history.records();
+    let journal_end = history.row_count();
     let compiled = &artifact["compiled"];
     let actors = history.participants;
 
@@ -201,7 +201,7 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
                     "EDITOR_IN_CHIEF",
                     "EDITOR_FILE",
                     reply_label,
-                    result_at + 1..rows.len(),
+                    result_at + 1..journal_end,
                     None,
                 )?,
             )
@@ -316,7 +316,7 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
                     });
                     let sender = if initial { "DATA_ANALYST" } else { author };
                     authorities.push(take(sender, "REVIEWER", label, interval, Some(logical))?.0);
-                    let notice = take(author, author_file, 26, result_at + 1..rows.len(), None)?.1;
+                    let notice = take(author, author_file, 26, result_at + 1..journal_end, None)?.1;
                     if notice.value()? != *output {
                         return Err("author notice differs from actual review".into());
                     }
@@ -354,7 +354,7 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
             }
             (
                 request,
-                take(owner, file, reply_label, result_at + 1..rows.len(), None)?,
+                take(owner, file, reply_label, result_at + 1..journal_end, None)?,
             )
         };
         if request.1.value()? != *args || reply.1.value()? != *output {

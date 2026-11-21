@@ -72,7 +72,7 @@ fn input<'a>(
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     journal.check_session(&journal.projection["compiled"]["session"])?;
     let dynamic = journal.execution;
-    let rows = journal.records();
+    let journal_end = journal.row_count();
     let compiled = &journal.projection["compiled"];
     let fixture = journal.fixture();
     let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
@@ -199,7 +199,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
             })
             .map(|call| call.emitted)
             .min()
-            .unwrap_or(rows.len());
+            .unwrap_or(journal_end);
         let (from, to, request, reply) = match tool {
             "implement_feature" => (
                 developer,

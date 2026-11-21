@@ -10,7 +10,7 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
     history.check_session(&history.projection["compiled"]["session"])?;
     let dynamic = history.execution;
     let artifact = history.projection;
-    let rows = history.records();
+    let journal_end = history.row_count();
     let compiled = &artifact["compiled"];
     let actors = history.participants;
 
@@ -88,7 +88,7 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
         let before = call.emitted.min(start);
         let accepted = take((file, owner), &[code], 0..before)?;
         let request_at = accepted.received;
-        let shown = take((agent, file), &[code], end + 1..rows.len())?;
+        let shown = take((agent, file), &[code], end + 1..journal_end)?;
         if accepted.value()? != *arguments || shown.value()? != *output {
             return Err(format!("{name} differs from the actual request or result").into());
         }
@@ -236,12 +236,12 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
                 } else {
                     "ComplianceRejected"
                 })?],
-                end + 1..rows.len(),
+                end + 1..journal_end,
             )?;
             let lead_file = take(
                 ("LEAD_SCIENTIST", "LEAD_FILE"),
                 &[label("ReviewResult")?],
-                lead.received + 1..rows.len(),
+                lead.received + 1..journal_end,
             )?;
             if result.value()? != *output
                 || lead.value()? != *output
@@ -257,11 +257,12 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
                     ("BIOLOGIST", "BIO_FILE", "ApprovedForBio"),
                     ("TOXICOLOGIST", "TOX_FILE", "ApprovedForTox"),
                 ] {
-                    let approved = take(("STUDY", agent), &[label(message)?], end + 1..rows.len())?;
+                    let approved =
+                        take(("STUDY", agent), &[label(message)?], end + 1..journal_end)?;
                     let shown = take(
                         (agent, file),
                         &[label("StudyNotice")?],
-                        approved.received + 1..rows.len(),
+                        approved.received + 1..journal_end,
                     )?;
                     if approved.value()? != *output || shown.value()? != *output {
                         return Err("scientist received a different approval".into());
@@ -270,12 +271,12 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
                 let chemist = take(
                     ("STUDY", "CHEMIST"),
                     &[label("ApprovedForChemist")?],
-                    end + 1..rows.len(),
+                    end + 1..journal_end,
                 )?;
                 let chem_file = take(
                     ("CHEMIST", "CHEM_FILE"),
                     &[label("ApprovalNotice")?],
-                    chemist.received + 1..rows.len(),
+                    chemist.received + 1..journal_end,
                 )?;
                 if chemist.value()? != *output || chem_file.value()? != *output {
                     return Err("chemist received a different approval".into());
@@ -308,7 +309,7 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
         let requested = take(
             ("LEAD_FILE", "LEAD_SCIENTIST"),
             &[label("Reanalysis")?],
-            0..rows.len(),
+            0..journal_end,
         )?;
         let choice = requested.value()?;
         let biology = choice["biology"].as_bool().ok_or("biology choice")?;

@@ -116,7 +116,7 @@ fn operation(agent: &str, tool: &str, arguments: &Value) -> Option<Operation> {
 
 pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
     let dynamic = history.execution;
-    let rows = history.records();
+    let journal_end = history.row_count();
     let compiled = &history.projection["compiled"];
     let actors = history.participants;
 
@@ -188,7 +188,7 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
         let before = call.emitted.min(start);
         let request = take(file, owner, code, 0..before)?;
         let received = request.received;
-        let shown = take(agent, file, code, end + 1..rows.len())?;
+        let shown = take(agent, file, code, end + 1..journal_end)?;
         if request.value()? != *arguments || shown.value()? != *output {
             return Err(format!("{name} differs from its actual file request or reply").into());
         }

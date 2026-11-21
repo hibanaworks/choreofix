@@ -48,7 +48,6 @@ fn prior<'a>(calls: &'a BTreeMap<u64, Call>, call: &Call, tool: &str) -> Result<
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     let dynamic = journal.execution;
     let artifact = journal.projection;
-    let rows = journal.records();
     let fixture = journal.fixture();
     let task = fixture["task"].as_str().ok_or("codebase task")?;
     let actors = journal.participants;
@@ -77,36 +76,19 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     let mut score_events = journal.scored_events.iter().collect::<Vec<_>>();
     let mut commits = Vec::new();
     let mut expected_returns = BTreeMap::<u64, usize>::new();
-    let mut decisions = BTreeMap::<(usize, usize), (u64, u64, u64)>::new();
-    for (index, row) in rows.iter().enumerate() {
-        if row["message"]["type"] != "protocol_capture" {
-            continue;
-        }
-        for (ordinal, record) in row["message"]["records"]
-            .as_array()
-            .ok_or("capture records")?
-            .iter()
-            .enumerate()
+    let members = compiled["participants"].as_object().ok_or("participants")?;
+    let mut decisions = Vec::new();
+    for (at, record) in journal.resolver_decisions()? {
+        let [actor, result] = record.causal_key().to_be_bytes();
+        let resolver = record.arg1() as u16;
+        if members
+            .values()
+            .any(|p| p["role"] == actor && p["resolver"] == resolver)
         {
-            if record[1] != hibana::runtime::tap::RESOLVER_AUDIT {
-                continue;
+            if record.arg0() != 20 {
+                return Err("resolver session differs".into());
             }
-            let causal = record[2].as_u64().ok_or("resolver actor/result")?;
-            let packed = record[4].as_u64().ok_or("resolver site/id")?;
-            if compiled["participants"]
-                .as_object()
-                .ok_or("participants")?
-                .values()
-                .any(|p| p["role"] == causal >> 8 && p["resolver"] == packed & 65535)
-            {
-                if record[3] != 20 {
-                    return Err("resolver session differs".into());
-                }
-                decisions.insert(
-                    (index, ordinal),
-                    (causal >> 8, packed & 65535, causal & 255),
-                );
-            }
+            decisions.push((at, u64::from(actor), u64::from(resolver), result));
         }
     }
     let mut used_decisions = BTreeSet::new();
@@ -341,14 +323,14 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
                         .as_u64()
                         .ok_or("compiled test resolver")?;
                     let mut matched = 0;
-                    for (id, &(actor, check, decision)) in &decisions {
+                    for (id, &(at, actor, check, decision)) in decisions.iter().enumerate() {
                         if actor == role
                             && check == resolver
-                            && result_at < id.0
-                            && id.0 < reply.received
+                            && result_at < at
+                            && at < reply.received
                         {
-                            if decision != u64::from(result["success"] != true)
-                                || !used_decisions.insert(*id)
+                            if decision != u8::from(result["success"] != true)
+                                || !used_decisions.insert(id)
                             {
                                 return Err(
                                     "actual test verdict differs from resolver decision".into()

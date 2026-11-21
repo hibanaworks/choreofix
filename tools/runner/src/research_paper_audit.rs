@@ -30,7 +30,7 @@ const CHAPTERS: [(&str, &str, &str, &str, &str); 3] = [
 pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
     let dynamic = history.execution;
     let artifact = history.projection;
-    let rows = history.records();
+    let journal_end = history.row_count();
     let compiled = &artifact["compiled"];
     let actors = history.participants;
     let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
@@ -159,7 +159,7 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
                 "DOCUMENT",
                 "EDITOR_FILE",
                 label(labels, "Published")?,
-                result_at + 1..rows.len(),
+                result_at + 1..journal_end,
                 None,
             )?;
             (request, reply, authorities)
@@ -211,7 +211,7 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
                 owner,
                 file,
                 label(table, reply_name)?,
-                result_at + 1..rows.len(),
+                result_at + 1..journal_end,
                 None,
             )?;
             let admitted = request.1.received;
@@ -255,7 +255,7 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
                             "DOCUMENT",
                             author_file,
                             label(table, "AuthorNotice")?,
-                            result_at + 1..rows.len(),
+                            result_at + 1..journal_end,
                             None,
                         )?;
                         if notice.value()? != *output {
@@ -267,7 +267,7 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
                             "FACT_CHECKER",
                             "FACT_FILE",
                             label(table, "FactFinished")?,
-                            result_at + 1..rows.len(),
+                            result_at + 1..journal_end,
                             None,
                         )?;
                         if final_notice.value()? != *output {
@@ -302,7 +302,7 @@ pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
             file,
             "RESEARCH_SERVICE",
             label(&compiled["chapter_labels"][chapter], "ResearchDone")?,
-            0..rows.len(),
+            0..journal_end,
             None,
         )?;
         if exit.bytes != [0; 4] {

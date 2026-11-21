@@ -8,7 +8,7 @@ use std::{collections::BTreeSet, ops::Range};
 
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     journal.check_session(&journal.projection["compiled"]["session"])?;
-    let rows = journal.records();
+    let journal_end = journal.row_count();
     let compiled = &journal.projection["compiled"];
     let fixture = journal.fixture();
     let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
@@ -370,7 +370,8 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
                     let decision_at = frames[&decision].received;
                     let notice = json!({"repair":selected,"test":result});
                     for edge in developer_outcomes {
-                        let (id, _) = take(edge, None, decision_at + 1..rows.len(), Some(&notice))?;
+                        let (id, _) =
+                            take(edge, None, decision_at + 1..journal_end, Some(&notice))?;
                         returns.push(id);
                     }
                     let (ui, backend, db, api) = match component {
@@ -420,7 +421,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
             Some(args),
         )?;
         for edge in replies {
-            let (id, _) = take(edge, None, returned + 1..rows.len(), Some(result))?;
+            let (id, _) = take(edge, None, returned + 1..journal_end, Some(result))?;
             returns.push(id);
         }
         let (score_id, _) = one(events.iter().enumerate().filter(|(index, event)| {

@@ -6,7 +6,7 @@ use std::{collections::BTreeSet, ops::Range};
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     let dynamic = journal.execution;
     let artifact = journal.projection;
-    let rows = journal.records();
+    let journal_end = journal.row_count();
     let compiled = &artifact["compiled"];
     let score = journal.scored_events;
     let role = |name: &str| compiled["roles"][name].as_u64().ok_or("pipeline role");
@@ -106,18 +106,18 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
             )?;
             let real = take(
                 (resource, agent, output, agent),
-                result_at..rows.len(),
+                result_at..journal_end,
                 result,
             )?;
             let delivered = take(
                 (agent, file, output, vm),
-                journal.frames[&real].received..rows.len(),
+                journal.frames[&real].received..journal_end,
                 result,
             )?;
             (vec![receipt, workspace, registry], vec![real, delivered])
         } else {
             let received = take((file, resource, input, holder), 0..call.emitted, arguments)?;
-            let delivered = take((resource, file, output, vm), result_at..rows.len(), result)?;
+            let delivered = take((resource, file, output, vm), result_at..journal_end, result)?;
             (vec![received], vec![delivered])
         };
         effects.push(json!({"agent":agent,"tool":tool,"arguments":arguments,

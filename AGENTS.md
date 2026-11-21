@@ -67,6 +67,9 @@ Pass the validated journal to each task effect checker. Select the checker from 
 compiled task in the common reader, pair it with the original participant roster,
 and use the same entry point for record mutations. Keep task-specific code for
 physical resource, argument and result correspondence.
+Derive a frame's logical roles, label and delegated resource from its matched
+compiled operation. If a business result determines a resolver decision, use
+the runtime capture that EPF checked and match it to that result's occurrence.
 Do not repeat EPF's operation-to-operation ordering or delegation-envelope
 checks in effect auditors. Check the actual request/effect/result boundary,
 file data, physical integration identities and completion evidence instead.

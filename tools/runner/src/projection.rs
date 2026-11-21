@@ -12,6 +12,7 @@ use std::{
 
 mod dynamic;
 pub use dynamic::check as check_dynamic;
+pub(crate) use dynamic::record as tap_event;
 
 // The canonical TapEvent identifiers and packed fields are documented by
 // hibana::runtime::tap. EPF checks the immutable source and captured history;

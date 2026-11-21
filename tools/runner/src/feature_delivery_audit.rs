@@ -72,7 +72,7 @@ fn business(frame: &Frame, roles: &BTreeSet<u64>) -> bool {
 pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     journal.check_session(&journal.projection["compiled"]["session"])?;
     let dynamic = journal.execution;
-    let rows = journal.records();
+    let journal_end = journal.row_count();
     let compiled = &journal.projection["compiled"];
     let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
     let label = |name: &str| crate::projection::named_id(&compiled["labels"], name).map(u64::from);
@@ -189,7 +189,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
             })
             .map(|other| other.emitted)
             .min()
-            .unwrap_or(rows.len());
+            .unwrap_or(journal_end);
         let (from, to, request_name, reply_name) = match tool {
             "implement_feature" => (
                 merge_file,
@@ -401,7 +401,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
                     v.direction(repo, build)
                         && u64::from(v.logical_label) == publication_label
                         && at < v.sent
-                        && v.sent < rows.len()
+                        && v.sent < journal_end
                         && !used.contains(&v.sent)
                         && v.value().is_ok_and(|v| v["publication"] == *result)
                 }))?;

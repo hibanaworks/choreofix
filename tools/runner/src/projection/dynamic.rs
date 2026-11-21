@@ -7,7 +7,7 @@ use hibana_epf::{
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-fn record(value: &Value) -> Result<TapEvent> {
+pub(crate) fn record(value: &Value) -> Result<TapEvent> {
     let fields = value
         .as_array()
         .filter(|v| v.len() == 5)

@@ -48,7 +48,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
     journal.check_session(&json!(6))?;
     let dynamic = journal.execution;
     let projection = journal.projection;
-    let rows = journal.records();
+    let journal_end = journal.row_count();
     let fixture = journal.fixture();
     if fixture["depth"].as_u64().is_none_or(|d| d > 2) {
         return Err("6E fixture".into());
@@ -178,7 +178,7 @@ pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
             })
             .map(|other| other.emitted)
             .min()
-            .unwrap_or(rows.len());
+            .unwrap_or(journal_end);
         let (from, to, request_label, reply_label) = match call.tool {
             "implement_feature" => (file, repo, 200 + feature, 208 + feature),
             "merge_code" => (file, repo, 202 + feature, 210 + feature),
