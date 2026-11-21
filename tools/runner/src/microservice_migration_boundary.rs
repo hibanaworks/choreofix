@@ -103,7 +103,7 @@ async fn run_wash_order(
     let artifact = projection::archive(&runtime, &output, "4H")?;
     save(
         &output.join("case.json"),
-        &json!({"task":"4H","scope":"preparation_tests_and_schema","migration_order":order,"test_order":suites,"failed_test_index":failed_test,"rejected_repair_reviews":rejected_reviews,"depth":0,"delay_multiplier":0.01,
+        &json!({"task":"4H","scope":"tested_services_on_staging","migration_order":order,"test_order":suites,"failed_test_index":failed_test,"rejected_repair_reviews":rejected_reviews,"depth":0,"delay_multiplier":0.01,
        "model_calls":0,"scored_benchmark":false,"runtime_binary_sha256":digest(&runtime)?,"guest_wasm_sha256":digest(wasm)?,
        "compiled_projection_sha256":digest(&output.join("projection.json"))?,"harness_binary_sha256":digest(&std::env::current_exe()?)?,
        "harness_source_sha256":digest(Path::new("tools/runner/src/microservice_migration_boundary.rs"))?}),
@@ -168,6 +168,19 @@ async fn run_wash_order(
                 assert_eq!(tested["success"],true);
                 assert_eq!(tested["data"]["service"],service);
                 assert_eq!(tested["data"]["plan"],plan["data"]["receipt"]);
+            }
+            let args=json!({"service":"microservice_a","environment":"staging"});
+            let blocked=response(guest.command("DEVOPS",format!("echo '{args}' > /service/deploy_service/microservice_a && cat /service/deploy_service/microservice_a")).await?)?;
+            assert_eq!(blocked,json!({"success":false,"status":"dependency_pending","service":"microservice_c"}));
+            let deploy_order = if test_order[0] == "microservice_b" {
+                ["microservice_b","microservice_c","microservice_a"]
+            } else { ["microservice_c","microservice_a","microservice_b"] };
+            for service in deploy_order {
+                let args=json!({"service":service,"environment":"staging"});
+                let deployed=response(guest.command("DEVOPS",format!("echo '{args}' > /service/deploy_service/{service} && cat /service/deploy_service/{service}")).await?)?;
+                assert_eq!(deployed["success"],true);
+                assert_eq!(deployed["data"]["service"],service);
+                assert_eq!(deployed["data"]["plan"],plan["data"]["receipt"]);
             }
             assert_eq!(guest.command("DEVOPS","exit 0".into()).await?["exit_status"],0);
             assert_eq!(guest.command("ARCHITECT","exit 0".into()).await?["exit_status"],0);
@@ -275,7 +288,7 @@ async fn run_wash_order(
     save(&output.join("result.json"), &result)?;
     assert_eq!(result["runtime_exit_code"], 0);
     assert_eq!(result["backend_errors"], json!([]));
-    assert_eq!(result["protocol"]["scope"], "preparation_tests_and_schema");
+    assert_eq!(result["protocol"]["scope"], "tested_services_on_staging");
     assert_eq!(result["protocol"]["status"], "complete");
     assert_eq!(result["score"]["complete"], false);
     assert_eq!(result["score"]["violations"], json!([]));
@@ -284,7 +297,7 @@ async fn run_wash_order(
         .ok_or("score lacks effects")?;
     assert_eq!(
         effects.len(),
-        13 + recovery.map_or(0, |(_, rejected)| 3 + 2 * rejected as usize)
+        16 + recovery.map_or(0, |(_, rejected)| 3 + 2 * rejected as usize)
     );
     let observed_suites: Vec<_> = effects
         .iter()
@@ -380,7 +393,9 @@ async fn run_wash_order(
         );
     }
     let file = roles["DEVOPS_FILE"].as_u64().ok_or("DevOps file role")?;
-    let schemas = roles["DEVOPS"].as_u64().ok_or("schema effect role")?;
+    let schemas = roles["STAGING_OWNER"]
+        .as_u64()
+        .ok_or("schema effect role")?;
     let staging = roles["STAGING_ENV"].as_u64().ok_or("staging resource")?;
     let architect = roles["ARCHITECT"].as_u64().ok_or("staging issuer")?;
     let vm = roles["DEVOPS_VM"].as_u64().ok_or("DevOps Wasm role")?;
@@ -652,12 +667,12 @@ async fn run_wash_order(
         let args = &call.request["arguments"];
         let (returned_at, result) = call.result()?;
         let (&request, frame) = journal::one(history.frames.iter().filter(|(_, frame)| {
-            frame.direction(file, staging)
+            frame.direction(file, schemas)
                 && frame.received.is_some_and(|at| at < call.emitted)
                 && frame.value().is_ok_and(|v| v == *args)
         }))?;
         let (&response, reply) = journal::one(history.frames.iter().filter(|(_, reply)| {
-            reply.direction(staging, file)
+            reply.direction(schemas, file)
                 && reply.sent > returned_at
                 && reply.received.is_some()
                 && reply.logical_label == frame.logical_label

@@ -68,6 +68,7 @@ pub(super) fn preparation(
     let mut calls: Vec<_> = history.calls.iter().collect();
     calls.sort_by_key(|(_, call)| call.emitted);
     let mut used = BTreeSet::new();
+    let deployments = deployment_attempts(history, receipts, roles, &mut used)?;
     let mut scores = BTreeSet::new();
     let mut correspondence = Vec::new();
     let mut latest: BTreeMap<(&str, &str), (usize, &Value)> = BTreeMap::new();
@@ -83,6 +84,7 @@ pub(super) fn preparation(
             "implement_feature" => args["feature_name"].as_str().ok_or("build target")?,
             "code_review" => args["pr_id"].as_str().ok_or("review target")?,
             "run_tests" => args["suite"].as_str().ok_or("suite target")?,
+            "deploy_service" => args["service"].as_str().ok_or("deployment target")?,
             "migrate_schema" => args["migration_name"]
                 .as_str()
                 .and_then(|s| s.strip_suffix("_schema"))
@@ -128,7 +130,14 @@ pub(super) fn preparation(
             "run_tests" => ("TEST_FILE", "ENV_OWNER", "ENV_OWNER", "TEST_VM", "TESTER"),
             "migrate_schema" => (
                 "DEVOPS_FILE",
-                "STAGING_ENV",
+                "STAGING_OWNER",
+                "STAGING_OWNER",
+                "DEVOPS_VM",
+                "DEVOPS",
+            ),
+            "deploy_service" => (
+                "DEVOPS_FILE",
+                service.as_str(),
                 "DEVOPS",
                 "DEVOPS_VM",
                 "DEVOPS",
@@ -141,6 +150,7 @@ pub(super) fn preparation(
             "implement_feature" => ("feature_name", "implemented", None),
             "code_review" => ("pr_id", "reviewed", Some("changes_requested")),
             "run_tests" => ("suite", "tests passed", Some("tests_failed")),
+            "deploy_service" => ("service", "deployed", Some("deployment_failed")),
             "migrate_schema" => ("migration_name", "migrated", None),
             _ => unreachable!(),
         };
@@ -206,23 +216,47 @@ pub(super) fn preparation(
             used.insert(frame_id);
             Ok((frame_id, frame.received()?))
         };
-        let (request, at) = committed(file, receiver, vm, actor, args, None, Some(call.emitted))?;
-        let effect_request = if tool == "run_tests" {
-            request_edges.insert((role("TEST_ENV")?, role(&tester)?));
-            committed(
-                role("TEST_ENV")?,
-                role(&tester)?,
-                actor,
-                role(&tester)?,
-                args,
-                Some(at),
-                Some(call.emitted),
-            )?
-            .0
+        let (request, effect_request, reply) = if tool == "deploy_service" {
+            request_edges.insert((role("STAGING_ENV")?, role("STAGING_SERVER")?));
+            reply_edges.insert((role("STAGING_SERVER")?, role("STAGING_ENV")?, tool));
+            *deployments.get(&id).ok_or("unbound staging effect")?
         } else {
-            request
+            let (request, at) =
+                committed(file, receiver, vm, actor, args, None, Some(call.emitted))?;
+            let effect_request = if tool == "run_tests" {
+                request_edges.insert((role("TEST_ENV")?, role(&tester)?));
+                committed(
+                    role("TEST_ENV")?,
+                    role(&tester)?,
+                    actor,
+                    role(&tester)?,
+                    args,
+                    Some(at),
+                    Some(call.emitted),
+                )?
+                .0
+            } else if tool == "migrate_schema" {
+                let env = role("STAGING_ENV")?;
+                let server = role("STAGING_SERVER")?;
+                request_edges.insert((env, server));
+                reply_edges.insert((server, env, tool));
+                let (physical, _) = committed(
+                    env,
+                    server,
+                    actor,
+                    server,
+                    args,
+                    Some(at),
+                    Some(call.emitted),
+                )?;
+                committed(server, env, server, actor, result, Some(completed), None)?;
+                physical
+            } else {
+                request
+            };
+            let (reply, _) = committed(receiver, file, actor, vm, result, Some(completed), None)?;
+            (request, effect_request, reply)
         };
-        let (reply, _) = committed(receiver, file, actor, vm, result, Some(completed), None)?;
         let prior = |kind, name, field: &str| -> Result<&Value> {
             let &(ended, previous) = latest
                 .get(&(kind, name))
@@ -261,6 +295,30 @@ pub(super) fn preparation(
             }
         } else {
             prior("design_proposal", "", "plan")?;
+        }
+        if tool == "deploy_service" {
+            let test = prior("run_tests", subject, "test")?;
+            if test["candidate"] != data["candidate"] || args["environment"] != "staging" {
+                return Err("deployment for a different candidate or environment".into());
+            }
+            let design = latest[&("design_proposal", "")].1;
+            let mut prerequisites = serde_json::Map::new();
+            for dependency in design["data"]["dependencies"][subject]
+                .as_array()
+                .ok_or("service prerequisites")?
+            {
+                let name = dependency.as_str().ok_or("dependency name")?;
+                let (ended, other) = latest
+                    .get(&("deploy_service", name))
+                    .ok_or("prerequisite deployment missing")?;
+                if *ended >= call.emitted || other["success"] != true {
+                    return Err("prerequisite was not deployed when the effect started".into());
+                }
+                prerequisites.insert(name.to_owned(), other["data"]["receipt"].clone());
+            }
+            if data["dependencies"].as_object() != Some(&prerequisites) {
+                return Err("deployment does not use the authored prerequisite receipts".into());
+            }
         }
         if matches!(tool, "code_review" | "run_tests") {
             prior("implement_feature", subject, "candidate")?;
@@ -354,6 +412,7 @@ pub(super) fn preparation(
             "code_review",
             "run_tests",
             "migrate_schema",
+            "deploy_service",
         ]
         .into_iter()
         .any(|tool| {
@@ -365,7 +424,179 @@ pub(super) fn preparation(
         }
     }
     Ok(
-        json!({"scope":"preparation_tests_and_schema","effects":correspondence,
+        json!({"scope":"tested_services_on_staging","effects":correspondence,
         "simulator_complete":history.score["complete"],"violations":history.score["violations"]}),
     )
+}
+
+/// Follow one service's real file requests, including a refusal followed by identical arguments.
+fn deployment_attempts(
+    history: &journal::Journal,
+    receipts: &BTreeMap<u64, &Value>,
+    roles: &Value,
+    used: &mut BTreeSet<u64>,
+) -> Result<BTreeMap<u64, (u64, u64, u64)>> {
+    let role = |name: &str| roles[name].as_u64().ok_or("missing staging role");
+    let file = role("DEVOPS_FILE")?;
+    let devops = role("DEVOPS")?;
+    let owner = role("STAGING_OWNER")?;
+    let env = role("STAGING_ENV")?;
+    let server = role("STAGING_SERVER")?;
+    let vm = role("DEVOPS_VM")?;
+    let mut effects = BTreeMap::new();
+    for suffix in ["A", "B", "C"] {
+        let svc = role(&format!("SERVICE_{suffix}"))?;
+        let name = format!("microservice_{}", suffix.to_ascii_lowercase());
+        let mut requests: Vec<_> = history
+            .frames
+            .iter()
+            .filter(|(_, f)| f.direction(file, svc))
+            .collect();
+        requests.sort_by_key(|(_, f)| f.sent);
+        for (i, &(&id, request)) in requests.iter().enumerate() {
+            let stop = requests
+                .get(i + 1)
+                .map_or(usize::MAX, |(_, next)| next.sent);
+            let args = request.value()?;
+            let admission = receipts.get(&id).ok_or("missing deployment file commit")?;
+            if args != json!({"service":name,"environment":"staging"})
+                || admission["send_actor"] != vm
+                || admission["receive_commit"]["actor"] != devops
+                || !used.insert(id)
+            {
+                return Err("invalid deployment file request".into());
+            }
+            let evidence = journal::one(history.calls.values().filter_map(|c| {
+                let (at, test) = c.result().ok()?;
+                (c.tool().ok()? == "run_tests"
+                    && at < request.sent
+                    && test["data"]["service"] == name
+                    && test["success"] == true)
+                    .then_some(test)
+            }))?;
+            let frame = |from,
+                         to,
+                         label: Option<u8>,
+                         bytes: Option<&Value>|
+             -> Result<(u64, &journal::Frame)> {
+                let (&id, f) = journal::one(history.frames.iter().filter(|(_,f)| {
+                    f.direction(from,to) && request.sent < f.sent && f.sent < stop
+                        && label.is_none_or(|l| l == f.logical_label)
+                        && bytes.is_none_or(|value| f.value().is_ok_and(|v| v == *value))
+                        && (label != Some(47) || matches!(f.bytes.as_slice(), [view, _, _] if u64::from(*view) == svc))
+                }))?;
+                Ok((id, f))
+            };
+            let (test_id, test) = frame(svc, owner, None, Some(evidence))?;
+            let (grant_id, grant) = frame(devops, owner, Some(47), None)?;
+            let (forward_id, forward) =
+                frame(devops, owner, Some(request.logical_label), Some(&args))?;
+            let (reply_id, reply) = frame(svc, file, Some(request.logical_label), None)?;
+            let outcome = reply.value()?;
+            let (answer_id, answer) = frame(svc, devops, None, Some(&outcome))?;
+            let (return_id, returned) = frame(owner, devops, Some(47), None)?;
+            if !(request.received()? < test.sent
+                && test.sent < grant.sent
+                && test.received()? < grant.received()?
+                && grant.received()? < forward.received()?
+                && forward.received()? < answer.sent
+                && answer.sent < returned.sent
+                && answer.received()? < returned.received()?
+                && returned.received()? < reply.sent)
+            {
+                return Err("deployment service custody and response are out of order".into());
+            }
+            for (id, sender, receiver) in [
+                (test_id, devops, owner),
+                (grant_id, devops, owner),
+                (forward_id, devops, owner),
+                (answer_id, owner, devops),
+                (return_id, owner, devops),
+                (reply_id, devops, vm),
+            ] {
+                let epf = receipts.get(&id).ok_or("absent deployment commit")?;
+                if epf["send_actor"] != sender
+                    || epf["receive_commit"]["actor"] != receiver
+                    || !used.insert(id)
+                {
+                    return Err("wrong or reused deployment occurrence".into());
+                }
+            }
+            let forwarded_at = forward.received()?;
+            let physical: Vec<_> = history
+                .frames
+                .iter()
+                .filter(|(_, f)| {
+                    f.direction(env, server)
+                        && request.sent < f.sent
+                        && f.sent < stop
+                        && f.value().is_ok_and(|v| v == args)
+                })
+                .collect();
+            if outcome["status"] == "dependency_pending" {
+                let dependency = outcome["service"]
+                    .as_str()
+                    .ok_or("missing pending dependency")?;
+                let design = journal::one(
+                    history
+                        .calls
+                        .values()
+                        .filter(|c| c.tool().ok() == Some("design_proposal")),
+                )?
+                .result()?
+                .1;
+                if outcome["success"] != false
+                    || !physical.is_empty()
+                    || u64::from(answer.logical_label) != svc
+                    || !design["data"]["dependencies"][&name]
+                        .as_array()
+                        .is_some_and(|deps| deps.contains(&json!(dependency)))
+                    || history.calls.values().any(|c| {
+                        c.tool().ok() == Some("deploy_service")
+                            && c.result().is_ok_and(|(at, r)| {
+                                at < forwarded_at
+                                    && r["success"] == true
+                                    && r["data"]["service"] == dependency
+                            })
+                    })
+                {
+                    return Err("unjustified deployment deferral".into());
+                }
+                continue;
+            }
+            let (&physical_id, admitted) = journal::one(physical.into_iter())?;
+            let (&rpc, call) = journal::one(history.calls.iter().filter(|(_, c)| {
+                c.tool().ok() == Some("deploy_service")
+                    && c.request["arguments"] == args
+                    && admitted.received.is_some_and(|at| at < c.emitted)
+                    && c.result()
+                        .is_ok_and(|(at, result)| at < answer.sent && *result == outcome)
+            }))?;
+            let (observed_id, observed) = frame(server, env, None, Some(call.result()?.1))?;
+            if !(forward.received()? < admitted.sent
+                && call.result()?.0 < observed.sent
+                && observed.received()? < answer.sent)
+                || outcome["data"]["test"] != evidence["data"]["receipt"]
+                || outcome["data"]["candidate"] != evidence["data"]["candidate"]
+                || answer.logical_label != request.logical_label
+                || effects.insert(rpc, (id, physical_id, reply_id)).is_some()
+            {
+                return Err(
+                    "deployment does not match the accepted test and staging invocation".into(),
+                );
+            }
+            for (id, sender, receiver) in
+                [(physical_id, owner, server), (observed_id, server, owner)]
+            {
+                let epf = receipts.get(&id).ok_or("absent physical staging commit")?;
+                if epf["send_actor"] != sender
+                    || epf["receive_commit"]["actor"] != receiver
+                    || !used.insert(id)
+                {
+                    return Err("invalid physical staging occurrence".into());
+                }
+            }
+        }
+    }
+    Ok(effects)
 }

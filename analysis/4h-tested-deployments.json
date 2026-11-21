@@ -1,0 +1,454 @@
+{
+  "task": "4H",
+  "scope": "Actual staging deployments of three individually tested services with an architect-authored C prerequisite for A. Each run requests A before C and receives a recoverable deferral. The six failed-suite runs rebuild and retest the affected service. Deployment failure, rollback, service registration and live model qualification remain open.",
+  "evidence_directory": "output/verification/4h-staging-deploy-20261121.NBecn5",
+  "build_receipt_sha256": "3b3277e0c8cc276dcfbedace28eed0b3303958f4befcdef1936cabdb807117c8",
+  "source_manifest_sha256": "05f1b8c911ef3e8c056ab721e52a39885a60b6597a495c732db8e3c0c1b21421",
+  "runtime_sha256": "e5452670c6643a5900e3c6e41eb1322eed31dcf1ac20b9e4dc9e9c9755f42a8d",
+  "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+  "projection_sha256": "96c228f6647e82efd82355cd5b4dca62db4bccf642122859e1d075f1e5efd84a",
+  "test_harness_sha256": "313cfcdc63a41afffc51fe41b568ba6b85ce27b0ae79507753b695f3ae9c32a8",
+  "test_harness_source_sha256": "1f697e8e09731346ba8948fafc7642cc6f07753776b1c998b5afe9277a501e36",
+  "auditor_source_sha256": "985c7a8e4190ade099b20b8b59a16a9033c3793369dbde5d1222abea66a148bf",
+  "cases": 42,
+  "schema_by_test_orders": 36,
+  "failed_suite_cases": 6,
+  "deployments": 126,
+  "recoverable_deferrals_without_deployment": 42,
+  "observed_deployment_orders": {
+    "bca": 12,
+    "cab": 30
+  },
+  "physical_staging_overlaps": 0,
+  "effect_calls": 702,
+  "epf_records": 264630,
+  "business_completions": 0,
+  "model_calls": 0,
+  "scored_comparisons": 0,
+  "records_rejected": {
+    "false_prerequisite": "both service and guest delivery claim B was missing for A, but only C is required",
+    "swapped_deployment_result": "guest delivery of one deployment contains the result of a different service"
+  },
+  "runs": [
+    {
+      "case": "abc-tests-abc",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "1b6392d7b2c8c1b8558d45abfda86b80e140c3e150456ae825b13ba6bd7fa23e",
+      "effect_receipts_sha256": "2b09d19068d69e50a1c0639a4087e7592e33be6fa955d444dae8a7761e28d47e",
+      "result_sha256": "8b9d84d360a1f75a66f164c55a61fa42e699e50105c7cb56e972e87d7e1f6ee6",
+      "epf_sha256": "ee87cd5716e8857d3ff2b76f7970b0214b47bf4f17db14ad59bccc5681958005"
+    },
+    {
+      "case": "abc-tests-acb",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "c28c2bf58077b950d53e1523c156cf26b3bf5f98bf289f02122f5b8e35d52140",
+      "effect_receipts_sha256": "6d9d91a8f618c30938f10a3f54de9eb712cff65546bdd84e82867ccdee5e19c9",
+      "result_sha256": "33dac4487c890a5ef4322c3d805cc9d058e347ec18ce115b94047aa4388b1b1e",
+      "epf_sha256": "871b2dd4f3dc97403fdeb2ff50465eea9d677e706678cc271e7bff9347c4231c"
+    },
+    {
+      "case": "abc-tests-bac",
+      "deployment_order": "bca",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "66c5967e4067dd634eac4f7b2aff88065751caace5d86d0151b86e25da613752",
+      "effect_receipts_sha256": "42ba9adf3314df96116c161303b0476b398cca6f01b80b857e97c92108b3a621",
+      "result_sha256": "3c9bef2c1e08057e3c7ae45d97ffa3da88234512fff543823dce1c012b9711d7",
+      "epf_sha256": "04e8d6cd6420a607b6163053aff2f7399efc1737199731b2200f1453f5926604"
+    },
+    {
+      "case": "abc-tests-bca",
+      "deployment_order": "bca",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "0a8a019c3dd4911046f1e1e3a75f14ded6bf0321fb941bcce0ddc2bed0e924ab",
+      "effect_receipts_sha256": "580d829f37c570035387171138beb4449c822902111cf39c56e8e1480d2e549d",
+      "result_sha256": "3168f65e36c21f12556691af8bb19d995ee357939e2a9a3561d4ce11f079ccf7",
+      "epf_sha256": "91f956c37bba3498d12f0e45f55386ac0f555dbbfa159a269e591ab73ca57d9c"
+    },
+    {
+      "case": "abc-tests-cab",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "c31176d56a1bfeaa5519c7aaa5bc782283313100521ed99ee55cf20998840fbe",
+      "effect_receipts_sha256": "88942f545ae1602ee9ff9dc6ba0cf1e037b81afc330cb2e72da6bb499d1e349d",
+      "result_sha256": "a4e9e1b8369bea9f93a734e77aa94ae41c7717c5bf00f267a3a537ba3fcdf02b",
+      "epf_sha256": "d0ef99623e83484bd5358050c61816c472f809b4480bf178db0c39efc8e0d45e"
+    },
+    {
+      "case": "abc-tests-cba",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "e45ca80c8f7f6ffd08fa127d7ebe879c673d13e7eca539217e13795f6de20239",
+      "effect_receipts_sha256": "221b8edac1ab9b70cfe1a97539fb66a1c96d8e37694b893c806a4c5599bf5def",
+      "result_sha256": "8b2b3bb9a49a45069f23d836083799c7e89fd6381b52c7ea7b57acabd3235855",
+      "epf_sha256": "ead340f3b4039b37d5fa063a943bab30b93f2c076bf78b18fd9baf8b3a014f6a"
+    },
+    {
+      "case": "acb-tests-abc",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "73896ead7f42a6919f1fb0949f2a5b6925056e479b36a6e036fdbfeaa2262ca9",
+      "effect_receipts_sha256": "c6ad4dc0cf80ad933dd2c6ba3f20cdd1f736b8857e3b22b58acc39336b364508",
+      "result_sha256": "6e77d8451f4361db38ec40a3afa3980d2d30ae14d6a74e2a13558aacca204c25",
+      "epf_sha256": "0df997db2f43a68202a73072abfccca345074ff2b528d7f8f09b8c7a653524d0"
+    },
+    {
+      "case": "acb-tests-acb",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "76af374d458b31c9527521cb086abf4913a0852f20ff8111643b9694617b3921",
+      "effect_receipts_sha256": "3beca22b207559cee83cc238ed2226d91acb7ea77ec969bb960cbe075714aafa",
+      "result_sha256": "37d47b1c2ef3a9be7f24aef59aaa8bc8ce518c8c429ee00945a0291f5defa8fa",
+      "epf_sha256": "3f4f959f426440ea456f6b6390387d43b18cf2d5788686fcf77609acd7bfe1f4"
+    },
+    {
+      "case": "acb-tests-bac",
+      "deployment_order": "bca",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "88e713cc519c1c76650f23b6177590269ae0b5824a9a8e530b40fff09be6e175",
+      "effect_receipts_sha256": "169118c1481bbe3bca4b60dfed91dbefac6307dd7131cdde257fcc2f1931a472",
+      "result_sha256": "22167907a536aac62a693215f0bd9011fd5e279c58954f5fa009f3f71ee67537",
+      "epf_sha256": "d53989688a1e8e19200b1b3c61c6384f52d73929000a55ffa27dd20ee45358b1"
+    },
+    {
+      "case": "acb-tests-bca",
+      "deployment_order": "bca",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "56e7c2d8de85c3a0453f84a107a2793b699e6cd7f61b3b996fd2fab34cf33046",
+      "effect_receipts_sha256": "adf690085898e79e8be166dd2f3ffd9406e3d996cab7cdd23b7eb7ea4ae73d30",
+      "result_sha256": "4f097da341f00388bb0d988273594ba0489b087565d1c6e821dc5fa5eb914429",
+      "epf_sha256": "979633d3a816f1a077a19556c4328ae69abfb238b9602b6635a2fc1e862a2b6f"
+    },
+    {
+      "case": "acb-tests-cab",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "1d6f3a3a4aa5c56db5f5440a7285784b50989ad632e840d860429f6335372a43",
+      "effect_receipts_sha256": "03cc0eadf73c32dd127d34ec0bbdff1ac77538fa00b854ecbf6ee294b0ec1d8b",
+      "result_sha256": "db3095425dee0278726c90e52a3bfb07290c6158366fe9c986060e6a65e2920e",
+      "epf_sha256": "6c2a442872df1bcc7ab23a065743b9d4882493e6c9e53ac758035e13f120ad09"
+    },
+    {
+      "case": "acb-tests-cba",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "00c5aa157a7142cf51f0697e2c9f12c04fa7cdcdb6b10f95c8ba99ece79a6027",
+      "effect_receipts_sha256": "2fc1a8e64ddcdd494e355c3fe6dee40c39dde68e7c668e16e3ceb80e32b983b2",
+      "result_sha256": "28f3590044f4269a5855b5091c8d7eaa7793b07370d96ba9ca8f42ada9f7256d",
+      "epf_sha256": "14d1e4ddd2a126114ebdd7bff8c193dba1d588cac2cb589582bfdb309722783a"
+    },
+    {
+      "case": "bac-tests-abc",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "d2dd1c1fcbf0cf9e250dc429d36377a7a6cecbed30ee7c8355a4bd84e828e749",
+      "effect_receipts_sha256": "8fc7fcb49d7aa211447ac500d31704be80c52892b92235e78c65be62197fd11f",
+      "result_sha256": "478a79a787e10b27d4ad285745060c8e06a4e788f34c1a05baf306b2dac4215d",
+      "epf_sha256": "e92b33b6ca135477237651dd2fb61514e2f36a53b006ade5b1265354413f85ea"
+    },
+    {
+      "case": "bac-tests-acb",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "0ab81d7556d76b5110dba49a6f12fd48a19db82789fb642622b88e5f962eb246",
+      "effect_receipts_sha256": "c097ec3344bbc5d9660a2663e50b7688834f4e9ddd86ab9fcc37c2ac7742b478",
+      "result_sha256": "d9f9ec07a0525541e78681d131634e01fec467c53fdd6a04dfca868596eac0b2",
+      "epf_sha256": "568de8a69f6aa05fc2bf20772bf81309f14be7e901463fda38ba04ab5e7692c4"
+    },
+    {
+      "case": "bac-tests-bac",
+      "deployment_order": "bca",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "304bb1f1eea93286d12acd9ba4e11175ec713e23f661ab3e6e786ef43d33bda3",
+      "effect_receipts_sha256": "9711163d10f3f37bc1f8be19b604741844cef344a1823b3c6abfad61458574d6",
+      "result_sha256": "3cebe91a76599a5a30e0a9481b427a0c3ccceb9ef7d35ce45721872d0aeafbac",
+      "epf_sha256": "257b69be5b938950b1b1e4c67cdb48e85a5c598ab7bc6054548ef376008fde29"
+    },
+    {
+      "case": "bac-tests-bca",
+      "deployment_order": "bca",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "774a8aef12d7ffa9ed3e692f262b289f4259d84417a1524dcdc1ed54fdd74318",
+      "effect_receipts_sha256": "c3160d8b14bff3be0a8a465a3c024e7136315ceb6054614b6924b1d042e35d84",
+      "result_sha256": "a8b7d78088767043eb95ad572dd0ce86b63dab1c12a0ba0da6947badbfb4cdba",
+      "epf_sha256": "b447f4c0bbf9aed961411dcfc01064a43f98ef9aa160e5c67f03c44a36e8e0c4"
+    },
+    {
+      "case": "bac-tests-cab",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "689e0d6b5495c9c5b833f0dc2f890eec24258ce22a86da4ea333164d0b1f691a",
+      "effect_receipts_sha256": "f87a1a22178cff01f6d5cbc5c3efd95afcb08abc9aeb503d47ea125fa7de0f5f",
+      "result_sha256": "b857cb69d007e3938fa0af5a52d9893b5d488dcbf7b7dfea3b73af65d48a8b7b",
+      "epf_sha256": "9d7c6ee3b344c2d02d87654b04a3e22ec9717e5cd445b2935bb522a47e7cbe4e"
+    },
+    {
+      "case": "bac-tests-cba",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "71962f1ba42f1c86e23314d0894a0d0a3526a362e295655616cb5d8a74be739d",
+      "effect_receipts_sha256": "9582daa24e57b07c863ff62e5e4d0f549684fd4a31869e67b18d974c240bebb2",
+      "result_sha256": "8fc45758e3b262aa8c6ca2660e5571896a733bca3c569c997fc853f2922c2f32",
+      "epf_sha256": "9c62d62ee7c8a51f48364a194fb6287f0d1e6fbc7ce39fd05d99bfaef1249634"
+    },
+    {
+      "case": "bca-tests-abc",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "ed7dec0de8b6069ea726828e4e9b2a90bf8343934d9a45d88720a5e72728bf46",
+      "effect_receipts_sha256": "be27705dbcac6710fd0ac94fe9f5ed9de53b2b0b8075e2774c39e596885c27a8",
+      "result_sha256": "4183aa1999e5a25d85f76028891e7b94f3645b22d55efc93c382c589489d546f",
+      "epf_sha256": "b5f2b7e8b5e4d47fc096ff7fcbc76e8d3661fb1403902a9e37ea3ef713779f84"
+    },
+    {
+      "case": "bca-tests-acb",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "837289cbea920573243fefdd340f18aeed1098e7a7292fa79c72274edceb7cfb",
+      "effect_receipts_sha256": "872676edd8304e84d48c103c1324cdbdefc0d5b62ef776abe9b87d26d6ae9b83",
+      "result_sha256": "42cb1924291508d16d0a6f0558132afe6e7dff1c7c40780de7a7e73e7b6ef440",
+      "epf_sha256": "09d0b4a7a5a6521b1ffb20257652721f22892eb1070e3681594c3759e4fd76ec"
+    },
+    {
+      "case": "bca-tests-bac",
+      "deployment_order": "bca",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "9dc076d938e7812bf49f83c49fda39e2a598e1a857166688ec65c29e890173c1",
+      "effect_receipts_sha256": "0fe0e85927a952633b10fd0f4c4fcbf9b808aec0711a893c6c313bbe2357df9a",
+      "result_sha256": "7cc535d94415fc6a4d4dc23b475d078dc5a9cc18c8f5f8bc8a8e2f9db295d048",
+      "epf_sha256": "84c84e7124b16e60dd84adc1b1be191aa9430f2b623847e340a6b8169d82126c"
+    },
+    {
+      "case": "bca-tests-bca",
+      "deployment_order": "bca",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "b35d669b3a845b53ca11f05e13c31967c37376f7971083355adf119c9613521c",
+      "effect_receipts_sha256": "b22f40a85072eddf517fe3c8464f51a91d44d55d26592b3afddfd3d7792f4ccb",
+      "result_sha256": "1fb81cc819691f157a3f2116744d215cf898c31f307377bf7c0a72bc4fbf4b59",
+      "epf_sha256": "74bc72f73cb5889a82b57314f0f3a86ffa997ec8c3b6e23cc410d81cbc6b3d3f"
+    },
+    {
+      "case": "bca-tests-cab",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "998fb3e11590fa040738b8d0f50cca0cb8d5ee838bd112044373dd585936a7b3",
+      "effect_receipts_sha256": "8c4c56d8c8f5e97218d01f0c867b947136d1070790beb466bdbc2c63ecc06457",
+      "result_sha256": "f7e62be9cdbe6ac99f0200b60d66f316a0ea8729661dd99b5f6d457b941203d7",
+      "epf_sha256": "7bb4d997df7c2970f310658685f162ac7e37965924f2aa3d55f7533c91186307"
+    },
+    {
+      "case": "bca-tests-cba",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "6ac9ef8d8d64e72e42db45e9b8dfc4f2b221f1d4f247d1915dc3b8a6b2ffed85",
+      "effect_receipts_sha256": "b2618f4a4175c73078f335d2fe37ad216b081b2f1be7fd60f987eaa80a3e029d",
+      "result_sha256": "53b58df6bc856c8022aeaea9d43ac670d898115c8fa80150448009e868b7d24b",
+      "epf_sha256": "8d933e0783bdfbd7a252b84b9f603073c48a3985d73245794dc1ecae1d8b86f2"
+    },
+    {
+      "case": "cab-tests-abc",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "46189090b799da8c9d93019b1d34be02270f739a979b80130beb72a2af979a5e",
+      "effect_receipts_sha256": "2690ab11ada77fa1b5fd2ce45705aa1717f9ceec0b58127e1ddf0a3f9e7c2bac",
+      "result_sha256": "55e168071795fbb8535d6589c4b773c3a2714ca368acc5d20ff0bed4f543c969",
+      "epf_sha256": "4059e9f17ad731d7a013a971487b31756c13293816bee3ea321b59e6188f9cda"
+    },
+    {
+      "case": "cab-tests-acb",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "dc151718444c1947e0bbc40470f9f860d7a8c5d861050a642ae662aad98026ea",
+      "effect_receipts_sha256": "1640f5164d1aa1d1c750dba276e7864cf1944623de32c34e743dde502b418fdb",
+      "result_sha256": "b6561aca82bd64cac22d91a6b4a2161d0f2a112c37e378ad341e39d48235d42b",
+      "epf_sha256": "fcdc5c45758223ab30128433ef72ad284df9f6cdffd6badffbd9b8a8a24bef9c"
+    },
+    {
+      "case": "cab-tests-bac",
+      "deployment_order": "bca",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "5af144d93dc49ec1a7942910eaefd404720c5d01f4e408466862ac85039cf1c1",
+      "effect_receipts_sha256": "705a151dda33f91d9eaf896abb08fd8bf3345bb719fe42b582aa763c71bf09ad",
+      "result_sha256": "bf43ab45d3d1d595fd61eebdf9d530331ef280a5c1c2e863d0ae6bbadfb250ca",
+      "epf_sha256": "3516fa16639602e6da51dfa276493bd52c8bdccfd0752db273b2e3cedf7c7475"
+    },
+    {
+      "case": "cab-tests-bca",
+      "deployment_order": "bca",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "93c5e5b62a8e89058f5d087b0800d4dfdb840adf9b5124bf993d16ebc096fe74",
+      "effect_receipts_sha256": "3ee68f33e886e89a5162cafdffbb33b3c53402b7ae71925b334af77d50c89fb4",
+      "result_sha256": "baeb7b062794f1ed8758a795289f7cd879443a5770de4b79fa0a970de63bca08",
+      "epf_sha256": "afe0ca939b3ad52e6abf3a9a7dd526601ec36b9533ebd5a7de1739ef140e747e"
+    },
+    {
+      "case": "cab-tests-cab",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "db9d01252d48246d1588fa14b6b8a1d15053925483612ed5dba0f63e7da7aedc",
+      "effect_receipts_sha256": "357f5eb2715dd63ca3d0a1c48555389004778bfcfb5cc3ad5e24713e8077c3aa",
+      "result_sha256": "cae9b63a45c923b9ca8fbfa996ca815f8efb6b1961b5fe8e71f9870b4dd0f807",
+      "epf_sha256": "9b68e7af245adb4ad3fb7358b27db7ec2a32c78fab9761d77e20aa65544a2d9c"
+    },
+    {
+      "case": "cab-tests-cba",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "9d62e7b63740f004b603103a16b6d9cb4a58f9bf357da9faeda2b34a717a356d",
+      "effect_receipts_sha256": "0f46125a86bb2401a4c81b5efc72a04b88218ef13968d98b606fa225044091eb",
+      "result_sha256": "aa93a7ac951aebac6730ed39f53e515879c5fbab31e4b19b0b6adf757a822130",
+      "epf_sha256": "cce50de2b7cd54840c4fcb02547aa96477fa7a02203595e7d73491272b022a37"
+    },
+    {
+      "case": "cba-tests-abc",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "04c0514dae702f6dc8d4c5978c5d354f0e9b40d93f6cae9fc2a17f54d6e77911",
+      "effect_receipts_sha256": "96857ebb799ad5f4596bfc25513186232acabd85059806e42194d4e78875fbdb",
+      "result_sha256": "4aa2f39c931ee1f323a894049e02a77a3bfcb3bed84ed71be9f9eba95fd813f8",
+      "epf_sha256": "cd8da0679984d022ebc9714ecad98ca7dc34c0ce7384cde7a05217cb158fd325"
+    },
+    {
+      "case": "cba-tests-acb",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "e88cacc1ea8d1a786a8043aef7c957e91adb48c4cc7c524e8fcfa525545bee68",
+      "effect_receipts_sha256": "b05e080853b9be83c7c9750ca8f743ec2d99b9ba44e785e4fc16fd333d579900",
+      "result_sha256": "08c6a509000afbe3b04a4f73ed7cc771ef2b21871d2fdfe077eef75049a9309a",
+      "epf_sha256": "1c5e55f7b0884561a44e6433eba6823c9d2dcdab3440b4107d421e145a7bad9f"
+    },
+    {
+      "case": "cba-tests-bac",
+      "deployment_order": "bca",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "2eb95ec6179b153866c3646304a7e41044158159cde9509c49f46f238c44f547",
+      "effect_receipts_sha256": "a04d9e7501cf82aae081a09d7ee622dbc075e0293ebf099ab9f4f8df5982894b",
+      "result_sha256": "9688b075f97730c69141eafe829c4347a2ec3d6f5618d0e46dbf66b14f87776c",
+      "epf_sha256": "e78dcdbbd907e302ded3e0392ce289476794c8e89f4bd7deeb20f9843f234de8"
+    },
+    {
+      "case": "cba-tests-bca",
+      "deployment_order": "bca",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "59c5dc1b0446043e67f803aa270cf9c569d642b576c2c9f8d8dc8e6df1a2d7e8",
+      "effect_receipts_sha256": "807ccae0d1055ce7e83e8bebd63ea5ad5df117f6c757c161cfab42dfb29e4cfc",
+      "result_sha256": "4fc02db5ed364d957cc8e4f38a7e80aaf4a9ca340cce0461c8136b96f5174296",
+      "epf_sha256": "39e15f61876cdde7d5a973375e4cfb449603222419c9fb70f7ff420eebc516c4"
+    },
+    {
+      "case": "cba-tests-cab",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "22b821430f33571e76b405cc52584d9a9dab243c1b6448d599ea75c5fd260197",
+      "effect_receipts_sha256": "31447b8f530fa6fa56febedcabc7901fca92abcc94a0f32456e4d7e5f56c8e8f",
+      "result_sha256": "3abb727f13ae9d144d439af51962ac51dad55dfd81025835a7747bbe15ac16c3",
+      "epf_sha256": "9a5b762806b5edcc719a99d842eb0ede0ad711b65d7ddbb3d80a9d7b633e90d8"
+    },
+    {
+      "case": "cba-tests-cab-fail-test-0-reject-0",
+      "deployment_order": "cab",
+      "effects": 19,
+      "epf_records": 7133,
+      "events_sha256": "dfb0b517048cbdab01b3f13437e51c7b2302493054b6f9d5bfe4b155ab5ce916",
+      "effect_receipts_sha256": "de2d4baf034a86a32390cb0b97b0e893fe515a58401377902f5655813b5fd6c9",
+      "result_sha256": "2687400c39429c8646df1308abda613457eeea94325bfd0461a3dff6b49cc5df",
+      "epf_sha256": "da7122284864d18616917a973dc6383af34fd388ed15acb61073e247f2c70ad0"
+    },
+    {
+      "case": "cba-tests-cab-fail-test-0-reject-2",
+      "deployment_order": "cab",
+      "effects": 23,
+      "epf_records": 8141,
+      "events_sha256": "845c132d05558aba38ab7a9b131a25f88a95805e0c59b1cdde4edd351e923de1",
+      "effect_receipts_sha256": "31b7e31f58df8ace6d9cf38dc160881ad9c6ab277bbd4587d356139c8e203733",
+      "result_sha256": "3a7ce068972f22346c1d17e19347277df0f04d34d7d001d41616c2fd4c4e73db",
+      "epf_sha256": "cd5c0d8cc76e741b3b998b588a1c29c43f6f1fbfc89d7c58f55ffa77c6fff07b"
+    },
+    {
+      "case": "cba-tests-cab-fail-test-1-reject-0",
+      "deployment_order": "cab",
+      "effects": 19,
+      "epf_records": 7034,
+      "events_sha256": "a4257ef97e8f2f8e0264e366b3a721ee14485d1978d905f49c1b8c37c5610f81",
+      "effect_receipts_sha256": "20251ff7bb0b090d101cf9b31b241608d32d3cdc23f124e18f22beda7a7b1e98",
+      "result_sha256": "6fd9c4c4c5a0069c69059cfbef73b79136cf52261b4fccfe49f1ee53294d4404",
+      "epf_sha256": "9bbb884f771c2cd331035dfdb507c2194d672abc58de5b2d03ecfa4d20204ed3"
+    },
+    {
+      "case": "cba-tests-cab-fail-test-1-reject-2",
+      "deployment_order": "cab",
+      "effects": 23,
+      "epf_records": 8042,
+      "events_sha256": "6adb90b0385978770a180a653cc4839a1a15124261fe2b68c4a5c90bbda031fc",
+      "effect_receipts_sha256": "bbc2cbd3319607dcec2b7b7da3118070edda0b0d2130220027a995b962e3ec27",
+      "result_sha256": "7a1b11755c15d1732c9461aeb726dcb6c63005d66a53362ebedf30b720235520",
+      "epf_sha256": "abfe4018fc9adef455d68b72dbf35f40248e18e761abc29e261dc090144fee7f"
+    },
+    {
+      "case": "cba-tests-cab-fail-test-2-reject-0",
+      "deployment_order": "cab",
+      "effects": 19,
+      "epf_records": 7034,
+      "events_sha256": "f5e021fbf095ca8780e615bc4b0bda82610551dd5ae0a3ab25c36e14b9e05a08",
+      "effect_receipts_sha256": "e5ec3ff8c4f94570961d90fc86439191cce3e2bbad956c561114b826f0d7b3b9",
+      "result_sha256": "850de6c3d4f3baeecacdf2d66f4c5c7b3e9fac6ba8df8a2ded393dee931f42d2",
+      "epf_sha256": "24784907d475293d89015ee57a871afc56f0ae945a50fe3654f12a7ff37b2228"
+    },
+    {
+      "case": "cba-tests-cab-fail-test-2-reject-2",
+      "deployment_order": "cab",
+      "effects": 23,
+      "epf_records": 8042,
+      "events_sha256": "99850b880c74d9e63855818b310c3609b555eb6b0073385fe6688eb52164612f",
+      "effect_receipts_sha256": "42eba17772ed948753f6a8eaf8e1d341745bd4e478f36209576c5632badb9825",
+      "result_sha256": "299685baed0b0b48bae3ee5a48e9b828f366ce5ff8bb518fec5c81d92533971f",
+      "epf_sha256": "e59efa2b32bac4e5f7fa75a866a274aca394d701835e7fdc982ffbdcf3d84bbd"
+    },
+    {
+      "case": "cba-tests-cba",
+      "deployment_order": "cab",
+      "effects": 16,
+      "epf_records": 6089,
+      "events_sha256": "8a4c2f141d0a7bcf9cef1b297d5c443afa3478d81f3ca0693f2940b4e2bd6f4d",
+      "effect_receipts_sha256": "4cd45a8270a956a78b8a2aad130fcbe2f2315407643985e033fb2795bb72e36f",
+      "result_sha256": "bdeff52aa00eb046e8e998e4533a16021a11fcbf314e71f1142a177241387548",
+      "epf_sha256": "ead1c6882796a7bd34409c64b7327b9535d94fc448f33421cb2146799fe411e4"
+    }
+  ]
+}

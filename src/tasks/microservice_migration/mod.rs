@@ -4,6 +4,7 @@ use crate::{
     imp::projection,
     shell::{
         ShellResult,
+        global::Loan,
         imp::{bus::Bus, private_fs::PrivateFs},
         localside::{file_metadata, private_io},
     },
@@ -74,6 +75,9 @@ test_data:TEST_DATA,
 test_vm:TEST_VM,
 test_io:TEST_IO,
 devops:DEVOPS,
+staging_owner:STAGING_OWNER,
+staging_server:STAGING_SERVER,
+registry:REGISTRY,
 staging:STAGING_ENV,
 devops_file:DEVOPS_FILE,
 devops_vm:DEVOPS_VM,
@@ -179,7 +183,22 @@ pub(super) async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
             let devops_vm = rv.enter(session, &programs.devops_vm)?;
             let mut devops_io = rv.enter(session, &programs.devops_io)?;
             async { architect(&mut architect_side, staging, &simulator).await };
-            async { devops(&mut devops_side, &simulator).await };
+            let mut owner = rv.enter(session, &programs.staging_owner)?;
+            let mut server = rv.enter(session, &programs.staging_server)?;
+            let mut registry = rv.enter(session, &programs.registry)?;
+            let [a, b, c] = devops_side.par()?;
+            async { devops_service::<TESTER_A, SERVICE_A, DEPLOY_A>(a).await };
+            async { devops_service::<TESTER_B, SERVICE_B, DEPLOY_B>(b).await };
+            async { devops_service::<TESTER_C, SERVICE_C, DEPLOY_C>(c).await };
+            async { staging_owner(&mut owner).await };
+            async { staging_server(&mut server, &simulator).await };
+            async {
+                let [mut a, mut b, mut c] = registry.par()?;
+                async { a.recv::<Loan<SERVICE_A>>().await };
+                async { b.recv::<Loan<SERVICE_B>>().await };
+                async { c.recv::<Loan<SERVICE_C>>().await };
+                Ok::<(), crate::shell::ShellError>(())
+            };
             async { file_metadata::run(&mut devops_data, devops_file, DEVOPS_FILES).await };
             async {
                 private_io::run(
@@ -264,6 +283,6 @@ pub(super) async fn run_stdio(wash: &[u8]) -> ShellResult<()> {
         result
     };
     let result = hibana_runtime::race(trial, io.run(bus)).await;
-    io.finish(bus, result, Some("preparation_tests_and_schema"))
+    io.finish(bus, result, Some("tested_services_on_staging"))
         .await
 }

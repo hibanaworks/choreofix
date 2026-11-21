@@ -82,6 +82,35 @@ impl ReceivedEffects for Journal {
             let arguments = arguments?;
             let (agent, tool) = P::RPC;
             let mut entries = self.0.take();
+            if tool == "deploy_service" {
+                let service = &arguments["service"];
+                let prior = |name: &str, key: &str, target: &Value| {
+                    entries
+                        .iter()
+                        .rposition(|(_, called, args)| *called == name && args[key] == *target)
+                        .map(|index| index + 1)
+                        .expect("required effect completed")
+                };
+                let candidate = prior("implement_feature", "feature_name", service);
+                let test = prior("run_tests", "suite", service);
+                let plan = &entries[0].2["dependencies"];
+                let mut dependencies = Map::new();
+                if let Some(required) = plan[service.as_str().unwrap()].as_array() {
+                    for dependency in required {
+                        dependencies.insert(
+                            dependency.as_str().unwrap().into(),
+                            json!(prior("deploy_service", "service", dependency)),
+                        );
+                    }
+                }
+                let result = json!({"tool_name":tool,"success":true,"data":{
+                    "agent":agent,"service":service,"candidate":candidate,"test":test,"plan":1,
+                    "status":"deployed","dependencies":dependencies,"receipt":entries.len()+1
+                }});
+                entries.push((agent, tool, arguments));
+                self.0.set(entries);
+                return Ok(result);
+            }
             if tool == "run_tests" {
                 let suite = &arguments["suite"];
                 let candidate = entries
@@ -219,6 +248,10 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
             .init()
             .rendezvous(&mut testing_slab, &transport)?;
         let mut devops_side = testing.enter(session, &project::<DEVOPS>(&source))?;
+        let mut staging_owner_side = testing.enter(session, &project::<STAGING_OWNER>(&source))?;
+        let mut staging_server_side =
+            testing.enter(session, &project::<STAGING_SERVER>(&source))?;
+        let mut registry = testing.enter(session, &project::<REGISTRY>(&source))?;
         let mut devops_file = testing.enter(session, &project::<DEVOPS_FILE>(&source))?;
         let mut test_side_a = testing.enter(session, &project::<TESTER_A>(&source))?;
         let mut test_side_b = testing.enter(session, &project::<TESTER_B>(&source))?;
@@ -275,7 +308,19 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
         hibana_runtime::race(
         async {
             async { architect(&mut architect_side, staging, &journal).await };
-            async { devops(&mut devops_side, &journal).await };
+            let [ad, bd, cd] = devops_side.par()?;
+            async { devops_service::<TESTER_A, SERVICE_A, DEPLOY_A>(ad).await };
+            async { devops_service::<TESTER_B, SERVICE_B, DEPLOY_B>(bd).await };
+            async { devops_service::<TESTER_C, SERVICE_C, DEPLOY_C>(cd).await };
+            async { staging_owner(&mut staging_owner_side).await };
+            async { staging_server(&mut staging_server_side, &journal).await };
+            async {
+                let [mut ar, mut br, mut cr] = registry.par()?;
+                async { ar.recv::<Loan<SERVICE_A>>().await };
+                async { br.recv::<Loan<SERVICE_B>>().await };
+                async { cr.recv::<Loan<SERVICE_C>>().await };
+                Ok::<(), ShellError>(())
+            };
             async {
                 let plan = decode(devops_file.recv::<Proposed<DEVOPS_FILE>>().await?)?;
                 for index in order {
@@ -303,6 +348,22 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
                     assert_eq!(receipt["data"]["suite"], SERVICES[index]);
                     assert_eq!(receipt["data"]["plan"], plan["data"]["receipt"]);
                 }
+                let a = Arguments(encode(&json!({"service":SERVICES[0],"environment":"staging"}))?);
+                let b = Arguments(encode(&json!({"service":SERVICES[1],"environment":"staging"}))?);
+                let c = Arguments(encode(&json!({"service":SERVICES[2],"environment":"staging"}))?);
+                devops_file.send::<Deploy<DEPLOY_A>>(&a).await?;
+                let blocked = decode(devops_file.recv::<Deployment<DEPLOY_A>>().await?)?;
+                assert_eq!(blocked["status"], "dependency_pending");
+                assert_eq!(blocked["service"], SERVICES[2]);
+                devops_file.send::<Deploy<DEPLOY_C>>(&c).await?;
+                let c = decode(devops_file.recv::<Deployment<DEPLOY_C>>().await?)?;
+                devops_file.send::<Deploy<DEPLOY_A>>(&a).await?;
+                let a = decode(devops_file.recv::<Deployment<DEPLOY_A>>().await?)?;
+                assert_eq!(a["data"]["dependencies"][SERVICES[2]], c["data"]["receipt"]);
+                devops_file.send::<Deploy<DEPLOY_B>>(&b).await?;
+                let b = decode(devops_file.recv::<Deployment<DEPLOY_B>>().await?)?;
+                assert_eq!(b["data"]["dependencies"][SERVICES[0]], a["data"]["receipt"]);
+                devops_file.send::<Exit>(&0).await?;
                 Ok(())
             };
             async { developer(&mut a, service_a, &journal).await };
@@ -569,6 +630,9 @@ async fn approved_services_share_one_test_environment_in_each_chosen_order() -> 
                 ("DEVELOPER_B", "implement_feature"),
                 ("DEVELOPER_B", "implement_feature"),
                 ("DEVELOPER_C", "implement_feature"),
+                ("DEVOPS", "deploy_service"),
+                ("DEVOPS", "deploy_service"),
+                ("DEVOPS", "deploy_service"),
                 ("DEVOPS", "migrate_schema"),
                 ("DEVOPS", "migrate_schema"),
                 ("DEVOPS", "migrate_schema"),

@@ -68,7 +68,7 @@ pub(super) const REVIEW_FILES: [ChoreoFsObject<'static>; 6] = [
     operation(b"service/code_review/microservice_b", 8),
     operation(b"service/code_review/microservice_c", 9),
 ];
-pub(super) const DEVOPS_FILES: [ChoreoFsObject<'static>; 7] = [
+pub(super) const DEVOPS_FILES: [ChoreoFsObject<'static>; 10] = [
     material(b"service/plan", 4),
     operation(b"service/migrate_schema/microservice_a", 5),
     operation(b"service/migrate_schema/microservice_b", 6),
@@ -76,6 +76,9 @@ pub(super) const DEVOPS_FILES: [ChoreoFsObject<'static>; 7] = [
     material(b"service/test_result/microservice_a", 8),
     material(b"service/test_result/microservice_b", 9),
     material(b"service/test_result/microservice_c", 10),
+    operation(b"service/deploy_service/microservice_a", 11),
+    operation(b"service/deploy_service/microservice_b", 12),
+    operation(b"service/deploy_service/microservice_c", 13),
 ];
 pub(super) const TEST_FILES: [ChoreoFsObject<'static>; 6] = [
     material(b"service/candidate/microservice_a", 4),
@@ -320,7 +323,13 @@ pub(super) async fn devops_guest(
         mut tested_a,
         mut tested_b,
         mut tested_c,
-    ] = [(); 10].map(|_| vec![0; GUEST_MEMORY_BYTES]);
+        mut deploy_a,
+        mut deployed_a,
+        mut deploy_b,
+        mut deployed_b,
+        mut deploy_c,
+        mut deployed_c,
+    ] = [(); 16].map(|_| vec![0; GUEST_MEMORY_BYTES]);
     let file = ChoreoFsFile::new(DEVOPS_FILES[0], endpoint)
         .read_as::<Proposed<DEVOPS_FILE>>(&mut plan)
         .file(DEVOPS_FILES[1])?
@@ -337,7 +346,16 @@ pub(super) async fn devops_guest(
         .file(DEVOPS_FILES[5])?
         .read_as::<StagingCandidate<TESTER_B>>(&mut tested_b)
         .file(DEVOPS_FILES[6])?
-        .read_as::<StagingCandidate<TESTER_C>>(&mut tested_c);
+        .read_as::<StagingCandidate<TESTER_C>>(&mut tested_c)
+        .file(DEVOPS_FILES[7])?
+        .write_as::<Deploy<DEPLOY_A>>(&mut deploy_a)
+        .read_as::<Deployment<DEPLOY_A>>(&mut deployed_a)
+        .file(DEVOPS_FILES[8])?
+        .write_as::<Deploy<DEPLOY_B>>(&mut deploy_b)
+        .read_as::<Deployment<DEPLOY_B>>(&mut deployed_b)
+        .file(DEVOPS_FILES[9])?
+        .write_as::<Deploy<DEPLOY_C>>(&mut deploy_c)
+        .read_as::<Deployment<DEPLOY_C>>(&mut deployed_c);
     let files = ChoreoFsFiles::new(root).file(file)?;
     let mut memory = vec![0; GUEST_MEMORY_BYTES];
     let mut storage = Box::new(HibanaWasiGuestStorage::uninit());
@@ -345,7 +363,9 @@ pub(super) async fn devops_guest(
     let (exit, files) = guest.run().await?;
     let status = exit.status() as i32;
     let (mut root, (file, ())) = files.into_parts();
-    file.into_endpoint().send::<FileExit>(&status).await?;
+    let mut file = file.into_endpoint();
+    file.send::<Exit>(&status).await?;
+    file.send::<FileExit>(&status).await?;
     root.send::<Exit>(&status).await?;
     Ok(())
 }
