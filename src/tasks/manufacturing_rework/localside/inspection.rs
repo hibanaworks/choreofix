@@ -81,19 +81,37 @@ pub async fn bench<'run>(bench: &mut Endpoint<'run, BENCH>) -> ShellResult<i32> 
                     .await?
             }
             BETA_JOB_A => {
-                bench
-                    .send::<Measurement<BETA_JOB_A>>(&reading.as_slice())
-                    .await?
+                if imp::decode(&reading)?["success"] == true {
+                    bench
+                        .send::<Approved<BETA_JOB_A>>(&imp::InspectionReply::from_bytes(&reading)?)
+                        .await?;
+                } else {
+                    bench
+                        .send::<Failed<BETA_JOB_A>>(&imp::InspectionReply::from_bytes(&reading)?)
+                        .await?;
+                }
             }
             GAMMA_JOB_B => {
-                bench
-                    .send::<Measurement<GAMMA_JOB_B>>(&reading.as_slice())
-                    .await?
+                if imp::decode(&reading)?["success"] == true {
+                    bench
+                        .send::<Approved<GAMMA_JOB_B>>(&imp::InspectionReply::from_bytes(&reading)?)
+                        .await?;
+                } else {
+                    bench
+                        .send::<Failed<GAMMA_JOB_B>>(&imp::InspectionReply::from_bytes(&reading)?)
+                        .await?;
+                }
             }
             ALPHA_JOB_C => {
-                bench
-                    .send::<Measurement<ALPHA_JOB_C>>(&reading.as_slice())
-                    .await?
+                if imp::decode(&reading)?["success"] == true {
+                    bench
+                        .send::<Approved<ALPHA_JOB_C>>(&imp::InspectionReply::from_bytes(&reading)?)
+                        .await?;
+                } else {
+                    bench
+                        .send::<Failed<ALPHA_JOB_C>>(&imp::InspectionReply::from_bytes(&reading)?)
+                        .await?;
+                }
             }
             _ => unreachable!(),
         }

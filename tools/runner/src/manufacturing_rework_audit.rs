@@ -190,13 +190,22 @@ pub(super) fn verify(
                     Some(call.emitted),
                 )?
                 .received()?;
+                let claim = frame(
+                    worker,
+                    role(&format!("{station}_OWNER"))?,
+                    index,
+                    Some(args),
+                    Some(admission),
+                    Some(call.emitted),
+                )?
+                .received()?;
                 if index < 3 {
                     frame(
                         machine,
                         depot,
                         10,
                         Some(args),
-                        Some(admission),
+                        Some(claim),
                         Some(call.emitted),
                     )?;
                     let tool_role = [role("TOOL_0")?, role("TOOL_1")?];
@@ -238,15 +247,16 @@ pub(super) fn verify(
                     frame(worker, file, 21, Some(result), Some(tool_reply), None)?;
                     frame(worker, inspector, index, Some(part), Some(tool_reply), None)?;
                 } else {
+                    let drive = role(&format!("{station}_DRIVE"))?;
                     frame(
                         machine,
-                        worker,
+                        drive,
                         20,
                         Some(args),
-                        Some(admission),
+                        Some(claim),
                         Some(call.emitted),
                     )?;
-                    let returned = frame(worker, machine, 21, Some(result), Some(reply_at), None)?
+                    let returned = frame(drive, machine, 21, Some(result), Some(reply_at), None)?
                         .received()?;
                     frame(worker, file, 21, Some(result), Some(returned), None)?;
                     frame(worker, inspector, index, Some(part), Some(returned), None)?;
@@ -295,9 +305,21 @@ pub(super) fn verify(
                 let actual =
                     frame(readout, gauge, 34, Some(result), Some(reply_at), None)?.received()?;
                 frame(gauge, inspector, 34, Some(result), Some(actual), None)?;
-                let measured =
-                    frame(bench, worker, index, Some(result), Some(actual), None)?.received()?;
                 let approved = result["success"].as_bool().ok_or("missing gauge verdict")?;
+                let verdict_label = match (index < 3, approved) {
+                    (true, _) => index,
+                    (false, true) => 25,
+                    (false, false) => 26,
+                };
+                let measured = frame(
+                    bench,
+                    worker,
+                    verdict_label,
+                    Some(result),
+                    Some(actual),
+                    None,
+                )?
+                .received()?;
                 if approved {
                     frame(worker, file, 36, Some(result), Some(measured), None)?;
                 }

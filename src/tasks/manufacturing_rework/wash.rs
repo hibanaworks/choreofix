@@ -190,7 +190,10 @@ pub async fn run(path: &str) -> ShellResult<()> {
         g::par(
             workstation_files(),
             g::par(
-                g::send::<INSPECTOR_FILES, INSPECTOR_VM, Loan<INSPECTOR>>(),
+                g::seq(
+                    g::send::<INSPECTOR_FILES, INSPECTOR_VM, Loan<BENCH>>(),
+                    g::send::<INSPECTOR_FILES, INSPECTOR_VM, Loan<INSPECTOR>>(),
+                ),
                 g::send::<DISPATCHER_FILES, DISPATCHER_VM, Loan<DISPATCHER>>(),
             ),
         ),
@@ -210,6 +213,25 @@ pub async fn run(path: &str) -> ShellResult<()> {
                         ),
                     ),
                     shell_io::<DISPATCHER_VM, DISPATCHER, DISPATCHER_FILES, DISPATCHER_TERM>(),
+                ),
+            ),
+        ),
+    );
+    let global = g::seq(
+        global,
+        g::par(
+            g::seq(
+                g::send::<ALPHA_C_FILES, ALPHA_DRIVE, FileExit>(),
+                g::send::<ALPHA_DRIVE, ALPHA_OWNER, FileExit>(),
+            ),
+            g::par(
+                g::seq(
+                    g::send::<BETA_A_FILES, BETA_DRIVE, FileExit>(),
+                    g::send::<BETA_DRIVE, BETA_OWNER, FileExit>(),
+                ),
+                g::seq(
+                    g::send::<GAMMA_B_FILES, GAMMA_DRIVE, FileExit>(),
+                    g::send::<GAMMA_DRIVE, GAMMA_OWNER, FileExit>(),
                 ),
             ),
         ),
@@ -244,16 +266,19 @@ pub async fn run(path: &str) -> ShellResult<()> {
     let b_files = project::<B_FILES>(&global);
     let c_files = project::<C_FILES>(&global);
     let alpha_machine = project::<ALPHA_MACHINE>(&global);
+    let alpha_drive = project::<ALPHA_DRIVE>(&global);
     let alpha_owner = project::<ALPHA_OWNER>(&global);
     let alpha_service = project::<ALPHA_SERVICE>(&global);
     let alpha_c = project::<ALPHA_C>(&global);
     let alpha_c_files = project::<ALPHA_C_FILES>(&global);
     let beta_machine = project::<BETA_MACHINE>(&global);
+    let beta_drive = project::<BETA_DRIVE>(&global);
     let beta_owner = project::<BETA_OWNER>(&global);
     let beta_service = project::<BETA_SERVICE>(&global);
     let beta_a = project::<BETA_A>(&global);
     let beta_a_files = project::<BETA_A_FILES>(&global);
     let gamma_machine = project::<GAMMA_MACHINE>(&global);
+    let gamma_drive = project::<GAMMA_DRIVE>(&global);
     let gamma_owner = project::<GAMMA_OWNER>(&global);
     let gamma_service = project::<GAMMA_SERVICE>(&global);
     let gamma_b = project::<GAMMA_B>(&global);
@@ -264,16 +289,19 @@ pub async fn run(path: &str) -> ShellResult<()> {
         ("READOUT", READOUT),
         ("ALPHA_MACHINE", ALPHA_MACHINE),
         ("ALPHA_OWNER", ALPHA_OWNER),
+        ("ALPHA_DRIVE", ALPHA_DRIVE),
         ("ALPHA_SERVICE", ALPHA_SERVICE),
         ("ALPHA_C", ALPHA_C),
         ("ALPHA_C_FILES", ALPHA_C_FILES),
         ("BETA_MACHINE", BETA_MACHINE),
         ("BETA_OWNER", BETA_OWNER),
+        ("BETA_DRIVE", BETA_DRIVE),
         ("BETA_SERVICE", BETA_SERVICE),
         ("BETA_A", BETA_A),
         ("BETA_A_FILES", BETA_A_FILES),
         ("GAMMA_MACHINE", GAMMA_MACHINE),
         ("GAMMA_OWNER", GAMMA_OWNER),
+        ("GAMMA_DRIVE", GAMMA_DRIVE),
         ("GAMMA_SERVICE", GAMMA_SERVICE),
         ("GAMMA_B", GAMMA_B),
         ("GAMMA_B_FILES", GAMMA_B_FILES),
@@ -313,16 +341,19 @@ pub async fn run(path: &str) -> ShellResult<()> {
         rows(&alpha_machine),
         rows(&alpha_owner),
         rows(&alpha_service),
+        rows(&alpha_drive),
         rows(&alpha_c),
         rows(&alpha_c_files),
         rows(&beta_machine),
         rows(&beta_owner),
         rows(&beta_service),
+        rows(&beta_drive),
         rows(&beta_a),
         rows(&beta_a_files),
         rows(&gamma_machine),
         rows(&gamma_owner),
         rows(&gamma_service),
+        rows(&gamma_drive),
         rows(&gamma_b),
         rows(&gamma_b_files),
         rows(&dispatcher),
@@ -354,7 +385,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
     ];
     let projection = json!({
         "type": "compiled_projection", "format_version": 1, "task": "11M",
-        "scope": "six initial jobs on shared workstations, one quality gauge, tool-job rework orders", "session": SESSION,
+        "scope": "six jobs on shared workstations and one inspection gauge, with repeat manufacture on the three station-only jobs", "session": SESSION,
         "roles": roles,
         "programs": programs,
     });
@@ -384,10 +415,16 @@ pub async fn run(path: &str) -> ShellResult<()> {
         ],
         [
             (session, ALPHA_C),
+            (session, ALPHA_DRIVE),
+            (session, ALPHA_SERVICE),
             (session, ALPHA_MACHINE),
             (session, BETA_A),
+            (session, BETA_DRIVE),
+            (session, BETA_SERVICE),
             (session, BETA_MACHINE),
             (session, GAMMA_B),
+            (session, GAMMA_DRIVE),
+            (session, GAMMA_SERVICE),
             (session, GAMMA_MACHINE),
             (session, TOOL_0),
             (session, TOOL_1),
@@ -396,6 +433,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
             (session, GAMMA),
             (session, INSPECTOR),
             (session, GAUGE),
+            (session, BENCH),
             (session, DISPATCHER),
         ],
     );
@@ -441,13 +479,9 @@ pub async fn run(path: &str) -> ShellResult<()> {
         )
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
         let mut inspector_files = rv.enter(session, &inspector_files)?;
-        let mut bench = rv.enter(session, &bench)?;
+        let bench = rv.enter(session, &bench)?;
         let readout = rv.enter(session, &readout)?;
         let gauge = rv.enter(session, &gauge)?;
-        async {
-            let status = localside::inspection::bench(&mut bench).await?;
-            bench.send::<FileExit>(&status).await?;
-        };
         async {
             localside::inspection::readout(readout, gauge, &simulator).await?;
         };
@@ -538,6 +572,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
         let mut inspector_vm = rv.enter(session, &inspector_vm)?;
         let mut inspector_term = rv.enter(session, &inspector_term)?;
         async {
+            inspector_files.send::<Loan<BENCH>>(bench).await?;
             file_metadata::run(&mut inspector_files, inspector, INSPECTION_FILES).await?;
         };
         async {
@@ -548,6 +583,11 @@ pub async fn run(path: &str) -> ShellResult<()> {
             .await?;
         };
         async {
+            let mut bench = inspector_vm.recv::<Loan<BENCH>>().await?;
+            async {
+                let status = localside::inspection::bench(&mut bench).await?;
+                bench.send::<FileExit>(&status).await?;
+            };
             let inbox = inspector_vm.recv::<Loan<INSPECTOR>>().await?;
             let [mut alpha, mut beta, mut gamma] = [(); 3].map(|_| vec![0; GUEST_MEMORY_BYTES]);
             let [mut check_a, mut check_b, mut check_c, mut verdict] =
@@ -614,28 +654,34 @@ pub async fn run(path: &str) -> ShellResult<()> {
         let mut b_term = rv.enter(session, &b_term)?;
         let mut c_term = rv.enter(session, &c_term)?;
         let mut alpha_owner = rv.enter(session, &alpha_owner)?;
-        let mut alpha_service = rv.enter(session, &alpha_service)?;
+        let alpha_drive = rv.enter(session, &alpha_drive)?;
+        let alpha_service = rv.enter(session, &alpha_service)?;
         let alpha_machine = rv.enter(session, &alpha_machine)?;
         let mut alpha_c_files = rv.enter(session, &alpha_c_files)?;
         let alpha_c = rv.enter(session, &alpha_c)?;
         async {
             file_metadata::run(&mut alpha_c_files, alpha_c, [OTHER_JOB, OTHER_UPDATE]).await?;
+            alpha_c_files.send::<FileExit>(&0).await?;
         };
         let mut beta_owner = rv.enter(session, &beta_owner)?;
-        let mut beta_service = rv.enter(session, &beta_service)?;
+        let beta_drive = rv.enter(session, &beta_drive)?;
+        let beta_service = rv.enter(session, &beta_service)?;
         let beta_machine = rv.enter(session, &beta_machine)?;
         let mut beta_a_files = rv.enter(session, &beta_a_files)?;
         let beta_a = rv.enter(session, &beta_a)?;
         async {
             file_metadata::run(&mut beta_a_files, beta_a, [OTHER_JOB, OTHER_UPDATE]).await?;
+            beta_a_files.send::<FileExit>(&0).await?;
         };
         let mut gamma_owner = rv.enter(session, &gamma_owner)?;
-        let mut gamma_service = rv.enter(session, &gamma_service)?;
+        let gamma_drive = rv.enter(session, &gamma_drive)?;
+        let gamma_service = rv.enter(session, &gamma_service)?;
         let gamma_machine = rv.enter(session, &gamma_machine)?;
         let mut gamma_b_files = rv.enter(session, &gamma_b_files)?;
         let gamma_b = rv.enter(session, &gamma_b)?;
         async {
             file_metadata::run(&mut gamma_b_files, gamma_b, [OTHER_JOB, OTHER_UPDATE]).await?;
+            gamma_b_files.send::<FileExit>(&0).await?;
         };
         async {
             file_metadata::run(&mut a_files, alpha, WORKSTATION_FILES).await?;
@@ -652,71 +698,87 @@ pub async fn run(path: &str) -> ShellResult<()> {
             (gamma_c_file, gamma_b_file),
         ) = async {
             async {
-                let [mut primary, mut other] = alpha_owner.par()?;
-                async { primary.recv::<Loan<ALPHA>>().await };
-                async { other.recv::<Loan<ALPHA_C>>().await };
+                let [mut primary, mut other, mut operator, mut drive] = alpha_owner.par()?;
+                let (first, second, (), ()) = async {
+                    async { primary.recv::<Loan<ALPHA>>().await };
+                    async { other.recv::<Loan<ALPHA_C>>().await };
+                    async { operator.send::<Loan<ALPHA_SERVICE>>(alpha_service).await };
+                    async { drive.send::<Loan<ALPHA_DRIVE>>(alpha_drive).await };
+                }
+                .await?;
+                Ok::<_, ShellError>((first, second))
             };
             async {
-                let [mut primary, mut other] = beta_owner.par()?;
-                async { primary.recv::<Loan<BETA>>().await };
-                async { other.recv::<Loan<BETA_A>>().await };
+                let [mut primary, mut other, mut operator, mut drive] = beta_owner.par()?;
+                let (first, second, (), ()) = async {
+                    async { primary.recv::<Loan<BETA>>().await };
+                    async { other.recv::<Loan<BETA_A>>().await };
+                    async { operator.send::<Loan<BETA_SERVICE>>(beta_service).await };
+                    async { drive.send::<Loan<BETA_DRIVE>>(beta_drive).await };
+                }
+                .await?;
+                Ok::<_, ShellError>((first, second))
             };
             async {
-                let [mut primary, mut other] = gamma_owner.par()?;
-                async { primary.recv::<Loan<GAMMA>>().await };
-                async { other.recv::<Loan<GAMMA_B>>().await };
+                let [mut primary, mut other, mut operator, mut drive] = gamma_owner.par()?;
+                let (first, second, (), ()) = async {
+                    async { primary.recv::<Loan<GAMMA>>().await };
+                    async { other.recv::<Loan<GAMMA_B>>().await };
+                    async { operator.send::<Loan<GAMMA_SERVICE>>(gamma_service).await };
+                    async { drive.send::<Loan<GAMMA_DRIVE>>(gamma_drive).await };
+                }
+                .await?;
+                Ok::<_, ShellError>((first, second))
             };
         }
         .await?;
         async {
-            let mut machine = alpha_machine;
-            for _ in 0..2 {
-                drop(alpha_owner.offer().await?);
-                alpha_owner.send::<JobLoan<ALPHA_MACHINE>>(machine).await?;
-                machine = alpha_owner.recv::<JobLoan<ALPHA_MACHINE>>().await?;
-            }
-        };
-        async {
-            localside::worker::station_job::<ALPHA_SERVICE, ALPHA_MACHINE, ALPHA_JOB_C>(
-                &mut alpha_service,
-                &simulator,
+            localside::worker::station::<ALPHA_OWNER, ALPHA_MACHINE, WORKER_A, ALPHA_JOB_C>(
+                &mut alpha_owner,
+                alpha_machine,
             )
             .await?;
         };
         async {
-            let mut machine = beta_machine;
-            for _ in 0..2 {
-                drop(beta_owner.offer().await?);
-                beta_owner.send::<JobLoan<BETA_MACHINE>>(machine).await?;
-                machine = beta_owner.recv::<JobLoan<BETA_MACHINE>>().await?;
-            }
-        };
-        async {
-            localside::worker::station_job::<BETA_SERVICE, BETA_MACHINE, BETA_JOB_A>(
-                &mut beta_service,
-                &simulator,
+            localside::worker::station::<BETA_OWNER, BETA_MACHINE, WORKER_B, BETA_JOB_A>(
+                &mut beta_owner,
+                beta_machine,
             )
             .await?;
         };
         async {
-            let mut machine = gamma_machine;
-            for _ in 0..2 {
-                drop(gamma_owner.offer().await?);
-                gamma_owner.send::<JobLoan<GAMMA_MACHINE>>(machine).await?;
-                machine = gamma_owner.recv::<JobLoan<GAMMA_MACHINE>>().await?;
-            }
-        };
-        async {
-            localside::worker::station_job::<GAMMA_SERVICE, GAMMA_MACHINE, GAMMA_JOB_B>(
-                &mut gamma_service,
-                &simulator,
+            localside::worker::station::<GAMMA_OWNER, GAMMA_MACHINE, WORKER_C, GAMMA_JOB_B>(
+                &mut gamma_owner,
+                gamma_machine,
             )
             .await?;
         };
         async {
+            let alpha_drive = depot.recv::<Loan<ALPHA_DRIVE>>().await?;
+            let beta_drive = depot.recv::<Loan<BETA_DRIVE>>().await?;
+            let gamma_drive = depot.recv::<Loan<GAMMA_DRIVE>>().await?;
+            async {
+                localside::worker::drive::<ALPHA_DRIVE, ALPHA_JOB_C>(alpha_drive, &simulator)
+                    .await?;
+            };
+            async {
+                localside::worker::drive::<BETA_DRIVE, BETA_JOB_A>(beta_drive, &simulator).await?;
+            };
+            async {
+                localside::worker::drive::<GAMMA_DRIVE, GAMMA_JOB_B>(gamma_drive, &simulator)
+                    .await?;
+            };
             localside::tool_depot::run(&mut depot, (tool_0, tool_1), (&simulator, &inputs)).await?;
         };
         async {
+            let mut service = worker_a.recv::<Loan<ALPHA_SERVICE>>().await?;
+            async {
+                localside::worker::station_job::<ALPHA_SERVICE, ALPHA_MACHINE, ALPHA_JOB_C>(
+                    &mut service,
+                    &simulator,
+                )
+                .await?;
+            };
             localside::worker::run::<WORKER_A, ALPHA_MACHINE>(&mut worker_a, &simulator).await?;
         };
         async {
@@ -731,6 +793,14 @@ pub async fn run(path: &str) -> ShellResult<()> {
             private_io::run(&mut a_term, PrivateFs::new(terminal_a, bus, &WORKER_FILES)).await?;
         };
         async {
+            let mut service = worker_b.recv::<Loan<BETA_SERVICE>>().await?;
+            async {
+                localside::worker::station_job::<BETA_SERVICE, BETA_MACHINE, BETA_JOB_A>(
+                    &mut service,
+                    &simulator,
+                )
+                .await?;
+            };
             localside::worker::run::<WORKER_B, BETA_MACHINE>(&mut worker_b, &simulator).await?;
         };
         async {
@@ -745,6 +815,14 @@ pub async fn run(path: &str) -> ShellResult<()> {
             private_io::run(&mut b_term, PrivateFs::new(terminal_b, bus, &WORKER_FILES)).await?;
         };
         async {
+            let mut service = worker_c.recv::<Loan<GAMMA_SERVICE>>().await?;
+            async {
+                localside::worker::station_job::<GAMMA_SERVICE, GAMMA_MACHINE, GAMMA_JOB_B>(
+                    &mut service,
+                    &simulator,
+                )
+                .await?;
+            };
             localside::worker::run::<WORKER_C, GAMMA_MACHINE>(&mut worker_c, &simulator).await?;
         };
         async {

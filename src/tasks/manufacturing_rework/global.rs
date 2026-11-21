@@ -46,6 +46,10 @@ pub const DISPATCHER: u8 = 27;
 pub const BENCH: u8 = 43;
 pub const GAUGE: u8 = 44;
 pub const READOUT: u8 = 45;
+pub const ALPHA_DRIVE: u8 = 46;
+pub const BETA_DRIVE: u8 = 47;
+pub const GAMMA_DRIVE: u8 = 48;
+pub type MachineRequest<const JOB: u8> = g::Msg<JOB, super::imp::JobArguments<JOB>>;
 
 pub type StationJob<const WORKER: u8> = g::Msg<35, super::imp::JobArguments<WORKER>>;
 pub type Intent<const WORKER: u8> = g::Msg<10, super::imp::JobArguments<WORKER>>;
@@ -262,13 +266,14 @@ fn workstation<
     const MACHINE: u8,
     const OWNER: u8,
     const SERVICE: u8,
+    const DRIVE: u8,
     const PRIMARY_FILE: u8,
     const WORKER: u8,
     const OTHER_FILE: u8,
     const OTHER_JOB: u8,
 >() -> impl Projectable {
     let primary = g::seq(
-        g::send::<PRIMARY_FILE, WORKER, StationJob<WORKER>>(),
+        g::send::<WORKER, OWNER, MachineRequest<WORKER>>(),
         g::seq(
             g::send::<OWNER, WORKER, JobLoan<MACHINE>>(),
             g::seq(
@@ -283,37 +288,60 @@ fn workstation<
             ),
         ),
     );
-    let other = g::seq(
-        g::send::<OTHER_FILE, SERVICE, StationJob<OTHER_JOB>>(),
+    let secondary = g::seq(
+        g::send::<SERVICE, OWNER, MachineRequest<OTHER_JOB>>(),
         g::seq(
             g::send::<OWNER, SERVICE, JobLoan<MACHINE>>(),
             g::seq(
-                g::send::<MACHINE, SERVICE, JobIntent<OTHER_JOB>>(),
+                g::send::<MACHINE, DRIVE, JobIntent<OTHER_JOB>>(),
                 g::seq(
-                    g::send::<SERVICE, MACHINE, JobResult>(),
-                    g::par(
-                        g::send::<SERVICE, OWNER, JobLoan<MACHINE>>(),
-                        g::par(
-                            g::send::<SERVICE, OTHER_FILE, JobResult>(),
-                            g::send::<SERVICE, INSPECTOR, FinishedPart<OTHER_JOB>>(),
-                        ),
-                    ),
+                    g::send::<DRIVE, MACHINE, JobResult>(),
+                    g::send::<SERVICE, OWNER, JobLoan<MACHINE>>(),
                 ),
             ),
         ),
     );
-    let inspect = g::seq(
-        check_part::<SERVICE, OTHER_JOB>(),
-        disposition::<SERVICE, OTHER_FILE, OTHER_JOB>(),
+    let leases = g::route(
+        g::seq(primary, secondary.roll()),
+        g::seq(secondary.roll(), primary),
     );
-    g::route(
-        g::seq(other, g::par(primary, inspect)),
-        g::seq(primary, g::seq(other, inspect)),
+
+    let delivery = g::par(
+        g::send::<SERVICE, OTHER_FILE, JobResult>(),
+        g::send::<SERVICE, INSPECTOR, FinishedPart<OTHER_JOB>>(),
+    );
+    let manufacture = g::seq(
+        g::send::<OTHER_FILE, SERVICE, StationJob<OTHER_JOB>>(),
+        delivery,
+    );
+    let measured = g::seq(
+        manufacture,
+        g::seq(
+            g::send::<INSPECTOR, SERVICE, CheckPart<OTHER_JOB>>(),
+            g::send::<SERVICE, BENCH, CheckPart<OTHER_JOB>>(),
+        ),
+    );
+    let missed = g::seq(
+        g::send::<BENCH, SERVICE, Failed<OTHER_JOB>>(),
+        rework_order::<SERVICE, OTHER_FILE, OTHER_JOB>(),
+    );
+    let repair = g::seq(missed, measured);
+    let approved = g::seq(
+        g::send::<BENCH, SERVICE, Approved<OTHER_JOB>>(),
+        close_job::<SERVICE, OTHER_FILE, OTHER_JOB>(),
+    );
+    let other = g::seq(
+        measured,
+        g::route(g::seq(repair.roll(), approved), approved),
+    );
+    g::par(
+        leases,
+        g::par(g::send::<PRIMARY_FILE, WORKER, StationJob<WORKER>>(), other),
     )
 }
 
 pub fn workstation_files() -> impl Projectable {
-    g::par(
+    let files = g::par(
         g::par(
             g::send::<A_FILES, ALPHA_OWNER, Loan<ALPHA>>(),
             g::send::<ALPHA_C_FILES, ALPHA_OWNER, Loan<ALPHA_C>>(),
@@ -328,7 +356,24 @@ pub fn workstation_files() -> impl Projectable {
                 g::send::<GAMMA_B_FILES, GAMMA_OWNER, Loan<GAMMA_B>>(),
             ),
         ),
-    )
+    );
+    let operators = g::par(
+        g::par(
+            g::send::<ALPHA_OWNER, WORKER_A, Loan<ALPHA_SERVICE>>(),
+            g::send::<ALPHA_OWNER, DEPOT, Loan<ALPHA_DRIVE>>(),
+        ),
+        g::par(
+            g::par(
+                g::send::<BETA_OWNER, WORKER_B, Loan<BETA_SERVICE>>(),
+                g::send::<BETA_OWNER, DEPOT, Loan<BETA_DRIVE>>(),
+            ),
+            g::par(
+                g::send::<GAMMA_OWNER, WORKER_C, Loan<GAMMA_SERVICE>>(),
+                g::send::<GAMMA_OWNER, DEPOT, Loan<GAMMA_DRIVE>>(),
+            ),
+        ),
+    );
+    g::par(files, operators)
 }
 
 pub fn source() -> impl Projectable {
@@ -337,18 +382,28 @@ pub fn source() -> impl Projectable {
             ALPHA_MACHINE,
             ALPHA_OWNER,
             ALPHA_SERVICE,
+            ALPHA_DRIVE,
             ALPHA,
             WORKER_A,
             ALPHA_C,
             ALPHA_JOB_C,
         >(),
         g::par(
-            workstation::<BETA_MACHINE, BETA_OWNER, BETA_SERVICE, BETA, WORKER_B, BETA_A, BETA_JOB_A>(
-            ),
+            workstation::<
+                BETA_MACHINE,
+                BETA_OWNER,
+                BETA_SERVICE,
+                BETA_DRIVE,
+                BETA,
+                WORKER_B,
+                BETA_A,
+                BETA_JOB_A,
+            >(),
             workstation::<
                 GAMMA_MACHINE,
                 GAMMA_OWNER,
                 GAMMA_SERVICE,
+                GAMMA_DRIVE,
                 GAMMA,
                 WORKER_C,
                 GAMMA_B,
@@ -387,18 +442,26 @@ fn tool_quality<const WORKER: u8, const FILE: u8>() -> impl Projectable {
 
 fn disposition<const WORKER: u8, const STATION: u8, const JOB: u8>() -> impl Projectable {
     g::route(
+        close_job::<WORKER, STATION, JOB>(),
+        rework_order::<WORKER, STATION, JOB>(),
+    )
+}
+
+fn close_job<const WORKER: u8, const STATION: u8, const JOB: u8>() -> impl Projectable + Copy {
+    g::seq(
+        g::send::<WORKER, STATION, JobUpdate>(),
+        g::send::<WORKER, DISPATCHER, FailureStream<JOB>>(),
+    )
+}
+
+fn rework_order<const WORKER: u8, const STATION: u8, const JOB: u8>() -> impl Projectable {
+    g::seq(
+        g::send::<WORKER, DISPATCHER, FailureStream<JOB>>(),
         g::seq(
-            g::send::<WORKER, STATION, JobUpdate>(),
-            g::send::<WORKER, DISPATCHER, FailureStream<JOB>>(),
-        ),
-        g::seq(
-            g::send::<WORKER, DISPATCHER, FailureStream<JOB>>(),
-            g::seq(
-                g::send::<DISPATCHER, WORKER, DispatchRequest<JOB>>(),
-                g::par(
-                    g::send::<WORKER, DISPATCHER, WorkOrder<JOB>>(),
-                    g::send::<WORKER, STATION, JobUpdate>(),
-                ),
+            g::send::<DISPATCHER, WORKER, DispatchRequest<JOB>>(),
+            g::par(
+                g::send::<WORKER, DISPATCHER, WorkOrder<JOB>>(),
+                g::send::<WORKER, STATION, JobUpdate>(),
             ),
         ),
     )
