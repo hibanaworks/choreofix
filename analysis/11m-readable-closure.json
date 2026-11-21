@@ -1,0 +1,114 @@
+{
+  "task": "11M",
+  "date": "2026-11-21",
+  "scored_benchmark": false,
+  "task_qualified": false,
+  "live_depth_two": {
+    "directory": "output/verification/11m-readable-closure.Gi58LwuD/live-2-complete",
+    "audit": "output/verification/11m-readable-closure.Gi58LwuD/live-depth-two-audit.json",
+    "git_base": "f44921a7ff6620a3838411a470be018417ea3b20",
+    "runtime_source_manifest_sha256": "8b2b9366ac9aff3c2de38f8d3d04193b593cc9dad399358d4eaad7621b615e3a",
+    "source_manifest_sha256": "7365d15f369be9893cbaf5cf756705f48251f9487ec7053e77803fd656bd19f9",
+    "runtime_binary_sha256": "c9aaa3b29659ec79fd40cefe91de61871f8a89ef6ce0fa6aafc5d11c5f30f7c7",
+    "compiled_projection_sha256": "5b9fe4b5a95259d1046869f3700b48aedf4f06683adcfaf9576836bf3da8cc39",
+    "events_sha256": "685106c5b7ae70e794bb0024d10c3d67c7d74e611c5baa6d2a662cd38e30d38f",
+    "auditor_sha256": "b9dc4388487862a92c5f4c2a09bf909d531cf53df42dadb36ca553d93e929a19",
+    "audit_sha256": "1f1c445410e45056c1d253a795207d7f92072ebbb53a0d1d3283780cf63a5e25",
+    "simulator_contract": "common-environment-v33",
+    "simulator_manifest_sha256": "6fb3593772b07bc5557d20376f1ed0cfbbfb2542430e75bb43beec70bd13c8c4",
+    "elapsed_seconds": 262.227743417,
+    "inclusive_tokens": 2459120,
+    "participants": [
+      {
+        "participant": "WORKER_A",
+        "status": "completed",
+        "returned_model": "gpt-6-luna",
+        "returned_effort": "xhigh",
+        "tool_calls": 14
+      },
+      {
+        "participant": "WORKER_C",
+        "status": "completed",
+        "returned_model": "gpt-6-luna",
+        "returned_effort": "xhigh",
+        "tool_calls": 23
+      },
+      {
+        "participant": "INSPECTOR",
+        "status": "completed",
+        "returned_model": "gpt-6-luna",
+        "returned_effort": "xhigh",
+        "tool_calls": 32
+      },
+      {
+        "participant": "WORKER_B",
+        "status": "completed",
+        "returned_model": "gpt-6-luna",
+        "returned_effort": "xhigh",
+        "tool_calls": 13
+      },
+      {
+        "participant": "DISPATCHER",
+        "status": "completed",
+        "returned_model": "gpt-6-luna",
+        "returned_effort": "xhigh",
+        "tool_calls": 15
+      }
+    ],
+    "epf_records": 22922,
+    "audited_effects": 18,
+    "effect_counts": {
+      "do_job": 8,
+      "inspect_quality": 8,
+      "dispatch_rework": 2
+    },
+    "part_attempts": {
+      "beta_job_b": [
+        1,
+        2
+      ],
+      "alpha_job_a": [
+        1,
+        2
+      ],
+      "beta_job_a": [
+        1
+      ],
+      "gamma_job_c": [
+        1
+      ],
+      "gamma_job_b": [
+        1
+      ],
+      "alpha_job_c": [
+        1
+      ]
+    },
+    "protocol": {
+      "scope": "workstation_tool_jobs",
+      "status": "complete",
+      "type": "run_result"
+    },
+    "runtime_exit_code": 0,
+    "common_complete": true,
+    "violations": [
+
+    ]
+  },
+  "failure_on_same_binary": {
+    "directory": "output/verification/11m-readable-closure.Gi58LwuD/arrival-orders/0-serial",
+    "events_sha256": "83060d855d8f061399f63f510b9a60d0abf511d20d056cb722ff1d1c2d3c4176",
+    "operation": "Submitted three different pending inspection requests before reading the gauge results. The runtime ended with a send Unavailable after the first of these measurements.",
+    "common_complete": false,
+    "isolated_send": "The diagnostic replay located the failure at GAUGE sending the beta_job_a request to READOUT after the alpha_job_c measurement. Three separate jobs had already submitted their checks.",
+    "diagnostic_log": "output/verification/11m-readable-closure.Gi58LwuD/diagnostic-case/0-serial/runtime-stderr.log",
+    "endpoint_probe": {
+      "directory": "output/verification/11m-readable-closure.Gi58LwuD/gauge-reentry",
+      "hibana_git": "331afd6e4b6315e103ce9cb9311f9d9140fc0e57",
+      "hibana_dirty": false,
+      "description": "Two delegated views share an actor. The first gauge sends a readout to the second view. With just its receive pending, the same route arm returns Pending, but a different arm returns Unavailable. After the file consumes its reading, the previously refused request succeeds.",
+      "source_sha256": "131ee90d59bbdda2e3db1a802c78bf7e86d3cc555ca3543054d6a75d45a6ea4f"
+    }
+  },
+  "failed_snapshot": "output/verification/11m-readable-closure.Gi58LwuD/live-2/harness-error.json"
+}

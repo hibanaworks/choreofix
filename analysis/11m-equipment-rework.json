@@ -1,0 +1,150 @@
+{
+  "task": "11M",
+  "stage": "scripted real wash/Wasm manufacturing rework",
+  "model_calls": 0,
+  "scored_comparisons": 0,
+  "git_base": "f44921a7ff6620a3838411a470be018417ea3b20",
+  "application_patch_sha256": "f05dc33843d2cfe2b4193a2fabe0c6f735481bdcfead8953c2ec7bc43ce84135",
+  "binary_sha256": "d80dde56af42459be258d2456bd3b5de5d0dc4785d4a38f82afad0ae316af5f2",
+  "diagnostic_sha256": "365cf8f8388b904157f395b7bb489a6ceea2e28cb65171724c74d83935967b2c",
+  "evidence": "output/verification/11m-all-job-rework.agzb1pX6",
+  "runs": [
+    {
+      "directory": "station-close",
+      "job_attempts": {
+        "alpha_job_c": 1,
+        "beta_job_a": 1,
+        "gamma_job_b": 1,
+        "alpha_job_a": 2,
+        "beta_job_b": 2,
+        "gamma_job_c": 2
+      },
+      "rejections": 3,
+      "completed_effects": 21,
+      "simulator_violations": 0,
+      "epf_records": 6765,
+      "wire_frames": 1269,
+      "hashes": {
+        "case.json": "30f680614f298904fe1dd779099f500e3f0e87dbb660d78f062e9c595fdea0de",
+        "events.jsonl": "fead0c8079df4b5a97cdfb8592bef40d695ff6270c8c0bef012272ac6771b7eb",
+        "epf.json": "03b60f13941022d1d9e28136cdadf4dc8c93b3ee69e8e7de760eda3c1c00167c",
+        "scores.json": "b95df3dcb4231f24d263c7dfaa3c4ae244781df2c8fdd8507ef1cfb2d516ed8d",
+        "projection.json": "7b9a803ce1822ffbaa33e162356d65ffd70f7971cd0cc2adf51b3679a7ec2a5b"
+      }
+    },
+    {
+      "directory": "all-jobs-repeated",
+      "job_attempts": {
+        "alpha_job_c": 2,
+        "beta_job_a": 2,
+        "gamma_job_b": 2,
+        "alpha_job_a": 2,
+        "beta_job_b": 3,
+        "gamma_job_c": 2
+      },
+      "rejections": 7,
+      "completed_effects": 33,
+      "simulator_violations": 0,
+      "epf_records": 10008,
+      "wire_frames": 1874,
+      "hashes": {
+        "case.json": "30f680614f298904fe1dd779099f500e3f0e87dbb660d78f062e9c595fdea0de",
+        "events.jsonl": "2570d336d5a830bf83f37c2fe041dd510e7ad8618a06db8d88bcbfc40e491eef",
+        "epf.json": "d06f9bd3912b3c7c54db47ebc4f1542cb98e0d151f90fc81c5ba754666fe4504",
+        "scores.json": "b64e76f3f9754c82f027c79ec400f3dbacee815c24f2d8b55d6b5e5ebaef1f36",
+        "projection.json": "7b9a803ce1822ffbaa33e162356d65ffd70f7971cd0cc2adf51b3679a7ec2a5b"
+      }
+    }
+  ],
+  "scope": "An external script drove five wash guests through real ChoreoFS files and checked simulator replies. EPF independently replayed each execution. The normal live-run effect audit and autonomous qualification are recorded separately.",
+  "live_depth_two_prefix": {
+    "captured_prefix_bytes": 6225983,
+    "captured_prefix_sha256": "365fffd5ad04e0a5ea1c5a24b7a09fb667d0f7891170a4f373d12430c0067337",
+    "effect_results": [
+      {
+        "tool": "dispatch_rework",
+        "success": true,
+        "count": 2
+      },
+      {
+        "tool": "do_job",
+        "success": true,
+        "count": 8
+      },
+      {
+        "tool": "inspect_quality",
+        "success": false,
+        "count": 2
+      },
+      {
+        "tool": "inspect_quality",
+        "success": true,
+        "count": 6
+      }
+    ],
+    "normal_guest_exits": {
+      "WORKER_B": 0,
+      "WORKER_A": 0,
+      "INSPECTOR": 0,
+      "WORKER_C": 0
+    },
+    "failure_stream_closures": [
+      {
+        "wire_label": 68,
+        "source": 0,
+        "send_line": 7770,
+        "read_command_id": 51,
+        "read_commit_line": 9118
+      },
+      {
+        "wire_label": 129,
+        "source": 1,
+        "send_line": 15857,
+        "read_command_id": 95,
+        "read_commit_line": 17117
+      },
+      {
+        "wire_label": 193,
+        "source": 2,
+        "send_line": 16540,
+        "read_command_id": 95,
+        "read_commit_line": 17210
+      },
+      {
+        "wire_label": 153,
+        "source": 38,
+        "send_line": 17402,
+        "read_command_id": 106,
+        "read_commit_line": 18695
+      },
+      {
+        "wire_label": 217,
+        "source": 39,
+        "send_line": 18436,
+        "read_command_id": 106,
+        "read_commit_line": 18788
+      },
+      {
+        "wire_label": 89,
+        "source": 37,
+        "send_line": 19248,
+        "read_command_id": 111,
+        "read_commit_line": 19429
+      }
+    ],
+    "subsequent_blocking_read": {
+      "command_id": 117,
+      "command": "cat /service/failed/beta_job_b"
+    },
+    "events_path": "output/verification/11m-all-job-rework.agzb1pX6/live-2/events.jsonl",
+    "interpretation": "A single normal five-participant Luna xhigh run. Six final inspections passed. Two returned negative readings and two rework orders preceded those passes. The dispatcher consumed each zero-byte approval and issued another blocking read on the beta job. Four guests exited. Only the observed prefix is described; no completed run, full effect audit or new task qualification is claimed."
+  },
+  "live_depth_two_stop": {
+    "diagnostic": "output/verification/11m-all-job-rework.agzb1pX6/diagnostic-interruption.json",
+    "status": "intentionally_interrupted",
+    "business_complete": true,
+    "protocol_complete": false,
+    "normal_guest_exits": 4,
+    "terminal_summary_sha256": "2b5c42a7caee81caf12bb9ad3ae26bd6ca5a038ebec1fe2cde7f8c4e92717b29"
+  }
+}
