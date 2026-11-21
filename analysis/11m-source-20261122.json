@@ -26,7 +26,17 @@
     "terminal_producer_checkpoints": 0,
     "run_error": "guest runtime failed: exit=null, protocol=null, error=\"model participant \\\"DISPATCHER\\\": status=\\\"harness_error\\\", error=\\\"turn completed with a pending tool request\\\"\", backend_errors=[]",
     "audit": "Error: \"failed or altered case result\"",
-    "scored": false
+    "scored": false,
+    "waiting_shell_calls": {
+      "row_numbering": "zero-based in the original events.jsonl",
+      "worker_b_waiting_for_other_job_update": 3232,
+      "gamma_job_b_failed_notice_transport_send": 4351,
+      "dispatcher_blocking_read_for_unproduced_beta_job_b": 8066,
+      "inspector_waiting_for_replacement_gamma_job_b": 8111,
+      "later_nonblocking_shell_command": 8622,
+      "later_worker_b_command": 8624,
+      "interpretation": "The dispatcher selected a blocking read for a different job. Worker B had requested its other-job update. The transport recorded a gamma failure notice; the incomplete capture does not establish its receive commit."
+    }
   },
   "scripted_first_attempt": {
     "status": "interrupted",
@@ -81,5 +91,40 @@
     "status": "passed",
     "model_calls": 0,
     "test_binary_sha256": "d182486bab6f442426c8a926ea1ac51da6b6a8a49d24b96ca556cc60e5e25c33"
+  },
+  "live_depth_one": {
+    "directory": "output/verification/11m-source-20261122/live-depth1-checked",
+    "choreofix_source": "7e1d4fd8c80ff3712d867f9265e7c36ed6b87425",
+    "binary_sha256": "2e1fd419eaa7613ccbb2514f0f7020c7a97a93012fd8b95a580c0de11cbaf309",
+    "verifier_sha256": "73a314d6d2cf80d1b6e852d370007d50cd9bdc0e4fe4854787289ec8e51e28c7",
+    "source_manifest_sha256": "59fd02f9d86513399882ff2e7491073c514b9b09ffd86b482996cf97b874e03f",
+    "result_sha256": "847c1b706467fbfc596292244b68db11d4c172afe945f2a0e4aa670eb421a29f",
+    "events_sha256": "615c9eb0ccfcd83fd2fae92787d5e4381967bb383602a3666beb95517be57ea8",
+    "same_prompt_bytes_as_depth_two": [
+      "DISPATCHER",
+      "INSPECTOR",
+      "WORKER_A",
+      "WORKER_B",
+      "WORKER_C"
+    ],
+    "elapsed_seconds": 128.770600541,
+    "inclusive_tokens": 1803176,
+    "participants_completed": 5,
+    "simulator_complete": true,
+    "simulator_violations": 0,
+    "simulator_effects": {
+      "dispatch_rework": 1,
+      "do_job": 7,
+      "inspect_quality": 7
+    },
+    "scored": false,
+    "setup_attempt": "output/verification/11m-source-20261122/live-depth1/harness-error.json",
+    "offline_audit": {
+      "status": "interrupted during EPF source execution search, before any effect audit verdict",
+      "elapsed_at_interruption_seconds": 911,
+      "reason": "Release the shared validation slot to replay the saved cross-task audit corpus",
+      "process_observation": "output/verification/11m-source-20261122/live-depth1-checked-audit-interruption.txt",
+      "stack_sample": "output/verification/11m-source-20261122/live-depth1-checked-audit-interruption.sample"
+    }
   }
 }

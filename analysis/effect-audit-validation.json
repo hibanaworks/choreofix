@@ -743,5 +743,129 @@
     "runner_unit_tests_passed": 58,
     "runner_opt_in_tests": 144,
     "clippy_all_targets_deny_warnings": true
+  },
+  "complete_call_and_roster_replay": {
+    "checked_implementation": "2286845b664f5da98b0394446bcf9915b25b2f9a",
+    "verifier_sha256": "93553b38f26cefb330b6c1ca31bffec25bbb30eed6bf186c036badf9f348d975",
+    "raw_directory": "output/verification/complete-effect-receipts-20261122",
+    "command": "--audit TASK EVENTS",
+    "scope": "One archived trial per available task. The journal reader admits only complete simulator calls with matching requests, arguments, results, RPC IDs, chronology and participant identities. Every task checker uses the roster from its original benchmark description. Task-specific rules still identify the relevant Endpoint receives and replies.",
+    "task_cases": 40,
+    "task_checkers": 34,
+    "journal_and_projection_inputs": "Same SHA-256 for both inputs as the corresponding cases entry.",
+    "byte_identical_reports": 39,
+    "identical_except_verifier_sha256": {
+      "task": "6H",
+      "audited_report_sha256": "32073f17f4b126659a48ca417714f643a62c18eb23d2a2ca0f19b241296c5e2b"
+    },
+    "replay_inventory_sha256": "04e3ed78750ed34b161a5e4b76228180fda2643ac9f492a7d0e5cd98c07d1fc0",
+    "archived_effect_count": 718,
+    "tasks_with_a_later_start_finishing_first": 22,
+    "pairs_with_a_later_start_finishing_first": 106,
+    "overlapping_calls": {
+      "task": "9H",
+      "journal_sha256": "1631a2a987ce5ee60534ac559ee68972c3642c7c92d3f3d3ebe7c5e7c98bda1d",
+      "description": "Two participants called think with the same argument. RPC 54 finished before RPC 50.",
+      "zero_based_request_start_finish_reply_rows": {
+        "50": [
+          7804,
+          7806,
+          7856,
+          7857
+        ],
+        "54": [
+          7832,
+          7834,
+          7854,
+          7855
+        ]
+      }
+    },
+    "changed_records": [
+      {
+        "task": "6E",
+        "change": "duplicate effect end",
+        "original_journal_sha256": "4c6bb242850813eae50e6ab8a356889583c353139dc559869f2d96a20deacbac",
+        "changed_journal_sha256": "f998d0ec061b0f81253038e6000faadadefd6f2153b92263236375e2ff27703f",
+        "zero_based_rows": [
+          1222
+        ],
+        "protocol_accepted": true,
+        "effect_audit_error": "Error: \"extra observation for effect 10\""
+      },
+      {
+        "task": "6E",
+        "change": "different result from the physical effect",
+        "original_journal_sha256": "4c6bb242850813eae50e6ab8a356889583c353139dc559869f2d96a20deacbac",
+        "changed_journal_sha256": "e4f6ff066dc9b78e7373e7966fcc7bf0a1081c51c00e3b1623107038e185bde3",
+        "zero_based_rows": [
+          1223
+        ],
+        "protocol_accepted": true,
+        "effect_audit_error": "Error: \"effect 10 observations differ in identity, result or chronology\""
+      },
+      {
+        "task": "16E",
+        "change": "reply before the effect ends",
+        "original_journal_sha256": "7bdaa46da6f178a9ebd1e486b89fe02cf94ff147daa1636e7b87a6ef2cca50fa",
+        "changed_journal_sha256": "beca9a2f534b7602b7eb439da25b91c3ae87ddcfde64b24b5839de3c0f0e203b",
+        "zero_based_rows": [
+          1322,
+          1323
+        ],
+        "protocol_accepted": true,
+        "effect_audit_error": "Error: \"effect 7 observations differ in identity, result or chronology\""
+      },
+      {
+        "task": "9E",
+        "change": "orphan domain start",
+        "original_journal_sha256": "e94ee112e2061c3caa8dd2e13186837d9da0510096d1d3da51fead6a2d259ae8",
+        "changed_journal_sha256": "b343a9f5c7feefabfa11a05a06785718c0f8408cc5c3ebc993d9ec89979a93fa",
+        "zero_based_rows": [
+          3328
+        ],
+        "protocol_accepted": true,
+        "effect_audit_error": "Error: \"incomplete or duplicate observations for effect 22\""
+      },
+      {
+        "task": "11M",
+        "change": "record a participant twice",
+        "original_journal_sha256": "e38c578edecb4217d2ee1c249b989653bc9d11abfa0a25f7372fe30d61391756",
+        "changed_journal_sha256": "9e68aff32d9491c31dc1e627615b8a627bbe793bab4c07ec1e9c58124946f394",
+        "zero_based_rows": [
+          0
+        ],
+        "protocol_accepted": true,
+        "effect_audit_error": "Error: \"unexpected or duplicate recorded participant\""
+      },
+      {
+        "task": "4H",
+        "change": "omit a participant",
+        "original_journal_sha256": "8a4c2f141d0a7bcf9cef1b297d5c443afa3478d81f3ca0693f2940b4e2bd6f4d",
+        "changed_journal_sha256": "0dbf6f523028fef0f52dc5134d6a12c866add41f95959ca7d790f67419e3a93b",
+        "zero_based_rows": [
+          0
+        ],
+        "protocol_accepted": true,
+        "effect_audit_error": "Error: \"missing benchmark participant\""
+      }
+    ],
+    "changed_records_scope": "The full protocol audit accepted each changed journal. The production effect audit rejected each one.",
+    "runner_unit_tests_passed": 59,
+    "runner_opt_in_tests_not_run_here": 144,
+    "clippy_all_targets_deny_warnings": true,
+    "line_counts": {
+      "task_checkers_before": 18867,
+      "task_checkers_after": 18501,
+      "all_tools_rust_before": 47901,
+      "all_tools_rust_after": 47553,
+      "boundary_test_files": 34,
+      "boundary_test_lines": 15094,
+      "record_mutation_functions_within_task_checkers": 20,
+      "lines_in_those_functions": 1854
+    },
+    "new_model_calls_in_replay": 0,
+    "new_task_qualifications": 0,
+    "new_scored_runs": 0
   }
 }

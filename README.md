@@ -91,14 +91,18 @@ domain effects and outcomes.
 
 EPF checks recorded Endpoint execution against the compiled protocol. The
 runner binds each physical frame to one EPF-checked receive and hashes the
-same journal and projection bytes it reads. All task checkers use the same
-comparison for the simulator actor, operation, scored arguments, result,
-success and violations. Each task supplies its argument conventions and checks
-which resource receives authorize each effect and where the reply went. The
-project maintains these checkers alongside the localsides. Attributing an
-effect to a particular receive relies on the checker for that task and on the
-recorded inputs. The common simulator assigns the business score from its own
-world state. Run `choreofix-experiments --audit TASK EVENTS` on an archived
+same journal and projection bytes it reads. The reader checks the participants
+against the original benchmark description. For each simulator call it pairs
+the request, start, finish and reply by RPC ID, including when identical calls
+overlap and finish in reverse order. Each task checker receives the complete
+call and uses a shared comparison for scored arguments, actor, operation,
+result, success and violations. The simulator request carries the RPC ID. The
+Endpoint receive is recorded separately in the frame journal. Each task
+checker specifies which resource receives can authorize that effect and
+where the reply goes, including tasks that require two receipts. The project
+maintains these rules alongside the localsides. The common simulator assigns
+the business score from its own world state. Run
+`choreofix-experiments --audit TASK EVENTS` on an archived
 journal. The runner checks the requested task against both the compiled
 projection and the recorded fixture. The 4E, 8E, dining and 16E checkers
 share the reconstruction of accepted WASI bytes. A short write updates the
