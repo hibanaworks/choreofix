@@ -867,5 +867,286 @@
     "new_model_calls_in_replay": 0,
     "new_task_qualifications": 0,
     "new_scored_runs": 0
+  },
+  "unified_journal_and_baselines": {
+    "production_audit_revision": "cdd395d3d8cf5d5f755050e2ae9d435eb0684fd7",
+    "mutation_driver_revision": "5d4f9f60709332462371777673e34739aedff971",
+    "raw_directory": "output/verification/unified-journal-20261122",
+    "scope": "One archived journal for each of 40 tasks using all 34 effect checkers. The common reader checks the participant roster, the EPF-checked receives, the simulator RPC lifecycle and the score envelope. Task-specific code still matches concrete effects to the required resource receives and results. No new guest run, model call, task qualification or scored comparison.",
+    "verifier_sha256": "0c5c3a4adf2877aaa43517c2359a52c70e59a422182ad63da09c7c16cc54596d",
+    "final_verifier_sha256": "88a42348457d355530fdfe55b48b4a2b43edafc28e37d73bfe63ae836bed7969",
+    "inputs": "See cases above for the immutable journal, projection, runtime and prior report hashes.",
+    "command": "--audit TASK EVENTS",
+    "checked_task_records": 40,
+    "checked_task_modules": 34,
+    "actual_effects": 718,
+    "byte_identical_prior_reports": 39,
+    "unchanged_except_verifier_hash": [
+      "6H"
+    ],
+    "replay_inventory_sha256": "807fd793424b02e40b99131e3a7c593a1362936d51ff3231237c26eab9a0b21e",
+    "changed_journals": [
+      {
+        "task": "6E",
+        "change": "drop a scored occurrence",
+        "original_journal_sha256": "4c6bb242850813eae50e6ab8a356889583c353139dc559869f2d96a20deacbac",
+        "changed_journal_sha256": "32d9f7aa8f1fe05d7eb320999f24945149cf10a6ff9fdac223f4fffc9fcc6685",
+        "zero_based_row": 7790,
+        "protocol_accepted": true,
+        "effect_audit_error": "Error: \"original simulator event count differs from actual effect count\""
+      },
+      {
+        "task": "16E",
+        "change": "repeat a scored occurrence",
+        "original_journal_sha256": "7bdaa46da6f178a9ebd1e486b89fe02cf94ff147daa1636e7b87a6ef2cca50fa",
+        "changed_journal_sha256": "7dad8a7bc3d3487849098a4ac51b3eb5bde2de8591351b687eecfcf19334ad6e",
+        "zero_based_row": 2658,
+        "protocol_accepted": true,
+        "effect_audit_error": "Error: \"original simulator event count differs from actual effect count\""
+      },
+      {
+        "task": "9E",
+        "change": "omit the violation list",
+        "original_journal_sha256": "e94ee112e2061c3caa8dd2e13186837d9da0510096d1d3da51fead6a2d259ae8",
+        "changed_journal_sha256": "9f0916e6c86747fb9cedbdd63656f2b3c58a9a7e70c5ae662745fb8e25d385a0",
+        "zero_based_row": 7178,
+        "protocol_accepted": true,
+        "effect_audit_error": "Error: \"original simulator score is missing its violation list or reports a violation\""
+      },
+      {
+        "task": "3E",
+        "change": "add a simulator violation",
+        "original_journal_sha256": "6c4714746cc2690f5dba8ce510161095080878761d5024083be59aea3e8a3c66",
+        "changed_journal_sha256": "f9cca4f76ac7d0fdb7956d0b4df3fa688cab1d6957e863367c90589c656843d9",
+        "zero_based_row": 2838,
+        "protocol_accepted": true,
+        "effect_audit_error": "Error: \"original simulator score is missing its violation list or reports a violation\""
+      },
+      {
+        "task": "8E",
+        "change": "record a non-boolean completion",
+        "original_journal_sha256": "9855970f3fa2294b0f8ea0dd5c814b4d0d977c524cee56876bae012d3f4dd345",
+        "changed_journal_sha256": "112ab669c0a342c39fbff52b9c1b963f3148a0a34eb1ee2e663d98b3a99de261",
+        "zero_based_row": 4637,
+        "protocol_accepted": true,
+        "effect_audit_error": "Error: \"missing simulator outcome\""
+      },
+      {
+        "task": "11E",
+        "change": "replace fixture origin",
+        "original_journal_sha256": "bf38a9ac74e0bed0e2f4673cb89797505838feb6e293524c741bffdd1a13c475",
+        "changed_journal_sha256": "39b1ed985853c75658e92127a1e69d1bb96ed76bc25d7a3602bc35e970706cd7",
+        "zero_based_row": 0,
+        "protocol_accepted": true,
+        "effect_audit_error": "Error: \"expected the original simulator fixture for the compiled task\""
+      },
+      {
+        "task": "4H",
+        "change": "remove a fixture participant",
+        "original_journal_sha256": "8a4c2f141d0a7bcf9cef1b297d5c443afa3478d81f3ca0693f2940b4e2bd6f4d",
+        "changed_journal_sha256": "0dbf6f523028fef0f52dc5134d6a12c866add41f95959ca7d790f67419e3a93b",
+        "zero_based_row": 0,
+        "protocol_accepted": true,
+        "effect_audit_error": "Error: \"missing benchmark participant\""
+      },
+      {
+        "task": "6E",
+        "change": "replace the simulator result",
+        "original_journal_sha256": "4c6bb242850813eae50e6ab8a356889583c353139dc559869f2d96a20deacbac",
+        "changed_journal_sha256": "eb460feed5c879680ba406794e3a7106e7163a3b6c49f0b9509253b8548d21a5",
+        "zero_based_row": 1223,
+        "protocol_accepted": true,
+        "effect_audit_error": "Error: \"effect 10 observations differ in identity, result or chronology\""
+      }
+    ],
+    "changed_journal_checks": "For each mutation --audit-protocol accepted the producer capture. --audit TASK EVENTS rejected the altered record.",
+    "all_targets_clippy_deny_warnings": true,
+    "unit_tests_passed": 59,
+    "unit_tests_failed": 0,
+    "opt_in_tests_not_run_by_cargo_test": 144,
+    "mutation_regression": {
+      "scope": "Each changed mutation command audited its unchanged input using the production Evidence entry before checking individual modifications. These are offline sensitivity checks of saved records.",
+      "rejected": 3194,
+      "suites": [
+        {
+          "task": "1E",
+          "command": "--check-protocol-mutants",
+          "rejected": 122,
+          "archived_count_matched": true,
+          "summary_sha256": "ff9e9f635eb91fc63a28b81f5e3cdb51d4a26f36942dd1310e9d0e8138700d0b"
+        },
+        {
+          "task": "2E",
+          "command": "--check-writing-mutants",
+          "rejected": 119,
+          "archived_count_matched": true,
+          "summary_sha256": "c4113fd45bd491e3dac09efbc3aff938df8b095cfcd2b4c30812d52df67dd2bf"
+        },
+        {
+          "task": "3E",
+          "command": "--check-report-mutants",
+          "rejected": 193,
+          "archived_count_matched": true,
+          "summary_sha256": "55bf82fe5edb1c5b3299587613b385e074bbf8b9bea0813307dcb1a59e5dc021"
+        },
+        {
+          "task": "6E",
+          "command": "--check-review-mutants",
+          "rejected": 140,
+          "archived_count_matched": true,
+          "summary_sha256": "7ff5e949f43cc5d767661896366e54267e76358c964f366037b3f68147bb7952"
+        },
+        {
+          "task": "12E",
+          "command": "--check-kitchen-mutants",
+          "rejected": 95,
+          "archived_count_matched": true,
+          "summary_sha256": "8a9a9804ed57d7ed49b6d7953ccc984b6494155f9cf6ea37e8b63c67efd262f4"
+        },
+        {
+          "task": "11E",
+          "command": "--check-manufacturing-mutants",
+          "rejected": 68,
+          "archived_count_matched": true,
+          "summary_sha256": "4c43e9cf75db1cfbf770230b12a3da2196fa17f4ccdea39be8f35fb251fbc61c"
+        },
+        {
+          "task": "5E",
+          "command": "--check-medical-mutants",
+          "rejected": 225,
+          "archived_count_matched": null,
+          "summary_sha256": "bccb63ca15b86e0775a2ffd1084181a95be2d0ef3770209f4c495d79ae257150"
+        },
+        {
+          "task": "5M",
+          "command": "--check-multi-specialty-mutants",
+          "rejected": 306,
+          "archived_count_matched": null,
+          "summary_sha256": "cf6371131ad570074f2ee2b8807962dd20c7418c29f1fc341af262ebc5d42e06"
+        },
+        {
+          "task": "5H",
+          "command": "--check-critical-care-mutants",
+          "rejected": 300,
+          "archived_count_matched": null,
+          "summary_sha256": "687cadaa3f7d6cd1da19c58c750b0d0114a35bc96fab2111b3cdb0244dff6719"
+        },
+        {
+          "task": "6H",
+          "command": "--check-staged-integration-mutants",
+          "rejected": 506,
+          "archived_count_matched": null,
+          "summary_sha256": "e45ea9d6743d47909a4aa38ccf18b78659d397e3d1f0d45aec93a8dd0446cdb8"
+        },
+        {
+          "task": "7E",
+          "command": "--check-document-mutants",
+          "rejected": 122,
+          "archived_count_matched": null,
+          "summary_sha256": "b6236f74a9c84d797c40ed4b275fdf420ba5a3d4e76744d1de565f3dfeada49b"
+        },
+        {
+          "task": "10E",
+          "command": "--check-build-mutants",
+          "rejected": 69,
+          "archived_count_matched": true,
+          "summary_sha256": "f40d69333345bafec823efdeff5cb788c3014e4d7d6f5381cc65df48d00bbaf7"
+        },
+        {
+          "task": "6M",
+          "command": "--check-feature-delivery-mutants",
+          "rejected": 518,
+          "archived_count_matched": true,
+          "summary_sha256": "a6fbd2a51223a95fada764c7ed93fba790de1a4339c0973ab47e9e50865c3d89"
+        },
+        {
+          "task": "16E",
+          "command": "--check-cicd-mutants",
+          "rejected": 16,
+          "archived_count_matched": true,
+          "summary_sha256": "1d8669d1a995430eec6d10482f14fac3bb716c796bcf23434cf0d070ca87f6e8"
+        },
+        {
+          "task": "8E",
+          "command": "--check-api-mutants",
+          "rejected": 18,
+          "archived_count_matched": true,
+          "summary_sha256": "e3101fff29bc02fc6cef99b5680199b0f020b6d0ce71e6977719f10a78a5cee7"
+        },
+        {
+          "task": "13M",
+          "command": "--check-lab-quality-mutants",
+          "rejected": 9,
+          "archived_count_matched": null,
+          "summary_sha256": "5872639ed6d8b8273000aedc00f84f22966014817e0e6cb3e713e21e43fdcf17"
+        },
+        {
+          "task": "10M",
+          "command": "--check-cascading-build-mutants",
+          "input": "output/verification/build-repair-choice-20261120.JisjNd/tested-inputs/evidence/cascading-build-wasi-1795174954749034000/case7/events.jsonl",
+          "events_sha256": "e212f7dea9253b3dd57ae84102b4807cf4d5223dc4bc39292fe9ca4f72767aa6",
+          "projection_sha256": "3f651aab161eed3fce62f289aba515c0dd82ff1f3170f00c2002572eca110947",
+          "rejected": 368,
+          "archived_count_matched": true,
+          "summary_sha256": "23ee78189ed751eccb56ff9f2dc238488f3aafde473c9418551102ae8e6774ef"
+        }
+      ],
+      "detailed_inventory_sha256": "001db8f8c93163afa94e0b92df4b0cff4b866be40bc49a48d478bcbdb860f274",
+      "verified_input_rule": "Use the recorded case for that task unless an alternate input is specified."
+    },
+    "line_counts": {
+      "before": {
+        "task_audit_file_lines": 18501,
+        "tools_rust_lines": 47553,
+        "task_audit_lines_before_mutation_entry_points": 16647
+      },
+      "after": {
+        "task_audit_file_lines": 18092,
+        "tools_rust_lines": 47160,
+        "task_audit_lines_before_mutation_entry_points": 16310
+      },
+      "baseline_before_audit_consolidation": {
+        "task_audit_file_lines": 19993,
+        "tools_rust_lines": 48709,
+        "task_audit_lines_before_mutation_entry_points": 18148
+      },
+      "method": "Physical lines of tracked Rust text. Task audit files include their CLI mutation commands; tools also includes the test-only Wasm boundaries. Source line counts do not measure checker independence."
+    },
+    "archived_live_audit": {
+      "task": "8E",
+      "source": "output/verification/8e-received-api-20261121.yYvl01/live-0",
+      "verifier_sha256": "88a42348457d355530fdfe55b48b4a2b43edafc28e37d73bfe63ae836bed7969",
+      "report_sha256": "431f638ca0fd3d323a060f0b71ff15b846bb8edf0c603a4f3c1f760b045b3985",
+      "status": "passed",
+      "new_model_calls": 0,
+      "old_run_events_sha256": "6140faed0c4c2fbf63a0436dcfee12947b3560a957f5d95c9be6da9da75592e9"
+    },
+    "live_replay_version_boundary": {
+      "task": "8M",
+      "input": "output/verification/full-stack-api-20261118/live-depth0-v26",
+      "current_run_audit": "Refused because the prompt sent in the archived trial differs from the current experiment interface. The saved model request retains the old shell instructions.",
+      "current_effect_audit": "Passed in the 40 --audit replays above.",
+      "frozen_runner_sha256": "c9d92b5f2e285aee3bc2f1e9d79463edbe371d9e4efbf0f85f04a1f245a3d8b9",
+      "frozen_run_audit": "passed",
+      "frozen_run_report_sha256": "73ef94fed116801389a8dbfba96a64ec9247a6ca0c57d8b26c761b0497c5d367"
+    },
+    "final_effect_checks": {
+      "unchanged_task_checker_bodies": 34,
+      "normal_cli_reports": [
+        {
+          "task": "1E",
+          "report_sha256": "ae89be553593b89046eb7d24671271dd8d7e95c85ec23e9b8fa614ec4a19041c"
+        },
+        {
+          "task": "6H",
+          "report_sha256": "09ac060d59fecaad901d8cbb4524989e2dee428f793c4673469b9da7d45a7d60"
+        },
+        {
+          "task": "11M",
+          "report_sha256": "c9394832ce629e92d9cde6ec4d6b5943af3fd901aededd05fb19ea460d4edb32"
+        }
+      ],
+      "comparison": "Full reports matched the archives, with only the new verifier hash substituted for 6H. The second revision changes mutation entry points and their imports."
+    }
   }
 }

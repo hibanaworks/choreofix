@@ -124,7 +124,16 @@
       "elapsed_at_interruption_seconds": 911,
       "reason": "Release the shared validation slot to replay the saved cross-task audit corpus",
       "process_observation": "output/verification/11m-source-20261122/live-depth1-checked-audit-interruption.txt",
-      "stack_sample": "output/verification/11m-source-20261122/live-depth1-checked-audit-interruption.sample"
+      "stack_sample": "output/verification/11m-source-20261122/live-depth1-checked-audit-interruption.sample",
+      "occurrence_pruning_trial": {
+        "raw_directory": "output/verification/11m-source-20261122/replay-latest",
+        "journal_sha256": "615c9eb0ccfcd83fd2fae92787d5e4381967bb383602a3666beb95517be57ea8",
+        "candidate_patch_sha256": "eba466de8fa280b40aed099b5d74c417c2b416f6f6da56e0150d56cd2854724c",
+        "candidate_verifier_sha256": "3c65b4524319d108e1800cbffac8d48b92e18ac42abe4ee4bfc662e517884ffd",
+        "elapsed_observed_seconds": 917,
+        "cpu_observed_seconds": 915.2,
+        "outcome": "Interrupted with no audit verdict. The candidate was removed from the EPF source; the journal auditor uses the unchanged pinned EPF."
+      }
     }
   }
 }
