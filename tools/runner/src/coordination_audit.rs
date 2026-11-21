@@ -12,13 +12,9 @@ fn number(value: &Value) -> Result<u64> {
         .ok_or_else(|| "invalid compiled file field".into())
 }
 
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
-    let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("empty coordination evidence")?["message"];
-    if compiled["task"] != "4E" || fixture["task"] != "4E" || fixture["type"] != "fixtures" {
-        return Err("coordination task differs".into());
-    }
-    let journal = crate::journal::read(rows, artifact, dynamic)?;
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let compiled = &journal.projection["compiled"];
     let actors = journal.participants;
 
     let role = |name: &str| number(&compiled["roles"][name]);

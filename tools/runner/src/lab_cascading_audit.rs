@@ -9,24 +9,14 @@ use std::{collections::BTreeSet, ops::Range};
 type Edge = (&'static str, &'static str, &'static str);
 type Instrument = (&'static str, &'static str, &'static str, &'static str);
 
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let artifact = journal.projection;
+    let rows = journal.records();
     let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("empty scientific history")?["message"];
-    let journal = crate::journal::read(rows, artifact, dynamic)?;
     let actors = journal.participants;
-    if compiled["task"] != "13H" || fixture["type"] != "fixtures" || fixture["task"] != "13H" {
-        return Err("foreign task fixture or projection".into());
-    }
-    let role = |name: &str| {
-        compiled["roles"][name]
-            .as_u64()
-            .ok_or_else(|| format!("compiled role {name}"))
-    };
-    let label = |name: &str| {
-        compiled["labels"][name]
-            .as_u64()
-            .ok_or_else(|| format!("compiled message {name}"))
-    };
+    let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
+    let label = |name: &str| crate::projection::named_id(&compiled["labels"], name).map(u64::from);
     let journal::Journal {
         frames,
         calls,

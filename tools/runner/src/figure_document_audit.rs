@@ -8,18 +8,16 @@ use std::{
 
 type Edge = (&'static str, &'static str, &'static str);
 
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = history.execution;
+    let artifact = history.projection;
+    let rows = history.records();
     let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("empty 7M history")?["message"];
-    let history = crate::journal::read(rows, artifact, dynamic)?;
-    if fixture["task"] != "7M" || compiled["task"] != "7M" {
-        return Err("foreign task fixture or projection".into());
-    }
     let scored = history.scored_events;
     if !history.simulator_complete {
         return Err("incomplete 7M score or resource violation".into());
     }
-    let role = |name: &str| compiled["roles"][name].as_u64().ok_or("7M role");
+    let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
     let mut used = BTreeSet::new();
     let mut take = |(from, to, label): Edge, range: Range<usize>, value: &Value| -> Result<Value> {
         let (source, target) = (role(from)?, role(to)?);

@@ -723,7 +723,7 @@ async fn five_wash_guests_complete_the_document_and_reconsider() -> Result<()> {
             frame["message"]["payload"] = json!(serde_json::to_vec(&arguments)?);
             let (artifact, _) = crate::projection::load(&path)?;
             let execution = crate::projection::check_dynamic(&artifact, &altered)?;
-            let error = crate::figure_document_audit::check(&altered, &artifact, &execution)
+            let error = crate::journal::check_effects(&altered, &artifact, &execution)
                 .expect_err("a substituted resource request cannot account for the actual effect");
             assert!(
                 error

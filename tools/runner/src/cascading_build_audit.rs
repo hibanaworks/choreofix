@@ -8,22 +8,15 @@ use std::{
     path::Path,
 };
 
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let artifact = journal.projection;
     let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("empty build record")?["message"];
-    if compiled["task"] != "10M" || fixture["task"] != "10M" || fixture["type"] != "fixtures" {
-        return Err("cascading build task differs".into());
-    }
-    let journal = crate::journal::read(rows, artifact, dynamic)?;
     let agents = ["BUILDER_A", "BUILDER_B", "BUILDER_C"];
     let modules = ["module_a", "module_b", "module_c"];
 
-    let name = |group: &str, key: &str| -> Result<u64> {
-        compiled[group][key]
-            .as_u64()
-            .filter(|n| *n <= 255)
-            .ok_or_else(|| format!("compiled {group} {key}").into())
-    };
+    let name =
+        |group: &str, key: &str| crate::projection::named_id(&compiled[group], key).map(u64::from);
     let role = |key: &str| name("roles", key);
     let label = |key: &str| name("labels", key).map(|v| v as u8);
     let compiler = role("COMPILER")?;
@@ -837,7 +830,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .map(|id| id.as_u64().ok_or("effect frame ID".into()))
         .collect::<Result<Vec<_>>>()?;
     let mut checked = crate::journal::json_frame_mutants(&rows, &ids, |changed| {
-        check(changed, &artifact, dynamic)
+        crate::journal::check_effects(changed, &artifact, dynamic)
     })?;
     let labels = crate::projection::frames(&artifact, &rows)?;
     let sends = rows
@@ -902,7 +895,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 row["message"]["payload"] = json!(serde_json::to_vec(&value)?);
             }
         }
-        let error = check(&changed, &artifact, dynamic)
+        let error = crate::journal::check_effects(&changed, &artifact, dynamic)
             .err()
             .ok_or_else(|| format!("accepted {kind}"))?;
         checked.push(json!({"kind":kind,"rejected":true,"error":error.to_string()}));
@@ -939,7 +932,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
             row["message"]["payload"] = json!(replacement);
         }
     }
-    let error = check(&changed, &artifact, dynamic)
+    let error = crate::journal::check_effects(&changed, &artifact, dynamic)
         .err()
         .ok_or("accepted substituted repair choice")?;
     checked.push(
@@ -952,7 +945,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 row["message"][field] = json!(65535);
             }
         }
-        let error = check(&changed, &artifact, dynamic)
+        let error = crate::journal::check_effects(&changed, &artifact, dynamic)
             .err()
             .ok_or("accepted coherently changed header")?;
         checked.push(json!({"kind":format!("coherent_wrong_{field}"),"rejected":true,"error":error.to_string()}));

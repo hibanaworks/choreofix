@@ -27,24 +27,16 @@ fn payload(message: &Value) -> Result<Vec<u8>> {
         })
         .collect()
 }
-pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
-    let compiled = &projection["compiled"];
-    let fixture = &records.first().ok_or("empty evidence")?["message"];
-    let journal = crate::journal::read(records, projection, dynamic)?;
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let compiled = &journal.projection["compiled"];
+    let fixture = journal.fixture();
     let actors = journal.participants;
-    if compiled["task"] != "8E" || fixture["task"] != "8E" {
-        return Err("unexpected API task".into());
-    }
     let depth = fixture["depth"]
         .as_u64()
         .filter(|n| *n <= 2)
         .ok_or("API depth")?;
-    let role = |name: &str| -> Result<u64> {
-        compiled["roles"][name]
-            .as_u64()
-            .filter(|n| *n <= 255)
-            .ok_or_else(|| format!("compiled role {name}").into())
-    };
+    let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
     let service_fd = u8::try_from(compiled["service_fd"].as_u64().ok_or("operation fd")?)?;
     let outcome_fd = u8::try_from(compiled["outcome_fd"].as_u64().ok_or("outcome fd")?)?;
     let frames = &journal.frames;

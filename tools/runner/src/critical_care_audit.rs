@@ -100,26 +100,13 @@ fn findings(calls: &[&Call], patient: &str, before: usize) -> Result<Value> {
     }
     Ok(value)
 }
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let artifact = journal.projection;
     let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("empty critical-care evidence")?["message"];
-    if compiled["task"] != "5H" || fixture["task"] != "5H" || fixture["type"] != "fixtures" {
-        return Err("critical-care task differs".into());
-    }
-    let journal = crate::journal::read(rows, artifact, dynamic)?;
 
-    let role = |name: &str| -> Result<u64> {
-        compiled["roles"][name]
-            .as_u64()
-            .filter(|r| *r < 256)
-            .ok_or_else(|| format!("compiled role {name}").into())
-    };
-    let label = |name: &str| -> Result<u8> {
-        compiled["labels"][name]
-            .as_u64()
-            .and_then(|n| u8::try_from(n).ok())
-            .ok_or_else(|| format!("compiled label {name}").into())
-    };
+    let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
+    let label = |name: &str| crate::projection::named_id(&compiled["labels"], name);
     let crate::journal::Journal {
         frames,
         calls,
@@ -686,7 +673,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .collect::<Vec<_>>();
     fs::create_dir(output)?;
     let verdicts = crate::journal::json_frame_mutants(&rows, &selected, |changed| {
-        check(changed, &artifact, dynamic)
+        crate::journal::check_effects(changed, &artifact, dynamic)
     })?;
     let result = json!({"status":"passed","mutants_rejected":verdicts.len(),"source_events_sha256":evidence.events_hash,"scope":"saved-record effect audit, not runtime attacks or EPF mutation replay","model_calls":0,"verdicts":verdicts});
     save(&output.join("result.json"), &result)?;

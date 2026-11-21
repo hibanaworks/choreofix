@@ -381,7 +381,7 @@ fn participant(root: &Path, agent: &str, runtime: &[Value]) -> Result<Value> {
     )
 }
 
-type EffectCheck = fn(&[Value], &Value, &Value) -> Result<Value>;
+type EffectCheck = fn(crate::journal::Journal<'_>) -> Result<Value>;
 
 /// Bind each task to the benchmark description embedded in the verifier and its effect checks.
 pub(crate) fn task_audit(task: &str) -> Result<(&'static str, EffectCheck)> {

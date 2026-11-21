@@ -17,13 +17,10 @@ fn field(v: &Value) -> Result<u64> {
         .filter(|v| *v <= 255)
         .ok_or_else(|| "invalid compiled operation field".into())
 }
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
-    let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("empty evidence")?["message"];
-    if compiled["task"] != "16E" || fixture["task"] != "16E" || fixture["type"] != "fixtures" {
-        return Err("CI/CD task or source differs".into());
-    }
-    let journal = crate::journal::read(rows, artifact, dynamic)?;
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let compiled = &journal.projection["compiled"];
+    let fixture = journal.fixture();
     let actors = journal.participants;
 
     let frames = &journal.frames;

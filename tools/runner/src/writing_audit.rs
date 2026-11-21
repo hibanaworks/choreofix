@@ -43,15 +43,15 @@ fn prior<'a>(calls: &'a BTreeMap<u64, Call>, call: &Call, tool: &str) -> Result<
     let p = one(earlier)?;
     Ok(p.result.1)
 }
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
-    let fixture = &rows.first().ok_or("empty writing evidence")?["message"];
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let artifact = journal.projection;
+    let fixture = journal.fixture();
     let task = fixture["task"].as_str().ok_or("writing task")?;
-    let journal = crate::journal::read(rows, artifact, dynamic)?;
     let actors = journal.participants;
     let participants = actors.len();
     let compiled = &artifact["compiled"];
-    if !matches!(task, "2E" | "2M" | "2H")
-        || compiled["session"] != 18
+    if compiled["session"] != 18
         || compiled["participants"]
             .as_object()
             .is_none_or(|p| p.len() != participants)
@@ -349,7 +349,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .map(|(id, _)| *id)
         .collect::<Vec<_>>();
     let mut rejected = crate::journal::json_frame_mutants(&rows, &ids, |changed| {
-        check(changed, &projection, dynamic)
+        crate::journal::check_effects(changed, &projection, dynamic)
     })?;
     for field in ["frame_label", "lane"] {
         let mut changed = rows.clone();
@@ -358,7 +358,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 row["message"][field] = json!(if field == "lane" { 255 } else { 65535 });
             }
         }
-        let error = check(&changed, &projection, dynamic)
+        let error = crate::journal::check_effects(&changed, &projection, dynamic)
             .err()
             .ok_or("coherent invalid wire header accepted")?;
         rejected.push(json!({"kind":format!("coherent_wrong_{field}"),"rejected":true,"error":error.to_string()}));

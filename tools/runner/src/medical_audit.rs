@@ -36,26 +36,13 @@ fn panel(calls: &[&Call], actor: &str, before: usize) -> Result<Value> {
     Ok(Value::Object(panel))
 }
 
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let artifact = journal.projection;
     let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("empty medical evidence")?["message"];
-    if compiled["task"] != "5E" || fixture["task"] != "5E" || fixture["type"] != "fixtures" {
-        return Err("medical task differs".into());
-    }
-    let journal = crate::journal::read(rows, artifact, dynamic)?;
 
-    let role = |name: &str| -> Result<u64> {
-        compiled["roles"][name]
-            .as_u64()
-            .filter(|n| *n <= 255)
-            .ok_or_else(|| format!("compiled role {name}").into())
-    };
-    let label = |name: &str| -> Result<u8> {
-        compiled["labels"][name]
-            .as_u64()
-            .and_then(|n| u8::try_from(n).ok())
-            .ok_or_else(|| format!("compiled label {name}").into())
-    };
+    let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
+    let label = |name: &str| crate::projection::named_id(&compiled["labels"], name);
     let records_actor = role("RECORDS")?;
     let crate::journal::Journal {
         frames,
@@ -411,7 +398,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .collect::<Vec<_>>();
     fs::create_dir(output)?;
     let verdicts = crate::journal::json_frame_mutants(&rows, &selected, |changed| {
-        check(changed, &artifact, dynamic)
+        crate::journal::check_effects(changed, &artifact, dynamic)
     })?;
     let result = json!({"status":"passed","mutants_rejected":verdicts.len(),"source_events_sha256":evidence.events_hash,
         "scope":"saved-record clinical effect audit, not runtime attacks or EPF mutation replay","model_calls":0,

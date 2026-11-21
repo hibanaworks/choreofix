@@ -114,25 +114,14 @@ fn operation(agent: &str, tool: &str, arguments: &Value) -> Option<Operation> {
     })
 }
 
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
-    let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("empty 14H history")?["message"];
-    let history = crate::journal::read(rows, artifact, dynamic)?;
+pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = history.execution;
+    let rows = history.records();
+    let compiled = &history.projection["compiled"];
     let actors = history.participants;
 
-    if compiled["task"] != "14H" || fixture["type"] != "fixtures" || fixture["task"] != "14H" {
-        return Err("foreign task fixture or projection".into());
-    }
-    let role = |name: &str| {
-        compiled["roles"][name]
-            .as_u64()
-            .ok_or_else(|| format!("missing compiled role {name}"))
-    };
-    let label = |name: &str| {
-        compiled["labels"][name]
-            .as_u64()
-            .ok_or_else(|| format!("missing compiled label {name}"))
-    };
+    let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
+    let label = |name: &str| crate::projection::named_id(&compiled["labels"], name).map(u64::from);
     let scored = history.scored_events;
     if !history.simulator_complete {
         return Err("incomplete 14H score or resource violation".into());

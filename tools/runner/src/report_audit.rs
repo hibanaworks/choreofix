@@ -155,13 +155,11 @@ fn material(calls: &[&Call], before: usize) -> Result<Value> {
 fn scoped(snapshot: &Value, scope: &str) -> Value {
     json!({"sections":{scope:snapshot["sections"][scope]},"references":{scope:snapshot["references"][scope]}})
 }
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let artifact = journal.projection;
     let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("empty report evidence")?["message"];
-    if fixture["type"] != "fixtures" || fixture["task"] != "3E" || compiled["task"] != "3E" {
-        return Err("report task differs".into());
-    }
-    let journal = crate::journal::read(rows, artifact, dynamic)?;
+    let fixture = journal.fixture();
     let actors = journal.participants;
 
     let headers = crate::projection::contracts(compiled)?;
@@ -690,7 +688,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     // bind_receives still requires every changed journal to match the checked
     // receive occurrences. Real audits always check their own capture above.
     let mut rejected = crate::journal::json_frame_mutants(&rows, &ids, |changed| {
-        check(changed, &projection, dynamic)
+        crate::journal::check_effects(changed, &projection, dynamic)
     })?;
     for field in ["frame_label", "lane"] {
         let mut changed = rows.clone();
@@ -699,7 +697,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 row["message"][field] = json!(if field == "lane" { 255 } else { 65535 });
             }
         }
-        let error = check(&changed, &projection, dynamic)
+        let error = crate::journal::check_effects(&changed, &projection, dynamic)
             .err()
             .ok_or("coherent invalid report wire header accepted")?;
         rejected.push(json!({"kind":format!("coherent_wrong_{field}"),"rejected":true,"error":error.to_string()}));
@@ -759,7 +757,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         // remain internally valid; rejection must come from the actual
         // request/effect/result boundary, not malformed effect intervals.
         crate::journal::read(&changed, &projection, dynamic)?;
-        let error = check(&changed, &projection, dynamic)
+        let error = crate::journal::check_effects(&changed, &projection, dynamic)
             .err()
             .ok_or_else(|| format!("accepted {kind}"))?;
         if !error.to_string().starts_with("missing matching frame") {

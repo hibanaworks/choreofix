@@ -260,24 +260,13 @@ fn quality(context: (&Calls, usize), value: &Value) -> Result<Value> {
     inputs["verification"] = json!(verification);
     Ok(inputs)
 }
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let artifact = journal.projection;
     let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("empty QC history")?["message"];
-    if compiled["task"] != "13M" || fixture["type"] != "fixtures" || fixture["task"] != "13M" {
-        return Err("foreign QC task/source".into());
-    }
-    let role = |name: &str| -> Result<u64> {
-        compiled["roles"][name]
-            .as_u64()
-            .ok_or_else(|| format!("compiled QC role {name}").into())
-    };
-    let label = |name: &str| -> Result<u64> {
-        compiled["labels"][name]
-            .as_u64()
-            .ok_or_else(|| format!("compiled QC message {name}").into())
-    };
+    let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
+    let label = |name: &str| crate::projection::named_id(&compiled["labels"], name).map(u64::from);
     let labels = |names: &[&str]| -> Result<Vec<u64>> { names.iter().map(|n| label(n)).collect() };
-    let journal = crate::journal::read(rows, artifact, dynamic)?;
 
     let journal::Journal {
         frames,
@@ -1256,7 +1245,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
             }
             _ => unreachable!(),
         }
-        let error = check(&changed, &artifact, dynamic)
+        let error = crate::journal::check_effects(&changed, &artifact, dynamic)
             .err()
             .ok_or_else(|| format!("QC auditor accepted {name}"))?;
         reports.push(json!({"name":name,"rejected":true,"error":error.to_string()}));

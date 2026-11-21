@@ -6,18 +6,10 @@ use crate::{
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
+    let artifact = history.projection;
     let compiled = &artifact["compiled"];
-    let inputs = &rows.first().ok_or("missing workshop journal")?["message"];
-    let history = crate::journal::read(rows, artifact, dynamic)?;
-    if inputs["task"] != "11M" || compiled["task"] != "11M" {
-        return Err("foreign task fixture or projection".into());
-    }
-    let role = |name: &str| -> Result<u64> {
-        compiled["roles"][name]
-            .as_u64()
-            .ok_or_else(|| format!("missing projected workshop role {name}").into())
-    };
+    let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
     let dispatcher = role("DISPATCHER")?;
     let inspector = role("INSPECTOR")?;
     let bench = role("BENCH")?;
@@ -344,6 +336,6 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         return Err("business score differs from the six gauged parts".into());
     }
     Ok(
-        json!({"status":"passed","task":"11M","simulator_complete":history.simulator_complete,"violations":0,"domain_calls":evidence.len(),"effects":evidence,"captured_records":dynamic["captured_records"],"runtime_binary_sha256":artifact["runtime_binary_sha256"]}),
+        json!({"status":"passed","task":"11M","simulator_complete":history.simulator_complete,"violations":0,"domain_calls":evidence.len(),"effects":evidence,"captured_records":history.execution["captured_records"],"runtime_binary_sha256":artifact["runtime_binary_sha256"]}),
     )
 }

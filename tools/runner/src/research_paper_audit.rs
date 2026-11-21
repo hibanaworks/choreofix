@@ -27,24 +27,14 @@ const CHAPTERS: [(&str, &str, &str, &str, &str); 3] = [
     ),
 ];
 
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = history.execution;
+    let artifact = history.projection;
+    let rows = history.records();
     let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("empty paper history")?["message"];
-    let history = crate::journal::read(rows, artifact, dynamic)?;
     let actors = history.participants;
-    if compiled["task"] != "3M" || fixture["type"] != "fixtures" || fixture["task"] != "3M" {
-        return Err("foreign task fixture or projection".into());
-    }
-    let role = |name: &str| {
-        compiled["roles"][name]
-            .as_u64()
-            .ok_or_else(|| format!("missing projected role {name}"))
-    };
-    let label = |table: &Value, name: &str| {
-        table[name]
-            .as_u64()
-            .ok_or_else(|| format!("missing projected message {name}"))
-    };
+    let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
+    let label = |table: &Value, name: &str| crate::projection::named_id(table, name).map(u64::from);
     let labels = &compiled["labels"];
     let contracts = projection::contracts(compiled)?;
     let evaluated = history.scored_events;

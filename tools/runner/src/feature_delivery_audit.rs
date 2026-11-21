@@ -10,11 +10,6 @@ use std::{
     path::Path,
 };
 
-fn named(compiled: &Value, group: &str, name: &str) -> Result<u64> {
-    compiled[group][name]
-        .as_u64()
-        .ok_or_else(|| format!("compiled {group} {name}").into())
-}
 fn target<'a>(call: &Call<'a>) -> Result<&'a str> {
     let key = match call.tool {
         "implement_feature" => "feature_name",
@@ -78,18 +73,13 @@ fn business(frame: &Frame, roles: &BTreeSet<u64>) -> bool {
         && frame.value().is_ok_and(|v| v.is_object())
 }
 
-pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
-    let compiled = &projection["compiled"];
-    if compiled["task"] != "6M" {
-        return Err("feature-delivery compiled task".into());
-    }
-    let role = |name: &str| named(compiled, "roles", name);
-    let label = |name: &str| named(compiled, "labels", name);
-    let fixture = &rows.first().ok_or("empty evidence")?["message"];
-    if fixture["type"] != "fixtures" || fixture["task"] != "6M" {
-        return Err("6M fixture".into());
-    }
-    let journal = crate::journal::read(rows, projection, dynamic)?;
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let rows = journal.records();
+    let compiled = &journal.projection["compiled"];
+    let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
+    let label = |name: &str| crate::projection::named_id(&compiled["labels"], name).map(u64::from);
+    let fixture = journal.fixture();
     let actors = journal.participants;
 
     let crate::journal::Journal {
@@ -619,7 +609,9 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let journal = crate::journal::read(&rows, &projection, dynamic)?;
     let roles = BUSINESS_ROLES
         .into_iter()
-        .map(|name| named(&projection["compiled"], "roles", name))
+        .map(|name| {
+            crate::projection::named_id(&projection["compiled"]["roles"], name).map(u64::from)
+        })
         .collect::<Result<BTreeSet<_>>>()?;
     let selected = journal
         .frames
@@ -629,7 +621,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .collect::<Vec<_>>();
     fs::create_dir(output)?;
     let mut verdicts = crate::journal::json_frame_mutants(&rows, &selected, |changed| {
-        check(changed, &projection, dynamic)
+        crate::journal::check_effects(changed, &projection, dynamic)
     })?;
     let id = *selected.first().ok_or("actual business frame")?;
     for (field, value) in [("frame_label", 65535), ("lane", 255)] {
@@ -639,7 +631,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 row["message"][field] = json!(value);
             }
         }
-        let error = check(&changed, &projection, dynamic)
+        let error = crate::journal::check_effects(&changed, &projection, dynamic)
             .err()
             .ok_or("coherent invalid header accepted")?;
         verdicts.push(json!({"frame_id":id,"kind":format!("coherent_wrong_{field}"),"rejected":true,"error":error.to_string()}));

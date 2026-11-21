@@ -3,34 +3,11 @@ use crate::{evidence::Result, journal};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
-    let effects = effects(rows, artifact, dynamic)?;
-    Ok(
-        json!({"status":"passed","task":"15E","simulator_complete":true,"violations":0,
-        "domain_calls":effects.len(),"effects":effects,"captured_records":dynamic["captured_records"],
-        }),
-    )
-}
-
-pub(crate) fn effects(rows: &[Value], artifact: &Value, epf: &Value) -> Result<Vec<Value>> {
-    let fixture = &rows.first().ok_or("empty wafer journal")?["message"];
-    let journal = crate::journal::read(rows, artifact, epf)?;
-
-    if fixture["task"] != "15E" || artifact["compiled"]["task"] != "15E" {
-        return Err("foreign task fixture or projection".into());
-    }
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let artifact = journal.projection;
     let roles = &artifact["compiled"]["roles"];
-    let role = |name: &str| {
-        roles[name]
-            .as_u64()
-            .ok_or_else(|| format!("missing wafer role {name}"))
-    };
-    let label = |name: &str| {
-        artifact["compiled"]["labels"][name]
-            .as_u64()
-            .and_then(|n| u8::try_from(n).ok())
-            .ok_or_else(|| format!("missing wafer message {name}"))
-    };
+    let role = |name: &str| crate::projection::named_id(roles, name).map(u64::from);
+    let label = |name: &str| crate::projection::named_id(&artifact["compiled"]["labels"], name);
     let pairs = [
         ("ENGINEER", "WAFER"),
         ("DEP", "DEP_INBOX"),
@@ -478,5 +455,9 @@ pub(crate) fn effects(rows: &[Value], artifact: &Value, epf: &Value) -> Result<V
             disposition = Some(decision);
         }
     }
-    Ok(evidence)
+    Ok(
+        json!({"status":"passed","task":"15E","simulator_complete":true,"violations":0,
+        "domain_calls":evidence.len(),"effects":evidence,"captured_records":journal.execution["captured_records"],
+        }),
+    )
 }

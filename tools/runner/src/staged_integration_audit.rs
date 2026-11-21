@@ -69,23 +69,13 @@ fn input<'a>(
     Ok(previous)
 }
 
-pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
-    let compiled = &projection["compiled"];
-    let fixture = &rows.first().ok_or("empty execution evidence")?["message"];
-    if compiled["task"] != "6H" || fixture["type"] != "fixtures" || fixture["task"] != "6H" {
-        return Err("staged-development source and run identity".into());
-    }
-    let role = |name: &str| -> Result<u64> {
-        compiled["roles"][name]
-            .as_u64()
-            .ok_or_else(|| format!("compiled role {name}").into())
-    };
-    let label = |name: &str| -> Result<u64> {
-        compiled["labels"][name]
-            .as_u64()
-            .ok_or_else(|| format!("compiled label {name}").into())
-    };
-    let journal = crate::journal::read(rows, projection, dynamic)?;
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let rows = journal.records();
+    let compiled = &journal.projection["compiled"];
+    let fixture = journal.fixture();
+    let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
+    let label = |name: &str| crate::projection::named_id(&compiled["labels"], name).map(u64::from);
     let actors = journal.participants;
 
     let crate::journal::Journal {
@@ -860,7 +850,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .collect::<Vec<_>>();
     fs::create_dir(output)?;
     let mut verdicts = crate::journal::json_frame_mutants(&rows, &selected, |changed| {
-        check(changed, &projection, dynamic)
+        crate::journal::check_effects(changed, &projection, dynamic)
     })?;
     let id = *selected.first().ok_or("actual business frame")?;
     for (field, value) in [("frame_label", 65535), ("lane", 255)] {
@@ -870,7 +860,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 row["message"][field] = json!(value);
             }
         }
-        let error = check(&changed, &projection, dynamic)
+        let error = crate::journal::check_effects(&changed, &projection, dynamic)
             .err()
             .ok_or("coherent invalid header accepted")?;
         verdicts.push(json!({"frame_id":id,"kind":format!("coherent_wrong_{field}"),"rejected":true,"error":error.to_string()}));

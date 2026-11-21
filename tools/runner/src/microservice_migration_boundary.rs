@@ -361,7 +361,7 @@ async fn run_wash_order(
         let rpc = premature.remove(retry.emitted);
         premature.insert(ready, rpc);
         let execution = projection::check_dynamic(&artifact, &premature)?;
-        let err = crate::microservice_migration_audit::check(&premature, &artifact, &execution)
+        let err = crate::journal::check_effects(&premature, &artifact, &execution)
             .expect_err("a previous test request cannot admit a premature retry");
         assert!(err.to_string().contains("missing matching frame"), "{err}");
         drop(premature);
@@ -383,7 +383,7 @@ async fn run_wash_order(
             .ok_or("score events")?
             .retain(|e| e["result"]["receipt"] != outcome["data"]["receipt"]);
         let execution = projection::check_dynamic(&artifact, &missing)?;
-        let err = crate::microservice_migration_audit::check(&missing, &artifact, &execution)
+        let err = crate::journal::check_effects(&missing, &artifact, &execution)
             .expect_err("a dropped RPC and score must leave an unmatched request");
         assert!(
             err.to_string().contains("multiple matching frames")

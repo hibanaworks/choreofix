@@ -45,15 +45,16 @@ fn prior<'a>(calls: &'a BTreeMap<u64, Call>, call: &Call, tool: &str) -> Result<
         .ok_or("missing actual completed input")?;
     Ok(earlier.result.1)
 }
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
-    let fixture = &rows.first().ok_or("empty codebase evidence")?["message"];
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let artifact = journal.projection;
+    let rows = journal.records();
+    let fixture = journal.fixture();
     let task = fixture["task"].as_str().ok_or("codebase task")?;
-    let journal = crate::journal::read(rows, artifact, dynamic)?;
     let actors = journal.participants;
     let participants = actors.len();
     let compiled = &artifact["compiled"];
-    if !matches!(task, "1E" | "1M" | "1H")
-        || compiled["session"] != 20
+    if compiled["session"] != 20
         || compiled["participants"]
             .as_object()
             .is_none_or(|p| p.len() != participants)
@@ -512,7 +513,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .map(|(id, _)| *id)
         .collect::<Vec<_>>();
     let mut rejected = crate::journal::json_frame_mutants(&rows, &ids, |changed| {
-        check(changed, &projection, dynamic)
+        crate::journal::check_effects(changed, &projection, dynamic)
     })?;
     for field in ["frame_label", "lane"] {
         let mut changed = rows.clone();
@@ -521,7 +522,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 row["message"][field] = json!(if field == "lane" { 255 } else { 65535 });
             }
         }
-        let error = check(&changed, &projection, dynamic)
+        let error = crate::journal::check_effects(&changed, &projection, dynamic)
             .err()
             .ok_or("coherent invalid wire header accepted")?;
         rejected.push(json!({"kind":format!("coherent_wrong_{field}"),"rejected":true,"error":error.to_string()}));
@@ -585,7 +586,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
             }
             return Err(format!("no input for record mutation {kind}").into());
         };
-        let error = check(&changed, &projection, dynamic)
+        let error = crate::journal::check_effects(&changed, &projection, dynamic)
             .err()
             .ok_or_else(|| format!("accepted record mutation {kind}"))?;
         rejected

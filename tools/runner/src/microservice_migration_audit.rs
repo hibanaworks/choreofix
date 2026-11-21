@@ -3,25 +3,16 @@ use crate::{evidence::Result, journal};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
-    let fixture = &rows.first().ok_or("empty 4H history")?["message"];
-    if artifact["compiled"]["task"] != "4H" || fixture["task"] != "4H" {
-        return Err("expected a 4H projection and participants".into());
-    }
-    let history = crate::journal::read(rows, artifact, dynamic)?;
-
+pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
+    let artifact = history.projection;
     let mut result = preparation(&history, &artifact["compiled"]["roles"])?;
-    result["epf_records"] = dynamic["captured_records"].clone();
+    result["epf_records"] = history.execution["captured_records"].clone();
     result["runtime_sha256"] = artifact["runtime_binary_sha256"].clone();
     Ok(result)
 }
 
 pub(super) fn preparation(history: &journal::Journal, roles: &Value) -> Result<Value> {
-    let role = |name: &str| {
-        roles[name]
-            .as_u64()
-            .ok_or_else(|| format!("missing 4H role {name}"))
-    };
+    let role = |name: &str| crate::projection::named_id(roles, name).map(u64::from);
     let scored = history.scored_events;
     if history.simulator_complete {
         return Err("4H score and effect inventory disagree or contain a violation".into());

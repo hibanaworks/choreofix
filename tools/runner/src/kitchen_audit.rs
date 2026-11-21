@@ -22,20 +22,12 @@ fn take<'a>(
     }
     Ok((id, frame))
 }
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
-    let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("empty kitchen trace")?["message"];
-    if compiled["task"] != "12E" || fixture["task"] != "12E" || fixture["type"] != "fixtures" {
-        return Err("kitchen source or input differs".into());
-    }
-    let journal = crate::journal::read(rows, artifact, dynamic)?;
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let compiled = &journal.projection["compiled"];
 
-    let name = |group: &str, key: &str| -> Result<u64> {
-        compiled[group][key]
-            .as_u64()
-            .filter(|n| *n <= 255)
-            .ok_or_else(|| format!("compiled {group} {key}").into())
-    };
+    let name =
+        |group: &str, key: &str| crate::projection::named_id(&compiled[group], key).map(u64::from);
     let crate::journal::Journal {
         frames,
         calls,
@@ -312,7 +304,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .map(|id| id.as_u64().ok_or_else(|| "frame ID".into()))
         .collect::<Result<Vec<_>>>()?;
     let mut checked = crate::journal::json_frame_mutants(&rows, &ids, |changed| {
-        check(changed, &artifact, dynamic)
+        crate::journal::check_effects(changed, &artifact, dynamic)
     })?;
     let first = *ids.first().ok_or("missing kitchen frame")?;
     for field in ["frame_label", "lane"] {
@@ -331,7 +323,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         if count != 1 {
             return Err("kitchen header mutation must change one actual acceptance".into());
         }
-        let error = check(&changed, &artifact, dynamic)
+        let error = crate::journal::check_effects(&changed, &artifact, dynamic)
             .err()
             .ok_or("accepted coherently changed kitchen header")?;
         checked.push(

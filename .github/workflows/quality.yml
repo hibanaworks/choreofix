@@ -44,7 +44,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: hibanaworks/hibana-epf
-          ref: f966c2817c68994315033fa65fbf72390fa107b4
+          ref: a75502133c5b67a2bba6546de3338b6a4c8980eb
           path: hibana-epf
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:

@@ -3,13 +3,11 @@ use crate::{evidence::Result, journal::one};
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, ops::Range};
 
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let artifact = journal.projection;
+    let rows = journal.records();
     let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("missing pipeline fixture")?["message"];
-    if compiled["task"] != "16M" || fixture["task"] != "16M" {
-        return Err("foreign pipeline task".into());
-    }
-    let journal = crate::journal::read(rows, artifact, dynamic)?;
     let score = journal.scored_events;
     let role = |name: &str| compiled["roles"][name].as_u64().ok_or("pipeline role");
     let mut used = BTreeSet::new();

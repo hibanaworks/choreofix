@@ -12,15 +12,14 @@ use std::{
     process::{Command, Stdio},
 };
 
-pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let projection = journal.projection;
     use crate::philosopher_identity::{AGENTS, THINK_COMPLETED, THINK_REQUEST, roles};
-    let fixture = &records.first().ok_or("empty evidence")?["message"];
-    if !matches!(fixture["task"].as_str(), Some("9E" | "9M" | "9H"))
-        || fixture["terminal_review_failure"] != false
-    {
+    let fixture = journal.fixture();
+    if fixture["terminal_review_failure"] != false {
         return Err("different task or invalid dining configuration".into());
     }
-    let journal = crate::journal::read(records, projection, dynamic)?;
     let actors = journal.participants;
     let count = actors.len();
     // Physical integration identities, shared with the actual application.

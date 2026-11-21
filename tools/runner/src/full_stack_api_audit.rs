@@ -6,23 +6,12 @@ use crate::{
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, ops::Range};
 
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
-    let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("empty full-stack evidence")?["message"];
-    let journal = crate::journal::read(rows, artifact, dynamic)?;
-    if compiled["task"] != "8M" || fixture["task"] != "8M" || fixture["type"] != "fixtures" {
-        return Err("foreign task fixture or projection".into());
-    }
-    let role = |name: &str| {
-        compiled["roles"][name]
-            .as_u64()
-            .ok_or_else(|| format!("compiled role {name}"))
-    };
-    let label = |name: &str| {
-        compiled["labels"][name]
-            .as_u64()
-            .ok_or_else(|| format!("compiled message {name}"))
-    };
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let rows = journal.records();
+    let compiled = &journal.projection["compiled"];
+    let fixture = journal.fixture();
+    let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
+    let label = |name: &str| crate::projection::named_id(&compiled["labels"], name).map(u64::from);
     let frames = &journal.frames;
     let events = journal.scored_events;
     if !journal.simulator_complete
@@ -497,6 +486,6 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     Ok(json!({
         "status":"passed","task":"8M","depth":fixture["depth"],"domain_calls":effects.len(),
         "effects":effects,"early_migration_requests":early_requests,"resource_transfers":transfers,
-        "captured_records":dynamic["captured_records"],"simulator_complete":true,"violations":0,
+        "captured_records":journal.execution["captured_records"],"simulator_complete":true,"violations":0,
     }))
 }

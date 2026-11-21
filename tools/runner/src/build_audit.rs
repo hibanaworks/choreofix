@@ -7,20 +7,12 @@ use std::{
     path::Path,
 };
 
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
-    let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("empty build evidence")?["message"];
-    if compiled["task"] != "10E" || fixture["task"] != "10E" || fixture["type"] != "fixtures" {
-        return Err("shared build task differs".into());
-    }
-    let journal = crate::journal::read(rows, artifact, dynamic)?;
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let compiled = &journal.projection["compiled"];
 
-    let name = |group: &str, key: &str| -> Result<u64> {
-        compiled[group][key]
-            .as_u64()
-            .filter(|n| *n <= 255)
-            .ok_or_else(|| format!("compiled {group} {key}").into())
-    };
+    let name =
+        |group: &str, key: &str| crate::projection::named_id(&compiled[group], key).map(u64::from);
     let service = name("roles", "BUILD_SERVICE")?;
     let core = name("roles", "CORE_LIB")?;
     let types = name("roles", "SHARED_TYPES")?;
@@ -265,7 +257,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .map(|id| id.as_u64().ok_or_else(|| "build effect frame id".into()))
         .collect::<Result<Vec<_>>>()?;
     let checked = crate::journal::json_frame_mutants(&rows, &ids, |changed| {
-        check(changed, &artifact, dynamic)
+        crate::journal::check_effects(changed, &artifact, dynamic)
     })?;
     fs::create_dir(output)?;
     let result = json!({"status":"passed","baseline":baseline,"checked":checked,

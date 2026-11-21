@@ -6,20 +6,15 @@ use crate::{
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
-    let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("missing 7H evidence")?["message"];
-    let history = crate::journal::read(rows, artifact, dynamic)?;
-    if fixture["type"] != "fixtures" || fixture["task"] != "7H" || compiled["task"] != "7H" {
-        return Err("foreign task fixture or projection".into());
-    }
+pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
+    let compiled = &history.projection["compiled"];
     let mut report = effects(compiled, &history)?;
-    report["captured_records"] = dynamic["captured_records"].clone();
+    report["captured_records"] = history.execution["captured_records"].clone();
     Ok(report)
 }
 
 pub(crate) fn effects(compiled: &Value, history: &Journal) -> Result<Value> {
-    let role = |name: &str| compiled["roles"][name].as_u64().ok_or("7H projected role");
+    let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
     let scores = history.scored_events;
     let mut ordered: Vec<_> = history.calls.values().collect();
     ordered.sort_by_key(|call| call.emitted);

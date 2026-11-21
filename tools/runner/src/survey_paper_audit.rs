@@ -34,21 +34,14 @@ const CHAPTERS: [(&str, &str, &str, &str, &str); 4] = [
     ),
 ];
 
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(history: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = history.execution;
+    let artifact = history.projection;
+    let rows = history.records();
     let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("empty survey journal")?["message"];
-    let history = crate::journal::read(rows, artifact, dynamic)?;
     let actors = history.participants;
 
-    if compiled["task"] != "3H" || fixture["type"] != "fixtures" || fixture["task"] != "3H" {
-        return Err("foreign task fixture or projection".into());
-    }
-
-    let role = |name: &str| {
-        compiled["roles"][name]
-            .as_u64()
-            .ok_or_else(|| format!("missing survey role {name}"))
-    };
+    let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
     let contracts = projection::contracts(compiled)?;
     let scores = history.scored_events;
     if !history.simulator_complete {

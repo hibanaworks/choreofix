@@ -20,6 +20,14 @@ const LOCAL: u64 = 0x0300;
 const SEND: u64 = 0x0301;
 const RECV: u64 = 0x0302;
 
+/// Logical roles and message labels in the compiled projection are both one byte.
+pub(crate) fn named_id(names: &Value, name: &str) -> Result<u8> {
+    names[name]
+        .as_u64()
+        .and_then(|id| u8::try_from(id).ok())
+        .ok_or_else(|| format!("missing or invalid projected ID for {name}").into())
+}
+
 pub(crate) fn contracts(compiled: &Value) -> Result<BTreeMap<u16, [u8; 6]>> {
     if compiled["type"] != "compiled_projection"
         || compiled["format_version"] != 1

@@ -22,20 +22,12 @@ fn take_frame<'a>(
     }
     Ok((id, frame))
 }
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
-    let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("empty manufacturing evidence")?["message"];
-    if compiled["task"] != "11E" || fixture["task"] != "11E" || fixture["type"] != "fixtures" {
-        return Err("manufacturing source or fixture differs".into());
-    }
-    let journal = crate::journal::read(rows, artifact, dynamic)?;
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let compiled = &journal.projection["compiled"];
 
-    let name = |group: &str, key: &str| -> Result<u64> {
-        compiled[group][key]
-            .as_u64()
-            .filter(|n| *n <= 255)
-            .ok_or_else(|| format!("compiled {group} {key}").into())
-    };
+    let name =
+        |group: &str, key: &str| crate::projection::named_id(&compiled[group], key).map(u64::from);
     let supervisor = name("roles", "SUPERVISOR")?;
     let crate::journal::Journal {
         frames,
@@ -313,7 +305,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .map(|id| id.as_u64().ok_or_else(|| "manufacturing frame id".into()))
         .collect::<Result<Vec<_>>>()?;
     let mut checked = crate::journal::json_frame_mutants(&rows, &ids, |changed| {
-        check(changed, &artifact, dynamic)
+        crate::journal::check_effects(changed, &artifact, dynamic)
     })?;
     let first = *ids.first().ok_or("manufacturing frame")?;
     for field in ["frame_label", "lane"] {
@@ -332,7 +324,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         if observations != 1 {
             return Err("manufacturing header mutation must change one actual acceptance".into());
         }
-        let error = check(&changed, &artifact, dynamic)
+        let error = crate::journal::check_effects(&changed, &artifact, dynamic)
             .err()
             .ok_or("coherently altered manufacturing wire header accepted")?;
         checked.push(

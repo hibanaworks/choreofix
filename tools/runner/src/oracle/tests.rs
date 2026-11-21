@@ -1385,7 +1385,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
             "every physical effect must originate at a wash guest"
         );
         let epf = projection::check_dynamic(&artifact, &rows)?;
-        let audited = crate::wafer_audit::effects(&rows, &artifact, &epf)?;
+        let audited = crate::journal::check_effects(&rows, &artifact, &epf)?;
         let compiled = &artifact["compiled"];
         let roles = &compiled["roles"];
         let probe_effects =
@@ -1589,7 +1589,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
         save(
             &directory.join("result.json"),
             &json!({"task":"15E","order":order,"wasm_participants":6,"disposition":decision,"deliveries":delivered,"deferred_reads":deferred_reads,
-            "model_calls":0,"scored_benchmark":false,"fabrication_fixture_calls":0, "fixture_post_validation_calls":0,"audited_effects":audited,"probe_effects":probe_effects,
+            "model_calls":0,"scored_benchmark":false,"fabrication_fixture_calls":0, "fixture_post_validation_calls":0,"audited_effects":audited["effects"],"probe_effects":probe_effects,
                 "shell_effects":guest_effects,"concurrent_load_exposure_first":exposure_first,"measurements":measurements,"instrument_effects":effects,"confirmations":confirmations,"rejected_confirmations":rejected_confirmations,"etcher_confirmation_after_inspections":deferred_reads,"injected_first_check_failure":retry_control,"injected_first_measurement_failure":retry,"injected_first_etch_failure":retry_etch,"early_reads":2,"rejected_wrong_operations":3,"rejected_duplicate_etch":true,"score":outcome["score"],"epf":epf,
             "events_sha256":digest(&journal)?,"runtime_binary_sha256":digest(&binary)?,
             "wash_sha256":digest(&wash)?,"build_receipt_sha256":digest(&output.join("build-receipt.json"))?}),
@@ -2722,7 +2722,7 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                 .map(serde_json::from_str)
                 .collect::<std::result::Result<_, _>>()?;
             let epf = projection::check_dynamic(&artifact, &rows)?;
-            let verified = crate::manufacturing_rework_audit::check(&rows, &artifact, &epf)?;
+            let verified = crate::journal::check_effects(&rows, &artifact, &epf)?;
             assert_eq!(verified["simulator_complete"], outcome["score"]["complete"]);
             assert_eq!(verified["domain_calls"], events.len());
             let effects = verified["effects"]

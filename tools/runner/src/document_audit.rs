@@ -39,20 +39,13 @@ fn snapshot(calls: &[&Call], before: usize) -> Result<Value> {
     Ok(material)
 }
 
-pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let artifact = journal.projection;
     let compiled = &artifact["compiled"];
-    let fixture = &rows.first().ok_or("empty document evidence")?["message"];
-    if compiled["task"] != "7E" || fixture["task"] != "7E" || fixture["type"] != "fixtures" {
-        return Err("document task differs".into());
-    }
-    let journal = crate::journal::read(rows, artifact, dynamic)?;
 
-    let name = |group: &str, key: &str| -> Result<u64> {
-        compiled[group][key]
-            .as_u64()
-            .filter(|n| *n <= 255)
-            .ok_or_else(|| format!("compiled {group} {key}").into())
-    };
+    let name =
+        |group: &str, key: &str| crate::projection::named_id(&compiled[group], key).map(u64::from);
     let service = name("roles", "DOCUMENT_SERVICE")?;
     let document = name("roles", "DOCUMENT")?;
     let editor = name("roles", "EDITOR")?;
@@ -527,8 +520,9 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .map(|id| id.as_u64().ok_or("effect frame ID"))
         .collect::<std::result::Result<Vec<_>, _>>()?;
     fs::create_dir(output)?;
-    let mut verdicts =
-        json_frame_mutants(&rows, &ids, |changed| check(changed, &artifact, dynamic))?;
+    let mut verdicts = json_frame_mutants(&rows, &ids, |changed| {
+        crate::journal::check_effects(changed, &artifact, dynamic)
+    })?;
     for field in ["frame_label", "lane"] {
         let mut changed = rows.clone();
         for row in &mut changed {
@@ -536,7 +530,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 row["message"][field] = json!(if field == "lane" { 255 } else { 65535 });
             }
         }
-        let error = check(&changed, &artifact, dynamic)
+        let error = crate::journal::check_effects(&changed, &artifact, dynamic)
             .err()
             .ok_or("coherent invalid wire header accepted")?;
         verdicts.push(json!({"kind":format!("coherent_wrong_{field}"),"rejected":true,"error":error.to_string()}));

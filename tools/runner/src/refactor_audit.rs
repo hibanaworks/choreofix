@@ -87,23 +87,12 @@ fn checked(value: &Value, module: &str, hash: &str) -> Result<()> {
     }
     Ok(())
 }
-pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let projection = journal.projection;
     let c = &projection["compiled"];
-    let fixture = &rows.first().ok_or("empty refactor record")?["message"];
-    if c["task"] != "4M" || fixture["task"] != "4M" || fixture["type"] != "fixtures" {
-        return Err("shared-refactor source and run differ".into());
-    }
-    let role = |name: &str| -> Result<u64> {
-        c["roles"][name]
-            .as_u64()
-            .ok_or_else(|| format!("compiled role {name}").into())
-    };
-    let label = |name: &str| -> Result<u64> {
-        c["labels"][name]
-            .as_u64()
-            .ok_or_else(|| format!("compiled label {name}").into())
-    };
-    let journal = crate::journal::read(rows, projection, dynamic)?;
+    let role = |name: &str| crate::projection::named_id(&c["roles"], name).map(u64::from);
+    let label = |name: &str| crate::projection::named_id(&c["labels"], name).map(u64::from);
     let actors = journal.participants;
 
     let journal::Journal {
@@ -542,7 +531,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
             }
             _ => unreachable!(),
         }
-        match check(&changed, &artifact, dynamic) {
+        match crate::journal::check_effects(&changed, &artifact, dynamic) {
             Ok(_) => return Err(format!("refactor auditor accepted {name}").into()),
             Err(error) => {
                 reports.push(json!({"name":name,"rejected":true,"error":error.to_string()}))

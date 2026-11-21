@@ -44,23 +44,11 @@ fn frame<'a>(
     used.insert(frame.sent);
     Ok(frame)
 }
-pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
-    let compiled = &projection["compiled"];
-    let fixture = &rows.first().ok_or("empty lab capture")?["message"];
-    if compiled["task"] != "13E" || fixture["type"] != "fixtures" || fixture["task"] != "13E" {
-        return Err("foreign laboratory source/run".into());
-    }
-    let role = |name: &str| -> Result<u64> {
-        compiled["roles"][name]
-            .as_u64()
-            .ok_or_else(|| format!("compiled role {name}").into())
-    };
-    let label = |name: &str| -> Result<u64> {
-        compiled["labels"][name]
-            .as_u64()
-            .ok_or_else(|| format!("compiled message {name}").into())
-    };
-    let journal = crate::journal::read(rows, projection, dynamic)?;
+pub(crate) fn check(journal: crate::journal::Journal<'_>) -> Result<Value> {
+    let dynamic = journal.execution;
+    let compiled = &journal.projection["compiled"];
+    let role = |name: &str| crate::projection::named_id(&compiled["roles"], name).map(u64::from);
+    let label = |name: &str| crate::projection::named_id(&compiled["labels"], name).map(u64::from);
     let actors = journal.participants;
 
     let journal::Journal {
@@ -526,7 +514,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
             }
             _ => unreachable!(),
         }
-        match check(&changed, &artifact, dynamic) {
+        match crate::journal::check_effects(&changed, &artifact, dynamic) {
             Ok(_) => return Err(format!("lab auditor accepted {name}").into()),
             Err(error) => {
                 reports.push(json!({"name":name,"rejected":true,"error":error.to_string()}))
