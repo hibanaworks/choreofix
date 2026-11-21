@@ -2462,7 +2462,7 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                             assert!(duplicate["stdout"].as_str().is_some_and(|s|s.contains("Permission denied")), "{duplicate}");
                             Ok(Some(order))
                         };
-                        let inspect = async |i: usize, part: &Value, other: Option<usize>| -> Result<Value> {
+                        let inspect = async |i: usize, part: &Value| -> Result<Value> {
                             let job = jobs[i].1;
                             let path = format!("/service/inspect/{job}");
                             let wrong = json!({"job_id":jobs[(i+1)%3].1});
@@ -2471,12 +2471,8 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                             let arguments = json!({"job_id":job});
                             let sent = guest.command("INSPECTOR", format!("printf '%s' '{arguments}' > {path}")).await?;
                             assert_eq!(sent["stdout"], "wash> ", "{sent}");
-                            if let Some(next) = other {
-                                let next_job = jobs[next].1;
-                                let next_args = json!({"job_id":next_job});
-                                let busy = guest.command("INSPECTOR", format!("printf '%s' '{next_args}' | dd of=/service/inspect/{next_job} oflag=nonblock")).await?;
-                                assert!(busy["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{busy}");
-                            }
+                            let duplicate = guest.command("INSPECTOR", format!("printf '%s' '{arguments}' | dd of={path} oflag=nonblock")).await?;
+                            assert!(duplicate["stdout"].as_str().is_some_and(|s|s.contains("Permission denied")), "{duplicate}");
                             let result = shell_json_result(&guest.command("INSPECTOR", "cat /service/inspection_result".into()).await?)?;
                             assert_eq!(result["data"]["input_part"], part["data"]["part"]);
                             let repeat = guest.command("INSPECTOR", format!("printf '%s' '{arguments}' | dd of={path} oflag=nonblock")).await?;
@@ -2552,7 +2548,7 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                                 if streamed && i == order[0] {
                                     submit(order[1]).await?;
                                 }
-                                let inspected = inspect(i, &part, None).await?;
+                                let inspected = inspect(i, &part).await?;
                                 if inspected["success"] == false {
                                     let dispatched = disposition(i, &inspected).await?.ok_or("missing rework order")?;
                                     let update = shell_json_result(&guest.command(agent, "cat /service/job_update".into()).await?)?;
@@ -2576,9 +2572,8 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                                 )?;
                                 parts.push((i, part));
                             }
-                            for (position, (i, part)) in parts.iter().cycle().skip(1).take(parts.len()).enumerate() {
-                                let other = (position == 0).then_some(parts[2].0);
-                                let inspected = inspect(*i, part, other).await?;
+                            for (i, part) in parts.iter().cycle().skip(1).take(parts.len()) {
+                                let inspected = inspect(*i, part).await?;
                                 if index % 2 == 0 && let Some(order) = disposition(*i, &inspected).await? {
                                     orders.push(order);
                                 }
@@ -2606,6 +2601,20 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                         }
                         for &i in &order {
                             if before & (1 << i) == 0 { submit_other(i).await?; read_other(i).await?; }
+                        }
+                        for i in order {
+                            let job = other_jobs[i].1;
+                            let args = json!({"job_id":job});
+                            let sent = guest.command("INSPECTOR",format!("printf '%s' '{args}' > /service/inspect/{job}")).await?;
+                            assert_eq!(sent["stdout"], "wash> ", "{sent}");
+                        }
+                        let mut returned = std::collections::BTreeSet::new();
+                        for _ in order {
+                            let reading = shell_json_result(&guest.command("INSPECTOR", "cat /service/inspection_result".into()).await?)?;
+                            let job = reading["data"]["job_id"].as_str().ok_or("missing measured job")?;
+                            assert!(other_jobs.iter().any(|entry|entry.1 == job) && returned.insert(job.to_owned()));
+                            assert_eq!(reading["data"]["input_part"]["artifact_id"],format!("part/{job}/1"));
+                            assert_eq!(reading["success"],true);
                         }
                         assert_eq!(guest.command("DISPATCHER", "exit 0".into()).await?["exit_status"], 0);
                         assert_eq!(guest.command("INSPECTOR", "exit 0".into()).await?["exit_status"], 0);
@@ -2636,13 +2645,13 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
             );
             assert_eq!(outcome["runtime_exit_code"], 0);
             assert_eq!(outcome["backend_errors"], json!([]));
-            assert_eq!(outcome["score"]["complete"], false);
+            assert_eq!(outcome["score"]["complete"], failures.is_empty());
             assert_eq!(outcome["score"]["violations"], json!([]));
             let events = outcome["score"]["events"]
                 .as_array()
                 .ok_or("station events")?;
             assert_eq!(orders.len(), failures.len());
-            assert_eq!(events.len(), 9 + orders.len());
+            assert_eq!(events.len(), 12 + orders.len());
             let rows: Vec<Value> = fs::read_to_string(&journal)?
                 .lines()
                 .map(serde_json::from_str)
@@ -2658,8 +2667,65 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                     rows.iter()
                         .filter(|row| row["direction"] == direction)
                         .count(),
-                    9 + orders.len()
+                    12 + orders.len()
                 );
+            }
+            let transfer = |source: &str, destination: &str| {
+                let mut transfers: Vec<_> = calls
+                    .iter()
+                    .filter(|call| {
+                        call["send_view"] == roles[source]
+                            && call["receive_commit"]["view"] == roles[destination]
+                    })
+                    .collect();
+                transfers
+                    .sort_by_key(|call| call["receive_commit"]["journal_row"].as_u64().unwrap());
+                transfers
+            };
+            let samples = transfer("GAUGE", "READOUT");
+            let readings = transfer("READOUT", "GAUGE");
+            let published = transfer("GAUGE", "INSPECTOR");
+            let measured: Vec<_> = rows
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| {
+                    r["direction"] == "domain_start" && r["message"]["tool"] == "inspect_quality"
+                })
+                .collect();
+            assert_eq!(
+                [
+                    samples.len(),
+                    readings.len(),
+                    published.len(),
+                    measured.len()
+                ],
+                [6; 4]
+            );
+            let mut gauge_effects = std::collections::BTreeMap::new();
+            let mut previous = 0;
+            for (((sample, reading), published), start) in samples
+                .into_iter()
+                .zip(readings)
+                .zip(published)
+                .zip(measured)
+            {
+                let job = start.1["message"]["arguments"]["job_id"]
+                    .as_str()
+                    .ok_or("missing inspected job")?;
+                let scored = events
+                    .iter()
+                    .find(|event| {
+                        event["tool"] == "inspect_quality" && event["args"]["job_id"] == job
+                    })
+                    .ok_or("unscored inspection")?;
+                let effect = received_instrument_effect(&rows, sample, reading, start, scored)?;
+                assert_eq!(sample["send_actor"], roles["BENCH"]);
+                let (sent, value) = json_frame(&rows, published)?;
+                assert_eq!(value, effect["result"]);
+                assert!(previous < effect["request_sent_row"].as_u64().unwrap());
+                assert!(effect["reply_received_row"].as_u64().unwrap() < sent as u64);
+                previous = sent as u64;
+                assert!(gauge_effects.insert(job.to_owned(), effect).is_none());
             }
             let starts: Vec<_> = rows
                 .iter()
@@ -2707,24 +2773,22 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                 assert_eq!(delivered["receive_commit"]["view"], roles["INSPECTOR"]);
                 assert_eq!(json_frame(&rows, delivered)?.1, part["data"]["part"]);
                 let check = find(&[i as u8], &roles["INSPECTOR_VM"], worker)?;
-                let reply = find(&[34], worker, &roles["INSPECTOR_VM"])?;
+                let presented = find(&[i as u8], worker, &roles["BENCH"])?;
+                let measured = find(&[i as u8], &roles["BENCH"], worker)?;
                 assert_eq!(check["send_view"], roles["INSPECTOR"]);
-                assert_eq!(reply["receive_commit"]["view"], roles["INSPECTOR"]);
                 let args = json!({"job_id":job});
-                let started = rows
-                    .iter()
-                    .enumerate()
-                    .find(|(_, r)| {
-                        r["direction"] == "domain_start"
-                            && r["message"]["tool"] == "inspect_quality"
-                            && r["message"]["arguments"] == args
-                    })
-                    .ok_or("inspection RPC")?;
-                let scored = events
-                    .iter()
-                    .find(|e| e["tool"] == "inspect_quality" && e["args"] == args)
-                    .ok_or("inspection score")?;
-                let inspection = received_instrument_effect(&rows, check, reply, started, scored)?;
+                let inspection = gauge_effects.get(job).ok_or("tool job was not measured")?;
+                assert_eq!(args, json_frame(&rows, check)?.1);
+                assert_eq!(args, json_frame(&rows, presented)?.1);
+                assert!(
+                    check["receive_commit"]["journal_row"].as_u64().unwrap()
+                        < json_frame(&rows, presented)?.0 as u64
+                );
+                assert!(
+                    presented["receive_commit"]["journal_row"].as_u64().unwrap()
+                        < inspection["request_sent_row"].as_u64().unwrap()
+                );
+                assert_eq!(json_frame(&rows, measured)?.1, inspection["result"]);
                 let (position, (_, shell)) = inspections
                     .iter()
                     .enumerate()
@@ -2770,7 +2834,7 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                     );
                     checked_orders.push(effect);
                 }
-                checked_inspections.push(inspection);
+                checked_inspections.push(inspection.clone());
                 assert_eq!(submitted["send_view"], roles[station]);
                 assert_eq!(returned["receive_commit"]["view"], roles[station]);
                 let using_tool = find(&[3, 4], worker, depot)?;
@@ -2901,6 +2965,28 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                             .ok_or("manufacturing completion")?
                 );
                 assert_eq!(score["agent"], agent);
+                let inspection = gauge_effects
+                    .get(job)
+                    .ok_or("station job was not measured")?;
+                let check = wire(job_id, &roles["INSPECTOR"], cpu)?;
+                let presented = wire(job_id, cpu, &roles["BENCH"])?;
+                let measured = wire(job_id, &roles["BENCH"], cpu)?;
+                assert_eq!(json_frame(&rows, check)?.1, inspection["arguments"]);
+                assert_eq!(json_frame(&rows, presented)?.1, inspection["arguments"]);
+                assert!(
+                    presented["receive_commit"]["journal_row"].as_u64().unwrap()
+                        < inspection["request_sent_row"].as_u64().unwrap()
+                );
+                assert!(
+                    check["receive_commit"]["journal_row"].as_u64().unwrap()
+                        < json_frame(&rows, presented)?.0 as u64
+                );
+                assert_eq!(json_frame(&rows, measured)?.1, inspection["result"]);
+                assert_eq!(
+                    inspection["result"]["data"]["input_part"],
+                    effect["result"]["data"]["part"]
+                );
+                checked_inspections.push(inspection.clone());
                 other_effects.push(effect);
             }
             if before == 7 {
@@ -3019,7 +3105,7 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
             };
             save(
                 &directory.join("checked.json"),
-                &json!({"order":order,"other_job_first_mask":before,"other_job_effects":other_effects,"dispatch_while_other_job_active":dispatch_overlap,"submitted_before_reads":batch,"maximum_outstanding_jobs":peak,"maximum_simultaneous_effects":simulator_peak,"epf_records":epf["captured_records"],"effects":effects,"inspections":checked_inspections,"dispatches":checked_orders,"inspection_order":inspections.iter().map(|(i,_)|jobs[*i].1).collect::<Vec<_>>(),"score_complete":false,"model_calls":0}),
+                &json!({"order":order,"other_job_first_mask":before,"other_job_effects":other_effects,"dispatch_while_other_job_active":dispatch_overlap,"submitted_before_reads":batch,"maximum_outstanding_jobs":peak,"maximum_simultaneous_effects":simulator_peak,"epf_records":epf["captured_records"],"effects":effects,"inspections":checked_inspections,"dispatches":checked_orders,"inspection_order":events.iter().filter(|e|e["tool"]=="inspect_quality").map(|e|&e["args"]["job_id"]).collect::<Vec<_>>(),"score_complete":outcome["score"]["complete"],"model_calls":0}),
             )?;
         }
     }

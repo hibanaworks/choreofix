@@ -77,10 +77,11 @@ pub async fn run<const WORKER: u8, const MACHINE: u8>(
         let request = check.recv::<CheckPart<WORKER>>().await?;
         let arguments = imp::decode(request.as_bytes())?;
         imp::inspection_input(&material, &arguments)?;
-        let result = effects.apply(request).await?;
+        let sample = imp::JobArguments::from_bytes(request.as_bytes())?;
+        check.send::<CheckPart<WORKER>>(&sample).await?;
+        let result = imp::decode(check.recv::<Measurement<WORKER>>().await?)?;
         imp::inspected(&material, &arguments, &result)?;
         let bytes = imp::encode(&result)?;
-        check.send::<InspectionResult>(&bytes.as_slice()).await?;
         Ok((result, bytes))
     }
     .await?;
@@ -152,18 +153,30 @@ pub async fn station_job<const SERVICE: u8, const MACHINE: u8, const JOB: u8>(
         Ok::<(), ShellError>(())
     }
     .await?;
-    let [mut returned, mut file, mut inspector] = endpoint.par()?;
     async {
-        returned.send::<JobLoan<MACHINE>>(machine).await?;
-    };
-    async {
-        file.send::<JobResult>(&bytes.as_slice()).await?;
-    };
-    async {
-        let part = imp::encode(&result["data"]["part"])?;
-        inspector
-            .send::<FinishedPart<JOB>>(&part.as_slice())
-            .await?;
-    };
+        let [mut returned, mut file, mut inspector] = endpoint.par()?;
+        async {
+            returned.send::<JobLoan<MACHINE>>(machine).await?;
+        };
+        async {
+            file.send::<JobResult>(&bytes.as_slice()).await?;
+        };
+        async {
+            let part = imp::encode(&result["data"]["part"])?;
+            inspector
+                .send::<FinishedPart<JOB>>(&part.as_slice())
+                .await?;
+        };
+        Ok(())
+    }
+    .await?;
+    let request = endpoint.recv::<CheckPart<JOB>>().await?;
+    let arguments = imp::decode(request.as_bytes())?;
+    let material = &result["data"]["part"];
+    imp::inspection_input(material, &arguments)?;
+    let sample = imp::JobArguments::from_bytes(request.as_bytes())?;
+    endpoint.send::<CheckPart<JOB>>(&sample).await?;
+    let verdict = imp::decode(endpoint.recv::<Measurement<JOB>>().await?)?;
+    imp::inspected(material, &arguments, &verdict)?;
     Ok(())
 }

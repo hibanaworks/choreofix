@@ -32,6 +32,9 @@ use shell::{
 use std::{cell::Cell, time::Duration};
 
 struct Programs {
+    bench: RoleProgram<BENCH>,
+    gauge: RoleProgram<GAUGE>,
+    readout: RoleProgram<READOUT>,
     a_files: RoleProgram<A_FILES>,
     alpha_c_files: RoleProgram<ALPHA_C_FILES>,
     alpha_service: RoleProgram<ALPHA_SERVICE>,
@@ -65,6 +68,9 @@ struct Programs {
 fn programs() -> Programs {
     let source = g::seq(workstation_files(), source());
     Programs {
+        bench: project::<BENCH>(&source),
+        gauge: project::<GAUGE>(&source),
+        readout: project::<READOUT>(&source),
         a_files: project::<A_FILES>(&source),
         alpha_c_files: project::<ALPHA_C_FILES>(&source),
         alpha_service: project::<ALPHA_SERVICE>(&source),
@@ -687,24 +693,35 @@ impl Domain for ToolEffects {
             .iter()
             .position(|name| *name == agent)
             .ok_or("unknown fixture worker")?;
-        if tool != "do_job" || arguments != json!({"job_id":data::JOBS[worker]}) {
+        let job = data::JOBS
+            .iter()
+            .position(|name| arguments == json!({"job_id":name}))
+            .ok_or("fixture received an unknown job")?;
+        if tool != "do_job" || job % data::AGENTS.len() != worker {
             return Err("fixture received wrong effect arguments".to_owned());
         }
         let mut events = self.events.take();
-        events.push(json!({"boundary":"start", "worker":worker, "arguments":arguments}));
+        events.push(json!({"boundary":"start", "worker":worker, "job":job, "arguments":arguments}));
         self.events.set(events);
         hibana_runtime::host::sleep(self.delays[worker])
             .await
             .map_err(|error| error.to_string())?;
-        let station = ["STATION_ALPHA", "STATION_BETA", "STATION_GAMMA"][worker];
+        let station = [
+            "STATION_ALPHA",
+            "STATION_BETA",
+            "STATION_GAMMA",
+            "STATION_BETA",
+            "STATION_GAMMA",
+            "STATION_ALPHA",
+        ][job];
         let result = json!({"tool_name":tool,"success":true,
             "data":{"status":"completed","rework_order":null,"part":{
-                "artifact_id":format!("part/{}/1",data::JOBS[worker]),
+                "artifact_id":format!("part/{}/1",data::JOBS[job]),
                 "job_id":arguments["job_id"],"worker":agent,
                 "station":station,
                 "attempt":1}}});
         let mut events = self.events.take();
-        events.push(json!({"boundary":"finish","worker":worker,"result":result}));
+        events.push(json!({"boundary":"finish","worker":worker,"job":job,"result":result}));
         self.events.set(events);
         Ok(result)
     }
@@ -737,6 +754,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
             let (mut connection, _, _) = Bus::open(
                 ["WORKER_A", "WORKER_B", "WORKER_C", "INSPECTOR"],
                 [
+                    (session, GAUGE),
                     (session, TOOL_0),
                     (session, TOOL_1),
                     (session, ALPHA),
@@ -863,23 +881,11 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
             }
             .await?;
             let mut alpha_service = caller.enter(session, &programs.alpha_service)?;
-            let alpha_work = QualityEffects {
-                job: 5,
-                rejected_inspections: 0,
-                events: Cell::default(),
-            };
             let mut beta_service = caller.enter(session, &programs.beta_service)?;
-            let beta_work = QualityEffects {
-                job: 3,
-                rejected_inspections: 0,
-                events: Cell::default(),
-            };
             let mut gamma_service = caller.enter(session, &programs.gamma_service)?;
-            let gamma_work = QualityEffects {
-                job: 4,
-                rejected_inspections: 0,
-                events: Cell::default(),
-            };
+            let bench = caller.enter(session, &programs.bench)?;
+            let readout = host.enter(session, &programs.readout)?;
+            let gauge = host.enter(session, &programs.gauge)?;
             let mut inspector = caller.enter(session, &programs.inspector)?;
             let mut dispatcher = caller.enter(session, &programs.dispatcher)?;
             let delays: [Duration; 3] = std::array::from_fn(|worker| {
@@ -897,6 +903,8 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
             let c_bytes = data::encode(&json!({"job_id":data::JOBS[2]}))?;
             let execution = hibana_runtime::race(
                 async {
+                    async { localside::inspection::bench(bench).await?; };
+                    async { localside::inspection::readout(readout, gauge, &simulator).await?; };
                     async {
                         localside::tool_depot::run(
                             &mut depot,
@@ -915,7 +923,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                         }
                     };
                     async {
-                        localside::worker::station_job::<ALPHA_SERVICE,ALPHA_MACHINE,ALPHA_JOB_C>(&mut alpha_service,&alpha_work).await?;
+                        localside::worker::station_job::<ALPHA_SERVICE,ALPHA_MACHINE,ALPHA_JOB_C>(&mut alpha_service,&simulator).await?;
                     };
                     async {
                         localside::worker::run::<WORKER_A, ALPHA_MACHINE>(&mut a, &simulator)
@@ -930,7 +938,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                         }
                     };
                     async {
-                        localside::worker::station_job::<BETA_SERVICE,BETA_MACHINE,BETA_JOB_A>(&mut beta_service,&beta_work).await?;
+                        localside::worker::station_job::<BETA_SERVICE,BETA_MACHINE,BETA_JOB_A>(&mut beta_service,&simulator).await?;
                     };
                     async {
                         localside::worker::run::<WORKER_B, BETA_MACHINE>(&mut b, &simulator)
@@ -945,7 +953,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                         }
                     };
                     async {
-                        localside::worker::station_job::<GAMMA_SERVICE,GAMMA_MACHINE,GAMMA_JOB_B>(&mut gamma_service,&gamma_work).await?;
+                        localside::worker::station_job::<GAMMA_SERVICE,GAMMA_MACHINE,GAMMA_JOB_B>(&mut gamma_service,&simulator).await?;
                     };
                     async {
                         localside::worker::run::<WORKER_C, GAMMA_MACHINE>(&mut c, &simulator)
@@ -1009,10 +1017,19 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                                 _ => unreachable!(),
                             };
                             assert_eq!(data::decode(part)?["job_id"], data::JOBS[usize::from(job)]);
+                            let bytes = data::encode(&json!({"job_id":data::JOBS[usize::from(job)]}))?;
+                            match job {
+                                ALPHA_JOB_C => inspector.send::<CheckPart<ALPHA_JOB_C>>(&data::JobArguments::from_bytes(&bytes)?).await?,
+                                BETA_JOB_A => inspector.send::<CheckPart<BETA_JOB_A>>(&data::JobArguments::from_bytes(&bytes)?).await?,
+                                GAMMA_JOB_B => inspector.send::<CheckPart<GAMMA_JOB_B>>(&data::JobArguments::from_bytes(&bytes)?).await?,
+                                _ => unreachable!(),
+                            };
+                            let result = data::decode(inspector.recv::<InspectionResult>().await?)?;
+                            assert_eq!(result["data"]["input_part"]["job_id"], data::JOBS[usize::from(job)]);
                         }
                     };
                     async {
-                        bus.fixture_peer::<6>(&effects, &["do_job", "inspect_quality"])
+                        bus.fixture_peer::<12>(&effects, &["do_job", "inspect_quality"])
                             .await?;
                     };
                     async {
@@ -1027,6 +1044,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                                 let events = effects.events.take();
                                 let started = events.iter().any(|event| {
                                     event["boundary"] == "start"
+                                        && event["job"] == event["worker"]
                                         && event["worker"] == order[rank - 1]
                                 });
                                 effects.events.set(events);
@@ -1062,6 +1080,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                                 let events = effects.events.take();
                                 let started = events.iter().any(|event| {
                                     event["boundary"] == "start"
+                                        && event["job"] == event["worker"]
                                         && event["worker"] == order[rank - 1]
                                 });
                                 effects.events.set(events);
@@ -1097,6 +1116,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                                 let events = effects.events.take();
                                 let started = events.iter().any(|event| {
                                     event["boundary"] == "start"
+                                        && event["job"] == event["worker"]
                                         && event["worker"] == order[rank - 1]
                                 });
                                 effects.events.set(events);
@@ -1179,6 +1199,11 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                 ))
             })?;
             assert_eq!(audit?, captured.iter().map(Vec::len).sum::<usize>());
+            assert_eq!(events.len(), 12, "six jobs each start and finish");
+            let events: Vec<_> = events
+                .into_iter()
+                .filter(|event| event["job"].as_u64().is_some_and(|job| job < 3))
+                .collect();
             assert_eq!(
                 events.len(),
                 6,

@@ -53,7 +53,7 @@ const fn inspect(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
         FdBinding::write(FdWriteRow::Object),
     )
 }
-const INSPECTION_FILES: [ChoreoFsObject<'static>; 10] = [
+const INSPECTION_FILES: [ChoreoFsObject<'static>; 13] = [
     readable(b"service/parts/alpha_job_a", 4),
     readable(b"service/parts/beta_job_b", 5),
     readable(b"service/parts/gamma_job_c", 6),
@@ -64,6 +64,9 @@ const INSPECTION_FILES: [ChoreoFsObject<'static>; 10] = [
     readable(b"service/parts/beta_job_a", 11),
     readable(b"service/parts/gamma_job_b", 12),
     readable(b"service/parts/alpha_job_c", 13),
+    inspect(b"service/inspect/beta_job_a", 14),
+    inspect(b"service/inspect/gamma_job_b", 15),
+    inspect(b"service/inspect/alpha_job_c", 16),
 ];
 
 const fn request_reply(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
@@ -195,6 +198,9 @@ pub async fn run(path: &str) -> ShellResult<()> {
         ),
     );
     let inspector = project::<INSPECTOR>(&global);
+    let bench = project::<BENCH>(&global);
+    let gauge = project::<GAUGE>(&global);
+    let readout = project::<READOUT>(&global);
     let dispatcher = project::<DISPATCHER>(&global);
     let dispatcher_vm = project::<DISPATCHER_VM>(&global);
     let dispatcher_files = project::<DISPATCHER_FILES>(&global);
@@ -236,6 +242,9 @@ pub async fn run(path: &str) -> ShellResult<()> {
     let gamma_b = project::<GAMMA_B>(&global);
     let gamma_b_files = project::<GAMMA_B_FILES>(&global);
     let roles = [
+        ("BENCH", BENCH),
+        ("GAUGE", GAUGE),
+        ("READOUT", READOUT),
         ("ALPHA_MACHINE", ALPHA_MACHINE),
         ("ALPHA_OWNER", ALPHA_OWNER),
         ("ALPHA_SERVICE", ALPHA_SERVICE),
@@ -281,6 +290,9 @@ pub async fn run(path: &str) -> ShellResult<()> {
     .into_iter()
     .collect::<std::collections::BTreeMap<_, _>>();
     let programs = vec![
+        rows(&bench),
+        rows(&gauge),
+        rows(&readout),
         rows(&alpha_machine),
         rows(&alpha_owner),
         rows(&alpha_service),
@@ -325,7 +337,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
     ];
     let projection = json!({
         "type": "compiled_projection", "format_version": 1, "task": "11M",
-        "scope": "six initial jobs on shared workstations, tool-job inspections and rework orders", "session": SESSION,
+        "scope": "six initial jobs on shared workstations, one quality gauge, tool-job rework orders", "session": SESSION,
         "roles": roles,
         "programs": programs,
     });
@@ -366,6 +378,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
             (session, BETA),
             (session, GAMMA),
             (session, INSPECTOR),
+            (session, GAUGE),
             (session, DISPATCHER),
         ],
     );
@@ -411,6 +424,15 @@ pub async fn run(path: &str) -> ShellResult<()> {
         )
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
         let mut inspector_files = rv.enter(session, &inspector_files)?;
+        let bench = rv.enter(session, &bench)?;
+        let readout = rv.enter(session, &readout)?;
+        let gauge = rv.enter(session, &gauge)?;
+        async {
+            localside::inspection::bench(bench).await?;
+        };
+        async {
+            localside::inspection::readout(readout, gauge, &simulator).await?;
+        };
         let mut dispatcher_files = rv.enter(session, &dispatcher_files)?;
         let dispatcher = rv.enter(session, &dispatcher)?;
         let mut dispatcher_vm = rv.enter(session, &dispatcher_vm)?;
@@ -497,6 +519,8 @@ pub async fn run(path: &str) -> ShellResult<()> {
                 [(); 4].map(|_| vec![0; GUEST_MEMORY_BYTES]);
             let [mut beta_a, mut gamma_b, mut alpha_c] =
                 [(); 3].map(|_| vec![0; GUEST_MEMORY_BYTES]);
+            let [mut check_ba, mut check_gb, mut check_ac] =
+                [(); 3].map(|_| vec![0; GUEST_MEMORY_BYTES]);
             let parts = ChoreoFsFile::new(INSPECTION_FILES[0], inbox)
                 .read_as::<FinishedPart<WORKER_A>>(&mut alpha)
                 .file(INSPECTION_FILES[1])?
@@ -516,7 +540,13 @@ pub async fn run(path: &str) -> ShellResult<()> {
                 .file(INSPECTION_FILES[8])?
                 .read_as::<FinishedPart<GAMMA_JOB_B>>(&mut gamma_b)
                 .file(INSPECTION_FILES[9])?
-                .read_as::<FinishedPart<ALPHA_JOB_C>>(&mut alpha_c);
+                .read_as::<FinishedPart<ALPHA_JOB_C>>(&mut alpha_c)
+                .file(INSPECTION_FILES[10])?
+                .write_as::<CheckPart<BETA_JOB_A>>(&mut check_ba)
+                .file(INSPECTION_FILES[11])?
+                .write_as::<CheckPart<GAMMA_JOB_B>>(&mut check_gb)
+                .file(INSPECTION_FILES[12])?
+                .write_as::<CheckPart<ALPHA_JOB_C>>(&mut check_ac);
             let files = ChoreoFsFiles::new(inspector_vm).file(parts)?;
             let mut memory = vec![0; GUEST_MEMORY_BYTES];
             let mut storage = Box::new(HibanaWasiGuestStorage::uninit());

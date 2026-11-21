@@ -43,6 +43,9 @@ pub const BETA_JOB_A: u8 = 3;
 pub const GAMMA_JOB_B: u8 = 4;
 pub const INSPECTOR: u8 = 26;
 pub const DISPATCHER: u8 = 27;
+pub const BENCH: u8 = 43;
+pub const GAUGE: u8 = 44;
+pub const READOUT: u8 = 45;
 
 pub type StationJob<const WORKER: u8> = g::Msg<35, super::imp::JobArguments<WORKER>>;
 pub type Intent<const WORKER: u8> = g::Msg<10, super::imp::JobArguments<WORKER>>;
@@ -73,6 +76,42 @@ pub type ApprovalForWorker<'a, const JOB: u8> =
     g::Msg<31, super::imp::InspectionReply<'a, JOB, true>>;
 pub type OrderForWorker<'a> = g::Msg<32, &'a [u8]>;
 pub type InspectionResult<'a> = g::Msg<34, &'a [u8]>;
+pub type Measurement<'a, const JOB: u8> = g::Msg<JOB, &'a [u8]>;
+
+/// The inspector may have several samples ready. The gauge can start its
+/// next measurement only after its electronics has returned the actual reading.
+pub fn gauge() -> impl Projectable {
+    let sample = g::route(
+        g::route(
+            g::send::<GAUGE, READOUT, CheckPart<WORKER_A>>(),
+            g::route(
+                g::send::<GAUGE, READOUT, CheckPart<WORKER_B>>(),
+                g::send::<GAUGE, READOUT, CheckPart<WORKER_C>>(),
+            ),
+        ),
+        g::route(
+            g::send::<GAUGE, READOUT, CheckPart<BETA_JOB_A>>(),
+            g::route(
+                g::send::<GAUGE, READOUT, CheckPart<GAMMA_JOB_B>>(),
+                g::send::<GAUGE, READOUT, CheckPart<ALPHA_JOB_C>>(),
+            ),
+        ),
+    );
+    g::seq(
+        g::send::<READOUT, BENCH, Loan<GAUGE>>(),
+        g::seq(
+            g::seq(
+                sample,
+                g::seq(
+                    g::send::<READOUT, GAUGE, InspectionResult>(),
+                    g::send::<GAUGE, INSPECTOR, InspectionResult>(),
+                ),
+            )
+            .roll(),
+            g::send::<BENCH, READOUT, Loan<GAUGE>>(),
+        ),
+    )
+}
 
 fn inspection<const JOB: u8, const WORKER: u8, const CAP: u8>() -> impl Projectable {
     g::seq(
@@ -276,7 +315,11 @@ fn workstation<
             ),
         ),
     );
-    g::route(g::seq(other, primary), g::seq(primary, other))
+    let inspect = check_part::<SERVICE, OTHER_JOB>();
+    g::route(
+        g::seq(other, g::par(primary, inspect)),
+        g::seq(primary, g::seq(other, inspect)),
+    )
 }
 
 pub fn workstation_files() -> impl Projectable {
@@ -335,33 +378,23 @@ pub fn source() -> impl Projectable {
         .resolve::<FIRST_B>(),
     )
     .resolve::<FIRST_A>();
-    let parts = g::par(
-        g::send::<WORKER_A, INSPECTOR, FinishedPart<WORKER_A>>(),
+    let tool_checks = g::par(
+        tool_quality::<WORKER_A, ALPHA>(),
         g::par(
-            g::send::<WORKER_B, INSPECTOR, FinishedPart<WORKER_B>>(),
-            g::send::<WORKER_C, INSPECTOR, FinishedPart<WORKER_C>>(),
+            tool_quality::<WORKER_B, BETA>(),
+            tool_quality::<WORKER_C, GAMMA>(),
         ),
     );
-    let a = check_part::<WORKER_A>();
-    let b = check_part::<WORKER_B>();
-    let c = check_part::<WORKER_C>();
-    let checks = g::route(
-        g::seq(a, g::route(g::seq(b, c), g::seq(c, b))),
-        g::route(
-            g::seq(b, g::route(g::seq(a, c), g::seq(c, a))),
-            g::seq(c, g::route(g::seq(a, b), g::seq(b, a))),
-        ),
-    );
-    let dispatch = g::par(
-        disposition::<WORKER_A, ALPHA>(),
+    g::par(gauge(), g::par(stations, g::seq(serving, tool_checks)))
+}
+
+fn tool_quality<const WORKER: u8, const FILE: u8>() -> impl Projectable {
+    g::seq(
         g::par(
-            disposition::<WORKER_B, BETA>(),
-            disposition::<WORKER_C, GAMMA>(),
+            g::send::<WORKER, INSPECTOR, FinishedPart<WORKER>>(),
+            check_part::<WORKER, WORKER>(),
         ),
-    );
-    g::par(
-        stations,
-        g::seq(serving, g::seq(g::par(parts, checks), dispatch)),
+        disposition::<WORKER, FILE>(),
     )
 }
 
@@ -384,9 +417,12 @@ fn disposition<const WORKER: u8, const STATION: u8>() -> impl Projectable {
     )
 }
 
-fn check_part<const WORKER: u8>() -> impl Projectable + Copy {
+fn check_part<const SERVICE: u8, const JOB: u8>() -> impl Projectable + Copy {
     g::seq(
-        g::send::<INSPECTOR, WORKER, CheckPart<WORKER>>(),
-        g::send::<WORKER, INSPECTOR, InspectionResult>(),
+        g::send::<INSPECTOR, SERVICE, CheckPart<JOB>>(),
+        g::seq(
+            g::send::<SERVICE, BENCH, CheckPart<JOB>>(),
+            g::send::<BENCH, SERVICE, Measurement<JOB>>(),
+        ),
     )
 }
