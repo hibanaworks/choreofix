@@ -78,7 +78,7 @@ pub fn freeze(task: &str, output: &Path) -> Result<Value> {
         "7H" => "LARGE_DOCUMENT",
         "10E" => "BUILD",
         "10M" => "CASCADING_BUILD",
-        "11E" => "MANUFACTURING",
+        "11E" | "11M" => "MANUFACTURING",
         "12E" => "KITCHEN",
         "4E" => "COORDINATION",
         "4M" => "REFACTOR",

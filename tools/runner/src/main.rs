@@ -60,6 +60,7 @@ mod large_document_boundary;
 mod manufacturing_audit;
 #[cfg(test)]
 mod manufacturing_boundary;
+mod manufacturing_rework_audit;
 mod medical_audit;
 #[cfg(test)]
 mod medical_boundary;
@@ -171,7 +172,7 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
     if !(dining
         || coding
         || api
-        || matches!(task, "8M" | "15E")
+        || matches!(task, "8M" | "11M" | "15E")
         || cicd
         || cicd_pipeline
         || review
@@ -203,7 +204,7 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
     }
     let data = if large_document {
         json!({"participant":agent,"resources":actor["resources"]})
-    } else if multi_round_discovery || cicd_pipeline || matches!(task, "8M" | "15E") {
+    } else if multi_round_discovery || cicd_pipeline || matches!(task, "8M" | "11M" | "15E") {
         json!({"participant":agent,"resources":actor["resources"],"operations":actor["operations"]})
     } else if dining {
         json!({"participant":agent,"resources":actor["forks"],"philosopher":agent})
@@ -387,6 +388,25 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
         }
     } else if kitchen {
         "/service/prepare_base_dish, /service/prepare_ingredient and /service/combine_dish"
+    } else if task == "11M" {
+        match agent {
+            "WORKER_A" => {
+                "/service/do_job (alpha_job_a), /service/do_job_at_other_station (beta_job_a); their readings are /service/job_update and /service/other_job_update"
+            }
+            "WORKER_B" => {
+                "/service/do_job (beta_job_b), /service/do_job_at_other_station (gamma_job_b); their readings are /service/job_update and /service/other_job_update"
+            }
+            "WORKER_C" => {
+                "/service/do_job (gamma_job_c), /service/do_job_at_other_station (alpha_job_c); their readings are /service/job_update and /service/other_job_update"
+            }
+            "INSPECTOR" => {
+                "/service/parts/<job_id> for the manufactured part, /service/inspect/<job_id> for the inspection request, and /service/inspection_result for the actual gauge reading"
+            }
+            "DISPATCHER" => {
+                "/service/approved/<job_id> and /service/failed/<job_id> for incoming verdicts; /service/dispatch/<job_id> accepts a rework request and returns its actual order"
+            }
+            _ => return Err("unknown workshop participant".into()),
+        }
     } else if manufacturing {
         match agent {
             "TECHNICIAN_A" | "TECHNICIAN_B" => "/service/do_lathe_job and /service/do_mill_job",
@@ -621,7 +641,9 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
     } else {
         "/service/read_literature, /service/draft_content, /service/write_to_document and /service/review_own_work"
     };
-    let coordination = if large_document {
+    let coordination = if task == "11M" {
+        "Choose your own shell commands and job order. A worker reads a manufacturing result from the same file used to request the job. The update for that job contains its actual approval or rework order. The inspector's gauge returns the material it measured and the inspection receipt. A dispatcher can probe a verdict file with dd iflag=nonblock without waiting for a particular outcome. Each successful read of an incoming delivery consumes that occurrence."
+    } else if large_document {
         "Each successful read of an incoming file consumes one delivery. Resource temporarily unavailable means that this read has no delivery ready; Permission denied means the attempted operation was refused. Neither message reports task completion. A saved copy in /work can be read again. A new blocking read waits for another delivery on that particular file, even if another file has data. For writers, data.status in the delivered outcome identifies the work. A review can include the reviewer's own comments in data.feedback. A needs_revision result calls for a substantive revision: /service/revise_section/<chapter> takes section_name and optional feedback text. A minor_revision result names exact replacements: /service/apply_minor_edit/<chapter> takes section_name and review_id. A review_id can also identify a major review; its presence alone does not mean minor_revision. A fact_check or review_sections result concerns the identified manuscript. On files that receive the whole-document decision, publication has tool_name combine_sections and success true. A withheld manuscript has a reviews array and no tool_name."
     } else if cicd_pipeline {
         match agent {
@@ -706,7 +728,9 @@ The tester reads /service/test_candidate before each test and reads the real tes
     } else {
         "Each file is a direct choreography projection. Choose shell commands and private computations freely. An unadmitted operation returns an error to the same guest, allowing correction or another operation. read_literature returns actual source material; draft_content uses that completed material; write_to_document uses your actual draft and both assigned section resources; review_own_work examines that actual contribution. The localsides drive the real section Endpoints and return the actual results. No host selects your commands or dispatches accepted files to another workflow. Read each actual response from the same operation file. Use your assigned topic, section or resource pair. Do not invent acquire/release or notification commands. The actual review outcome is terminal, including failure; finish your own work and exit after reading it."
     };
-    let response_object = if cicd_pipeline {
+    let response_object = if task == "11M" {
+        "Manufacturing and dispatch each return their reply on the submitted file. All gauge replies arrive on /service/inspection_result."
+    } else if cicd_pipeline {
         "Read a domain operation's actual reply from the same file you wrote. For example, after closing /service/compile_code, read /service/compile_code. The master's build-order and repair files are write-only. /service/result carries the final pipeline outcome. A successful read of the developer's /service/start or /service/workspace or the QA engineer's /service/start is a notification with empty output. Each read consumes that notification once."
     } else if large_document {
         "Operations with a readable reply return it on the file you wrote."
@@ -718,7 +742,7 @@ The tester reads /service/test_candidate before each test and reads the real tes
         || dining
         || coding
         || api
-        || matches!(task, "8M" | "15E")
+        || matches!(task, "8M" | "11M" | "15E")
         || cicd
         || feature_delivery
         || staged_integration
@@ -785,7 +809,7 @@ collect their saved replies with empty shell calls ({{}}) until the response is
 no_interrupted_command. Collection also works after exit. Leaving before doing
 the work fails the run.
 "#,
-        files_heading = if large_document {
+        files_heading = if large_document || task == "11M" {
             "Your role has these service files."
         } else {
             "Your writable domain objects are"
@@ -993,6 +1017,7 @@ async fn main() -> Result<()> {
         [mode, events] if mode == "--audit-kitchen" => println!("{}", serde_json::to_string_pretty(&kitchen_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-kitchen-mutants" => println!("{}", serde_json::to_string_pretty(&kitchen_audit::check_mutants(Path::new(events),Path::new(output))?)?),
         [mode, events] if mode == "--audit-wafer" => println!("{}", serde_json::to_string_pretty(&wafer_audit::audit(Path::new(events))?)?),
+        [mode, events] if mode == "--audit-workshop" => println!("{}", serde_json::to_string_pretty(&manufacturing_rework_audit::audit(Path::new(events))?)?),
         [mode, events] if mode == "--audit-manufacturing" => println!("{}", serde_json::to_string_pretty(&manufacturing_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-manufacturing-mutants" => println!("{}", serde_json::to_string_pretty(&manufacturing_audit::check_mutants(Path::new(events), Path::new(output))?)?),
         [mode, events] if mode == "--audit-build" => println!("{}", serde_json::to_string_pretty(&build_audit::audit(Path::new(events))?)?),
@@ -1066,8 +1091,8 @@ async fn main() -> Result<()> {
             }
         }
         _ => return Err(concat!(
-            "usage: choreofix-experiments 1E|1M|1H|2E|2M|2H|3E|3M|3H|4E|4M|5E|5M|5H|6E|6M|6H|7E|7M|7H|8E|8M|9E|9M|9H|10E|10M|11E|12E|13E|13M|13H|14E|14M|14H|15E|16E|16M DEPTH OUTPUT\n",
-            "       --audit-api|--audit-review|--audit-migration|--audit-report|--audit-document|--audit-coordination|--audit-writing|--audit-cicd|--audit-cicd-pipeline|--audit-philosophers|--audit-lab|--audit-lab-quality|--audit EVENTS\n",
+            "usage: choreofix-experiments 1E|1M|1H|2E|2M|2H|3E|3M|3H|4E|4M|5E|5M|5H|6E|6M|6H|7E|7M|7H|8E|8M|9E|9M|9H|10E|10M|11E|11M|12E|13E|13M|13H|14E|14M|14H|15E|16E|16M DEPTH OUTPUT\n",
+            "       --audit-api|--audit-review|--audit-migration|--audit-report|--audit-document|--audit-coordination|--audit-workshop|--audit-writing|--audit-cicd|--audit-cicd-pipeline|--audit-philosophers|--audit-lab|--audit-lab-quality|--audit EVENTS\n",
             "       --audit-protocol EVENTS\n",
             "       --check-api-mutants|--check-review-mutants|--check-report-mutants|--check-document-mutants|--check-writing-mutants|--check-cicd-mutants|--check-philosophers-mutants|--check-protocol-mutants EVENTS NEW_OUTPUT\n",
             "       --audit-run RUN\n",

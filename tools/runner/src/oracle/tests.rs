@@ -2427,6 +2427,13 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
             let journal = directory.join("events.jsonl");
             let trace = Trace::create(&journal)?;
             let artifact = projection::archive(&binary, &directory, "11M")?;
+            crate::evidence::save(
+                &directory.join("case.json"),
+                &json!({
+                    "runtime_binary_sha256": artifact["runtime_binary_sha256"],
+                    "compiled_projection_sha256": crate::evidence::digest(&directory.join("projection.json"))?,
+                }),
+            )?;
             let (world, _) = Simulator::new("11M", 0, 1.0, trace.clone(), failures)?;
             let job_seconds = if streamed { 1.6 } else { 0.4 };
             world
@@ -2670,6 +2677,10 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                 .collect::<std::result::Result<_, _>>()?;
             let labels = projection::frames(&artifact, &rows)?;
             let epf = projection::check_dynamic(&artifact, &rows)?;
+            let verified =
+                crate::manufacturing_rework_audit::verify(&artifact, &rows, &labels, &epf)?;
+            assert_eq!(verified["simulator_complete"], outcome["score"]["complete"]);
+            assert_eq!(verified["domain_calls"], events.len());
             let calls = epf["sessions"][0]["acceptances"]
                 .as_array()
                 .ok_or("EPF accepted calls")?;

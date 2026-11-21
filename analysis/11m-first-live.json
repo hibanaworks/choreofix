@@ -1,0 +1,92 @@
+{
+  "task": "11M",
+  "qualified": false,
+  "scored_benchmark": false,
+  "archive": "output/verification/11m-live.UU0g6MVU",
+  "live": {
+    "depth": 0,
+    "model": "gpt-6-luna",
+    "effort": "xhigh",
+    "elapsed_seconds": 175.539677,
+    "business_complete": false,
+    "simulator_violations": [],
+    "simulator_effects_by_tool": {
+      "do_job": 3
+    },
+    "protocol": {
+      "error": "EndpointError { operation: \"send\", kind: SessionFault(EndpointDropped) }",
+      "status": "failed",
+      "type": "run_result"
+    },
+    "run_audit": "rejected",
+    "participants": {
+      "DISPATCHER": {
+        "status": "harness_error",
+        "tool_calls": 99,
+        "returned_model": "gpt-6-luna",
+        "returned_effort": "xhigh"
+      },
+      "INSPECTOR": {
+        "status": "harness_error",
+        "tool_calls": 21,
+        "returned_model": "gpt-6-luna",
+        "returned_effort": "xhigh"
+      },
+      "WORKER_A": {
+        "status": "harness_error",
+        "tool_calls": 8,
+        "returned_model": "gpt-6-luna",
+        "returned_effort": "xhigh"
+      },
+      "WORKER_B": {
+        "status": "harness_error",
+        "tool_calls": 5,
+        "returned_model": "gpt-6-luna",
+        "returned_effort": "xhigh"
+      },
+      "WORKER_C": {
+        "status": "harness_error",
+        "tool_calls": 5,
+        "returned_model": "gpt-6-luna",
+        "returned_effort": "xhigh"
+      }
+    },
+    "observation": "Each worker produced one part. The inspector read alpha_job_a, then waited for beta_job_b before that part was manufactured. The workers were waiting on job updates. The dispatcher exited while no inspection result had been issued. The session then reported EndpointDropped.",
+    "runtime_and_runner_sha256": {
+      "runner": "d6e9ff9c0d9d7c9fa32de17ab3a2a17b52e03975aaecf4f76dd365fd0de3d7aa",
+      "runtime": "a41380fab9d4e4e85b50b21a12005d7c012c37a6bfdfb935b8f6359c6dfa4f03",
+      "wash.wasm": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca"
+    },
+    "build_source_manifest_sha256": "7629787244a596bc9c350ab1043e04197eb966a6bbe2d77a3bfd9026301d0a6f",
+    "evidence_sha256": {
+      "events.jsonl": "3fabeae550a696b5b00856387e5c46576500ceb710a00bcc35c6316b553ab691",
+      "guest-outcome.json": "0ef4d1e50474b9491931955b9ba2c4f23d112e2aa1d672ec8a9a6925eec8b61a",
+      "model-outcomes.json": "1a2373a92bf98834b287ffbf84baa11d65a919df324e1eaad63b2069362a62b5",
+      "result.json": "a63557e2dab04bebb5ff6cfe0024bc1412fb2e2b77a6e2db362110eb4945f80e",
+      "projection.json": "7e523347e540463032d68eac91d879a4ae7258c7c112e6eee86e0bb61ca78b28",
+      "versions.json": "ff1646f087b68d565f2399488d70065884666bbb19aa44c09d3e9c8e27c0b902",
+      "source-manifest.json": "fe7700d4b8c07bd66fc3f32fdaa5dcc2a0254f99495cd15598213e163f344d63"
+    }
+  },
+  "scripted_reanalysis": {
+    "case_archive": "output/verification/11m-gauge.t9B43npL",
+    "case_checksums_sha256": "4aa02d0aab86c86730e80119987e3b2728817bac3bc58a1417323cdd59b7a271",
+    "receipt_source": "Each archived projection and raw event file was checked against the previously published archive index. The binary was checked against the original build receipt.",
+    "cases": 30,
+    "completed": 6,
+    "simulator_effects_by_tool": {
+      "do_job": 180,
+      "inspect_quality": 180,
+      "dispatch_rework": 48
+    },
+    "epf_records": 203535,
+    "altered_records_rejected": {
+      "alter_last_simulator_score": "Error: \"business score differs from the six gauged parts\"",
+      "remove_actual_dispatch_request": "Error: \"committed operation lacks its transport frame\"",
+      "replace_order_on_both_transport_observations": "Error: \"missing beta_job_b dispatch_rework frame (1, 7, 36)\""
+    },
+    "auditor_binary_sha256": "138d0fe6c40bee7089bb0dbea1d227427b34f95d49a74bbd34b356065a526038",
+    "auditor_source_sha256": "d0832890bda0f6cb014cdcdcc8a1e78927639e4a10900d7899d5adc49b9aaab2"
+  },
+  "open": "The full shared-workstation global ends a rejected job after delivering its order. Reacquiring the workstation and any required tool, manufacturing the replacement and reinspecting it in the five-guest application remain open."
+}

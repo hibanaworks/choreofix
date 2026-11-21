@@ -41,7 +41,7 @@ fn check_resource_assignments(task: &str, fixture: &Value, metadata: &Value) -> 
                 )?);
             }
             names.into_iter().collect::<Vec<_>>()
-        } else if field == "resources" && !matches!(task, "14H" | "16M") {
+        } else if field == "resources" && !matches!(task, "11M" | "14H" | "16M") {
             // The tools' physical resources are data, not a list of known task IDs.
             let mut names = Vec::new();
             for call in actor["calls"].as_array().ok_or("participant assignments")? {
@@ -463,7 +463,7 @@ pub fn run(root: &Path) -> Result<Value> {
         return Err("task identity, depth or participant set differs from original inputs".into());
     }
     check_resource_assignments(task, fixture, &metadata)?;
-    if matches!(task, "7H" | "8M" | "15E" | "14H" | "16M") {
+    if matches!(task, "7H" | "8M" | "15E" | "11M" | "14H" | "16M") {
         let schemas = load(&root.join(format!("source/benchmark/descriptions/{task}/tools.json")))?;
         if fixture["tool_schemas"] != schemas {
             return Err("tool schemas differ from the common task".into());
@@ -576,6 +576,7 @@ pub fn run(root: &Path) -> Result<Value> {
         "7M" => crate::figure_document_audit::audit(&root.join("events.jsonl"))?,
         "7H" => crate::large_document_audit::audit(&root.join("events.jsonl"))?,
         "10E" => crate::build_audit::audit(&root.join("events.jsonl"))?,
+        "11M" => crate::manufacturing_rework_audit::audit(&root.join("events.jsonl"))?,
         "11E" => crate::manufacturing_audit::audit(&root.join("events.jsonl"))?,
         "12E" => crate::kitchen_audit::audit(&root.join("events.jsonl"))?,
         "10M" => crate::cascading_build_audit::audit(&root.join("events.jsonl"))?,
