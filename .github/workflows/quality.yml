@@ -116,7 +116,7 @@ jobs:
           CHOREOFIX_MANUFACTURING_WASI_BINARY="$PWD/target/debug/manufacturing-wasi" \
             CHOREOFIX_MANUFACTURING_BUILD_RECEIPT="$PWD/output/wasi-boundary/manufacturing-build-receipt.json" \
             CHOREOFIX_EVIDENCE_ROOT="$PWD/output/wasi-boundary/workstation-tools" \
-            cargo +stable test --locked --manifest-path tools/runner/Cargo.toml oracle::tests::wash_submits_the_three_tool_jobs_from_their_actual_workstations -- --ignored --exact
+            cargo +stable test --locked --manifest-path tools/runner/Cargo.toml oracle::tests::wash_manufactures_all_six_jobs_on_their_shared_workstations -- --ignored --exact
           tools/runner/target/debug/choreofix-experiments --build-wasi "$PWD/output/wasi-boundary/wafer-build" wafer
           CHOREOFIX_WAFER_WASI_BINARY="$PWD/target/debug/wafer-wasi" \
             CHOREOFIX_WAFER_BUILD_RECEIPT="$PWD/output/wasi-boundary/wafer-build/wafer-build-receipt.json" \

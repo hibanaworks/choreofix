@@ -1,10 +1,14 @@
-//! Three workstation jobs share two tools. Their inspections can issue rework orders.
+//! Each workstation serves either assigned worker first. Three of the six jobs also require a cabinet tool.
 use super::imp::{DO_JOB, INSPECT_QUALITY};
-use hibana::{
-    Endpoint, g,
-    runtime::program::{Projectable, RoleProgram, project},
-};
+use crate::shell::global::Loan;
+use hibana::{Endpoint, g, runtime::program::Projectable};
 
+pub const A_FILES: u8 = 15;
+pub const ALPHA_C_FILES: u8 = 40;
+pub const B_FILES: u8 = 16;
+pub const BETA_A_FILES: u8 = 41;
+pub const C_FILES: u8 = 17;
+pub const GAMMA_B_FILES: u8 = 42;
 pub const WORKER_A: u8 = 0;
 pub const WORKER_B: u8 = 1;
 pub const WORKER_C: u8 = 2;
@@ -22,6 +26,21 @@ pub const ARRIVAL_1: u16 = 944;
 pub const FINISHED_FIRST: u16 = 945;
 pub const QUALITY_FIRST: u16 = 946;
 pub const SESSION: u32 = 112;
+pub const ALPHA_C: u8 = 28;
+pub const BETA_A: u8 = 29;
+pub const GAMMA_B: u8 = 30;
+pub const ALPHA_MACHINE: u8 = 31;
+pub const BETA_MACHINE: u8 = 32;
+pub const GAMMA_MACHINE: u8 = 33;
+pub const ALPHA_OWNER: u8 = 34;
+pub const BETA_OWNER: u8 = 35;
+pub const GAMMA_OWNER: u8 = 36;
+pub const ALPHA_SERVICE: u8 = 37;
+pub const BETA_SERVICE: u8 = 38;
+pub const GAMMA_SERVICE: u8 = 39;
+pub const ALPHA_JOB_C: u8 = 5;
+pub const BETA_JOB_A: u8 = 3;
+pub const GAMMA_JOB_B: u8 = 4;
 pub const INSPECTOR: u8 = 26;
 pub const DISPATCHER: u8 = 27;
 
@@ -37,6 +56,7 @@ pub type Return0<'r> = g::Msg<7, Endpoint<'r, TOOL_0>>;
 pub type Return1<'r> = g::Msg<8, Endpoint<'r, TOOL_1>>;
 pub type JobIntent<const JOB: u8> = g::Msg<20, super::imp::JobArguments<JOB, DO_JOB>>;
 pub type JobResult<'a> = g::Msg<21, &'a [u8]>;
+pub type StationResult<'a, const MACHINE: u8> = g::Msg<MACHINE, &'a [u8]>;
 pub type FinishedPart<'a, const WORKER: u8> = g::Msg<WORKER, &'a [u8]>;
 pub type CheckPart<const JOB: u8> = g::Msg<JOB, super::imp::JobArguments<JOB, INSPECT_QUALITY>>;
 pub type PartReady<'a> = g::Msg<22, &'a [u8]>;
@@ -215,21 +235,89 @@ fn first_job<const FIRST: u8, const A: u8, const B: u8>(
     )
 }
 
-pub fn source() -> impl Projectable {
-    let intents = g::par(
+fn workstation<
+    const MACHINE: u8,
+    const OWNER: u8,
+    const SERVICE: u8,
+    const PRIMARY_FILE: u8,
+    const WORKER: u8,
+    const OTHER_FILE: u8,
+    const OTHER_JOB: u8,
+>() -> impl Projectable {
+    let primary = g::seq(
+        g::send::<PRIMARY_FILE, WORKER, StationJob<WORKER>>(),
         g::seq(
-            g::send::<ALPHA, WORKER_A, StationJob<WORKER_A>>(),
-            g::send::<WORKER_A, DEPOT, Intent<WORKER_A>>(),
+            g::send::<OWNER, WORKER, JobLoan<MACHINE>>(),
+            g::seq(
+                g::send::<MACHINE, DEPOT, Intent<WORKER>>(),
+                g::seq(
+                    g::send::<DEPOT, MACHINE, StationResult<MACHINE>>(),
+                    g::send::<WORKER, OWNER, JobLoan<MACHINE>>(),
+                ),
+            ),
+        ),
+    );
+    let other = g::seq(
+        g::send::<OTHER_FILE, SERVICE, StationJob<OTHER_JOB>>(),
+        g::seq(
+            g::send::<OWNER, SERVICE, JobLoan<MACHINE>>(),
+            g::seq(
+                g::send::<MACHINE, SERVICE, JobIntent<OTHER_JOB>>(),
+                g::seq(
+                    g::send::<SERVICE, MACHINE, JobResult>(),
+                    g::par(
+                        g::send::<SERVICE, OWNER, JobLoan<MACHINE>>(),
+                        g::send::<SERVICE, OTHER_FILE, JobResult>(),
+                    ),
+                ),
+            ),
+        ),
+    );
+    g::route(g::seq(other, primary), g::seq(primary, other))
+}
+
+pub fn workstation_files() -> impl Projectable {
+    g::par(
+        g::par(
+            g::send::<A_FILES, ALPHA_OWNER, Loan<ALPHA>>(),
+            g::send::<ALPHA_C_FILES, ALPHA_OWNER, Loan<ALPHA_C>>(),
         ),
         g::par(
-            g::seq(
-                g::send::<BETA, WORKER_B, StationJob<WORKER_B>>(),
-                g::send::<WORKER_B, DEPOT, Intent<WORKER_B>>(),
+            g::par(
+                g::send::<B_FILES, BETA_OWNER, Loan<BETA>>(),
+                g::send::<BETA_A_FILES, BETA_OWNER, Loan<BETA_A>>(),
             ),
-            g::seq(
-                g::send::<GAMMA, WORKER_C, StationJob<WORKER_C>>(),
-                g::send::<WORKER_C, DEPOT, Intent<WORKER_C>>(),
+            g::par(
+                g::send::<C_FILES, GAMMA_OWNER, Loan<GAMMA>>(),
+                g::send::<GAMMA_B_FILES, GAMMA_OWNER, Loan<GAMMA_B>>(),
             ),
+        ),
+    )
+}
+
+pub fn source() -> impl Projectable {
+    let stations = g::par(
+        workstation::<
+            ALPHA_MACHINE,
+            ALPHA_OWNER,
+            ALPHA_SERVICE,
+            ALPHA,
+            WORKER_A,
+            ALPHA_C,
+            ALPHA_JOB_C,
+        >(),
+        g::par(
+            workstation::<BETA_MACHINE, BETA_OWNER, BETA_SERVICE, BETA, WORKER_B, BETA_A, BETA_JOB_A>(
+            ),
+            workstation::<
+                GAMMA_MACHINE,
+                GAMMA_OWNER,
+                GAMMA_SERVICE,
+                GAMMA,
+                WORKER_C,
+                GAMMA_B,
+                GAMMA_JOB_B,
+            >(),
         ),
     );
     let alpha = g::send::<WORKER_A, ALPHA, JobResult>();
@@ -268,9 +356,9 @@ pub fn source() -> impl Projectable {
             disposition::<WORKER_C, GAMMA>(),
         ),
     );
-    g::seq(
-        g::par(intents, serving),
-        g::seq(g::par(parts, checks), dispatch),
+    g::par(
+        stations,
+        g::seq(serving, g::seq(g::par(parts, checks), dispatch)),
     )
 }
 
@@ -298,34 +386,4 @@ fn check_part<const WORKER: u8>() -> impl Projectable + Copy {
         g::send::<INSPECTOR, WORKER, CheckPart<WORKER>>(),
         g::send::<WORKER, INSPECTOR, InspectionResult>(),
     )
-}
-
-pub struct Programs {
-    pub dispatcher: RoleProgram<DISPATCHER>,
-    pub inspector: RoleProgram<INSPECTOR>,
-    pub a: RoleProgram<WORKER_A>,
-    pub b: RoleProgram<WORKER_B>,
-    pub c: RoleProgram<WORKER_C>,
-    pub alpha: RoleProgram<ALPHA>,
-    pub beta: RoleProgram<BETA>,
-    pub gamma: RoleProgram<GAMMA>,
-    pub depot: RoleProgram<DEPOT>,
-    pub tool_0: RoleProgram<TOOL_0>,
-    pub tool_1: RoleProgram<TOOL_1>,
-}
-pub fn programs() -> Programs {
-    let source = source();
-    Programs {
-        dispatcher: project::<DISPATCHER>(&source),
-        inspector: project::<INSPECTOR>(&source),
-        a: project::<WORKER_A>(&source),
-        b: project::<WORKER_B>(&source),
-        c: project::<WORKER_C>(&source),
-        alpha: project::<ALPHA>(&source),
-        beta: project::<BETA>(&source),
-        gamma: project::<GAMMA>(&source),
-        depot: project::<DEPOT>(&source),
-        tool_0: project::<TOOL_0>(&source),
-        tool_1: project::<TOOL_1>(&source),
-    }
 }

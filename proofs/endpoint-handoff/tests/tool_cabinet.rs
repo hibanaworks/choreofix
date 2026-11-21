@@ -11,9 +11,11 @@ pub(crate) mod imp {
 }
 #[path = "../../../src/tasks/manufacturing_rework/mod.rs"]
 pub mod manufacturing_rework;
+use hibana::g;
 use hibana::runtime::{
     SessionKitStorage,
     ids::SessionId,
+    program::{RoleProgram, project},
     resolver::{DecisionArm, ResolverError, ResolverRef},
     tap::TapEvent,
 };
@@ -28,6 +30,72 @@ use shell::{
     },
 };
 use std::{cell::Cell, time::Duration};
+
+struct Programs {
+    a_files: RoleProgram<A_FILES>,
+    alpha_c_files: RoleProgram<ALPHA_C_FILES>,
+    alpha_service: RoleProgram<ALPHA_SERVICE>,
+    alpha_owner: RoleProgram<ALPHA_OWNER>,
+    alpha_machine: RoleProgram<ALPHA_MACHINE>,
+    alpha_c: RoleProgram<ALPHA_C>,
+    b_files: RoleProgram<B_FILES>,
+    beta_a_files: RoleProgram<BETA_A_FILES>,
+    beta_service: RoleProgram<BETA_SERVICE>,
+    beta_owner: RoleProgram<BETA_OWNER>,
+    beta_machine: RoleProgram<BETA_MACHINE>,
+    beta_a: RoleProgram<BETA_A>,
+    c_files: RoleProgram<C_FILES>,
+    gamma_b_files: RoleProgram<GAMMA_B_FILES>,
+    gamma_service: RoleProgram<GAMMA_SERVICE>,
+    gamma_owner: RoleProgram<GAMMA_OWNER>,
+    gamma_machine: RoleProgram<GAMMA_MACHINE>,
+    gamma_b: RoleProgram<GAMMA_B>,
+    dispatcher: RoleProgram<DISPATCHER>,
+    inspector: RoleProgram<INSPECTOR>,
+    a: RoleProgram<WORKER_A>,
+    b: RoleProgram<WORKER_B>,
+    c: RoleProgram<WORKER_C>,
+    alpha: RoleProgram<ALPHA>,
+    beta: RoleProgram<BETA>,
+    gamma: RoleProgram<GAMMA>,
+    depot: RoleProgram<DEPOT>,
+    tool_0: RoleProgram<TOOL_0>,
+    tool_1: RoleProgram<TOOL_1>,
+}
+fn programs() -> Programs {
+    let source = g::seq(workstation_files(), source());
+    Programs {
+        a_files: project::<A_FILES>(&source),
+        alpha_c_files: project::<ALPHA_C_FILES>(&source),
+        alpha_service: project::<ALPHA_SERVICE>(&source),
+        alpha_owner: project::<ALPHA_OWNER>(&source),
+        alpha_machine: project::<ALPHA_MACHINE>(&source),
+        alpha_c: project::<ALPHA_C>(&source),
+        b_files: project::<B_FILES>(&source),
+        beta_a_files: project::<BETA_A_FILES>(&source),
+        beta_service: project::<BETA_SERVICE>(&source),
+        beta_owner: project::<BETA_OWNER>(&source),
+        beta_machine: project::<BETA_MACHINE>(&source),
+        beta_a: project::<BETA_A>(&source),
+        c_files: project::<C_FILES>(&source),
+        gamma_b_files: project::<GAMMA_B_FILES>(&source),
+        gamma_service: project::<GAMMA_SERVICE>(&source),
+        gamma_owner: project::<GAMMA_OWNER>(&source),
+        gamma_machine: project::<GAMMA_MACHINE>(&source),
+        gamma_b: project::<GAMMA_B>(&source),
+        dispatcher: project::<DISPATCHER>(&source),
+        inspector: project::<INSPECTOR>(&source),
+        a: project::<WORKER_A>(&source),
+        b: project::<WORKER_B>(&source),
+        c: project::<WORKER_C>(&source),
+        alpha: project::<ALPHA>(&source),
+        beta: project::<BETA>(&source),
+        gamma: project::<GAMMA>(&source),
+        depot: project::<DEPOT>(&source),
+        tool_0: project::<TOOL_0>(&source),
+        tool_1: project::<TOOL_1>(&source),
+    }
+}
 
 /// Completed external material records and controlled quality outcomes. This
 /// fixture has no Endpoint permission, station scheduler or application cursor.
@@ -668,7 +736,19 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
             let session = SessionId::new(SESSION);
             let (mut connection, _, _) = Bus::open(
                 ["WORKER_A", "WORKER_B", "WORKER_C", "INSPECTOR"],
-                [(session, TOOL_0), (session, TOOL_1)],
+                [
+                    (session, TOOL_0),
+                    (session, TOOL_1),
+                    (session, ALPHA),
+                    (session, ALPHA_C),
+                    (session, ALPHA_MACHINE),
+                    (session, BETA),
+                    (session, BETA_A),
+                    (session, BETA_MACHINE),
+                    (session, GAMMA),
+                    (session, GAMMA_B),
+                    (session, GAMMA_MACHINE),
+                ],
             );
             let (bus, simulator) = connection.split();
             let inputs = [const { Cell::new(Value::Null) }; 5];
@@ -725,9 +805,81 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
             let mut a = caller.enter(session, &programs.a)?;
             let mut b = caller.enter(session, &programs.b)?;
             let mut c = caller.enter(session, &programs.c)?;
-            let mut alpha = caller.enter(session, &programs.alpha)?;
-            let mut beta = caller.enter(session, &programs.beta)?;
-            let mut gamma = caller.enter(session, &programs.gamma)?;
+
+            let mut alpha_data = caller.enter(session, &programs.a_files)?;
+            let mut alpha_other_data = caller.enter(session, &programs.alpha_c_files)?;
+            let mut alpha_owner = caller.enter(session, &programs.alpha_owner)?;
+            let alpha_machine = caller.enter(session, &programs.alpha_machine)?;
+            let alpha_file = caller.enter(session, &programs.alpha)?;
+            let alpha_other = caller.enter(session, &programs.alpha_c)?;
+            alpha_data
+                .send::<shell::global::Loan<ALPHA>>(alpha_file)
+                .await?;
+            alpha_other_data
+                .send::<shell::global::Loan<ALPHA_C>>(alpha_other)
+                .await?;
+            let (mut alpha, mut alpha_other) = async {
+                let [mut primary, mut other] = alpha_owner.par()?;
+                async { primary.recv::<shell::global::Loan<ALPHA>>().await };
+                async { other.recv::<shell::global::Loan<ALPHA_C>>().await };
+            }
+            .await?;
+
+            let mut beta_data = caller.enter(session, &programs.b_files)?;
+            let mut beta_other_data = caller.enter(session, &programs.beta_a_files)?;
+            let mut beta_owner = caller.enter(session, &programs.beta_owner)?;
+            let beta_machine = caller.enter(session, &programs.beta_machine)?;
+            let beta_file = caller.enter(session, &programs.beta)?;
+            let beta_other = caller.enter(session, &programs.beta_a)?;
+            beta_data
+                .send::<shell::global::Loan<BETA>>(beta_file)
+                .await?;
+            beta_other_data
+                .send::<shell::global::Loan<BETA_A>>(beta_other)
+                .await?;
+            let (mut beta, mut beta_other) = async {
+                let [mut primary, mut other] = beta_owner.par()?;
+                async { primary.recv::<shell::global::Loan<BETA>>().await };
+                async { other.recv::<shell::global::Loan<BETA_A>>().await };
+            }
+            .await?;
+
+            let mut gamma_data = caller.enter(session, &programs.c_files)?;
+            let mut gamma_other_data = caller.enter(session, &programs.gamma_b_files)?;
+            let mut gamma_owner = caller.enter(session, &programs.gamma_owner)?;
+            let gamma_machine = caller.enter(session, &programs.gamma_machine)?;
+            let gamma_file = caller.enter(session, &programs.gamma)?;
+            let gamma_other = caller.enter(session, &programs.gamma_b)?;
+            gamma_data
+                .send::<shell::global::Loan<GAMMA>>(gamma_file)
+                .await?;
+            gamma_other_data
+                .send::<shell::global::Loan<GAMMA_B>>(gamma_other)
+                .await?;
+            let (mut gamma, mut gamma_other) = async {
+                let [mut primary, mut other] = gamma_owner.par()?;
+                async { primary.recv::<shell::global::Loan<GAMMA>>().await };
+                async { other.recv::<shell::global::Loan<GAMMA_B>>().await };
+            }
+            .await?;
+            let mut alpha_service = caller.enter(session, &programs.alpha_service)?;
+            let alpha_work = QualityEffects {
+                job: 5,
+                rejected_inspections: 0,
+                events: Cell::default(),
+            };
+            let mut beta_service = caller.enter(session, &programs.beta_service)?;
+            let beta_work = QualityEffects {
+                job: 3,
+                rejected_inspections: 0,
+                events: Cell::default(),
+            };
+            let mut gamma_service = caller.enter(session, &programs.gamma_service)?;
+            let gamma_work = QualityEffects {
+                job: 4,
+                rejected_inspections: 0,
+                events: Cell::default(),
+            };
             let mut inspector = caller.enter(session, &programs.inspector)?;
             let mut dispatcher = caller.enter(session, &programs.dispatcher)?;
             let delays: [Duration; 3] = std::array::from_fn(|worker| {
@@ -755,13 +907,49 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                         .map_err(|error| ShellError::message(format!("depot: {error}")))?;
                     };
                     async {
-                        localside::worker::run(&mut a, &simulator).await?;
+                        let mut machine = alpha_machine;
+                        for _ in 0..2 {
+                            drop(alpha_owner.offer().await?);
+                            alpha_owner.send::<JobLoan<ALPHA_MACHINE>>(machine).await?;
+                            machine = alpha_owner.recv::<JobLoan<ALPHA_MACHINE>>().await?;
+                        }
                     };
                     async {
-                        localside::worker::run(&mut b, &simulator).await?;
+                        localside::worker::station_job::<ALPHA_SERVICE,ALPHA_MACHINE,ALPHA_JOB_C>(&mut alpha_service,&alpha_work).await?;
                     };
                     async {
-                        localside::worker::run(&mut c, &simulator).await?;
+                        localside::worker::run::<WORKER_A, ALPHA_MACHINE>(&mut a, &simulator)
+                            .await?;
+                    };
+                    async {
+                        let mut machine = beta_machine;
+                        for _ in 0..2 {
+                            drop(beta_owner.offer().await?);
+                            beta_owner.send::<JobLoan<BETA_MACHINE>>(machine).await?;
+                            machine = beta_owner.recv::<JobLoan<BETA_MACHINE>>().await?;
+                        }
+                    };
+                    async {
+                        localside::worker::station_job::<BETA_SERVICE,BETA_MACHINE,BETA_JOB_A>(&mut beta_service,&beta_work).await?;
+                    };
+                    async {
+                        localside::worker::run::<WORKER_B, BETA_MACHINE>(&mut b, &simulator)
+                            .await?;
+                    };
+                    async {
+                        let mut machine = gamma_machine;
+                        for _ in 0..2 {
+                            drop(gamma_owner.offer().await?);
+                            gamma_owner.send::<JobLoan<GAMMA_MACHINE>>(machine).await?;
+                            machine = gamma_owner.recv::<JobLoan<GAMMA_MACHINE>>().await?;
+                        }
+                    };
+                    async {
+                        localside::worker::station_job::<GAMMA_SERVICE,GAMMA_MACHINE,GAMMA_JOB_B>(&mut gamma_service,&gamma_work).await?;
+                    };
+                    async {
+                        localside::worker::run::<WORKER_C, GAMMA_MACHINE>(&mut c, &simulator)
+                            .await?;
                     };
                     async {
                         for job in order {
@@ -850,6 +1038,10 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                         )?;
                         let approval = data::decode(alpha.recv::<JobUpdate>().await?)?;
                         data::inspected(&result["data"]["part"], &arguments.value(), &approval)?;
+                        let arguments = data::JobArguments::<ALPHA_JOB_C>::from_bytes(&data::encode(&json!({"job_id":data::JOBS[5]}))?)?;
+                        alpha_other.send::<StationJob<ALPHA_JOB_C>>(&arguments).await?;
+                        let result = data::decode(alpha_other.recv::<JobResult>().await?)?;
+                        data::completed(&data::submission::<ALPHA_JOB_C>(arguments.value()), &result, None)?;
                     };
                     async {
                         if let Some(rank) = order
@@ -881,6 +1073,10 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                         )?;
                         let approval = data::decode(beta.recv::<JobUpdate>().await?)?;
                         data::inspected(&result["data"]["part"], &arguments.value(), &approval)?;
+                        let arguments = data::JobArguments::<BETA_JOB_A>::from_bytes(&data::encode(&json!({"job_id":data::JOBS[3]}))?)?;
+                        beta_other.send::<StationJob<BETA_JOB_A>>(&arguments).await?;
+                        let result = data::decode(beta_other.recv::<JobResult>().await?)?;
+                        data::completed(&data::submission::<BETA_JOB_A>(arguments.value()), &result, None)?;
                     };
                     async {
                         if let Some(rank) = order
@@ -912,6 +1108,10 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                         )?;
                         let approval = data::decode(gamma.recv::<JobUpdate>().await?)?;
                         data::inspected(&result["data"]["part"], &arguments.value(), &approval)?;
+                        let arguments = data::JobArguments::<GAMMA_JOB_B>::from_bytes(&data::encode(&json!({"job_id":data::JOBS[4]}))?)?;
+                        gamma_other.send::<StationJob<GAMMA_JOB_B>>(&arguments).await?;
+                        let result = data::decode(gamma_other.recv::<JobResult>().await?)?;
+                        data::completed(&data::submission::<GAMMA_JOB_B>(arguments.value()), &result, None)?;
                     };
                     Ok::<(), ShellError>(())
                 },
@@ -1054,8 +1254,22 @@ async fn production_receiver_rejects_changed_tool_requests_before_effect() -> Sh
         b"null".as_slice(),
     ] {
         let session = SessionId::new(SESSION);
-        let (mut connection, _, _) =
-            Bus::open(data::AGENTS, [(session, TOOL_0), (session, TOOL_1)]);
+        let (mut connection, _, _) = Bus::open(
+            data::AGENTS,
+            [
+                (session, TOOL_0),
+                (session, TOOL_1),
+                (session, ALPHA),
+                (session, ALPHA_C),
+                (session, ALPHA_MACHINE),
+                (session, BETA),
+                (session, BETA_A),
+                (session, BETA_MACHINE),
+                (session, GAMMA),
+                (session, GAMMA_B),
+                (session, GAMMA_MACHINE),
+            ],
+        );
         let (bus, simulator) = connection.split();
         let inputs = [const { Cell::new(Value::Null) }; 5];
         let mut host_slab = vec![0; 1024 * 1024];
@@ -1077,7 +1291,26 @@ async fn production_receiver_rejects_changed_tool_requests_before_effect() -> Sh
         let tool0 = host.enter(session, &programs.tool_0)?;
         let tool1 = host.enter(session, &programs.tool_1)?;
         let mut worker = caller.enter(session, &programs.a)?;
-        let mut alpha = caller.enter(session, &programs.alpha)?;
+
+        let mut alpha_data = caller.enter(session, &programs.a_files)?;
+        let mut alpha_other_data = caller.enter(session, &programs.alpha_c_files)?;
+        let mut alpha_owner = caller.enter(session, &programs.alpha_owner)?;
+        let alpha_machine = caller.enter(session, &programs.alpha_machine)?;
+        let alpha_file = caller.enter(session, &programs.alpha)?;
+        let alpha_other = caller.enter(session, &programs.alpha_c)?;
+        alpha_data
+            .send::<shell::global::Loan<ALPHA>>(alpha_file)
+            .await?;
+        alpha_other_data
+            .send::<shell::global::Loan<ALPHA_C>>(alpha_other)
+            .await?;
+        let (mut alpha, _alpha_other) = async {
+            let [mut primary, mut other] = alpha_owner.par()?;
+            async { primary.recv::<shell::global::Loan<ALPHA>>().await };
+            async { other.recv::<shell::global::Loan<ALPHA_C>>().await };
+        }
+        .await?;
+
         let effects = ToolEffects {
             events: Cell::new(Vec::new()),
             delays: [Duration::ZERO; 3],
@@ -1097,7 +1330,11 @@ async fn production_receiver_rejects_changed_tool_requests_before_effect() -> Sh
                         data::JobArguments::<WORKER_A>::from_bytes(br#"{"job_id":"alpha_job_a"}"#)?;
                     alpha.send::<StationJob<WORKER_A>>(&admitted).await?;
                     let _station = intent.recv::<StationJob<WORKER_A>>().await?;
-                    intent.send::<Intent<WORKER_A>>(&admitted).await?;
+                    alpha_owner
+                        .send::<JobLoan<ALPHA_MACHINE>>(alpha_machine)
+                        .await?;
+                    let mut machine = intent.recv::<JobLoan<ALPHA_MACHINE>>().await?;
+                    machine.send::<Intent<WORKER_A>>(&admitted).await?;
                     let mut tool = work.recv::<Loan0>().await?;
                     tool.send::<UntrustedRequest>(&Untrusted(bytes)).await?;
                     core::future::pending::<ShellResult<()>>().await?;

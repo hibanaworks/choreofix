@@ -4,18 +4,19 @@ use crate::shell::{ShellError, ShellResult, imp::service::ReceivedEffects};
 use hibana::{Endpoint, g::Message};
 
 #[hibana_runtime::scope]
-pub async fn run<const WORKER: u8>(
+pub async fn run<const WORKER: u8, const MACHINE: u8>(
     endpoint: &mut Endpoint<WORKER>,
     effects: &impl ReceivedEffects,
 ) -> ShellResult<()> {
+    let [mut intent, mut work] = endpoint.par()?;
     let material = {
-        let [mut intent, mut work] = endpoint.par()?;
         let station = intent.recv::<StationJob<WORKER>>().await?;
         let arguments = imp::JobArguments::<WORKER>::from_bytes(station.as_bytes())?;
         let admitted = imp::submission::<WORKER>(arguments.value());
-        intent.send::<Intent<WORKER>>(&arguments).await?;
+        let mut machine = intent.recv::<JobLoan<MACHINE>>().await?;
+        machine.send::<Intent<WORKER>>(&arguments).await?;
         let branch = work.offer().await?;
-        match branch.label() {
+        let material = match branch.label() {
             Loan0::LOGICAL_LABEL => {
                 async {
                     let mut tool = branch.recv::<Loan0>().await?;
@@ -55,10 +56,19 @@ pub async fn run<const WORKER: u8>(
                 .await
             }
             _ => Err(ShellError::message("unexpected tool loan")),
-        }?
+        }?;
+        let actual = imp::decode(machine.recv::<StationResult<MACHINE>>().await?)?;
+        imp::completed(&admitted, &actual, None)?;
+        if actual["data"]["part"] != material {
+            return Err(ShellError::message(
+                "station and tool returned different material",
+            ));
+        }
+        intent.send::<JobLoan<MACHINE>>(machine).await?;
+        material
     };
     let (result, bytes) = async {
-        let [mut delivery, mut check] = endpoint.par()?;
+        let [mut delivery, mut check] = work.par()?;
         async {
             delivery
                 .send::<FinishedPart<WORKER>>(&imp::encode(&material)?.as_slice())
@@ -75,22 +85,20 @@ pub async fn run<const WORKER: u8>(
     }
     .await?;
     if result["success"] == true {
-        endpoint
-            .send::<Approved<WORKER>>(&imp::InspectionReply::from_bytes(&bytes)?)
+        work.send::<Approved<WORKER>>(&imp::InspectionReply::from_bytes(&bytes)?)
             .await?;
-        endpoint.send::<JobUpdate>(&bytes.as_slice()).await?;
+        work.send::<JobUpdate>(&bytes.as_slice()).await?;
     } else {
-        endpoint
-            .send::<Failed<WORKER>>(&imp::InspectionReply::from_bytes(&bytes)?)
+        work.send::<Failed<WORKER>>(&imp::InspectionReply::from_bytes(&bytes)?)
             .await?;
-        let request = endpoint.recv::<DispatchRequest<WORKER>>().await?;
+        let request = work.recv::<DispatchRequest<WORKER>>().await?;
         let arguments = imp::decode(request.as_bytes())?;
         imp::rework_input(&result, &arguments)?;
         let order = effects.apply(request).await?;
         imp::dispatched(&result, &arguments, &order)?;
         let bytes = imp::encode(&order)?;
         async {
-            let [mut dispatcher, mut station] = endpoint.par()?;
+            let [mut dispatcher, mut station] = work.par()?;
             async {
                 dispatcher
                     .send::<WorkOrder<WORKER>>(&bytes.as_slice())
@@ -103,5 +111,53 @@ pub async fn run<const WORKER: u8>(
         }
         .await?;
     }
+    Ok(())
+}
+
+/// Manufacture the job that needs only this workstation.
+#[hibana_runtime::scope]
+pub async fn station_job<const SERVICE: u8, const MACHINE: u8, const JOB: u8>(
+    endpoint: &mut Endpoint<SERVICE>,
+    effects: &impl ReceivedEffects,
+) -> ShellResult<()> {
+    let submission = endpoint.recv::<StationJob<JOB>>().await?;
+    let arguments = imp::JobArguments::<JOB>::from_bytes(submission.as_bytes())?;
+    let admitted = imp::submission::<JOB>(arguments.value());
+    let mut machine = endpoint.recv::<JobLoan<MACHINE>>().await?;
+    let received = async {
+        async {
+            machine.send::<JobIntent<JOB>>(&arguments.into()).await?;
+        };
+        Ok::<_, ShellError>(endpoint.recv::<JobIntent<JOB>>().await?)
+    }
+    .await?;
+    if imp::decode(received.as_bytes())? != admitted["arguments"] {
+        return Err(ShellError::message(
+            "workstation request differs from the submitted job",
+        ));
+    }
+    let result = effects.apply(received).await?;
+    imp::completed(&admitted, &result, None)?;
+    let bytes = imp::encode(&result)?;
+    async {
+        async {
+            endpoint.send::<JobResult>(&bytes.as_slice()).await?;
+        };
+        let confirmed = machine.recv::<JobResult>().await?;
+        if confirmed[..] != bytes {
+            return Err(ShellError::message(
+                "workstation reply differs from its actual effect",
+            ));
+        }
+        Ok::<(), ShellError>(())
+    }
+    .await?;
+    let [mut returned, mut file] = endpoint.par()?;
+    async {
+        returned.send::<JobLoan<MACHINE>>(machine).await?;
+    };
+    async {
+        file.send::<JobResult>(&bytes.as_slice()).await?;
+    };
     Ok(())
 }

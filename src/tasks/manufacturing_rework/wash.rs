@@ -1,4 +1,4 @@
-//! Wash files for the three jobs that use the two-tool cabinet.
+//! Each worker has direct ChoreoFS requests on two distinct workstations.
 use super::manufacturing_rework::{global::*, imp, localside};
 use crate::shell::{
     GUEST_MEMORY_BYTES, ShellError, ShellResult,
@@ -29,9 +29,6 @@ const C_VM: u8 = 11;
 const A_TERM: u8 = 12;
 const B_TERM: u8 = 13;
 const C_TERM: u8 = 14;
-const A_FILES: u8 = 15;
-const B_FILES: u8 = 16;
-const C_FILES: u8 = 17;
 const INSPECTOR_VM: u8 = 18;
 const INSPECTOR_TERM: u8 = 19;
 const INSPECTOR_FILES: u8 = 20;
@@ -81,6 +78,8 @@ const fn request_reply(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
 }
 const JOB: ChoreoFsObject<'static> = request_reply(b"service/do_job", 4);
 const WORKSTATION_FILES: [ChoreoFsObject<'static>; 2] = [JOB, readable(b"service/job_update", 5)];
+const OTHER_JOB: ChoreoFsObject<'static> = request_reply(b"service/do_job_at_other_station", 6);
+const WORKER_FILES: [ChoreoFsObject<'static>; 3] = [JOB, WORKSTATION_FILES[1], OTHER_JOB];
 const ORDERS: [ChoreoFsObject<'static>; 9] = [
     readable(b"service/approved/alpha_job_a", 4),
     readable(b"service/approved/beta_job_b", 5),
@@ -105,11 +104,17 @@ fn shell_io<const VM: u8, const STATION: u8, const FILES: u8, const TERM: u8>() 
 }
 
 #[hibana_runtime::scope]
-async fn worker_shell<const WORKER: u8, const VM: u8, const STATION: u8>(
-    mut vm: Endpoint<VM>,
+async fn worker_shell<
+    const WORKER: u8,
+    const VM: u8,
+    const STATION: u8,
+    const OTHER: u8,
+    const JOB_ID: u8,
+>(
+    vm: Endpoint<VM>,
+    (station, other): (Endpoint<STATION>, Endpoint<OTHER>),
     module: &[u8],
 ) -> ShellResult<()> {
-    let station = vm.recv::<Loan<STATION>>().await?;
     let mut request = vec![0; GUEST_MEMORY_BYTES];
     let mut result = vec![0; GUEST_MEMORY_BYTES];
     let mut update = vec![0; GUEST_MEMORY_BYTES];
@@ -118,13 +123,22 @@ async fn worker_shell<const WORKER: u8, const VM: u8, const STATION: u8>(
         .read_as::<JobResult>(&mut result)
         .file(WORKSTATION_FILES[1])?
         .read_as::<JobUpdate>(&mut update);
-    let files = ChoreoFsFiles::new(vm).file(file)?;
+    let mut other_request = vec![0; GUEST_MEMORY_BYTES];
+    let mut other_result = vec![0; GUEST_MEMORY_BYTES];
+    let files = ChoreoFsFiles::new(vm).file(file)?.file(
+        ChoreoFsFile::new(OTHER_JOB, other)
+            .write_as::<StationJob<JOB_ID>>(&mut other_request)
+            .read_as::<JobResult>(&mut other_result),
+    )?;
     let mut memory = vec![0; GUEST_MEMORY_BYTES];
     let mut storage = Box::new(HibanaWasiGuestStorage::uninit());
     let guest = storage.init(module, GuestMemory::new(&mut memory), files)?;
     let (exit, files) = guest.run().await?;
     let status = exit.status() as i32;
-    let (mut vm, (file, ())) = files.into_parts();
+    let (mut vm, (file, (other, ()))) = files.into_parts();
+    async {
+        other.into_endpoint().send::<FileExit>(&status).await?;
+    };
     async {
         file.into_endpoint().send::<FileExit>(&status).await?;
     };
@@ -135,13 +149,6 @@ async fn worker_shell<const WORKER: u8, const VM: u8, const STATION: u8>(
 #[hibana_runtime::scope]
 pub async fn run(path: &str) -> ShellResult<()> {
     use crate::imp::projection::rows;
-    let loans = g::par(
-        g::send::<A_FILES, A_VM, Loan<ALPHA>>(),
-        g::par(
-            g::send::<B_FILES, B_VM, Loan<BETA>>(),
-            g::send::<C_FILES, C_VM, Loan<GAMMA>>(),
-        ),
-    );
     let io = g::par(
         shell_io::<A_VM, ALPHA, A_FILES, A_TERM>(),
         g::par(
@@ -149,9 +156,25 @@ pub async fn run(path: &str) -> ShellResult<()> {
             shell_io::<C_VM, GAMMA, C_FILES, C_TERM>(),
         ),
     );
+    let metadata = g::par(
+        g::seq(
+            file_metadata::<ALPHA_C, ALPHA_C_FILES>().roll(),
+            g::send::<ALPHA_C, ALPHA_C_FILES, FileExit>(),
+        ),
+        g::par(
+            g::seq(
+                file_metadata::<BETA_A, BETA_A_FILES>().roll(),
+                g::send::<BETA_A, BETA_A_FILES, FileExit>(),
+            ),
+            g::seq(
+                file_metadata::<GAMMA_B, GAMMA_B_FILES>().roll(),
+                g::send::<GAMMA_B, GAMMA_B_FILES, FileExit>(),
+            ),
+        ),
+    );
     let global = g::seq(
         g::par(
-            loans,
+            workstation_files(),
             g::par(
                 g::send::<INSPECTOR_FILES, INSPECTOR_VM, Loan<INSPECTOR>>(),
                 g::send::<DISPATCHER_FILES, DISPATCHER_VM, Loan<DISPATCHER>>(),
@@ -160,7 +183,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
         g::par(
             source(),
             g::par(
-                io,
+                g::par(io, metadata),
                 g::par(
                     shell_io::<INSPECTOR_VM, INSPECTOR, INSPECTOR_FILES, INSPECTOR_TERM>(),
                     shell_io::<DISPATCHER_VM, DISPATCHER, DISPATCHER_FILES, DISPATCHER_TERM>(),
@@ -194,26 +217,114 @@ pub async fn run(path: &str) -> ShellResult<()> {
     let a_files = project::<A_FILES>(&global);
     let b_files = project::<B_FILES>(&global);
     let c_files = project::<C_FILES>(&global);
+    let alpha_machine = project::<ALPHA_MACHINE>(&global);
+    let alpha_owner = project::<ALPHA_OWNER>(&global);
+    let alpha_service = project::<ALPHA_SERVICE>(&global);
+    let alpha_c = project::<ALPHA_C>(&global);
+    let alpha_c_files = project::<ALPHA_C_FILES>(&global);
+    let beta_machine = project::<BETA_MACHINE>(&global);
+    let beta_owner = project::<BETA_OWNER>(&global);
+    let beta_service = project::<BETA_SERVICE>(&global);
+    let beta_a = project::<BETA_A>(&global);
+    let beta_a_files = project::<BETA_A_FILES>(&global);
+    let gamma_machine = project::<GAMMA_MACHINE>(&global);
+    let gamma_owner = project::<GAMMA_OWNER>(&global);
+    let gamma_service = project::<GAMMA_SERVICE>(&global);
+    let gamma_b = project::<GAMMA_B>(&global);
+    let gamma_b_files = project::<GAMMA_B_FILES>(&global);
+    let roles = [
+        ("ALPHA_MACHINE", ALPHA_MACHINE),
+        ("ALPHA_OWNER", ALPHA_OWNER),
+        ("ALPHA_SERVICE", ALPHA_SERVICE),
+        ("ALPHA_C", ALPHA_C),
+        ("ALPHA_C_FILES", ALPHA_C_FILES),
+        ("BETA_MACHINE", BETA_MACHINE),
+        ("BETA_OWNER", BETA_OWNER),
+        ("BETA_SERVICE", BETA_SERVICE),
+        ("BETA_A", BETA_A),
+        ("BETA_A_FILES", BETA_A_FILES),
+        ("GAMMA_MACHINE", GAMMA_MACHINE),
+        ("GAMMA_OWNER", GAMMA_OWNER),
+        ("GAMMA_SERVICE", GAMMA_SERVICE),
+        ("GAMMA_B", GAMMA_B),
+        ("GAMMA_B_FILES", GAMMA_B_FILES),
+        ("DISPATCHER", DISPATCHER),
+        ("DISPATCHER_VM", DISPATCHER_VM),
+        ("DISPATCHER_FILES", DISPATCHER_FILES),
+        ("DISPATCHER_TERM", DISPATCHER_TERM),
+        ("INSPECTOR", INSPECTOR),
+        ("INSPECTOR_VM", INSPECTOR_VM),
+        ("INSPECTOR_FILES", INSPECTOR_FILES),
+        ("INSPECTOR_TERM", INSPECTOR_TERM),
+        ("WORKER_A", WORKER_A),
+        ("WORKER_B", WORKER_B),
+        ("WORKER_C", WORKER_C),
+        ("DEPOT", DEPOT),
+        ("TOOL_0", TOOL_0),
+        ("TOOL_1", TOOL_1),
+        ("ALPHA", ALPHA),
+        ("BETA", BETA),
+        ("GAMMA", GAMMA),
+        ("A_VM", A_VM),
+        ("B_VM", B_VM),
+        ("C_VM", C_VM),
+        ("A_TERM", A_TERM),
+        ("B_TERM", B_TERM),
+        ("C_TERM", C_TERM),
+        ("A_FILES", A_FILES),
+        ("B_FILES", B_FILES),
+        ("C_FILES", C_FILES),
+    ]
+    .into_iter()
+    .collect::<std::collections::BTreeMap<_, _>>();
+    let programs = vec![
+        rows(&alpha_machine),
+        rows(&alpha_owner),
+        rows(&alpha_service),
+        rows(&alpha_c),
+        rows(&alpha_c_files),
+        rows(&beta_machine),
+        rows(&beta_owner),
+        rows(&beta_service),
+        rows(&beta_a),
+        rows(&beta_a_files),
+        rows(&gamma_machine),
+        rows(&gamma_owner),
+        rows(&gamma_service),
+        rows(&gamma_b),
+        rows(&gamma_b_files),
+        rows(&dispatcher),
+        rows(&dispatcher_vm),
+        rows(&dispatcher_files),
+        rows(&dispatcher_term),
+        rows(&inspector),
+        rows(&inspector_vm),
+        rows(&inspector_files),
+        rows(&inspector_term),
+        rows(&worker_a),
+        rows(&worker_b),
+        rows(&worker_c),
+        rows(&depot),
+        rows(&tool_0),
+        rows(&tool_1),
+        rows(&alpha),
+        rows(&beta),
+        rows(&gamma),
+        rows(&a_vm),
+        rows(&b_vm),
+        rows(&c_vm),
+        rows(&a_term),
+        rows(&b_term),
+        rows(&c_term),
+        rows(&a_files),
+        rows(&b_files),
+        rows(&c_files),
+    ];
     let projection = json!({
         "type": "compiled_projection", "format_version": 1, "task": "11M",
-        "scope": "tool-requiring jobs, inspection and rework orders", "session": SESSION,
-        "roles": {
-            "DISPATCHER": DISPATCHER, "DISPATCHER_VM": DISPATCHER_VM, "DISPATCHER_FILES": DISPATCHER_FILES, "DISPATCHER_TERM": DISPATCHER_TERM,
-            "INSPECTOR": INSPECTOR, "INSPECTOR_VM": INSPECTOR_VM, "INSPECTOR_FILES": INSPECTOR_FILES, "INSPECTOR_TERM": INSPECTOR_TERM,
-            "WORKER_A": WORKER_A, "WORKER_B": WORKER_B, "WORKER_C": WORKER_C, "DEPOT": DEPOT,
-            "TOOL_0": TOOL_0, "TOOL_1": TOOL_1, "ALPHA": ALPHA, "BETA": BETA, "GAMMA": GAMMA,
-            "A_VM": A_VM, "B_VM": B_VM, "C_VM": C_VM,
-            "A_TERM": A_TERM, "B_TERM": B_TERM, "C_TERM": C_TERM,
-            "A_FILES": A_FILES, "B_FILES": B_FILES, "C_FILES": C_FILES,
-        },
-        "programs": [
-            rows(&dispatcher), rows(&dispatcher_vm), rows(&dispatcher_files), rows(&dispatcher_term),
-            rows(&inspector), rows(&inspector_vm), rows(&inspector_files), rows(&inspector_term),
-            rows(&worker_a), rows(&worker_b), rows(&worker_c), rows(&depot),
-            rows(&tool_0), rows(&tool_1), rows(&alpha), rows(&beta), rows(&gamma),
-            rows(&a_vm), rows(&b_vm), rows(&c_vm), rows(&a_term), rows(&b_term), rows(&c_term),
-            rows(&a_files), rows(&b_files), rows(&c_files),
-        ],
+        "scope": "six initial jobs on shared workstations, tool-job inspections and rework orders", "session": SESSION,
+        "roles": roles,
+        "programs": programs,
     });
     if path == "--projection" {
         println!("{projection}");
@@ -240,6 +351,12 @@ pub async fn run(path: &str) -> ShellResult<()> {
             "DISPATCHER",
         ],
         [
+            (session, ALPHA_C),
+            (session, ALPHA_MACHINE),
+            (session, BETA_A),
+            (session, BETA_MACHINE),
+            (session, GAMMA_B),
+            (session, GAMMA_MACHINE),
             (session, TOOL_0),
             (session, TOOL_1),
             (session, ALPHA),
@@ -420,56 +537,150 @@ pub async fn run(path: &str) -> ShellResult<()> {
         let mut a_term = rv.enter(session, &a_term)?;
         let mut b_term = rv.enter(session, &b_term)?;
         let mut c_term = rv.enter(session, &c_term)?;
+        let mut alpha_owner = rv.enter(session, &alpha_owner)?;
+        let mut alpha_service = rv.enter(session, &alpha_service)?;
+        let alpha_machine = rv.enter(session, &alpha_machine)?;
+        let mut alpha_c_files = rv.enter(session, &alpha_c_files)?;
+        let alpha_c = rv.enter(session, &alpha_c)?;
         async {
-            localside::tool_depot::run(&mut depot, (tool_0, tool_1), (&simulator, &inputs)).await?;
+            file_metadata::run(&mut alpha_c_files, alpha_c, [OTHER_JOB]).await?;
         };
+        let mut beta_owner = rv.enter(session, &beta_owner)?;
+        let mut beta_service = rv.enter(session, &beta_service)?;
+        let beta_machine = rv.enter(session, &beta_machine)?;
+        let mut beta_a_files = rv.enter(session, &beta_a_files)?;
+        let beta_a = rv.enter(session, &beta_a)?;
         async {
-            localside::worker::run(&mut worker_a, &simulator).await?;
+            file_metadata::run(&mut beta_a_files, beta_a, [OTHER_JOB]).await?;
         };
+        let mut gamma_owner = rv.enter(session, &gamma_owner)?;
+        let mut gamma_service = rv.enter(session, &gamma_service)?;
+        let gamma_machine = rv.enter(session, &gamma_machine)?;
+        let mut gamma_b_files = rv.enter(session, &gamma_b_files)?;
+        let gamma_b = rv.enter(session, &gamma_b)?;
         async {
-            worker_shell::<WORKER_A, A_VM, ALPHA>(a_vm, &module).await?;
+            file_metadata::run(&mut gamma_b_files, gamma_b, [OTHER_JOB]).await?;
         };
         async {
             file_metadata::run(&mut a_files, alpha, WORKSTATION_FILES).await?;
         };
         async {
-            private_io::run(
-                &mut a_term,
-                PrivateFs::new(terminal_a, bus, &WORKSTATION_FILES),
-            )
-            .await?;
-        };
-        async {
-            localside::worker::run(&mut worker_b, &simulator).await?;
-        };
-        async {
-            worker_shell::<WORKER_B, B_VM, BETA>(b_vm, &module).await?;
-        };
-        async {
             file_metadata::run(&mut b_files, beta, WORKSTATION_FILES).await?;
-        };
-        async {
-            private_io::run(
-                &mut b_term,
-                PrivateFs::new(terminal_b, bus, &WORKSTATION_FILES),
-            )
-            .await?;
-        };
-        async {
-            localside::worker::run(&mut worker_c, &simulator).await?;
-        };
-        async {
-            worker_shell::<WORKER_C, C_VM, GAMMA>(c_vm, &module).await?;
         };
         async {
             file_metadata::run(&mut c_files, gamma, WORKSTATION_FILES).await?;
         };
+        let (
+            (alpha_a_file, alpha_c_file),
+            (beta_b_file, beta_a_file),
+            (gamma_c_file, gamma_b_file),
+        ) = async {
+            async {
+                let [mut primary, mut other] = alpha_owner.par()?;
+                async { primary.recv::<Loan<ALPHA>>().await };
+                async { other.recv::<Loan<ALPHA_C>>().await };
+            };
+            async {
+                let [mut primary, mut other] = beta_owner.par()?;
+                async { primary.recv::<Loan<BETA>>().await };
+                async { other.recv::<Loan<BETA_A>>().await };
+            };
+            async {
+                let [mut primary, mut other] = gamma_owner.par()?;
+                async { primary.recv::<Loan<GAMMA>>().await };
+                async { other.recv::<Loan<GAMMA_B>>().await };
+            };
+        }
+        .await?;
         async {
-            private_io::run(
-                &mut c_term,
-                PrivateFs::new(terminal_c, bus, &WORKSTATION_FILES),
+            let mut machine = alpha_machine;
+            for _ in 0..2 {
+                drop(alpha_owner.offer().await?);
+                alpha_owner.send::<JobLoan<ALPHA_MACHINE>>(machine).await?;
+                machine = alpha_owner.recv::<JobLoan<ALPHA_MACHINE>>().await?;
+            }
+        };
+        async {
+            localside::worker::station_job::<ALPHA_SERVICE, ALPHA_MACHINE, ALPHA_JOB_C>(
+                &mut alpha_service,
+                &simulator,
             )
             .await?;
+        };
+        async {
+            let mut machine = beta_machine;
+            for _ in 0..2 {
+                drop(beta_owner.offer().await?);
+                beta_owner.send::<JobLoan<BETA_MACHINE>>(machine).await?;
+                machine = beta_owner.recv::<JobLoan<BETA_MACHINE>>().await?;
+            }
+        };
+        async {
+            localside::worker::station_job::<BETA_SERVICE, BETA_MACHINE, BETA_JOB_A>(
+                &mut beta_service,
+                &simulator,
+            )
+            .await?;
+        };
+        async {
+            let mut machine = gamma_machine;
+            for _ in 0..2 {
+                drop(gamma_owner.offer().await?);
+                gamma_owner.send::<JobLoan<GAMMA_MACHINE>>(machine).await?;
+                machine = gamma_owner.recv::<JobLoan<GAMMA_MACHINE>>().await?;
+            }
+        };
+        async {
+            localside::worker::station_job::<GAMMA_SERVICE, GAMMA_MACHINE, GAMMA_JOB_B>(
+                &mut gamma_service,
+                &simulator,
+            )
+            .await?;
+        };
+        async {
+            localside::tool_depot::run(&mut depot, (tool_0, tool_1), (&simulator, &inputs)).await?;
+        };
+        async {
+            localside::worker::run::<WORKER_A, ALPHA_MACHINE>(&mut worker_a, &simulator).await?;
+        };
+        async {
+            worker_shell::<WORKER_A, A_VM, ALPHA, BETA_A, BETA_JOB_A>(
+                a_vm,
+                (alpha_a_file, beta_a_file),
+                &module,
+            )
+            .await?;
+        };
+        async {
+            private_io::run(&mut a_term, PrivateFs::new(terminal_a, bus, &WORKER_FILES)).await?;
+        };
+        async {
+            localside::worker::run::<WORKER_B, BETA_MACHINE>(&mut worker_b, &simulator).await?;
+        };
+        async {
+            worker_shell::<WORKER_B, B_VM, BETA, GAMMA_B, GAMMA_JOB_B>(
+                b_vm,
+                (beta_b_file, gamma_b_file),
+                &module,
+            )
+            .await?;
+        };
+        async {
+            private_io::run(&mut b_term, PrivateFs::new(terminal_b, bus, &WORKER_FILES)).await?;
+        };
+        async {
+            localside::worker::run::<WORKER_C, GAMMA_MACHINE>(&mut worker_c, &simulator).await?;
+        };
+        async {
+            worker_shell::<WORKER_C, C_VM, GAMMA, ALPHA_C, ALPHA_JOB_C>(
+                c_vm,
+                (gamma_c_file, alpha_c_file),
+                &module,
+            )
+            .await?;
+        };
+        async {
+            private_io::run(&mut c_term, PrivateFs::new(terminal_c, bus, &WORKER_FILES)).await?;
         };
         Ok::<(), ShellError>(())
     };
