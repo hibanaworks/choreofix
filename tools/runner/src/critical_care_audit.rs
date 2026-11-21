@@ -194,7 +194,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             return Err(format!("missing or excess {name}: {actual} != {count}").into());
         }
     }
-    let mut scored = score["events"].as_array().ok_or("common effects")?.clone();
+    let mut scored = score["events"]
+        .as_array()
+        .ok_or("common effects")?
+        .iter()
+        .collect::<Vec<_>>();
     if scored.len() != ordered.len() {
         return Err("world and domain counts differ".into());
     }
@@ -379,11 +383,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                 ],
                 _ => return Err("unassigned clinical effect".into()),
             };
-        let index = scored
-            .iter()
-            .position(|e| call.matches_score(e, arguments))
-            .ok_or("effect differs from common-world occurrence")?;
-        scored.remove(index);
+        call.take_score(&mut scored, arguments)?;
         for (from, to, name, after) in relations {
             let (a, b, n) = (role(from)?, role(to)?, label(name)?);
             let matches = frames.iter().filter(|(id, f)| {

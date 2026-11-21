@@ -241,7 +241,8 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut scored = score["events"]
         .as_array()
         .ok_or("manufacturing score events")?
-        .clone();
+        .iter()
+        .collect::<Vec<_>>();
     for call in calls.values() {
         // The neutral simulator records collect_reports' declared default,
         // whereas its actual accepted request omits that optional argument.
@@ -250,11 +251,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         } else {
             call.request["arguments"].clone()
         };
-        let index = scored
-            .iter()
-            .position(|event| call.matches_score(event, &scored_arguments))
-            .ok_or("common score differs from actual effect")?;
-        scored.remove(index);
+        call.take_score(&mut scored, &scored_arguments)?;
     }
     let business = [
         "RequestLatheA",

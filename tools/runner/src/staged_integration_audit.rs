@@ -175,7 +175,8 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
     let mut scored = score["events"]
         .as_array()
         .ok_or("actual scored effects")?
-        .clone();
+        .iter()
+        .collect::<Vec<_>>();
     if scored.len() != calls.len() {
         return Err("effect and score counts differ".into());
     }
@@ -248,11 +249,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             "run_tests" => json!({"suite":target(call)?}),
             _ => json!({"service":name}),
         };
-        let scored_at = scored
-            .iter()
-            .position(|event| call.matches_score(event, &score_args))
-            .ok_or("scored effect differs from actual effect")?;
-        scored.remove(scored_at);
+        call.take_score(&mut scored, &score_args)?;
         let next = ordered
             .iter()
             .filter(|next| {

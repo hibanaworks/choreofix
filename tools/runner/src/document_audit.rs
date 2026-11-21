@@ -89,7 +89,8 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut originals = score["events"]
         .as_array()
         .ok_or("document score events")?
-        .clone();
+        .iter()
+        .collect::<Vec<_>>();
     let mut resources = 0;
     let mut reviews = 0;
     let mut publications = 0;
@@ -327,11 +328,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                 return Err("actual result delivery altered or reused".into());
             }
         }
-        let index = originals
-            .iter()
-            .position(|event| call.matches_score(event, args))
-            .ok_or("original document effect differs")?;
-        originals.remove(index);
+        call.take_score(&mut originals, args)?;
         if result["data"]["agent"] != agent {
             return Err("document result actor differs".into());
         }

@@ -1,6 +1,6 @@
 //! Match EPF-checked file bytes and resource receives to actual effects and replies.
+use crate::journal::file::FileContents;
 use crate::{evidence::Result, journal};
-use hibana::runtime::wire::{Payload, WirePayload};
 use hibana_wasip1_runtime::protocol;
 use serde_json::{Value, json};
 use std::{
@@ -26,10 +26,6 @@ fn payload(message: &Value) -> Result<Vec<u8>> {
                 .ok_or_else(|| "invalid frame byte".into())
         })
         .collect()
-}
-fn validate<P: WirePayload>(frame: &journal::Frame) -> Result<()> {
-    P::validate_payload(Payload::new(&frame.bytes))
-        .map_err(|error| format!("WASI payload: {error:?}").into())
 }
 pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &projection["compiled"];
@@ -156,9 +152,7 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
         if requests.len() != replies.len() {
             return Err("unpaired operation-file requests and replies".into());
         }
-        let mut bytes = Vec::new();
-        let mut offset = 0usize;
-        let mut flags = 0u16;
+        let mut contents = FileContents::new(service_fd);
         for ((_, request_id, request), (_, reply_id, reply)) in requests.into_iter().zip(replies) {
             let receiver = if request.logical_label == file_label {
                 controller
@@ -174,76 +168,31 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
             }
             match (request.logical_label, reply.logical_label) {
                 (protocol::LABEL_WASI_PATH_OPEN, protocol::LABEL_WASI_PATH_OPEN_RET) => {
-                    validate::<protocol::PathOpenReq>(request)?;
-                    validate::<protocol::PathOpenedRet>(reply)?;
-                    if reply.bytes[1..3] == [0, 0] {
-                        if reply.bytes[0] != service_fd
-                            || request.bytes[0] != 3
-                            || request.bytes[14..] != *format!("service/{tool}").as_bytes()
-                        {
-                            return Err("operation open names another object".into());
-                        }
-                        if u16::from_be_bytes(request.bytes[9..11].try_into()?) & 8 != 0 {
-                            bytes.clear();
-                        }
-                        flags = u16::from_be_bytes(request.bytes[11..13].try_into()?);
-                        offset = 0;
-                    }
+                    contents.open(request, reply, |actual| {
+                        actual == format!("service/{tool}").as_bytes()
+                    })?;
                 }
                 (
                     protocol::LABEL_WASI_FD_WRITE_OBJECT,
                     protocol::LABEL_WASI_FD_WRITE_OBJECT_RET,
                 ) => {
-                    validate::<protocol::FdWriteObjectReq>(request)?;
-                    validate::<protocol::FdWriteDoneRet>(reply)?;
-                    let count = usize::from(reply.bytes[1]);
-                    let errno = u16::from_be_bytes(reply.bytes[2..4].try_into()?);
-                    if request.bytes[0] != service_fd
-                        || reply.bytes[0] != service_fd
-                        || count > request.bytes.len() - 2
-                        || (errno != 0 && count != 0)
-                    {
-                        return Err("operation write fd or accepted prefix differs".into());
-                    }
-                    if errno == 0 {
-                        let start = if flags & 1 != 0 { bytes.len() } else { offset };
-                        let end = start.checked_add(count).ok_or("file offset overflow")?;
-                        bytes.resize(bytes.len().max(end), 0);
-                        bytes[start..end].copy_from_slice(&request.bytes[2..2 + count]);
-                        offset = end;
-                    }
+                    contents.write(request, reply)?;
                 }
                 (protocol::LABEL_WASI_FD_READ, protocol::LABEL_WASI_FD_READ_RET) => {
-                    validate::<protocol::FdReadReq>(request)?;
-                    validate::<protocol::FdReadDoneRet>(reply)?;
-                    let end = offset
-                        .saturating_add(usize::from(request.bytes[1]))
-                        .min(bytes.len());
-                    if request.bytes[0] != service_fd
-                        || reply.bytes[0] != service_fd
-                        || reply.bytes[1..3] != [0, 0]
-                        || bytes.get(offset..end) != Some(&reply.bytes[4..])
-                    {
-                        return Err("operation read differs from actual file data".into());
-                    }
-                    if bytes == serde_json::to_vec(result)? {
+                    contents.read(request, reply)?;
+                    if contents.bytes == serde_json::to_vec(result)? {
                         result_reads += 1;
                     }
-                    offset = end;
                 }
                 (protocol::LABEL_WASI_FD_CLOSE, protocol::LABEL_WASI_FD_CLOSE_RET) => {
-                    validate::<protocol::FdCloseReq>(request)?;
-                    validate::<protocol::FdClosedRet>(reply)?;
-                    if request.bytes != [service_fd] || reply.bytes != [service_fd, 0, 0] {
-                        return Err("ordinary close fd/result mismatch".into());
-                    }
+                    contents.close(request, reply)?;
                 }
                 (label, 165) if label == file_label => {
                     let (&result_id, published) =
                         journal::one(frames.iter().filter(|(_, f)| {
                             f.direction(controller, owner) && f.logical_label == 42
                         }))?;
-                    if request.bytes != bytes
+                    if request.bytes != contents.bytes
                         || request.value()? != call.request["arguments"]
                         || request.received >= call.emitted
                         || !reply.bytes.is_empty()
@@ -259,8 +208,8 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
                         return Err("submitted file bytes, Endpoint receive, effect or published result differ".into());
                     }
                     closes.insert(request_id);
-                    bytes = serde_json::to_vec(result)?;
-                    offset = 0;
+                    contents.bytes = serde_json::to_vec(result)?;
+                    contents.offset = 0;
                 }
                 _ => return Err("operation file request/reply types differ".into()),
             }
@@ -379,8 +328,8 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
         let mut complete = 0;
         for (request, reply) in requests.into_iter().zip(replies) {
             if request.logical_label == protocol::LABEL_WASI_PATH_OPEN {
-                validate::<protocol::PathOpenReq>(request)?;
-                validate::<protocol::PathOpenedRet>(reply)?;
+                request.validate::<protocol::PathOpenReq>()?;
+                reply.validate::<protocol::PathOpenedRet>()?;
                 if reply.bytes[1..3] != [0, 0]
                     || reply.bytes[0] != outcome_fd
                     || request.bytes[14..] != *b"service/outcome"
@@ -389,8 +338,8 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
                 }
                 offset = 0;
             } else {
-                validate::<protocol::FdReadReq>(request)?;
-                validate::<protocol::FdReadDoneRet>(reply)?;
+                request.validate::<protocol::FdReadReq>()?;
+                reply.validate::<protocol::FdReadDoneRet>()?;
                 let end = offset
                     .saturating_add(usize::from(request.bytes[1]))
                     .min(canonical.len());
@@ -644,7 +593,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
             send(&mut out, r)?
         }
         out.flush()?;
-        let error = crate::journal::reject_mutant(path, &file, "--audit-api")?;
+        let error = crate::journal::reject_mutant(path, &file, "8E")?;
         let hash = crate::evidence::digest(&file)?;
         fs::remove_file(&file)?;
         reports.push(json!({"mutation":kind,"rejected":true,"sha256":hash,"error":error}));

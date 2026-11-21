@@ -1028,46 +1028,9 @@ async fn main() -> Result<()> {
             "{}",
             serde_json::to_string_pretty(&audit::run(Path::new(output))?)?
         ),
-        [mode, events] if mode == "--audit" || mode.starts_with("--audit-") => {
-            let check: fn(&[Value], &Value, &Value) -> Result<Value> = match mode.as_str() {
-                "--audit-philosophers" => philosophers_audit::check,
-                "--audit-api" => api_audit::check,
-                "--audit-full-stack-api" => full_stack_api_audit::check,
-                "--audit-review" => review_audit::check,
-                "--audit-staged-integration" => staged_integration_audit::check,
-                "--audit-feature-delivery" => feature_delivery_audit::check,
-                "--audit-refactor" => refactor_audit::check,
-                "--audit-lab-quality" => lab_quality_audit::check,
-                "--audit-lab-cascading" => lab_cascading_audit::check,
-                "--audit-drug-discovery" => drug_discovery_audit::check,
-                "--audit-regulatory-discovery" => regulatory_discovery_audit::check,
-                "--audit-multi-round-discovery" => multi_round_discovery_audit::check,
-                "--audit-lab" => lab_audit::check,
-                "--audit-coordination" => coordination_audit::check,
-                "--audit-medical" => medical_audit::check,
-                "--audit-multi-specialty" => multi_specialty_audit::check,
-                "--audit-critical-care" => critical_care_audit::check,
-                "--audit-migration" => microservice_migration_audit::check,
-                "--audit-report" => report_audit::check,
-                "--audit-research-paper" => research_paper_audit::check,
-                "--audit-survey-paper" => survey_paper_audit::check,
-                "--audit-figure-document" => figure_document_audit::check,
-                "--audit-large-document" => large_document_audit::check,
-                "--audit-document" => document_audit::check,
-                "--audit-kitchen" => kitchen_audit::check,
-                "--audit-wafer" => wafer_audit::check,
-                "--audit-workshop" => manufacturing_rework_audit::check,
-                "--audit-manufacturing" => manufacturing_audit::check,
-                "--audit-build" => build_audit::check,
-                "--audit-cascading-build" => cascading_build_audit::check,
-                "--audit-writing" => writing_audit::check,
-                "--audit-cicd" => cicd_audit::check,
-                "--audit-cicd-pipeline" => cicd_pipeline_audit::check,
-                "--audit" => codebase_audit::check,
-                _ => return Err(format!("unknown effect audit: {mode}").into()),
-            };
-            let report = journal::Evidence::open(Path::new(events))?.audit(check)?;
-            println!("{}", serde_json::to_string_pretty(&report)?);
+        [mode, task, events] if mode == "--audit" => {
+            let evidence = journal::Evidence::open(Path::new(events))?;
+            println!("{}", serde_json::to_string_pretty(&audit::effects(task, &evidence)?)?);
         },
         [task, depth, output] => {
             let result = match run(task, depth.parse()?, Path::new(output)).await {
@@ -1090,7 +1053,7 @@ async fn main() -> Result<()> {
         }
         _ => return Err(concat!(
             "usage: choreofix-experiments 1E|1M|1H|2E|2M|2H|3E|3M|3H|4E|4M|5E|5M|5H|6E|6M|6H|7E|7M|7H|8E|8M|9E|9M|9H|10E|10M|11E|11M|12E|13E|13M|13H|14E|14M|14H|15E|16E|16M DEPTH OUTPUT\n",
-            "       --audit-api|--audit-review|--audit-migration|--audit-report|--audit-document|--audit-coordination|--audit-workshop|--audit-writing|--audit-cicd|--audit-cicd-pipeline|--audit-philosophers|--audit-lab|--audit-lab-quality|--audit EVENTS\n",
+            "       --audit TASK EVENTS\n",
             "       --audit-protocol EVENTS\n",
             "       --check-api-mutants|--check-review-mutants|--check-report-mutants|--check-document-mutants|--check-writing-mutants|--check-cicd-mutants|--check-philosophers-mutants|--check-protocol-mutants EVENTS NEW_OUTPUT\n",
             "       --audit-run RUN\n",

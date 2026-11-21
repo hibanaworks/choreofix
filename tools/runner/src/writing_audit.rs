@@ -71,7 +71,8 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut score_events = journal.score["events"]
         .as_array()
         .ok_or("original events")?
-        .clone();
+        .iter()
+        .collect::<Vec<_>>();
     let mut reviews_passed = true;
     let mut resource_requests = 0;
     let mut writes = Vec::new();
@@ -253,11 +254,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             }
             _ => unreachable!(),
         }
-        let index = score_events
-            .iter()
-            .position(|event| call.matches_score(event, args))
-            .ok_or("original score differs from the actual effect")?;
-        score_events.remove(index);
+        call.take_score(&mut score_events, args)?;
     }
     if !score_events.is_empty()
         || completed.len() != 4 * participants

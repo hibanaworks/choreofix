@@ -1,7 +1,7 @@
 //! Bind EPF-checked receive occurrences to actual file data, effects and replies.
 //! Source eligibility and affine custody are checked by EPF, not reimplemented.
+use crate::journal::file::FileContents;
 use crate::{evidence::Result, journal};
-use hibana::runtime::wire::{Payload, WirePayload};
 use hibana_wasip1_runtime::protocol;
 use serde_json::{Value, json};
 use std::{
@@ -11,11 +11,6 @@ use std::{
     path::Path,
     process::{Command, Stdio},
 };
-
-fn validate<P: WirePayload>(frame: &journal::Frame) -> Result<()> {
-    P::validate_payload(Payload::new(&frame.bytes))
-        .map_err(|error| format!("WASI payload: {error:?}").into())
-}
 
 pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
     use crate::philosopher_identity::{AGENTS, THINK_COMPLETED, THINK_REQUEST, roles};
@@ -266,9 +261,7 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
             }
             // Reconstruct descriptor data only. EPF owns the dynamic protocol
             // interpretation; no stage, next-operation or owner state is here.
-            let mut bytes = Vec::<u8>::new();
-            let mut offset = 0usize;
-            let mut fd_flags = 0u16;
+            let mut contents = FileContents::new(fd);
             for ((at, request_id, request), (replied, reply_id, reply)) in
                 requests.into_iter().zip(replies)
             {
@@ -281,77 +274,28 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
                 }
                 match (request.logical_label, reply.logical_label) {
                     (protocol::LABEL_WASI_PATH_OPEN, protocol::LABEL_WASI_PATH_OPEN_RET) => {
-                        validate::<protocol::PathOpenReq>(request)?;
-                        validate::<protocol::PathOpenedRet>(reply)?;
-                        let errno = u16::from_be_bytes(reply.bytes[1..3].try_into()?);
-                        if errno == 0 {
-                            if reply.bytes[0] != fd
-                                || request.bytes[0] != 3
-                                || request.bytes[14..] != *format!("service/{tool}").as_bytes()
-                            {
-                                return Err("open was rebound to a different object".into());
-                            }
-                            if u16::from_be_bytes(request.bytes[9..11].try_into()?) & 8 != 0 {
-                                bytes.clear();
-                            }
-                            fd_flags = u16::from_be_bytes(request.bytes[11..13].try_into()?);
-                            offset = 0;
-                        }
+                        contents.open(request, reply, |actual| {
+                            actual == format!("service/{tool}").as_bytes()
+                        })?;
                     }
                     (
                         protocol::LABEL_WASI_FD_WRITE_OBJECT,
                         protocol::LABEL_WASI_FD_WRITE_OBJECT_RET,
                     ) => {
-                        validate::<protocol::FdWriteObjectReq>(request)?;
-                        validate::<protocol::FdWriteDoneRet>(reply)?;
-                        if request.bytes[0] != fd || reply.bytes[0] != fd {
-                            return Err("write reply belongs to a different fd".into());
-                        }
-                        let length = usize::from(reply.bytes[1]);
-                        let errno = u16::from_be_bytes(reply.bytes[2..4].try_into()?);
-                        if length > request.bytes.len() - 2 || (errno != 0 && length != 0) {
-                            return Err("invalid accepted write prefix".into());
-                        }
-                        if errno == 0 {
-                            let start = if fd_flags & 1 != 0 {
-                                bytes.len()
-                            } else {
-                                offset
-                            };
-                            let end = start.checked_add(length).ok_or("write offset overflow")?;
-                            bytes.resize(bytes.len().max(end), 0);
-                            bytes[start..end].copy_from_slice(&request.bytes[2..2 + length]);
-                            offset = end;
-                        }
+                        contents.write(request, reply)?;
                     }
                     (protocol::LABEL_WASI_FD_READ, protocol::LABEL_WASI_FD_READ_RET) => {
-                        validate::<protocol::FdReadReq>(request)?;
-                        validate::<protocol::FdReadDoneRet>(reply)?;
-                        let end = offset
-                            .saturating_add(usize::from(request.bytes[1]))
-                            .min(bytes.len());
-                        if request.bytes[0] != fd
-                            || reply.bytes[0] != fd
-                            || reply.bytes[1..3] != [0, 0]
-                            || bytes.get(offset..end) != Some(&reply.bytes[4..])
-                        {
-                            return Err("read bytes differ from the actual file/result".into());
-                        }
-                        if !bytes.is_empty() {
+                        contents.read(request, reply)?;
+                        if !contents.bytes.is_empty() {
                             read_results += 1;
                         }
-                        offset = end;
                     }
                     (protocol::LABEL_WASI_FD_CLOSE, protocol::LABEL_WASI_FD_CLOSE_RET) => {
-                        validate::<protocol::FdCloseReq>(request)?;
-                        validate::<protocol::FdClosedRet>(reply)?;
-                        if request.bytes != [fd] || reply.bytes != [fd, 0, 0] {
-                            return Err("ordinary close fd/result mismatch".into());
-                        }
+                        contents.close(request, reply)?;
                     }
                     (THINK_REQUEST, THINK_COMPLETED) => {
                         let arguments = request.value()?;
-                        if request.bytes != bytes
+                        if request.bytes != contents.bytes
                             || !arguments.get("philosopher").is_some_and(Value::is_string)
                             || !reply.bytes.is_empty()
                             || authority_id.is_some()
@@ -376,22 +320,22 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
                                 "thought request, effect and acknowledgement mismatch".into()
                             );
                         }
-                        bytes = serde_json::to_vec(result)?;
-                        offset = 0;
+                        contents.bytes = serde_json::to_vec(result)?;
+                        contents.offset = 0;
                     }
                     (
                         protocol::LABEL_WASI_FD_CLOSE_OBJECT,
                         protocol::LABEL_WASI_FD_CLOSE_OBJECT_RET
                         | protocol::LABEL_WASI_FD_CLOSE_REJECTED,
                     ) => {
-                        validate::<protocol::FdCloseObjectReq>(request)?;
+                        request.validate::<protocol::FdCloseObjectReq>()?;
                         if request.bytes != [fd] || reply.bytes.first() != Some(&fd) {
                             return Err("object close fd mismatch".into());
                         }
                         // close_with completes the guest syscall only after its
                         // returned Endpoint arrives. In an arbitrated meal the
                         // initial fd acknowledgement precedes fork acquisition.
-                        let arguments = serde_json::from_slice::<Value>(&bytes).ok();
+                        let arguments = serde_json::from_slice::<Value>(&contents.bytes).ok();
                         let (effect_after, completion) = if selects_meals
                             && tool == "eat"
                             && reply.logical_label == protocol::LABEL_WASI_FD_CLOSE_OBJECT_RET
@@ -474,7 +418,7 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
                                 .is_some_and(|v| v.get("philosopher").is_some_and(Value::is_string))
                         });
                         if reply.logical_label == protocol::LABEL_WASI_FD_CLOSE_REJECTED {
-                            validate::<protocol::FdCloseRejectedRet>(reply)?;
+                            reply.validate::<protocol::FdCloseRejectedRet>()?;
                             if valid || !calls.is_empty() || reply.bytes != [fd, 0, 28] {
                                 return Err(
                                     "rejected close admitted an effect or rejected valid arguments"
@@ -483,7 +427,7 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
                             }
                             rejected_closes += 1;
                         } else {
-                            validate::<protocol::FdClosedRet>(reply)?;
+                            reply.validate::<protocol::FdClosedRet>()?;
                             if reply.bytes != [fd, 0, 0] || !valid || calls.len() != 1 {
                                 return Err("successful close lacks one admitted effect".into());
                             }
@@ -500,8 +444,8 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
                                     "file arguments/effect/result occurrence mismatch".into()
                                 );
                             }
-                            bytes = serde_json::to_vec(result)?;
-                            offset = 0;
+                            contents.bytes = serde_json::to_vec(result)?;
+                            contents.offset = 0;
                         }
                     }
                     _ => return Err("object request and reply types differ".into()),
@@ -988,7 +932,11 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
         }
         file.flush()?;
         drop(file);
-        let error = journal::reject_mutant(path, &mutant_path, "--audit-philosophers")?;
+        let error = journal::reject_mutant(
+            path,
+            &mutant_path,
+            baseline["task"].as_str().ok_or("dining task")?,
+        )?;
         if epf_still_valid {
             // Release the complete search workspace after each input, just as
             // the effect auditor does. No source implementation is restored.

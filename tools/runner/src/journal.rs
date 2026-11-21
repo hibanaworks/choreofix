@@ -1,4 +1,6 @@
 //! Immutable transport and effect observations, shared by task auditors.
+pub(crate) mod file;
+
 use crate::evidence::Result;
 use hibana::runtime::wire::{Payload, WirePayload};
 use hibana_wasip1_runtime::protocol;
@@ -22,6 +24,10 @@ pub(crate) struct Frame<'a> {
 impl Frame<'_> {
     pub(crate) fn direction(&self, from: u64, to: u64) -> bool {
         self.identity["source"] == from && self.identity["target"] == to
+    }
+    pub(crate) fn validate<P: WirePayload>(&self) -> Result<()> {
+        P::validate_payload(Payload::new(&self.bytes))
+            .map_err(|error| format!("WASI payload: {error:?}").into())
     }
     pub(crate) fn value(&self) -> Result<Value> {
         Ok(serde_json::from_slice(&self.bytes)?)
@@ -63,6 +69,15 @@ impl Call {
                     .is_some_and(|value| value == &result["data"])
                 && event["violations"].as_array().is_some_and(Vec::is_empty)
         })
+    }
+    /// Consume one scored occurrence. Equal calls can each use a separate equal event.
+    pub(crate) fn take_score(&self, remaining: &mut Vec<&Value>, arguments: &Value) -> Result<()> {
+        let index = remaining
+            .iter()
+            .position(|event| self.matches_score(event, arguments))
+            .ok_or_else(|| format!("missing matching score for effect {}", self.request["id"]))?;
+        remaining.swap_remove(index);
+        Ok(())
     }
     pub(crate) fn tool(&self) -> Result<&str> {
         self.request["tool"]
@@ -124,7 +139,7 @@ impl Evidence {
 
 /// Run a saved-record counterexample in the same production auditor, releasing
 /// its search workspace on exit. This neither rebuilds nor restores any source.
-pub(crate) fn reject_mutant(original: &Path, changed: &Path, command: &str) -> Result<String> {
+pub(crate) fn reject_mutant(original: &Path, changed: &Path, task: &str) -> Result<String> {
     let source = original.parent().ok_or("original evidence directory")?;
     let output = changed.parent().ok_or("mutant evidence directory")?;
     for name in ["projection.json", "case.json", "versions.json"] {
@@ -145,7 +160,7 @@ pub(crate) fn reject_mutant(original: &Path, changed: &Path, command: &str) -> R
     #[cfg(not(test))]
     let auditor = std::env::current_exe()?;
     let result = std::process::Command::new(auditor)
-        .arg(command)
+        .args(["--audit", task])
         .arg(changed)
         .output()?;
     let error = String::from_utf8(result.stderr)?;
@@ -599,6 +614,14 @@ mod tests {
         let scored = json!({"agent":"A","tool":"write_section","args":args,
             "success":true,"result":result["data"],"violations":[]});
         assert!(call.matches_score(&scored, &args));
+        let mut repeated = vec![&scored, &scored];
+        assert!(
+            call.take_score(&mut repeated, &request["arguments"])
+                .is_err()
+        );
+        call.take_score(&mut repeated, &args).unwrap();
+        call.take_score(&mut repeated, &args).unwrap();
+        assert!(call.take_score(&mut repeated, &args).is_err());
         assert!(!call.matches_score(&scored, &request["arguments"]));
         for field in ["agent", "tool", "args", "success", "result", "violations"] {
             let mut changed = scored.clone();

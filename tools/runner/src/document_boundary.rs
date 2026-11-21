@@ -643,7 +643,7 @@ async fn run(cases: &[Case]) -> Result<()> {
             .count();
         assert_eq!(events.len(), 7 + 3 * revisions);
         let status = Command::new(&auditor)
-            .arg("--audit-document")
+            .args(["--audit", "7E"])
             .arg(output.join("events.jsonl"))
             .stdout(Stdio::from(fs::File::create(output.join("audit.json"))?))
             .stderr(Stdio::from(fs::File::create(

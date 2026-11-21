@@ -172,7 +172,7 @@ async fn actual_wasm_discovers_and_records_either_decision() -> Result<()> {
         assert_eq!(outcome["score"]["complete"], true, "{outcome}");
         assert_eq!(outcome["score"]["violations"], json!([]), "{outcome}");
         let checked = Command::new(&auditor)
-            .arg("--audit-drug-discovery")
+            .args(["--audit", "14E"])
             .arg(&events)
             .output()?;
         fs::write(output.join("audit-stderr.log"), &checked.stderr)?;

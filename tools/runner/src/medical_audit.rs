@@ -172,7 +172,8 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut scored = score["events"]
         .as_array()
         .ok_or("common-world effects")?
-        .clone();
+        .iter()
+        .collect::<Vec<_>>();
     let mut used_frames = BTreeSet::new();
     for call in &ordered {
         let actor = call.request["agent"].as_str().ok_or("effect actor")?;
@@ -261,11 +262,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             ],
             _ => return Err("unassigned clinical effect".into()),
         };
-        let index = scored
-            .iter()
-            .position(|event| call.matches_score(event, arguments))
-            .ok_or("clinical effect differs from its common-world occurrence")?;
-        scored.remove(index);
+        call.take_score(&mut scored, arguments)?;
         for &(from, to, name, after) in messages {
             let value = if after { result } else { arguments };
             let (from, to, number) = (role(from)?, role(to)?, label(name)?);

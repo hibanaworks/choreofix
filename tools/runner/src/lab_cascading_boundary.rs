@@ -441,7 +441,7 @@ async fn actual_wasm_scientists_reconsider_and_retire() -> Result<()> {
         assert_eq!(outcome["score"]["violations"], json!([]), "{outcome}");
         // Release the independent auditor's temporary workspace after each case.
         let checked = Command::new(&auditor)
-            .arg("--audit-lab-cascading")
+            .args(["--audit", "13H"])
             .arg(&events)
             .output()?;
         fs::write(output.join("audit-stderr.log"), &checked.stderr)?;

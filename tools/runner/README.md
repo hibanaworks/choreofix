@@ -60,7 +60,7 @@ run audit on that same runtime: 53 effects, 50,851 complete EPF records, neutral
 world completion and zero violations. It takes 517.343330458 seconds and
 8,533,959 inclusive tokens. Its source-bound qualification is
 `qualification-live-v102.json`. The normal runner accepts 6H;
-saved executions use `--audit-staged-integration EVENTS`, with record
+saved executions use `--audit 6H EVENTS`, with record
 counterexamples through `--check-staged-integration-mutants EVENTS NEW_OUTPUT`.
 Use the experiment matrix and qualified task artifacts for scored comparisons.
 The model-trial budget is defined in experiment.json (now 1,800 seconds for
@@ -114,12 +114,12 @@ failure depths. Each qualification retains its exact source and simulator
 version. The 14M evidence covers seven real Wasm
 conditions and a five-participant depth-two run on the same executable.
 Use `--qualify-wasi NEW_OUTPUT regulatory_discovery_boundary::` for its
-mechanism cases or `--audit-regulatory-discovery EVENTS` to inspect a saved run.
+mechanism cases or `--audit 14M EVENTS` to inspect a saved run.
 For 3M, `--qualify-wasi NEW_OUTPUT research_paper_boundary::` runs the ordinary
-and two-rejection conditions. `--audit-research-paper EVENTS` checks a saved
+and two-rejection conditions. `--audit 3M EVENTS` checks a saved
 trace, and the live run uses the `RESEARCH_PAPER` build variables.
 For 14H, `--qualify-wasi NEW_OUTPUT multi_round_discovery_boundary::` runs the
-three mechanism conditions. `--audit-multi-round-discovery EVENTS` checks the
+three mechanism conditions. `--audit 14H EVENTS` checks the
 actual scientific requests, effects and replies against the EPF witness.
 The older adapter results retain their original software and experiment scope.
 The rewritten 7E passes
@@ -159,7 +159,7 @@ The common entry assigns each of these 51 conditions once and reconciles the sav
 reports. It rejects an external `CHOREOFIX_KITCHEN_CASE` selector; that selector
 is available only on the direct boundary test for explicitly partial diagnosis.
 Use `--qualify-wasi NEW_OUTPUT kitchen_boundary::` for the complete kitchen
-family, and `--audit-kitchen EVENTS` to recheck an existing kitchen execution
+family, and `--audit 12E EVENTS` to recheck an existing kitchen execution
 without repeating its guest effects or model calls. The source-bound scope and
 the qualified pilot are recorded in `benchmark/ports/12E.md`.
 The original kitchen tools have zero processing delay. The three concurrency
@@ -248,7 +248,7 @@ four actual effects and zero violations. These are finite, unscored,
 source-bound results, not qualification of all families or scored comparisons.
 See `output/experiments/coordination-direct-projection-20261113/qualification-summary.json`
 and `output/experiments/coordination-free-shell-current-20261113-live/`.
-`--audit-coordination EVENTS` checks saved evidence without model calls.
+`--audit 4E EVENTS` checks saved evidence without model calls.
 
 The v19 world executes actual backend/frontend code and binds completed
 integration tests to the current repository contents. Its world tests cover
@@ -261,7 +261,7 @@ scoring, complete EPF and the actual-effect auditor. Nine matrix cases cover CT
 orders, partial panels, rejection recovery and actual concurrent CT/MRI effects;
 two schedules demonstrate each patient's care finishing before the other's assessment.
 Both real ICU resource requests and the anesthesia-to-surgery OR handoff remain
-in the global. `--audit-critical-care EVENTS` independently checks the saved
+in the global. `--audit 5H EVENTS` independently checks the saved
 record. The same-binary seven-model qualification completes in 68.85 seconds
 with zero violations. Scope and evidence are in `benchmark/ports/5H.md`; this
 is not a scored comparison.
@@ -320,7 +320,7 @@ retain their documented checks. Keep the projection and receipt beside
 The auditor reports overlapping domain operations and runs without models:
 
 ```sh
-cargo +stable run --locked --manifest-path tools/runner/Cargo.toml -- --audit-review EVENTS.jsonl
+cargo +stable run --locked --manifest-path tools/runner/Cargo.toml -- --audit 6E EVENTS.jsonl
 cargo +stable run --locked --manifest-path tools/runner/Cargo.toml -- --check-review-mutants EVENTS.jsonl NEW_DIRECTORY
 ```
 
@@ -427,7 +427,7 @@ incoming messages and zero violations. These are finite, unscored results.
 See `output/experiments/cicd-direct-projection-20261113/qualification-summary.json`.
 
 ```sh
-cargo +stable run --locked --manifest-path tools/runner/Cargo.toml -- --audit-cicd EVENTS.jsonl
+cargo +stable run --locked --manifest-path tools/runner/Cargo.toml -- --audit 16E EVENTS.jsonl
 cargo +stable run --locked --manifest-path tools/runner/Cargo.toml -- --check-cicd-mutants EVENTS.jsonl NEW_DIRECTORY
 ```
 
@@ -441,7 +441,7 @@ The writing auditor checks both section Endpoints, actual requests and replies,
 returns, original outcomes and disjoint write overlap for 3/5/7 participants:
 
 ```sh
-cargo +stable run --locked --manifest-path tools/runner/Cargo.toml -- --audit-writing EVENTS.jsonl
+cargo +stable run --locked --manifest-path tools/runner/Cargo.toml -- --audit 2E EVENTS.jsonl
 cargo +stable run --locked --manifest-path tools/runner/Cargo.toml -- --check-writing-mutants EVENTS.jsonl NEW_DIRECTORY
 ```
 
@@ -519,13 +519,13 @@ A repeated family or unknown/empty selector fails before starting the build.
 An empty or unmatched test result fails. Normal CI uses the unfiltered command.
 
 The saved QC captures can be checked without another model or Wasm run using
-`--audit-lab-quality EVENTS` and `--check-lab-quality-mutants EVENTS REPORT`.
+`--audit 13M EVENTS` and `--check-lab-quality-mutants EVENTS REPORT`.
 The latter checks nine scientific effect-record counterexamples against the
 same captured baseline; these are audit mutations, not runtime attacks.
 
 
 For the 4H migration preparation trials, run
-`choreofix-experiments --audit-migration PATH/TO/events.jsonl` alongside the
+`choreofix-experiments --audit 4H PATH/TO/events.jsonl` alongside the
 saved projection and build-linked case receipt. The command checks the EPF
 capture and joins each shell request to its effect, result and score entry.
 The frame IDs in the output refer to the supplied journal. This scope ends

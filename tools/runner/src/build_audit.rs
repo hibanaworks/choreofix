@@ -55,7 +55,8 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut scored = score["events"]
         .as_array()
         .ok_or("build score effects")?
-        .clone();
+        .iter()
+        .collect::<Vec<_>>();
     let mut objects = BTreeMap::new();
     let mut ordered: Vec<_> = calls.values().collect();
     ordered.sort_by_key(|call| call.emitted);
@@ -75,11 +76,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         {
             return Err("build arguments or result differ".into());
         }
-        let index = scored
-            .iter()
-            .position(|event| call.matches_score(event, arguments))
-            .ok_or("original build score differs from actual effect")?;
-        scored.remove(index);
+        call.take_score(&mut scored, arguments)?;
         let actor = name("roles", agent)?;
         let file = name("roles", file)?;
         let label = name("labels", request)? as u8;

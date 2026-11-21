@@ -1,9 +1,9 @@
 //! EPF checks source execution; this auditor checks actual file/effect data.
+use crate::journal::file::{FileContents, same_path};
 use crate::{
     evidence::{Result, digest},
     journal::{self, one, records},
 };
-use hibana::runtime::wire::{Payload, WirePayload};
 use hibana_wasip1_runtime::protocol;
 use serde_json::{Value, json};
 use std::{
@@ -16,18 +16,6 @@ fn field(v: &Value) -> Result<u64> {
     v.as_u64()
         .filter(|v| *v <= 255)
         .ok_or_else(|| "invalid compiled operation field".into())
-}
-fn validate<P: WirePayload>(f: &journal::Frame) -> Result<()> {
-    P::validate_payload(Payload::new(&f.bytes)).map_err(|e| format!("WASI payload: {e:?}").into())
-}
-fn same_path(bytes: &[u8], path: &str) -> bool {
-    use hibana_wasip1_runtime::choreofs::{ChoreoFsObject, ChoreoFsObjectSet, FdSpec, ObjectId};
-    let objects = ChoreoFsObjectSet::new([ChoreoFsObject::new(
-        path.as_bytes(),
-        ObjectId(0),
-        FdSpec::new(0, 0),
-    )]);
-    objects.choreofs().resolve(bytes) == Some(ObjectId(0))
 }
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
@@ -134,9 +122,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         if requests.is_empty() || requests.len() != replies.len() {
             return Err("unpaired operation file data".into());
         }
-        let mut bytes = Vec::new();
-        let mut offset = 0usize;
-        let mut flags = 0u16;
+        let mut contents = FileContents::new(fd);
         for ((_, request_id, request), (_, reply_id, reply)) in requests.into_iter().zip(replies) {
             let request_at = request.received;
             let reply_at = frames[&reply_id].first_poll;
@@ -150,58 +136,23 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             }
             match (request.logical_label, reply.logical_label) {
                 (protocol::LABEL_WASI_PATH_OPEN, protocol::LABEL_WASI_PATH_OPEN_RET) => {
-                    validate::<protocol::PathOpenReq>(request)?;
-                    validate::<protocol::PathOpenedRet>(reply)?;
-                    if reply.bytes[1..3] == [0, 0] {
-                        if reply.bytes[0] != fd
-                            || request.bytes[0] != 3
-                            || !same_path(&request.bytes[14..], path)
-                        {
-                            return Err("open names another object".into());
-                        }
-                        if u16::from_be_bytes(request.bytes[9..11].try_into()?) & 8 != 0 {
-                            bytes.clear();
-                        }
-                        flags = u16::from_be_bytes(request.bytes[11..13].try_into()?);
-                        offset = 0;
-                    }
+                    contents.open(request, reply, |actual| same_path(actual, path))?;
                 }
                 (
                     protocol::LABEL_WASI_FD_WRITE_OBJECT,
                     protocol::LABEL_WASI_FD_WRITE_OBJECT_RET,
                 ) => {
-                    validate::<protocol::FdWriteObjectReq>(request)?;
-                    validate::<protocol::FdWriteDoneRet>(reply)?;
-                    let count = usize::from(reply.bytes[1]);
-                    let errno = u16::from_be_bytes(reply.bytes[2..4].try_into()?);
-                    if request.bytes[0] != fd
-                        || reply.bytes[0] != fd
-                        || count > request.bytes.len() - 2
-                        || (errno != 0 && count != 0)
-                    {
-                        return Err("write fd or accepted prefix differs".into());
-                    }
-                    if errno == 0 {
-                        let start = if flags & 1 != 0 { bytes.len() } else { offset };
-                        let end = start.checked_add(count).ok_or("file offset overflow")?;
-                        bytes.resize(bytes.len().max(end), 0);
-                        bytes[start..end].copy_from_slice(&request.bytes[2..2 + count]);
-                        offset = end;
-                    }
+                    contents.write(request, reply)?;
                 }
                 (protocol::LABEL_WASI_FD_CLOSE, protocol::LABEL_WASI_FD_CLOSE_RET) => {
-                    validate::<protocol::FdCloseReq>(request)?;
-                    validate::<protocol::FdClosedRet>(reply)?;
-                    if request.bytes != [fd] || reply.bytes != [fd, 0, 0] {
-                        return Err("ordinary close differs".into());
-                    }
+                    contents.close(request, reply)?;
                 }
                 (protocol::LABEL_WASI_FD_CLOSE_OBJECT, protocol::LABEL_WASI_FD_CLOSE_REJECTED) => {
-                    validate::<protocol::FdCloseObjectReq>(request)?;
-                    validate::<protocol::FdCloseRejectedRet>(reply)?;
+                    request.validate::<protocol::FdCloseObjectReq>()?;
+                    reply.validate::<protocol::FdCloseRejectedRet>()?;
                     if request.bytes != [fd]
                         || reply.bytes != [fd, 0, 28]
-                        || serde_json::from_slice::<Value>(&bytes)
+                        || serde_json::from_slice::<Value>(&contents.bytes)
                             .is_ok_and(|v| v == original["arguments"])
                     {
                         return Err("rejected file close contains valid assigned arguments".into());
@@ -212,12 +163,12 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                     protocol::LABEL_WASI_FD_CLOSE_OBJECT,
                     protocol::LABEL_WASI_FD_CLOSE_OBJECT_RET,
                 ) => {
-                    validate::<protocol::FdCloseObjectReq>(request)?;
-                    validate::<protocol::FdClosedRet>(reply)?;
+                    request.validate::<protocol::FdCloseObjectReq>()?;
+                    reply.validate::<protocol::FdClosedRet>()?;
                     if request.bytes != [fd] || reply.bytes != [fd, 0, 0] {
                         return Err("accepted close fd or reply differs".into());
                     }
-                    let arguments: Value = serde_json::from_slice(&bytes)?;
+                    let arguments: Value = serde_json::from_slice(&contents.bytes)?;
                     let (&call_id, call) = one(journal.calls.iter().filter(|(_, c)| {
                         c.request["agent"] == agent && c.request["tool"] == tool
                     }))?;
@@ -502,7 +453,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         }
         stream.flush()?;
         drop(stream);
-        let error = journal::reject_mutant(path, &mutant, "--audit-cicd")?;
+        let error = journal::reject_mutant(path, &mutant, "16E")?;
         let hash = digest(&mutant)?;
         fs::remove_file(&mutant)?;
         results.push(json!({"kind":kind,"status":"rejected","sha256":hash,"error":error}));

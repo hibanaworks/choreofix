@@ -1,6 +1,6 @@
 //! EPF owns execution/custody; this reader checks file bytes and actual effects.
+use crate::journal::file::{FileContents, same_path};
 use crate::{evidence::Result, journal};
-use hibana::runtime::wire::{Payload, WirePayload};
 use hibana_wasip1_runtime::protocol;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -10,20 +10,6 @@ fn number(value: &Value) -> Result<u64> {
         .as_u64()
         .filter(|n| *n <= 255)
         .ok_or_else(|| "invalid compiled file field".into())
-}
-fn validate<P: WirePayload>(frame: &journal::Frame) -> Result<()> {
-    P::validate_payload(Payload::new(&frame.bytes))
-        .map_err(|error| format!("WASI data: {error:?}").into())
-}
-
-fn same_path(observed: &[u8], expected: &str) -> bool {
-    use hibana_wasip1_runtime::choreofs::{ChoreoFsObject, ChoreoFsObjectSet, FdSpec, ObjectId};
-    let objects = ChoreoFsObjectSet::new([ChoreoFsObject::new(
-        expected.as_bytes(),
-        ObjectId(0),
-        FdSpec::new(0, 0),
-    )]);
-    objects.choreofs().resolve(observed) == Some(ObjectId(0))
 }
 
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
@@ -91,7 +77,8 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut scored = journal.score["events"]
         .as_array()
         .ok_or("original score events")?
-        .clone();
+        .iter()
+        .collect::<Vec<_>>();
     let operations = compiled["operation_files"]
         .as_array()
         .ok_or("compiled operation files")?;
@@ -169,9 +156,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         if requests.len() != replies.len() || requests.is_empty() {
             return Err("unpaired file operations".into());
         }
-        let mut bytes = Vec::new();
-        let mut offset = 0usize;
-        let mut flags = 0u16;
+        let mut contents = FileContents::new(fd);
         for ((_, request_id, request), (_, reply_id, reply)) in requests.into_iter().zip(replies) {
             let request_at = request.received;
             let reply_at = frames[&reply_id].first_poll;
@@ -188,71 +173,24 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             }
             match (request.logical_label, reply.logical_label) {
                 (protocol::LABEL_WASI_PATH_OPEN, protocol::LABEL_WASI_PATH_OPEN_RET) => {
-                    validate::<protocol::PathOpenReq>(request)?;
-                    validate::<protocol::PathOpenedRet>(reply)?;
-                    if reply.bytes[1..3] == [0, 0] {
-                        if reply.bytes[0] != fd
-                            || request.bytes[0] != 3
-                            || !same_path(&request.bytes[14..], path)
-                        {
-                            return Err("file open names another object".into());
-                        }
-                        if u16::from_be_bytes(request.bytes[9..11].try_into()?) & 8 != 0 {
-                            bytes.clear();
-                        }
-                        flags = u16::from_be_bytes(request.bytes[11..13].try_into()?);
-                        offset = 0;
-                    }
+                    contents.open(request, reply, |actual| same_path(actual, path))?;
                 }
                 (
                     protocol::LABEL_WASI_FD_WRITE_OBJECT,
                     protocol::LABEL_WASI_FD_WRITE_OBJECT_RET,
                 ) => {
-                    validate::<protocol::FdWriteObjectReq>(request)?;
-                    validate::<protocol::FdWriteDoneRet>(reply)?;
-                    let count = usize::from(reply.bytes[1]);
-                    let errno = u16::from_be_bytes(reply.bytes[2..4].try_into()?);
-                    if request.bytes[0] != fd
-                        || reply.bytes[0] != fd
-                        || count > request.bytes.len() - 2
-                        || (errno != 0 && count != 0)
-                    {
-                        return Err("file write fd or accepted prefix differs".into());
-                    }
-                    if errno == 0 {
-                        let start = if flags & 1 != 0 { bytes.len() } else { offset };
-                        let end = start.checked_add(count).ok_or("file offset overflow")?;
-                        bytes.resize(bytes.len().max(end), 0);
-                        bytes[start..end].copy_from_slice(&request.bytes[2..2 + count]);
-                        offset = end;
-                    }
+                    contents.write(request, reply)?;
                 }
                 (protocol::LABEL_WASI_FD_READ, protocol::LABEL_WASI_FD_READ_RET) => {
-                    validate::<protocol::FdReadReq>(request)?;
-                    validate::<protocol::FdReadDoneRet>(reply)?;
-                    let end = offset
-                        .saturating_add(usize::from(request.bytes[1]))
-                        .min(bytes.len());
-                    if request.bytes[0] != fd
-                        || reply.bytes[0] != fd
-                        || reply.bytes[1..3] != [0, 0]
-                        || bytes.get(offset..end) != Some(&reply.bytes[4..])
-                    {
-                        return Err("file read differs from actual operation data".into());
-                    }
-                    offset = end;
+                    contents.read(request, reply)?;
                 }
                 (protocol::LABEL_WASI_FD_CLOSE, protocol::LABEL_WASI_FD_CLOSE_RET) => {
-                    validate::<protocol::FdCloseReq>(request)?;
-                    validate::<protocol::FdClosedRet>(reply)?;
-                    if request.bytes != [fd] || reply.bytes != [fd, 0, 0] {
-                        return Err("ordinary close differs".into());
-                    }
+                    contents.close(request, reply)?;
                 }
                 (protocol::LABEL_WASI_FD_CLOSE_OBJECT, protocol::LABEL_WASI_FD_CLOSE_REJECTED) => {
-                    validate::<protocol::FdCloseObjectReq>(request)?;
-                    validate::<protocol::FdCloseRejectedRet>(reply)?;
-                    let value = serde_json::from_slice::<Value>(&bytes).ok();
+                    request.validate::<protocol::FdCloseObjectReq>()?;
+                    reply.validate::<protocol::FdCloseRejectedRet>()?;
+                    let value = serde_json::from_slice::<Value>(&contents.bytes).ok();
                     let valid = if let Some(original) = assigned {
                         value.as_ref() == Some(&original["arguments"])
                     } else {
@@ -277,12 +215,12 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                     protocol::LABEL_WASI_FD_CLOSE_OBJECT,
                     protocol::LABEL_WASI_FD_CLOSE_OBJECT_RET,
                 ) => {
-                    validate::<protocol::FdCloseObjectReq>(request)?;
-                    validate::<protocol::FdClosedRet>(reply)?;
+                    request.validate::<protocol::FdCloseObjectReq>()?;
+                    reply.validate::<protocol::FdClosedRet>()?;
                     if request.bytes != [fd] || reply.bytes != [fd, 0, 0] {
                         return Err("invalid accepted close fd/result".into());
                     }
-                    let arguments: Value = serde_json::from_slice(&bytes)?;
+                    let arguments: Value = serde_json::from_slice(&contents.bytes)?;
                     let result = if let Some(tool) = tool {
                         let (&call_id, call) =
                             journal::one(journal.calls.iter().filter(|(_, c)| {
@@ -409,11 +347,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                         } else {
                             arguments.clone()
                         };
-                        let at = scored
-                            .iter()
-                            .position(|e| call.matches_score(e, &score_args))
-                            .ok_or("actual effect differs from original score")?;
-                        scored.remove(at);
+                        call.take_score(&mut scored, &score_args)?;
                         result.clone()
                     } else if name == "AGREEMENT" {
                         if !arguments.as_object().is_some_and(|o| o.len() == 2)
@@ -500,9 +434,9 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                     };
                     accepted_closes += 1;
                     if name != "AGREEMENT" {
-                        bytes = serde_json::to_vec(&result)?;
+                        contents.bytes = serde_json::to_vec(&result)?;
                     }
-                    offset = 0;
+                    contents.offset = 0;
                 }
                 _ => return Err("file request/reply types differ".into()),
             }

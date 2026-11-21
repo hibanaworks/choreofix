@@ -209,7 +209,8 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut originals = score["events"]
         .as_array()
         .ok_or("report score events")?
-        .clone();
+        .iter()
+        .collect::<Vec<_>>();
     let mut resource_requests = 0;
     let mut review_count = 0;
     let mut publications = 0;
@@ -632,11 +633,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             }
             _ => return Err("unexpected report operation".into()),
         }
-        let index = originals
-            .iter()
-            .position(|event| call.matches_score(event, args))
-            .ok_or("actual report effect differs from the shared score")?;
-        originals.remove(index);
+        call.take_score(&mut originals, args)?;
     }
     if !originals.is_empty() || publications != 1 {
         return Err("unmatched report effect or publication".into());

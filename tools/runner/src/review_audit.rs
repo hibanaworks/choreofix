@@ -132,7 +132,8 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
     let mut scored = score["events"]
         .as_array()
         .ok_or("original scored events")?
-        .clone();
+        .iter()
+        .collect::<Vec<_>>();
     if scored.len() != expected {
         return Err("original event count".into());
     }
@@ -152,11 +153,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
         {
             return Err("implementation changed actual caller source".into());
         }
-        let at = scored
-            .iter()
-            .position(|e| call.matches_score(e, &args))
-            .ok_or("score differs from original calls")?;
-        scored.remove(at);
+        call.take_score(&mut scored, &args)?;
     }
 
     let repo = role(projection, "REPO")?;

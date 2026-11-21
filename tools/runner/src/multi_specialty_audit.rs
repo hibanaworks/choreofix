@@ -286,7 +286,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             }
         }
     }
-    let mut scored = score["events"].as_array().ok_or("world effects")?.clone();
+    let mut scored = score["events"]
+        .as_array()
+        .ok_or("world effects")?
+        .iter()
+        .collect::<Vec<_>>();
     if scored.len() != ordered.len() {
         return Err("world and domain effect counts differ".into());
     }
@@ -447,11 +451,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             ],
             _ => return Err("unassigned multi-specialty effect".into()),
         };
-        let i = scored
-            .iter()
-            .position(|e| call.matches_score(e, arguments))
-            .ok_or("effect differs from common-world occurrence")?;
-        scored.remove(i);
+        call.take_score(&mut scored, arguments)?;
         for &(from, to, name, after) in messages {
             let value = if name == "RoomRequest" {
                 json!({"arguments":arguments,"case":case(&ordered,call.emitted)?})

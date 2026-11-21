@@ -87,7 +87,8 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut score_events = journal.score["events"]
         .as_array()
         .ok_or("original events")?
-        .clone();
+        .iter()
+        .collect::<Vec<_>>();
     let mut commits = Vec::new();
     let mut expected_returns = BTreeMap::<u64, usize>::new();
     let mut decisions = BTreeMap::<(usize, usize), (u64, u64, u64)>::new();
@@ -378,11 +379,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             }
             _ => unreachable!(),
         }
-        let index = score_events
-            .iter()
-            .position(|event| call.matches_score(event, args))
-            .ok_or("score differs from actual effect")?;
-        score_events.remove(index);
+        call.take_score(&mut score_events, args)?;
     }
     let passed = latest_tests.len() == participants && latest_tests.values().all(|v| *v);
     if !score_events.is_empty()

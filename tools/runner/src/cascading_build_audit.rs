@@ -83,7 +83,8 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut scored = score["events"]
         .as_array()
         .ok_or("build score events")?
-        .clone();
+        .iter()
+        .collect::<Vec<_>>();
     let mut ordered: Vec<_> = calls.values().collect();
     ordered.sort_by_key(|call| call.emitted);
     let mut objects = BTreeMap::<String, Value>::new();
@@ -98,11 +99,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         let tool = call.tool()?;
         let args = &call.request["arguments"];
         let (at, result) = call.result()?;
-        let matched = scored
-            .iter()
-            .position(|event| call.matches_score(event, args))
-            .ok_or("score differs from actual build effect")?;
-        scored.remove(matched);
+        call.take_score(&mut scored, args)?;
         if args.as_object().is_none_or(|fields| fields.len() != 1)
             || result["tool_name"] != tool
             || result["data"]["agent"] != agent
