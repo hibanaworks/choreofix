@@ -1337,5 +1337,121 @@
     },
     "scope": "Offline replay. No new model calls, qualifications or scored runs. This comparison tests the behavior of the effect checkers on these inputs. It does not establish independent correctness of task-specific rules."
   }
-
+,
+  "compiled_frame_and_runtime_decision_evidence": {
+    "date": "2026-11-22",
+    "verifier_build": {
+      "rustc": "rustc 1.100.0 (0ef1bc386 2026-11-09)",
+      "hibana": "27c7a8f4ad597843761013f6ace8d0a7fcdbe9b1",
+      "hibana-epf": "a75502133c5b67a2bba6546de3338b6a4c8980eb",
+      "hibana-runtime": "4e29a837eaf72247a6803ffbbff0c257519df0a5",
+      "hibana-wasip1-runtime": "94ed8a88026f3f1c58e8b35e3766d8b9a83cb334"
+    },
+    "inputs": "The 40 frozen cases listed above. Events and projection hashes were matched to each verifier report.",
+    "full_replay": {
+      "runner_revision": "26decf83465e3ae131869ca8440afb0d1258b4ff",
+      "runner_tree": "cbfb1b3919028a2da0c81b51491a4725effaeb00",
+      "verifier_sha256": "73f84c02df98bb6462c90f1dabe0841109b3d01c46f9f15b044fe46c3bef4eb9",
+      "tasks": 40,
+      "simulator_effects": 718,
+      "byte_identical_reports": 39,
+      "6H": "All output matched after removing the verifier's self-hash.",
+      "inventory_sha256": "c3f0fb4b7f481007b98cc9507fb10a981ccf15ab8b75d65404e8ca1ed592510f"
+    },
+    "resolver_provenance_follow_up": {
+      "runner_revision": "28dd7936ff39e10f61738c5fe43ebccf283d75b2",
+      "runner_tree": "bdadba2a337199ba880bd1c7b3cb60223d383bcd",
+      "verifier_sha256": "b540df59cbc992d21b929a8e316ecff109ebb4bb4d43594c310f7d6dce86d375",
+      "tasks_replayed": 38,
+      "simulator_effects": 674,
+      "carried_from_full_replay": [
+        "10M",
+        "7H"
+      ],
+      "reason": "10M and 7H use neither the removed raw-records accessor nor the coding resolver observations. Their task checks, executed common validation and EPF search bodies are unchanged.",
+      "inventory_sha256": "fccf1baaf08ba1684533a371195d5826a138a04ea62a9dd7d41f23f52102412d"
+    },
+    "report_digests_by_task": {
+      "10E": "7439e325e5b2d4561898f3a949cb562b79467416cabc27fe95ae7a3ebfb77858",
+      "10M": "ec350dafd658d14690938b03ba207833c815558fe6ca0603fdcfcc65753f3953",
+      "11E": "e6c17529861e6aec55a20b8f475dcb65e5167ec50723959aa4919bebfcb1c0bc",
+      "11M": "c9394832ce629e92d9cde6ec4d6b5943af3fd901aededd05fb19ea460d4edb32",
+      "12E": "9a533ab9e2461d606a04b819106340b1cd82ebfe343b49caf80d88680a907fc5",
+      "13E": "3b6db34cbef572bab00fce115dbd86b791854c2fb4c358622bf940e699811d77",
+      "13H": "25c8284fa7a454d10edfc847da73e9b5d201cc6a5a32f8e0c836e9d0e0f6e3c2",
+      "13M": "3274e78c1c6337844f6c9f0dd0fd44f0e7bde2f62cad851ee203d3ff76659643",
+      "14E": "664625973fe0d632b399bdc7cee8b3c917a2ba92f2ff6cc34447e7cdfe0c7b52",
+      "14H": "38ba0ea87fa2862952612ccb431b4b31647428370a85ea36fd53bcf771f61f45",
+      "14M": "db28dc6e98787c761c97ecd30118c8a800712b8b933fb0bad7f14a086bad8530",
+      "15E": "38d38f367291e66f91dbcb80ff30e589c9d4d99f85e7e5ecd860d9bf6cc9557f",
+      "16E": "c8a672d6d38d49356d4f9a048b6711fef00824bbc94e7fcf80371a80b6737777",
+      "16M": "7b4d6720423765693fba69c7ef299e1e5c6718a4fc43fef7589690f79b33dfea",
+      "1E": "ae89be553593b89046eb7d24671271dd8d7e95c85ec23e9b8fa614ec4a19041c",
+      "1H": "0788e2534b00a4be17540fec8eaa20a1484f160521508cf23527f7bf98869bce",
+      "1M": "2bbabfb7cfe6baf7647da8860e63358d5ed627e9172d2bc00a1b3bd1300e8fba",
+      "2E": "95cc4dfffffb9f8c99d1d85091f60f85d3ee9c18c19f38f93572dc0a9f078e41",
+      "2H": "de7bfd9b28452a5d2cad147e480c541bd50ece749ea90e61e7c4337c7369b0a4",
+      "2M": "53c1114a56d3bb0e8dc95d0becc0a100ade60a9d02440a16490a58b1745492a8",
+      "3E": "451b98cf4e03fff587c83c92d431ef2bcc5ba58e21245d16d68b876f3aeacff5",
+      "3H": "48fc9976c9a59067774f631ba10fc232ebc3665a8b72751bddad7548c1785e6d",
+      "3M": "89cd5853ab23b7f15055343e1c51177cb9f633d7865bc5e2c8f938d82f399e1c",
+      "4E": "7d304f6c0ce1aa061245cb6613d63db1a32fecae7066a422e07369f56e903de6",
+      "4H": "ad5799787f7329222ba90d89ff9d4785772ee5428aae0044d600fdcea033f2e0",
+      "4M": "74d1ddb3bf36a033b85d18ebd42f82a202e3a0279c4e98bcf84b68f945be9b1c",
+      "5E": "1f50df5bcde1aadbfebefbce3f41613cf2bacd504ad93243e47bafe7af1ecae6",
+      "5H": "7083818830d03c5603f7d606a6b60fadc2066907b2d517f79cf991b40869fd3e",
+      "5M": "8277fc12131b9c281494e2b0356d64b7c84e946c108c641dfff6c00511f70280",
+      "6E": "b6ca8080f3888f05f2ad851ccb9dee8f9ab91d3abe6a0bdb9bcf45daa09b798f",
+      "6H": "1b914a0214198ef859f839cc24b8eb2ab837e13c4d40b062c42b6d394048d13f",
+      "6M": "78addf6248b87ddc18b5613364cd6fcdcb01a2d045ae645c9c04288bf031d39b",
+      "7E": "9df66977d936b015af54be7e902923e4cfe2efa73def407a70c0ea3e0c010782",
+      "7H": "03b1f41e3a4b5d3499c4b5755329ff6144662d8771eefa6f5dacff693b820188",
+      "7M": "51875f691df97f2b72273969439c5d8ea1d85e519f9a902171c4ee57bcfe160b",
+      "8E": "6110b05ab99a1ae5c16953d45b54a2a1707c62d28cbcd7c7a9c131e603b5eff7",
+      "8M": "0213764cc6d951270d094a138d15e24bad32cc86ce07edf66ad058d661a46aef",
+      "9E": "e6cc44f2cacf249dea8c4eb5e011252b3c69f175477dd3637554dadb4c104857",
+      "9H": "dfcf57e8ac94f6a3983dc5a93a9f3bd167d1bc2df1f92bc04c539956423305c9",
+      "9M": "7386c5d574ea41caa24b08f1539db455f1770674977eea48c38626bf3b8682cf"
+    },
+    "record_checks": {
+      "4M_log_annotation": {
+        "changed_frames": 532,
+        "field": "message.delegated_role",
+        "value": 13,
+        "events_sha256": "09ff435215c8d6fa3487bb50f613ead7ca09fe5542f55bfc9d652f21048caef0",
+        "outcome": "All 12 effects and the whole output matched after removing the input journal hash."
+      },
+      "4M_missing_scored_event": {
+        "events_sha256": "de1f6934cc4bc188c1df080411ec1faeaa19fe8207900c2689c49280a481f6cd",
+        "protocol_accepted": true,
+        "effect_error": "Error: \"original simulator event count differs from actual effect count\""
+      },
+      "4M_duplicate_frame": {
+        "events_sha256": "50feca23f55d4d34c8c5e3252357a15a75990289f21c7b5ab284fddb957bb3bd",
+        "error": "Error: \"unmatched session or reused send frame\""
+      },
+      "1H_foreign_decision": {
+        "change": "Append a copy of one actual resolver observation (actor 10, resolver 302) with direction simulator.",
+        "events_sha256": "15e8064fa6f5542d4d7609ceffde1add0ee1cdd01122c4d6e88550be560cd39f",
+        "actual_decisions": 35,
+        "effects": 112,
+        "outcome": "The complete report matched the valid original after replacing only its journal hash."
+      }
+    },
+    "local_checks": {
+      "runner_tests_passed": 60,
+      "opt_in_cases_not_run_by_cargo_test": 144,
+      "all_targets_clippy_deny_warnings": true,
+      "format_check": true
+    },
+    "tracked_rust_lines": {
+      "task_audit_files": 34,
+      "task_audit_lines_before_this_change": 17825,
+      "task_audit_lines_after": 17567,
+      "all_tools_before_this_change": 47031,
+      "all_tools_after": 46921,
+      "task_boundary_test_lines": 15040
+    },
+    "scope": "Saved-record replay under the same EPF implementation. The simulator and the project-maintained task-to-effect matchers still determine distinct properties. This work adds no scored trials or qualifications."
+  }
 }

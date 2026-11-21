@@ -228,6 +228,9 @@ checker from the compiled task and pairs each transport frame with a distinct
 EPF receive. The task checker reads the sender, receiver, logical label and
 delegated role from the matched compiled operation. For instance, an extra
 field in a 4M log cannot classify a data message as an Endpoint transfer.
+The 1H checker matches a local test result to a resolver decision in the
+runtime capture. It ignores records of the same shape attributed to other
+journal writers.
 The journal reader checks the participants against the upstream
 task description and matches each simulator request to its start, finish and
 reply by RPC identifier. Before task-specific matching, it checks that the
