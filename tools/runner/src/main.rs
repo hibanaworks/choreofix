@@ -109,6 +109,7 @@ mod survey_paper_audit;
 mod survey_paper_boundary;
 #[cfg(test)]
 mod timeout_boundary;
+mod wafer_audit;
 mod wire;
 mod writing_audit;
 #[cfg(test)]
@@ -170,7 +171,7 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
     if !(dining
         || coding
         || api
-        || task == "8M"
+        || matches!(task, "8M" | "15E")
         || cicd
         || cicd_pipeline
         || review
@@ -202,7 +203,7 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
     }
     let data = if large_document {
         json!({"participant":agent,"resources":actor["resources"]})
-    } else if multi_round_discovery || cicd_pipeline || task == "8M" {
+    } else if multi_round_discovery || cicd_pipeline || matches!(task, "8M" | "15E") {
         json!({"participant":agent,"resources":actor["resources"],"operations":actor["operations"]})
     } else if dining {
         json!({"participant":agent,"resources":actor["forks"],"philosopher":agent})
@@ -280,6 +281,28 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
                 "/service/pull_artifacts, /service/deploy_staging, /service/run_staging_smoke, /service/deploy_production and /service/run_production_smoke; read /service/start, /service/staging_ready, /service/promote, /service/abort and /service/result"
             }
             _ => return Err("unknown pipeline participant".into()),
+        }
+    } else if task == "15E" {
+        match agent {
+            "LITHOGRAPHER" => {
+                "/service/run_stepper_exposure, /service/check_monitoring/exposure_dose, /service/run_etch_process, /service/check_monitoring/etch_endpoint, /service/run_metrology_measurement. Send the pattern transfer and endpoint check receipt numbers to /service/fab_ready as {\"receipts\":[process_receipt,check_receipt]}. Receive /service/process_validation and /service/lot_disposition."
+            }
+            "DEPOSITOR" => {
+                "/service/run_deposition, /service/check_monitoring, /service/run_metrology_measurement. Send the growth and rate check receipt numbers to /service/fab_ready as {\"receipts\":[process_receipt,check_receipt]}. Receive /service/process_validation and /service/lot_disposition."
+            }
+            "ETCHER" => {
+                "/service/run_etch_process and /service/check_monitoring. Send the reactive etch and rate check receipt numbers to /service/fab_ready as {\"receipts\":[process_receipt,check_receipt]}. Receive /service/process_validation and /service/lot_disposition."
+            }
+            "METROLOGY_ENGINEER" => {
+                "/service/pattern, /service/film and /service/etch each deliver the fabricator's receipt pair and accept your successful measurement result JSON for that material. /service/cd_measurement, /service/thickness_measurement and /service/profile_measurement take the original measurement arguments and return your instrument result."
+            }
+            "PROCESS_CONTROLLER" => {
+                "/service/pattern_report, /service/film_report and /service/etch_report deliver the actual measurements. /service/check_monitoring takes the original JSON request. The four outgoing files /service/validated_lithographer, /service/validated_depositor, /service/validated_etcher and /service/all_validated each take your successful cross-reference result JSON."
+            }
+            "INTEGRATION_ENGINEER" => {
+                "/service/all_validated delivers the controller's result. /service/run_stepper_exposure, /service/run_metrology_measurement, /service/run_deposition and /service/run_etch_process take the original arguments. /service/lot_lithographer, /service/lot_depositor, and /service/lot_etcher take the same JSON with lot_disposition (your decision) and inspection, an object mapping film_integrity_check and etch_uniformity_check to their actual receipt numbers."
+            }
+            _ => return Err("unknown wafer participant".into()),
         }
     } else if task == "8M" {
         match agent {
@@ -616,6 +639,8 @@ fn prompt(source: &Path, task: &str, actor: &Value) -> Result<String> {
             }
             _ => return Err("unknown pipeline participant".into()),
         }
+    } else if task == "15E" {
+        "In-situ measurement is available on a loaded wafer. A failed operation has no receipt and may be retried. Stage notices carry the actual JSON or receipt numbers from the instruments. You choose the commands, order of independent work and disposition."
     } else if task == "8M" {
         r#"Use the benchmark's object identifiers as JSON field values. For /service/define_api, set "endpoint" to "feature_api_spec". This field identifies the contract object. You can choose an HTTP method in the optional "method" field. For migrate_schema, set "migration_name" to "feature_schema". For implement_backend and implement_frontend, set "component" to "api_endpoints" and "user_interface", respectively. For the matching review file, set "pr_id" to "backend_api" or "frontend_ui". For run_integration_tests, set "suite" to "full_stack_integration".
 Choose the work and shell commands for your own role. The API definition and initial schema migration can proceed independently. Backend code uses the actual schema from /service/schema. Before implementing the first backend revision, the backend developer may request an additional migration by writing {"reason":"your concrete reason"} to /service/request_migration. The DB admin reads /service/schema_status for either that request or the implementation that uses the schema. A new migration delivers its actual new schema. The UI uses the approved backend data from /service/backend. A review with status changes_requested lets the developer submit a fresh implementation through their existing operation file. The reviewer receives the new candidate through the same candidate file.
@@ -693,7 +718,7 @@ The tester reads /service/test_candidate before each test and reads the real tes
         || dining
         || coding
         || api
-        || task == "8M"
+        || matches!(task, "8M" | "15E")
         || cicd
         || feature_delivery
         || staged_integration
@@ -967,6 +992,7 @@ async fn main() -> Result<()> {
         [mode, events] if mode == "--audit-document" => println!("{}", serde_json::to_string_pretty(&document_audit::audit(Path::new(events))?)?),
         [mode, events] if mode == "--audit-kitchen" => println!("{}", serde_json::to_string_pretty(&kitchen_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-kitchen-mutants" => println!("{}", serde_json::to_string_pretty(&kitchen_audit::check_mutants(Path::new(events),Path::new(output))?)?),
+        [mode, events] if mode == "--audit-wafer" => println!("{}", serde_json::to_string_pretty(&wafer_audit::audit(Path::new(events))?)?),
         [mode, events] if mode == "--audit-manufacturing" => println!("{}", serde_json::to_string_pretty(&manufacturing_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-manufacturing-mutants" => println!("{}", serde_json::to_string_pretty(&manufacturing_audit::check_mutants(Path::new(events), Path::new(output))?)?),
         [mode, events] if mode == "--audit-build" => println!("{}", serde_json::to_string_pretty(&build_audit::audit(Path::new(events))?)?),
@@ -1040,7 +1066,7 @@ async fn main() -> Result<()> {
             }
         }
         _ => return Err(concat!(
-            "usage: choreofix-experiments 1E|1M|1H|2E|2M|2H|3E|3M|3H|4E|4M|5E|5M|5H|6E|6M|6H|7E|7M|7H|8E|8M|9E|9M|9H|10E|10M|11E|12E|13E|13M|13H|14E|14M|14H|16E|16M DEPTH OUTPUT\n",
+            "usage: choreofix-experiments 1E|1M|1H|2E|2M|2H|3E|3M|3H|4E|4M|5E|5M|5H|6E|6M|6H|7E|7M|7H|8E|8M|9E|9M|9H|10E|10M|11E|12E|13E|13M|13H|14E|14M|14H|15E|16E|16M DEPTH OUTPUT\n",
             "       --audit-api|--audit-review|--audit-migration|--audit-report|--audit-document|--audit-coordination|--audit-writing|--audit-cicd|--audit-cicd-pipeline|--audit-philosophers|--audit-lab|--audit-lab-quality|--audit EVENTS\n",
             "       --audit-protocol EVENTS\n",
             "       --check-api-mutants|--check-review-mutants|--check-report-mutants|--check-document-mutants|--check-writing-mutants|--check-cicd-mutants|--check-philosophers-mutants|--check-protocol-mutants EVENTS NEW_OUTPUT\n",

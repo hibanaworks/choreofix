@@ -25,8 +25,8 @@ For these tasks, 43 audited live-agent runs link shell commands and Hibana
 operation occurrences to 732 shared effects and their replies. The common
 simulator recorded task completion in 39 of these runs. Each qualification
 applies to the software version that produced its trace. The sample includes
-replacement runs. A subsequent seven-agent publication on task 7H added
-a 37th qualified task. Formal benchmark scoring has yet to begin.
+replacement runs. Subsequent live trials qualified a seven-agent publication on task 7H and
+six-agent wafer fabrication on 15E, bringing the count to 38 tasks. Formal benchmark scoring has yet to begin.
 \end{abstract}
 
 \section{Problem and scope}
@@ -757,6 +757,14 @@ completed, and the audit matched 33 effects and replies to the same trace
 of 147,787 EPF records. The common simulator recorded publication and zero
 violations. This additional trial is outside the November~19 cohort.
 \path{analysis/7h-review-inbox.json}.
+
+In 15E, six live agents completed wafer fabrication at depth zero on the same
+executable used for seven scripted trials. They took 161.22 seconds and used
+1,811,784 inclusive tokens. The audit linked all 18 shared effects to actual
+requests and replies across 8,747 EPF records. All three fabricators received
+the same lot disposition with the two inspection receipts. The common world
+reported completion and zero violations. This trial is also outside the
+November~19 cohort. \path{analysis/15e-wafer-live.json}.
 
 These are integration observations from development, not random samples or
 paired baseline trials. They cannot estimate a comparative completion rate,

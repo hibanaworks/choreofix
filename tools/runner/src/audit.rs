@@ -28,7 +28,7 @@ fn check_resource_assignments(task: &str, fixture: &Value, metadata: &Value) -> 
             .iter()
             .map(|v| v.as_str().ok_or("resource name"))
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        let mut expected = if matches!(task, "7H" | "8M") {
+        let mut expected = if matches!(task, "7H" | "8M" | "15E") {
             let mut names = BTreeSet::new();
             for operation in actor["operations"]
                 .as_array()
@@ -463,7 +463,7 @@ pub fn run(root: &Path) -> Result<Value> {
         return Err("task identity, depth or participant set differs from original inputs".into());
     }
     check_resource_assignments(task, fixture, &metadata)?;
-    if matches!(task, "7H" | "8M" | "14H" | "16M") {
+    if matches!(task, "7H" | "8M" | "15E" | "14H" | "16M") {
         let schemas = load(&root.join(format!("source/benchmark/descriptions/{task}/tools.json")))?;
         if fixture["tool_schemas"] != schemas {
             return Err("tool schemas differ from the common task".into());
@@ -581,6 +581,7 @@ pub fn run(root: &Path) -> Result<Value> {
         "10M" => crate::cascading_build_audit::audit(&root.join("events.jsonl"))?,
         "8E" => crate::api_audit::audit(&root.join("events.jsonl"))?,
         "8M" => crate::full_stack_api_audit::audit(&root.join("events.jsonl"))?,
+        "15E" => crate::wafer_audit::audit(&root.join("events.jsonl"))?,
         "16E" => crate::cicd_audit::audit(&root.join("events.jsonl"))?,
         "16M" => crate::cicd_pipeline_audit::audit(&root.join("events.jsonl"))?,
         "9E" | "9M" | "9H" => crate::philosophers_audit::audit(&root.join("events.jsonl"))?,

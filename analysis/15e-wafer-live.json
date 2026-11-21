@@ -1,0 +1,434 @@
+{
+  "task": "15E",
+  "scope": "Source-bound unscored qualification at depth zero. Six autonomous wash guests use the same executable as the seven scripted trials. The common simulator supplies the physical operations and business score.",
+  "archive": "output/verification/wafer-fab.gxanqSku",
+  "build": {
+    "revisions": {
+      "hibana": "331afd6e4b6315e103ce9cb9311f9d9140fc0e57",
+      "hibana-epf": "f966c2817c68994315033fa65fbf72390fa107b4",
+      "hibana-runtime": "4e29a837eaf72247a6803ffbbff0c257519df0a5",
+      "hibana-wasip1-runtime": "94ed8a88026f3f1c58e8b35e3766d8b9a83cb334",
+      "source": "5f02be475cd0134cba15cc4b7bd31084bd0d7a4c"
+    },
+    "source_manifest_sha256": "3e509d89e0e9736868514644fdea44c4dc4445c484c9d6e0a4efc90219c4f374",
+    "source_unchanged": true,
+    "binary_sha256": "c79e22be0c57c11ba4d55070fb2c9d1a38ca513ba540a32d47b17d045ad213f4",
+    "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+    "run_runner_sha256": "a485f03667ca03cdc899cd2e66f6d5d177975ee2a421170b00e4658726080493",
+    "build_receipt_sha256": "f730f98b4d7416187149832b1cc205a6e2551ef5b1828e7915c8f94eec94e376",
+    "frozen_sources_sha256": "e0cdf6d44a8bbadc05c3a116db80ab8d8d7482532c06aa4c532528e9ceab32be"
+  },
+  "scripted": {
+    "cases": [
+      {
+        "case": "dep-litho-etch",
+        "endpoint_effects": 20,
+        "unbound_effects": 0,
+        "epf_records": 8386,
+        "complete": true,
+        "violations": 0,
+        "events_sha256": "ef40e3099da308d4c9109cb98404e502f73d06f8225f86c4c7bb43495319b308",
+        "reaudit_sha256": "b896a422e965a267f50fcafe76035f31e91c1fa472da498eef744e5f070a9c85"
+      },
+      {
+        "case": "etch-dep-litho",
+        "endpoint_effects": 20,
+        "unbound_effects": 0,
+        "epf_records": 8374,
+        "complete": true,
+        "violations": 0,
+        "events_sha256": "91c9fcb8c5e9688abe4db7755da6120eee3d3c2d89c5cf5d76347128de3b7c75",
+        "reaudit_sha256": "9c640d008179e8aab1fc66ecbd49b443b28382b03c7642b390e9f73b2bcb0e32"
+      },
+      {
+        "case": "etch-first",
+        "endpoint_effects": 19,
+        "unbound_effects": 0,
+        "epf_records": 7844,
+        "complete": true,
+        "violations": 0,
+        "events_sha256": "ec3f012053a3d0a2009cb960f215cfdcf885b7650131c378034cd8aedd994bba",
+        "reaudit_sha256": "b22826a02ccb525464db3b0aa8f6f03e63dcceee7bc9bb7e17e070340939a47e"
+      },
+      {
+        "case": "film-first",
+        "endpoint_effects": 19,
+        "unbound_effects": 0,
+        "epf_records": 7844,
+        "complete": true,
+        "violations": 0,
+        "events_sha256": "ec7ee9b9a73d9fd93f016b63fb7b08fc49f097b650524b391c4f811e2ee1736e",
+        "reaudit_sha256": "49f8e2b9b04088bd98d76b6c10f05fd690d96a0570df32b8c4930c383f927121"
+      },
+      {
+        "case": "litho-etch-dep",
+        "endpoint_effects": 23,
+        "unbound_effects": 0,
+        "epf_records": 9271,
+        "complete": true,
+        "violations": 0,
+        "events_sha256": "69c0510af9e886ca1ce362bbe9fcb68621daeca65642e4cea8b8a0837c5304c3",
+        "reaudit_sha256": "9442fef24fda3124a10826e2cb683053514b801248865227f72114bed1f8f599"
+      },
+      {
+        "case": "overlay-retry",
+        "endpoint_effects": 23,
+        "unbound_effects": 0,
+        "epf_records": 8711,
+        "complete": true,
+        "violations": 0,
+        "events_sha256": "898a21b1c4f5effdd1693765778cac1379b7ae239577ba44389849f95869f1c3",
+        "reaudit_sha256": "9cf6c51ede8616c66ecf24346a56fe56f9c61c1ecc43f23c80e5cc85c786b400"
+      },
+      {
+        "case": "reactive-etch-retry",
+        "endpoint_effects": 20,
+        "unbound_effects": 0,
+        "epf_records": 8100,
+        "complete": true,
+        "violations": 0,
+        "events_sha256": "2c500dff83673cab3c79328d21501a4297925ec0b5fa3c7575af57bbd4aa9cca",
+        "reaudit_sha256": "38d38f367291e66f91dbcb80ff30e589c9d4d99f85e7e5ecd860d9bf6cc9557f"
+      }
+    ],
+    "model_calls": 0,
+    "total_effects": 144,
+    "total_epf_records": 58530
+  },
+  "live_depth_0": {
+    "qualified": true,
+    "scored_comparison": false,
+    "model": "gpt-6-luna",
+    "effort": "xhigh",
+    "elapsed_seconds": 161.21987775,
+    "inclusive_tokens": 1811784,
+    "participant_turns": 6,
+    "participants": [
+      {
+        "participant": "DEPOSITOR",
+        "inclusive_tokens": 291137,
+        "tool_calls": 12
+      },
+      {
+        "participant": "ETCHER",
+        "inclusive_tokens": 277800,
+        "tool_calls": 11
+      },
+      {
+        "participant": "INTEGRATION_ENGINEER",
+        "inclusive_tokens": 395935,
+        "tool_calls": 16
+      },
+      {
+        "participant": "LITHOGRAPHER",
+        "inclusive_tokens": 292953,
+        "tool_calls": 12
+      },
+      {
+        "participant": "METROLOGY_ENGINEER",
+        "inclusive_tokens": 360802,
+        "tool_calls": 17
+      },
+      {
+        "participant": "PROCESS_CONTROLLER",
+        "inclusive_tokens": 193157,
+        "tool_calls": 8
+      }
+    ],
+    "domain_effects": 18,
+    "epf_records": 8747,
+    "events_sha256": "7f7044a88fbfb3bb7d715fe07f0b30c3e1134ffe5ab099772774af0ebe67eed9",
+    "auditor_sha256": "e9fabd139e3713c0f83375ab77676f568da4e1ef9087981675ab2600ebe80787",
+    "simulator_contract": "common-environment-v33",
+    "simulator_manifest_sha256": "6fb3593772b07bc5557d20376f1ed0cfbbfb2542430e75bb43beec70bd13c8c4",
+    "compiled_projection_sha256": "fdf7d4f98bffad85b36424bdff14bb45ff58961b29633ac22ededf638c3d1871",
+    "common_score_complete": true,
+    "violations": 0,
+    "effects": [
+      {
+        "agent": "DEPOSITOR",
+        "input_frame": 156,
+        "instrument_frames": [],
+        "operation": "cvd_growth",
+        "receipt": 1,
+        "result_frame": 287,
+        "score_index": 0,
+        "success": true,
+        "tool": "run_deposition"
+      },
+      {
+        "agent": "ETCHER",
+        "input_frame": 250,
+        "instrument_frames": [
+          253,
+          255,
+          256,
+          282,
+          284
+        ],
+        "operation": "reactive_ion_etch",
+        "receipt": 2,
+        "result_frame": 286,
+        "score_index": 1,
+        "success": true,
+        "tool": "run_etch_process"
+      },
+      {
+        "agent": "LITHOGRAPHER",
+        "input_frame": 274,
+        "instrument_frames": [],
+        "operation": "photo_exposure",
+        "receipt": 3,
+        "result_frame": 297,
+        "score_index": 2,
+        "success": true,
+        "tool": "run_stepper_exposure"
+      },
+      {
+        "agent": "DEPOSITOR",
+        "input_frame": 332,
+        "instrument_frames": [
+          337,
+          338,
+          339,
+          342,
+          344
+        ],
+        "operation": "deposition_rate",
+        "receipt": 4,
+        "result_frame": 346,
+        "score_index": 3,
+        "success": true,
+        "tool": "check_monitoring"
+      },
+      {
+        "agent": "LITHOGRAPHER",
+        "input_frame": 387,
+        "instrument_frames": [
+          391,
+          395,
+          396,
+          452,
+          454
+        ],
+        "operation": "exposure_dose",
+        "receipt": 5,
+        "result_frame": 456,
+        "score_index": 4,
+        "success": true,
+        "tool": "check_monitoring"
+      },
+      {
+        "agent": "ETCHER",
+        "input_frame": 447,
+        "instrument_frames": [
+          450,
+          457,
+          458,
+          468,
+          470,
+          471,
+          473
+        ],
+        "operation": "etch_rate",
+        "receipt": 6,
+        "result_frame": 474,
+        "score_index": 5,
+        "success": true,
+        "tool": "check_monitoring"
+      },
+      {
+        "agent": "LITHOGRAPHER",
+        "input_frame": 537,
+        "instrument_frames": [
+          540,
+          543,
+          544,
+          555,
+          557
+        ],
+        "operation": "pattern_transfer_etch",
+        "receipt": 7,
+        "result_frame": 559,
+        "score_index": 6,
+        "success": true,
+        "tool": "run_etch_process"
+      },
+      {
+        "agent": "LITHOGRAPHER",
+        "input_frame": 641,
+        "instrument_frames": [
+          644,
+          647,
+          648,
+          651,
+          653,
+          654,
+          657
+        ],
+        "operation": "etch_endpoint",
+        "receipt": 8,
+        "result_frame": 656,
+        "score_index": 7,
+        "success": true,
+        "tool": "check_monitoring"
+      },
+      {
+        "agent": "METROLOGY_ENGINEER",
+        "input_frame": 714,
+        "instrument_frames": [
+          718,
+          719
+        ],
+        "operation": "thickness_measurement",
+        "receipt": 9,
+        "result_frame": 720,
+        "score_index": 8,
+        "success": true,
+        "tool": "run_metrology_measurement"
+      },
+      {
+        "agent": "METROLOGY_ENGINEER",
+        "input_frame": 779,
+        "instrument_frames": [
+          783,
+          784
+        ],
+        "operation": "cd_measurement",
+        "receipt": 10,
+        "result_frame": 785,
+        "score_index": 9,
+        "success": true,
+        "tool": "run_metrology_measurement"
+      },
+      {
+        "agent": "METROLOGY_ENGINEER",
+        "input_frame": 884,
+        "instrument_frames": [
+          888,
+          889
+        ],
+        "operation": "profile_measurement",
+        "receipt": 11,
+        "result_frame": 890,
+        "score_index": 10,
+        "success": true,
+        "tool": "run_metrology_measurement"
+      },
+      {
+        "agent": "PROCESS_CONTROLLER",
+        "input_frame": 955,
+        "instrument_frames": [
+          957,
+          959,
+          960,
+          962,
+          964
+        ],
+        "operation": "cross_reference",
+        "receipt": 12,
+        "result_frame": 966,
+        "score_index": 11,
+        "success": true,
+        "tool": "check_monitoring"
+      },
+      {
+        "agent": "INTEGRATION_ENGINEER",
+        "input_frame": 1199,
+        "instrument_frames": [],
+        "operation": "overlay_alignment",
+        "receipt": 13,
+        "result_frame": 1204,
+        "score_index": 12,
+        "success": true,
+        "tool": "run_stepper_exposure"
+      },
+      {
+        "agent": "INTEGRATION_ENGINEER",
+        "input_frame": 1265,
+        "instrument_frames": [
+          1269,
+          1270
+        ],
+        "operation": "overlay_alignment",
+        "receipt": 14,
+        "result_frame": 1273,
+        "score_index": 13,
+        "success": true,
+        "tool": "run_metrology_measurement"
+      },
+      {
+        "agent": "INTEGRATION_ENGINEER",
+        "input_frame": 1355,
+        "instrument_frames": [],
+        "operation": "film_integrity_check",
+        "receipt": 15,
+        "result_frame": 1359,
+        "score_index": 14,
+        "success": true,
+        "tool": "run_deposition"
+      },
+      {
+        "agent": "INTEGRATION_ENGINEER",
+        "input_frame": 1387,
+        "instrument_frames": [
+          1391,
+          1392,
+          1393,
+          1394
+        ],
+        "operation": "etch_uniformity_check",
+        "receipt": 16,
+        "result_frame": 1396,
+        "score_index": 15,
+        "success": true,
+        "tool": "run_etch_process"
+      },
+      {
+        "agent": "LITHOGRAPHER",
+        "input_frame": 1457,
+        "instrument_frames": [
+          1462,
+          1465
+        ],
+        "operation": "alignment_check",
+        "receipt": 17,
+        "result_frame": 1466,
+        "score_index": 16,
+        "success": true,
+        "tool": "run_metrology_measurement"
+      },
+      {
+        "agent": "DEPOSITOR",
+        "input_frame": 1546,
+        "instrument_frames": [
+          1551,
+          1554
+        ],
+        "operation": "thickness_verification",
+        "receipt": 18,
+        "result_frame": 1555,
+        "score_index": 17,
+        "success": true,
+        "tool": "run_metrology_measurement"
+      }
+    ],
+    "run_record_mutants": [
+      "forged_model",
+      "incorrect_inclusive_usage",
+      "forged_command",
+      "missing_tool_reply",
+      "false_simulator_score",
+      "changed_upstream_source",
+      "unqualified_runtime",
+      "missing_guest_artifact",
+      "wrong_participant_set",
+      "simulator_contract_mismatch",
+      "artificial_delay_in_model_fixture"
+    ],
+    "result_sha256": "7b4cccb15bc3bda0ee5aa366379d80984acb8e7a613b9e70ca7c435a0c41ef1f",
+    "initial_audit_sha256": "891f28410787c68f4e56e4adc42ba779eaaaabe4a6f405cbc40e225d47c4743a",
+    "reaudit_sha256": "f7016b22fd17d555d3045666226e268f9d5773b352f0b21be8ec7bca21f682a9",
+    "mutations_sha256": "4b0182611dacbd6e2af91b11c0c8ecaa5d8885c154db5c8cd8b2f9d0f9b19af8"
+  }
+}

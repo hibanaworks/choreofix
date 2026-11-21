@@ -3,10 +3,7 @@ use choreofix::shell::imp::review_reply::ReviewReply;
 use choreofix::shell::imp::service::SimulatorOperation;
 use hibana::{
     g,
-    runtime::{
-        program::Projectable,
-        wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload},
-    },
+    runtime::wire::{CodecError, Payload, ReceivedPayload, WireEncode, WirePayload},
 };
 use serde_json::Value;
 
@@ -17,12 +14,13 @@ pub const DEPOSITION_CHAMBER: u8 = 3;
 pub const ETCH_CHAMBER: u8 = 4;
 pub const STEPPER: u8 = 6;
 pub const METROLOGY: u8 = 7;
+pub const PLASMA_INPUT: u8 = 43;
 pub const STAGE: u8 = 8;
 pub const MONITOR: u8 = 21;
 pub const CVD_STAGE: u8 = 32;
 pub type Growth = g::Msg<60, InstrumentRequest<CVD_STAGE>>;
 pub type Grown<'a> = g::Msg<61, &'a [u8]>;
-const DEPOSITION_RATE: u8 = 62;
+pub const DEPOSITION_RATE: u8 = 62;
 pub type Rate = g::Msg<DEPOSITION_RATE, InstrumentRequest<DEPOSITION_RATE>>;
 pub type RateResult<'a> = g::Msg<63, &'a [u8]>;
 pub type RatePassed<'a> = g::Msg<64, ReviewReply<'a, true>>;
@@ -35,6 +33,26 @@ pub type ReactiveEtch = g::Msg<REACTIVE_ION_ETCH, InstrumentRequest<REACTIVE_ION
 pub type EtchResult<'a> = g::Msg<69, &'a [u8]>;
 pub type EtchLoaded<'a> = g::Msg<70, ReviewReply<'a, true>>;
 pub type EtchFailed<'a> = g::Msg<71, ReviewReply<'a, false>>;
+pub const EXPOSURE_DOSE: u8 = 75;
+pub const ETCH_RATE: u8 = 76;
+pub type MonitorRequest<const KIND: u8> = g::Msg<KIND, InstrumentRequest<KIND>>;
+pub type SensorPermit<const KIND: u8> = g::Msg<81, InstrumentRequest<KIND>>;
+pub type MonitorReading<'a, const KIND: u8> = g::Msg<KIND, &'a [u8]>;
+pub type DosePassed<'a> = g::Msg<77, ReviewReply<'a, true>>;
+pub type DoseFailed<'a> = g::Msg<78, ReviewReply<'a, false>>;
+pub type EtchRatePassed<'a> = g::Msg<79, ReviewReply<'a, true>>;
+pub type EtchRateFailed<'a> = g::Msg<80, ReviewReply<'a, false>>;
+pub const PATTERN_ETCH: u8 = 82;
+pub const ETCH_ENDPOINT: u8 = 83;
+pub type PatternEtch = g::Msg<PATTERN_ETCH, InstrumentRequest<PATTERN_ETCH>>;
+pub type PatternResult<'a> = g::Msg<84, &'a [u8]>;
+pub type PatternLoaded<'a> = g::Msg<85, ReviewReply<'a, true>>;
+pub type PatternFailed<'a> = g::Msg<86, ReviewReply<'a, false>>;
+pub type EndpointPassed<'a> = g::Msg<87, ReviewReply<'a, true>>;
+pub type EndpointFailed<'a> = g::Msg<88, ReviewReply<'a, false>>;
+pub type ChamberPermit<const K: u8> = g::Msg<89, InstrumentRequest<K>>;
+pub type LoadPassed<'a> = g::Msg<90, ReviewReply<'a, true>>;
+pub type LoadFailed<'a> = g::Msg<91, ReviewReply<'a, false>>;
 pub const CD: u8 = 50;
 pub const THICKNESS: u8 = 51;
 pub const PROFILE: u8 = 52;
@@ -63,10 +81,7 @@ impl<const KIND: u8> WireEncode for WaferReading<'_, KIND> {
     }
 }
 
-impl<const KIND: u8> WirePayload for WaferReading<'_, KIND>
-where
-    InstrumentRequest<KIND>: SimulatorOperation,
-{
+impl<const KIND: u8> WirePayload for WaferReading<'_, KIND> {
     const SCHEMA_ID: u32 = 0xac15_1000 | KIND as u32;
     type Decoded<'a> = &'a [u8];
 
@@ -81,7 +96,11 @@ where
                 dimension_name(KIND).ok_or(CodecError::Malformed)?,
             )
         };
-        let (engineer, tool) = InstrumentRequest::<KIND>::RPC;
+        let (engineer, tool) = match KIND {
+            MONITOR => InstrumentRequest::<MONITOR>::RPC,
+            CD | THICKNESS | PROFILE => InstrumentRequest::<CD>::RPC,
+            _ => return Err(CodecError::Malformed),
+        };
         if result["success"] == true
             && result["tool_name"] == tool
             && result["data"]["engineer"] == engineer
@@ -121,18 +140,6 @@ pub type CrossReferenceFailed<'a> = g::Msg<33, ReviewReply<'a, false>>;
 pub type OverlayPassed<'a> = g::Msg<28, ReviewReply<'a, true>>;
 pub type OverlayFailed<'a> = g::Msg<29, ReviewReply<'a, false>>;
 
-pub fn checks() -> impl Projectable {
-    let film = g::seq(
-        g::send::<WAFER, DEPOSITION_CHAMBER, Film>(),
-        g::send::<DEPOSITION_CHAMBER, WAFER, FilmResult>(),
-    );
-    let etch = g::seq(
-        g::send::<WAFER, ETCH_CHAMBER, Uniformity>(),
-        g::send::<ETCH_CHAMBER, WAFER, UniformityResult>(),
-    );
-    g::route(g::seq(film, etch), g::seq(etch, film))
-}
-
 // The ChoreoFS codec preserves the actual file arguments sent to the instrument.
 pub struct InstrumentRequest<const CHAMBER: u8>(Vec<u8>);
 
@@ -167,9 +174,13 @@ impl<const CHAMBER: u8> WirePayload for InstrumentRequest<CHAMBER> {
             ETCH_CHAMBER => ("process", "etch_uniformity_check"),
             PHOTO_EXPOSURE => ("process", "photo_exposure"),
             REACTIVE_ION_ETCH => ("process", "reactive_ion_etch"),
+            PATTERN_ETCH => ("process", "pattern_transfer_etch"),
+            ETCH_ENDPOINT => ("check_type", "etch_endpoint"),
             STEPPER => ("process", "overlay_alignment"),
             CVD_STAGE => ("process", "cvd_growth"),
             DEPOSITION_RATE => ("check_type", "deposition_rate"),
+            EXPOSURE_DOSE => ("check_type", "exposure_dose"),
+            ETCH_RATE => ("check_type", "etch_rate"),
             MONITOR => ("check_type", "cross_reference"),
             METROLOGY => ("measurement", "overlay_alignment"),
             other => (
@@ -200,11 +211,11 @@ impl SimulatorOperation for InstrumentRequest<DEPOSITION_CHAMBER> {
     const RPC: (&'static str, &'static str) = ("INTEGRATION_ENGINEER", "run_deposition");
 }
 
-impl SimulatorOperation for InstrumentRequest<ETCH_CHAMBER> {
+impl SimulatorOperation<2> for InstrumentRequest<ETCH_CHAMBER> {
     const RPC: (&'static str, &'static str) = ("INTEGRATION_ENGINEER", "run_etch_process");
 }
 
-impl SimulatorOperation for InstrumentRequest<MONITOR> {
+impl SimulatorOperation<2> for InstrumentRequest<MONITOR> {
     const RPC: (&'static str, &'static str) = ("PROCESS_CONTROLLER", "check_monitoring");
 }
 
@@ -212,7 +223,7 @@ impl SimulatorOperation for InstrumentRequest<CVD_STAGE> {
     const RPC: (&'static str, &'static str) = ("DEPOSITOR", "run_deposition");
 }
 
-impl SimulatorOperation for InstrumentRequest<DEPOSITION_RATE> {
+impl SimulatorOperation<2> for InstrumentRequest<DEPOSITION_RATE> {
     const RPC: (&'static str, &'static str) = ("DEPOSITOR", "check_monitoring");
 }
 
@@ -220,7 +231,7 @@ impl SimulatorOperation for InstrumentRequest<PHOTO_EXPOSURE> {
     const RPC: (&'static str, &'static str) = ("LITHOGRAPHER", "run_stepper_exposure");
 }
 
-impl SimulatorOperation for InstrumentRequest<REACTIVE_ION_ETCH> {
+impl SimulatorOperation<2> for InstrumentRequest<REACTIVE_ION_ETCH> {
     const RPC: (&'static str, &'static str) = ("ETCHER", "run_etch_process");
 }
 
@@ -248,4 +259,18 @@ impl SimulatorOperation for InstrumentRequest<ALIGNMENT_CHECK> {
 
 impl SimulatorOperation for InstrumentRequest<THICKNESS_VERIFICATION> {
     const RPC: (&'static str, &'static str) = ("DEPOSITOR", "run_metrology_measurement");
+}
+
+impl SimulatorOperation<2> for InstrumentRequest<EXPOSURE_DOSE> {
+    const RPC: (&'static str, &'static str) = ("LITHOGRAPHER", "check_monitoring");
+}
+impl SimulatorOperation<2> for InstrumentRequest<ETCH_RATE> {
+    const RPC: (&'static str, &'static str) = ("ETCHER", "check_monitoring");
+}
+
+impl SimulatorOperation<2> for InstrumentRequest<PATTERN_ETCH> {
+    const RPC: (&'static str, &'static str) = ("LITHOGRAPHER", "run_etch_process");
+}
+impl SimulatorOperation<2> for InstrumentRequest<ETCH_ENDPOINT> {
+    const RPC: (&'static str, &'static str) = ("LITHOGRAPHER", "check_monitoring");
 }

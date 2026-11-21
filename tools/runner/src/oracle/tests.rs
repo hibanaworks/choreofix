@@ -1,6 +1,3 @@
-#[path = "../../../../src/tasks/wafer_fabrication/instruments.rs"]
-mod instruments;
-
 use super::*;
 use std::collections::BTreeSet;
 
@@ -852,15 +849,6 @@ async fn staged_release_inputs_preserve_all_seven_agents_and_original_operation_
 
 #[hibana_runtime::main]
 #[test]
-async fn wafer_measurements_can_be_repeated_while_other_materials_are_unstarted() -> Result<()> {
-    for etch_first in [false, true] {
-        wafer_trial(etch_first).await?;
-    }
-    Ok(())
-}
-
-#[hibana_runtime::main]
-#[test]
 #[ignore = "requires the built wafer runtime and wash guest"]
 async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()> {
     use crate::{
@@ -914,7 +902,23 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
         } else {
             &[]
         };
-        let (world, _) = Simulator::new("15E", 0, 1.0, trace.clone(), failures)?;
+        let (world, fixture) = Simulator::new("15E", 0, 1.0, trace.clone(), failures)?;
+        let actors = fixture["fixtures"].as_array().ok_or("wafer participants")?;
+        assert_eq!(actors.len(), 6);
+        assert!(actors.iter().all(|a| {
+            a.get("calls").is_none()
+                && a["operations"]
+                    .as_array()
+                    .is_some_and(|ops| !ops.is_empty())
+        }));
+        let retry_pattern = case == "dep-litho-etch";
+        let retry_endpoint = case == "etch-dep-litho";
+        if retry_pattern {
+            world.call(json!({"type":"test_failure","tool":"run_etch_process","agent":"LITHOGRAPHER","call_index":0})).await?;
+        }
+        if retry_endpoint {
+            world.call(json!({"type":"test_failure","tool":"check_monitoring","agent":"LITHOGRAPHER","call_index":1})).await?;
+        }
         if retry_etch {
             world.call(json!({"type":"test_failure","tool":"run_etch_process","agent":"ETCHER","call_index":0})).await?;
         }
@@ -923,9 +927,12 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
             "run_metrology_measurement":[0.0,0.0],"check_monitoring":[0.0,0.0],
             "run_etch_process":[0.0,0.0],"run_deposition":[0.5,0.5]}))
             .await?;
-        let fabrication_calls = 4 + 2 * usize::from(retry_control);
-        let guest_effects =
-            15 + 4 * usize::from(retry) + 2 * usize::from(retry_control) + usize::from(retry_etch);
+        let guest_effects = 19
+            + 4 * usize::from(retry)
+            + 4 * usize::from(retry_control)
+            + usize::from(retry_etch)
+            + usize::from(retry_pattern)
+            + usize::from(retry_endpoint);
         let exposure_first = match case {
             "dep-litho-etch" => Some(true),
             "etch-dep-litho" => Some(false),
@@ -944,15 +951,6 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                         "cd_measurement",
                         "thickness_measurement",
                         "profile_measurement",
-                    ];
-                    let processing: [&[(&str, &str, &str)]; 3] = [
-                        &[
-                            ("check_monitoring", "check_type", "exposure_dose"),
-                            ("run_etch_process", "process", "pattern_transfer_etch"),
-                            ("check_monitoring", "check_type", "etch_endpoint"),
-                        ],
-                        &[],
-                        &[("check_monitoring", "check_type", "etch_rate")],
                     ];
                     let mut measure_order = delivery;
                     let schedule: Vec<_> = if deferred_reads {
@@ -984,10 +982,38 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                                     assert!(wrong["stdout"].as_str().is_some_and(|s| s.contains("Invalid argument")), "{wrong}");
                                     assert_eq!(guest.command(who, expose.into()).await?["stdout"], "wash> ");
                                 }
+                                let monitor_path="/service/check_monitoring/exposure_dose";
+                                let sample=format!("echo '{{\"check_type\":\"exposure_dose\"}}' > {monitor_path}; cat {monitor_path}");
+                                let mut reading=shell_json_result(&guest.command(who,sample.clone()).await?)?;
+                                if retry_control {
+                                    assert_eq!(reading["data"]["status"],"check_failed");
+                                    let early=guest.command(who,"echo ready | dd of=/service/fab_ready oflag=nonblock".into()).await?;
+                                    assert!(early["stdout"].as_str().is_some_and(|text|text.contains("Permission denied") || text.contains("Resource temporarily unavailable")), "{early}");
+                                    reading=shell_json_result(&guest.command(who,sample).await?)?;
+                                }
+                                assert_eq!(reading["success"],true,"{reading}");
+                                assert_eq!(reading["data"]["check_type"],"exposure_dose");
                                 let result = shell_json_result(&guest.command(who, "cat /service/run_stepper_exposure".into()).await?)?;
                                 assert_eq!(result["success"], true, "{result}");
                                 assert_eq!(result["data"]["process"], "photo_exposure");
-                                receipts.push(result["data"]["receipt"].clone());
+                                assert_eq!(reading["data"]["inputs"],json!([result["data"]["receipt"]]));
+                                let etch = r#"echo '{"process":"pattern_transfer_etch"}' > /service/run_etch_process; cat /service/run_etch_process"#;
+                                let mut etched = shell_json_result(&guest.command(who, etch.into()).await?)?;
+                                if retry_pattern {
+                                    assert_eq!(etched["data"]["status"], "etch_failed", "{etched}");
+                                    etched = shell_json_result(&guest.command(who, etch.into()).await?)?;
+                                }
+                                assert_eq!(etched["success"], true, "{etched}");
+                                assert_eq!(etched["data"]["inputs"], json!([result["data"]["receipt"], reading["data"]["receipt"]]));
+                                let inspect = r#"echo '{"check_type":"etch_endpoint"}' > /service/check_monitoring/etch_endpoint; cat /service/check_monitoring/etch_endpoint"#;
+                                let mut endpoint = shell_json_result(&guest.command(who, inspect.into()).await?)?;
+                                if retry_endpoint {
+                                    assert_eq!(endpoint["data"]["status"], "check_failed", "{endpoint}");
+                                    endpoint = shell_json_result(&guest.command(who, inspect.into()).await?)?;
+                                }
+                                assert_eq!(endpoint["success"], true, "{endpoint}");
+                                assert_eq!(endpoint["data"]["inputs"], json!([etched["data"]["receipt"]]));
+                                receipts.extend([etched["data"]["receipt"].clone(), endpoint["data"]["receipt"].clone()]);
                             }
                             if who == "DEPOSITOR" {
                                 let growth = "/service/run_deposition";
@@ -1033,12 +1059,21 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                                 receipts.push(result["data"]["receipt"].clone());
                                 let repeat = guest.command(who, format!("echo '{{\"process\":\"reactive_ion_etch\"}}' | dd of={path} oflag=nonblock")).await?;
                                 assert!(repeat["stdout"].as_str().is_some_and(|s| s.contains("Permission denied")), "{repeat}");
+                                let monitor_path="/service/check_monitoring";
+                                let sample=format!("echo '{{\"check_type\":\"etch_rate\"}}' > {monitor_path}; cat {monitor_path}");
+                                let mut reading=shell_json_result(&guest.command(who,sample.clone()).await?)?;
+                                if retry_control {
+                                    assert_eq!(reading["data"]["status"],"check_failed");
+                                    let early=guest.command(who,"echo ready | dd of=/service/fab_ready oflag=nonblock".into()).await?;
+                                    assert!(early["stdout"].as_str().is_some_and(|text|text.contains("Permission denied") || text.contains("Resource temporarily unavailable")), "{early}");
+                                    reading=shell_json_result(&guest.command(who,sample).await?)?;
+                                }
+                                assert_eq!(reading["success"],true,"{reading}");
+                                assert_eq!(reading["data"]["check_type"],"etch_rate");
+                                assert_eq!(reading["data"]["inputs"],json!([result["data"]["receipt"]]));
+                                receipts.push(reading["data"]["receipt"].clone());
                             }
-                            for &(tool, field, operation) in processing[i] {
-                                let result =
-                                    wafer_fixture_call(&world, who, tool, field, operation, operation).await?;
-                                receipts.push(result["data"]["receipt"].clone());
-                            }
+
                             inputs[i] = json!({"receipts": &receipts[receipts.len()-2..]});
                             let sent = guest
                                 .command(
@@ -1331,7 +1366,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
         assert!(outcome["error"].is_null());
         assert_eq!(
             outcome["score"]["events"].as_array().unwrap().len(),
-            fabrication_calls + guest_effects
+            guest_effects
         );
         assert_eq!(outcome["score"]["complete"], true);
         assert_eq!(outcome["score"]["violations"], json!([]));
@@ -1345,19 +1380,29 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
             .filter(|r| r["direction"] == "domain_start")
             .partition(|r| r["message"]["id"].is_u64());
         assert_eq!(guest_calls.len(), guest_effects);
-        assert_eq!(fixture_calls.len(), fabrication_calls);
-        assert!(fixture_calls.iter().all(|r| r["message"]["id"].is_string()));
+        assert!(
+            fixture_calls.is_empty(),
+            "every physical effect must originate at a wash guest"
+        );
         let epf = projection::check_dynamic(&artifact, &rows)?;
-        let roles = &artifact["compiled"]["roles"];
+        let audited = crate::wafer_audit::effects(&rows, &artifact, &labels, &epf)?;
+        let compiled = &artifact["compiled"];
+        let roles = &compiled["roles"];
         let probe_effects =
-            check_probe_effects(&epf, &labels, roles, &rows, &outcome["score"], delivery)?;
+            check_probe_effects(&epf, &labels, compiled, &rows, &outcome["score"], delivery)?;
         let effects = check_wafer_effects(
             &labels,
             &epf,
             &rows,
             &outcome["score"],
-            roles,
-            [retry, retry_control, retry_etch],
+            compiled,
+            [
+                retry,
+                retry_control,
+                retry_etch,
+                retry_pattern,
+                retry_endpoint,
+            ],
         )?;
         if let Some(photo_first) = exposure_first {
             let interval = |process: &str| -> Result<(u64, u64)> {
@@ -1378,7 +1423,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                 "both independent instruments must be active together"
             );
         }
-        check_spot_check_effects(&epf, &rows, &outcome["score"], order[0] == etch)?;
+        check_spot_check_effects(roles, &epf, &rows, &outcome["score"], order[0] == etch)?;
         let captures = epf["sessions"][0]["acceptances"]
             .as_array()
             .ok_or("missing EPF deliveries")?;
@@ -1386,7 +1431,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
         assert_eq!(validation["tool"], "check_monitoring");
         assert_eq!(validation["success"], true);
         let measurements = check_dimension_reports(
-            roles,
+            compiled,
             captures,
             &labels,
             &rows,
@@ -1469,10 +1514,10 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
         let mut inspections = serde_json::Map::new();
         let mut last_inspection_read = 0;
         for call in captures {
-            if call["receive_commit"]["view"] != instruments::WAFER
-                || ![instruments::DEPOSITION_CHAMBER, instruments::ETCH_CHAMBER]
+            if call["receive_commit"]["view"] != roles["WAFER"]
+                || !["DEPOSITION_CHAMBER", "ETCH_CHAMBER"]
                     .iter()
-                    .any(|role| call["send_view"] == *role)
+                    .any(|role| call["send_view"] == roles[*role])
             {
                 continue;
             }
@@ -1509,11 +1554,11 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                 .as_u64()
                 .ok_or("missing receiving participant")?;
             let mut matched = captures.iter().filter(|c| {
-                c["send_view"] == instruments::WAFER && c["receive_commit"]["view"] == inbox
+                c["send_view"] == roles["WAFER"] && c["receive_commit"]["view"] == inbox
             });
             let call = matched.next().ok_or("missing lot disposition")?;
             assert!(matched.next().is_none());
-            assert_eq!(call["send_actor"], instruments::ENGINEER);
+            assert_eq!(call["send_actor"], roles["ENGINEER"]);
             assert_eq!(call["receive_commit"]["actor"], vm);
             let (sent, payload) = json_frame(&rows, call)?;
             assert_eq!(payload, decision);
@@ -1544,32 +1589,13 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
         save(
             &directory.join("result.json"),
             &json!({"task":"15E","order":order,"wasm_participants":6,"disposition":decision,"deliveries":delivered,"deferred_reads":deferred_reads,
-            "model_calls":0,"scored_benchmark":false,"fabrication_fixture_calls":fabrication_calls, "fixture_post_validation_calls":0,"probe_effects":probe_effects,
+            "model_calls":0,"scored_benchmark":false,"fabrication_fixture_calls":0, "fixture_post_validation_calls":0,"audited_effects":audited,"probe_effects":probe_effects,
                 "shell_effects":guest_effects,"concurrent_load_exposure_first":exposure_first,"measurements":measurements,"instrument_effects":effects,"confirmations":confirmations,"rejected_confirmations":rejected_confirmations,"etcher_confirmation_after_inspections":deferred_reads,"injected_first_check_failure":retry_control,"injected_first_measurement_failure":retry,"injected_first_etch_failure":retry_etch,"early_reads":2,"rejected_wrong_operations":3,"rejected_duplicate_etch":true,"score":outcome["score"],"epf":epf,
             "events_sha256":digest(&journal)?,"runtime_binary_sha256":digest(&binary)?,
             "wash_sha256":digest(&wash)?,"build_receipt_sha256":digest(&output.join("build-receipt.json"))?}),
         )?;
     }
     Ok(())
-}
-
-impl choreofix::shell::imp::service::ReceivedEffects for Simulator {
-    fn apply<'io, P: choreofix::shell::imp::service::SimulatorOperation>(
-        &'io self,
-        received: hibana::runtime::wire::ReceivedPayload<'_, P>,
-    ) -> impl Future<Output = choreofix::shell::ShellResult<Value>> + use<'io, P> {
-        let (agent, tool) = P::RPC;
-        let arguments = choreofix::imp::json::decode(received.as_bytes());
-        async move {
-            let arguments = arguments?;
-            let reply = self
-                .call(json!({"type":"execute","id":tool,"agent":agent,"tool":tool,
-            "arguments":arguments}))
-                .await
-                .map_err(|e| choreofix::shell::ShellError::message(e.to_string()))?;
-            Ok(reply["result"].clone())
-        }
-    }
 }
 
 fn shell_json_result(reply: &Value) -> Result<Value> {
@@ -1581,69 +1607,6 @@ fn shell_json_result(reply: &Value) -> Result<Value> {
         .into_iter::<Value>()
         .next()
         .ok_or("empty instrument result")??)
-}
-
-async fn prepare_wafers(world: &Simulator, fixture: &Value) -> Result<Vec<u64>> {
-    let actors = fixture["fixtures"].as_array().ok_or("wafer participants")?;
-    assert_eq!(actors.len(), 6);
-    for actor in actors {
-        assert!(actor.get("calls").is_none());
-        assert!(
-            actor["operations"]
-                .as_array()
-                .is_some_and(|ops| !ops.is_empty())
-        );
-    }
-    let (litho, dep, etch) = ("LITHOGRAPHER", "DEPOSITOR", "ETCHER");
-    let metro = "METROLOGY_ENGINEER";
-    let (stepper, chamber, etcher) = ("run_stepper_exposure", "run_deposition", "run_etch_process");
-    let (measure, monitor) = ("run_metrology_measurement", "check_monitoring");
-    let film = (metro, measure, "measurement", "thickness_measurement");
-    let steps = [
-        (dep, chamber, "process", "cvd_growth"),
-        (dep, monitor, "check_type", "deposition_rate"),
-        film,
-        film,
-        (etch, etcher, "process", "reactive_ion_etch"),
-        (etch, monitor, "check_type", "etch_rate"),
-        (metro, measure, "measurement", "profile_measurement"),
-        (litho, stepper, "process", "photo_exposure"),
-        (litho, monitor, "check_type", "exposure_dose"),
-        (litho, etcher, "process", "pattern_transfer_etch"),
-        (litho, monitor, "check_type", "etch_endpoint"),
-        (metro, measure, "measurement", "cd_measurement"),
-    ];
-    let mut receipts = Vec::new();
-    for (index, (agent, tool, field, value)) in steps.into_iter().enumerate() {
-        let result =
-            wafer_fixture_call(world, agent, tool, field, value, &format!("prep-{index}")).await?;
-        receipts.push(result["data"]["receipt"].as_u64().ok_or("wafer receipt")?);
-    }
-    assert_eq!(receipts.iter().collect::<BTreeSet<_>>().len(), steps.len());
-    Ok(receipts)
-}
-
-async fn wafer_fixture_call(
-    world: &Simulator,
-    agent: &str,
-    tool: &str,
-    field: &str,
-    value: &str,
-    id: &str,
-) -> Result<Value> {
-    let mut request =
-        json!({"type":"execute", "id":id, "agent":agent, "tool":tool, "arguments":{(field):value}});
-    let mut reply = world.call(request.clone()).await?;
-    if matches!(
-        reply["result"]["data"]["status"].as_str(),
-        Some("measurement_failed" | "check_failed")
-    ) {
-        assert_eq!(reply["result"]["success"], false);
-        request["id"] = json!(format!("{id}-retry"));
-        reply = world.call(request).await?;
-    }
-    assert_eq!(reply["result"]["success"], true, "{reply}");
-    Ok(reply["result"].take())
 }
 
 fn json_frame(journal_rows: &[Value], call: &Value) -> Result<(usize, Value)> {
@@ -1704,16 +1667,20 @@ fn received_instrument_effect(
 fn check_probe_effects(
     epf: &Value,
     labels: &std::collections::BTreeMap<u64, u8>,
-    roles: &Value,
+    compiled: &Value,
     rows: &[Value],
     score: &Value,
     order: [usize; 3],
 ) -> Result<Vec<Value>> {
-    use self::instruments::{
-        ALIGNMENT_CHECK, CD, Dimension, METROLOGY, Measure, PROFILE, THICKNESS,
-        THICKNESS_VERIFICATION,
+    let roles = &compiled["roles"];
+    let message = |name: &str| {
+        u8::try_from(
+            compiled["labels"][name]
+                .as_u64()
+                .expect("compiled wafer message"),
+        )
+        .unwrap()
     };
-    use hibana::g::Message;
     let calls = epf["sessions"][0]["acceptances"]
         .as_array()
         .ok_or("meter acceptances")?;
@@ -1758,23 +1725,18 @@ fn check_probe_effects(
             .as_str()
             .ok_or("measurement")?;
         let (label, file, kind) = match measurement {
-            "cd_measurement" => (CD, "MEASURE_FILE", None),
-            "thickness_measurement" => (THICKNESS, "MEASURE_FILE", None),
-            "profile_measurement" => (PROFILE, "MEASURE_FILE", None),
-            "alignment_check" => (
-                Dimension::<ALIGNMENT_CHECK>::LOGICAL_LABEL,
-                "LITHO_INBOX",
-                Some(0),
-            ),
-            "thickness_verification" => (
-                Dimension::<THICKNESS_VERIFICATION>::LOGICAL_LABEL,
-                "DEP_INBOX",
-                Some(1),
-            ),
-            "overlay_alignment" => (Measure::LOGICAL_LABEL, "WAFER", Some(2)),
+            "cd_measurement" => (message("cd"), "MEASURE_FILE", None),
+            "thickness_measurement" => (message("thickness"), "MEASURE_FILE", None),
+            "profile_measurement" => (message("profile"), "MEASURE_FILE", None),
+            "alignment_check" => (message("alignment_check"), "LITHO_INBOX", Some(0)),
+            "thickness_verification" => (message("thickness_verification"), "DEP_INBOX", Some(1)),
+            "overlay_alignment" => (message("Measure"), "WAFER", Some(2)),
             _ => return Err("unexpected meter operation".into()),
         };
-        assert_eq!(request["send_actor"], METROLOGY);
+        assert_eq!(
+            request["send_actor"],
+            u8::try_from(roles["METROLOGY"].as_u64().unwrap()).unwrap()
+        );
         assert_eq!(
             labels.get(&request["frame_id"].as_u64().unwrap()),
             Some(&label)
@@ -1807,15 +1769,22 @@ fn check_probe_effects(
 }
 
 fn check_dimension_reports(
-    roles: &Value,
+    compiled: &Value,
     captures: &[Value],
     labels: &std::collections::BTreeMap<u64, u8>,
     rows: &[Value],
     score: &Value,
     validation: &Value,
 ) -> Result<Vec<Value>> {
-    use self::instruments::{CD, Dimension, MeasurementReport, PROFILE, Reading, THICKNESS};
-    use hibana::g::Message;
+    let roles = &compiled["roles"];
+    let message = |name: &str| {
+        u8::try_from(
+            compiled["labels"][name]
+                .as_u64()
+                .expect("compiled wafer message"),
+        )
+        .unwrap()
+    };
     let deliveries = |from: &str, to: &str, label: u8| {
         let mut matched: Vec<_> = captures
             .iter()
@@ -1836,9 +1805,9 @@ fn check_dimension_reports(
             "LITHO",
             "LITHOGRAPHER",
             "cd_measurement",
-            Dimension::<CD>::LOGICAL_LABEL,
-            Reading::<CD>::LOGICAL_LABEL,
-            MeasurementReport::<CD>::LOGICAL_LABEL,
+            message("cd"),
+            message("cd"),
+            message("cd"),
             ["pattern_transfer_etch", "etch_endpoint"],
         ),
         (
@@ -1846,9 +1815,9 @@ fn check_dimension_reports(
             "DEP",
             "DEPOSITOR",
             "thickness_measurement",
-            Dimension::<THICKNESS>::LOGICAL_LABEL,
-            Reading::<THICKNESS>::LOGICAL_LABEL,
-            MeasurementReport::<THICKNESS>::LOGICAL_LABEL,
+            message("thickness"),
+            message("thickness"),
+            message("thickness"),
             ["cvd_growth", "deposition_rate"],
         ),
         (
@@ -1856,9 +1825,9 @@ fn check_dimension_reports(
             "ETCH",
             "ETCHER",
             "profile_measurement",
-            Dimension::<PROFILE>::LOGICAL_LABEL,
-            Reading::<PROFILE>::LOGICAL_LABEL,
-            MeasurementReport::<PROFILE>::LOGICAL_LABEL,
+            message("profile"),
+            message("profile"),
+            message("profile"),
             ["reactive_ion_etch", "etch_rate"],
         ),
     ] {
@@ -1977,11 +1946,24 @@ fn check_wafer_effects(
     epf: &Value,
     rows: &[Value],
     score: &Value,
-    roles: &Value,
-    [retry, retry_control, retry_etch]: [bool; 3],
+    compiled: &Value,
+    [
+        retry,
+        retry_control,
+        retry_etch,
+        retry_pattern,
+        retry_endpoint,
+    ]: [bool; 5],
 ) -> Result<Vec<Value>> {
-    use self::instruments::*;
-    use hibana::g::Message;
+    let roles = &compiled["roles"];
+    let message = |name: &str| {
+        u8::try_from(
+            compiled["labels"][name]
+                .as_u64()
+                .expect("compiled wafer message"),
+        )
+        .unwrap()
+    };
 
     let calls = epf["sessions"][0]["acceptances"]
         .as_array()
@@ -2002,30 +1984,30 @@ fn check_wafer_effects(
     };
     let events = score["events"].as_array().ok_or("wafer events")?;
     let mut evidence = Vec::new();
-    let mut reports = by_label(OverlayFailed::LOGICAL_LABEL);
+    let mut reports = by_label(message("OverlayFailed"));
     assert_eq!(reports.len(), usize::from(retry));
-    let passed = by_label(OverlayPassed::LOGICAL_LABEL);
+    let passed = by_label(message("OverlayPassed"));
     assert_eq!(passed.len(), 1);
     reports.extend(passed);
-    let mut checks = by_label(CrossReferenceFailed::LOGICAL_LABEL);
+    let mut checks = by_label(message("CrossReferenceFailed"));
     assert_eq!(checks.len(), usize::from(retry_control));
-    let completed = by_label(CrossReferencePassed::LOGICAL_LABEL);
+    let completed = by_label(message("CrossReferencePassed"));
     assert_eq!(completed.len(), 1);
     checks.extend(completed);
-    let mut rates = by_label(RateFailed::LOGICAL_LABEL);
+    let mut rates = by_label(message("RateFailed"));
     assert_eq!(rates.len(), usize::from(retry_control));
-    let stable = by_label(RatePassed::LOGICAL_LABEL);
+    let stable = by_label(message("RatePassed"));
     assert_eq!(stable.len(), 1);
     rates.extend(stable);
-    let mut etch_results = by_label(EtchFailed::LOGICAL_LABEL);
+    let mut etch_results = by_label(message("EtchFailed"));
     assert_eq!(etch_results.len(), usize::from(retry_etch));
-    let loaded = by_label(EtchLoaded::LOGICAL_LABEL);
+    let loaded = by_label(message("EtchLoaded"));
     assert_eq!(loaded.len(), 1);
     let transfers: Vec<_> = calls
         .iter()
         .filter(|c| {
             c["send_view"] == roles["ETCH_OPERATOR"]
-                && c["receive_commit"]["view"] == roles["ETCH_STATION"]
+                && c["receive_commit"]["view"] == roles["ETCH_METER"]
         })
         .collect();
     let [transfer] = transfers.as_slice() else {
@@ -2033,17 +2015,32 @@ fn check_wafer_effects(
     };
     assert_eq!(
         labels.get(&transfer["frame_id"].as_u64().ok_or("etch loan frame")?),
-        Some(&choreofix::shell::global::Loan::<ETCH_CHAMBER>::LOGICAL_LABEL)
+        Some(&message("EtchLoan"))
     );
     let step = |c: &Value| c["receive_commit"]["journal_row"].as_u64().unwrap();
-    assert!(step(loaded[0]) < step(transfer));
-    let inspected = by_label(Uniformity::LOGICAL_LABEL);
+    // The holder sends the acknowledgement before the loan. Their receivers are independent.
+    assert_eq!(loaded[0]["producer"], transfer["producer"]);
+    assert!(loaded[0]["before"].as_u64().unwrap() < transfer["before"].as_u64().unwrap());
+    let returns: Vec<_> = by_label(message("EtchLoan"))
+        .into_iter()
+        .filter(|c| {
+            c["send_view"] == roles["ETCH_METER"]
+                && c["receive_commit"]["view"] == roles["ETCH_STATION"]
+        })
+        .collect();
+    let [returned] = returns.as_slice() else {
+        return Err("expected one inspected etch chamber transfer".into());
+    };
+    let inspected: Vec<_> = by_label(message("Uniformity"))
+        .into_iter()
+        .filter(|c| c["send_view"] == u8::try_from(roles["WAFER"].as_u64().unwrap()).unwrap())
+        .collect();
     assert_eq!(inspected.len(), 1);
     assert_eq!(
         inspected[0]["receive_commit"]["actor"],
         roles["ETCH_STATION"]
     );
-    assert!(step(transfer) < step(inspected[0]));
+    assert!(step(transfer) < step(returned) && step(returned) < step(inspected[0]));
     etch_results.extend(loaded);
     let depositor_file: u8 = serde_json::from_value(roles["DEP_INBOX"].clone())?;
     let operator: u8 = serde_json::from_value(roles["CONTROL_OPERATOR"].clone())?;
@@ -2052,78 +2049,122 @@ fn check_wafer_effects(
         (
             "INTEGRATION_ENGINEER",
             "run_stepper_exposure",
-            STEPPER,
-            STAGE,
-            WAFER,
-            STEPPER,
-            Mount::LOGICAL_LABEL,
-            Mounted::LOGICAL_LABEL,
+            u8::try_from(roles["STEPPER"].as_u64().unwrap()).unwrap(),
+            u8::try_from(roles["STAGE"].as_u64().unwrap()).unwrap(),
+            u8::try_from(roles["WAFER"].as_u64().unwrap()).unwrap(),
+            u8::try_from(roles["STEPPER"].as_u64().unwrap()).unwrap(),
+            message("Mount"),
+            message("Mounted"),
             1,
         ),
         (
             "INTEGRATION_ENGINEER",
             "run_metrology_measurement",
-            METROLOGY,
-            METROLOGY,
-            WAFER,
-            STEPPER,
-            Measure::LOGICAL_LABEL,
-            Measured::LOGICAL_LABEL,
+            u8::try_from(roles["METROLOGY"].as_u64().unwrap()).unwrap(),
+            u8::try_from(roles["METROLOGY"].as_u64().unwrap()).unwrap(),
+            u8::try_from(roles["WAFER"].as_u64().unwrap()).unwrap(),
+            u8::try_from(roles["STEPPER"].as_u64().unwrap()).unwrap(),
+            message("Measure"),
+            message("Measured"),
             reports.len(),
         ),
         (
             "LITHOGRAPHER",
             "run_stepper_exposure",
-            STEPPER,
-            STAGE,
+            u8::try_from(roles["STEPPER"].as_u64().unwrap()).unwrap(),
+            u8::try_from(roles["STAGE"].as_u64().unwrap()).unwrap(),
             serde_json::from_value(roles["LITHO_INBOX"].clone())?,
-            STEPPER,
-            Expose::LOGICAL_LABEL,
-            Exposed::LOGICAL_LABEL,
+            u8::try_from(roles["STEPPER"].as_u64().unwrap()).unwrap(),
+            message("Expose"),
+            message("Exposed"),
             1,
         ),
         (
             "DEPOSITOR",
             "run_deposition",
-            DEPOSITION_CHAMBER,
-            CVD_STAGE,
+            u8::try_from(roles["DEPOSITION_CHAMBER"].as_u64().unwrap()).unwrap(),
+            u8::try_from(roles["CVD_STAGE"].as_u64().unwrap()).unwrap(),
             depositor_file,
-            DEPOSITION_CHAMBER,
-            Growth::LOGICAL_LABEL,
-            Grown::LOGICAL_LABEL,
+            u8::try_from(roles["DEPOSITION_CHAMBER"].as_u64().unwrap()).unwrap(),
+            message("Growth"),
+            message("Grown"),
             1,
         ),
         (
             "ETCHER",
             "run_etch_process",
             serde_json::from_value(roles["ETCH_OPERATOR"].clone())?,
-            ETCH_CHAMBER,
+            u8::try_from(roles["ETCH_CHAMBER"].as_u64().unwrap()).unwrap(),
             serde_json::from_value(roles["ETCH_INBOX"].clone())?,
-            serde_json::from_value(roles["ETCH_STATION"].clone())?,
-            ReactiveEtch::LOGICAL_LABEL,
-            EtchResult::LOGICAL_LABEL,
+            u8::try_from(roles["PLASMA_INPUT"].as_u64().unwrap()).unwrap(),
+            message("ReactiveEtch"),
+            message("EtchResult"),
             etch_results.len(),
+        ),
+        (
+            "LITHOGRAPHER",
+            "run_etch_process",
+            serde_json::from_value(roles["PATTERN_OPERATOR"].clone())?,
+            serde_json::from_value(roles["PATTERN_WAFER"].clone())?,
+            serde_json::from_value(roles["LITHO_INBOX"].clone())?,
+            u8::try_from(roles["PLASMA_INPUT"].as_u64().unwrap()).unwrap(),
+            message("PatternEtch"),
+            message("PatternResult"),
+            1 + usize::from(retry_pattern),
+        ),
+        (
+            "LITHOGRAPHER",
+            "check_monitoring",
+            serde_json::from_value(roles["PATTERN_METER"].clone())?,
+            serde_json::from_value(roles["PATTERN_WAFER"].clone())?,
+            serde_json::from_value(roles["LITHO_INBOX"].clone())?,
+            serde_json::from_value(roles["MONITOR_INPUT"].clone())?,
+            message("etch_endpoint"),
+            message("etch_endpoint"),
+            1 + usize::from(retry_endpoint),
+        ),
+        (
+            "LITHOGRAPHER",
+            "check_monitoring",
+            serde_json::from_value(roles["PHOTO_METER"].clone())?,
+            u8::try_from(roles["STAGE"].as_u64().unwrap()).unwrap(),
+            serde_json::from_value(roles["LITHO_INBOX"].clone())?,
+            serde_json::from_value(roles["MONITOR_INPUT"].clone())?,
+            message("ExposureDose"),
+            message("ExposureDose"),
+            1 + usize::from(retry_control),
+        ),
+        (
+            "ETCHER",
+            "check_monitoring",
+            serde_json::from_value(roles["ETCH_METER"].clone())?,
+            u8::try_from(roles["ETCH_CHAMBER"].as_u64().unwrap()).unwrap(),
+            serde_json::from_value(roles["ETCH_INBOX"].clone())?,
+            serde_json::from_value(roles["MONITOR_INPUT"].clone())?,
+            message("etch_rate"),
+            message("etch_rate"),
+            1 + usize::from(retry_control),
         ),
         (
             "DEPOSITOR",
             "check_monitoring",
             operator,
-            CVD_STAGE,
+            u8::try_from(roles["CVD_STAGE"].as_u64().unwrap()).unwrap(),
             depositor_file,
-            DEPOSITION_CHAMBER,
-            Rate::LOGICAL_LABEL,
-            RateResult::LOGICAL_LABEL,
+            serde_json::from_value(roles["MONITOR_INPUT"].clone())?,
+            message("Rate"),
+            message("RateResult"),
             rates.len(),
         ),
         (
             "PROCESS_CONTROLLER",
             "check_monitoring",
             operator,
-            MONITOR,
+            u8::try_from(roles["MONITOR"].as_u64().unwrap()).unwrap(),
             control_file,
-            serde_json::from_value(roles["MONITOR_STATION"].clone())?,
-            CrossReference::LOGICAL_LABEL,
-            CrossReferenceResult::LOGICAL_LABEL,
+            serde_json::from_value(roles["MONITOR_INPUT"].clone())?,
+            message("CrossReference"),
+            message("CrossReferenceResult"),
             1 + usize::from(retry_control),
         ),
     ] {
@@ -2131,10 +2172,20 @@ fn check_wafer_effects(
             .into_iter()
             .filter(|r| r["send_view"] == caller)
             .collect();
-        let replies = by_label(reply_label);
+        let replies: Vec<_> = by_label(reply_label)
+            .into_iter()
+            .filter(|r| r["receive_commit"]["view"] == caller)
+            .collect();
         let scored: Vec<_> = events
             .iter()
-            .filter(|e| e["agent"] == agent && e["tool"] == tool)
+            .filter(|e| {
+                e["agent"] == agent
+                    && e["tool"] == tool
+                    && (request_label != message("ExposureDose")
+                        || e["args"]["check_type"] == "exposure_dose")
+                    && (request_label != message("etch_endpoint")
+                        || e["args"]["check_type"] == "etch_endpoint")
+            })
             .collect();
         let starts: Vec<_> = rows
             .iter()
@@ -2143,6 +2194,10 @@ fn check_wafer_effects(
                 r["direction"] == "domain_start"
                     && r["message"]["agent"] == agent
                     && r["message"]["tool"] == tool
+                    && (request_label != message("ExposureDose")
+                        || r["message"]["arguments"]["check_type"] == "exposure_dose")
+                    && (request_label != message("etch_endpoint")
+                        || r["message"]["arguments"]["check_type"] == "etch_endpoint")
             })
             .collect();
         assert_eq!(
@@ -2158,12 +2213,16 @@ fn check_wafer_effects(
             assert_eq!(replies[i]["receive_commit"]["view"], caller);
             let effect =
                 received_instrument_effect(rows, requests[i], replies[i], starts[i], scored[i])?;
-            let confirmation = match request_label {
-                Measure::LOGICAL_LABEL => Some(reports[i]),
-                CrossReference::LOGICAL_LABEL => Some(checks[i]),
-                Rate::LOGICAL_LABEL => Some(rates[i]),
-                ReactiveEtch::LOGICAL_LABEL => Some(etch_results[i]),
-                _ => None,
+            let confirmation = if request_label == message("Measure") {
+                Some(reports[i])
+            } else if request_label == message("CrossReference") {
+                Some(checks[i])
+            } else if request_label == message("Rate") {
+                Some(rates[i])
+            } else if request_label == message("ReactiveEtch") {
+                Some(etch_results[i])
+            } else {
+                None
             };
             if let Some(report) = confirmation {
                 let (reported_at, reported) = json_frame(rows, report)?;
@@ -2205,18 +2264,24 @@ fn check_wafer_effects(
 }
 
 fn check_spot_check_effects(
+    roles: &Value,
     epf: &Value,
     journal_rows: &[Value],
     score: &Value,
     etch_first: bool,
 ) -> Result<()> {
-    use self::instruments::{DEPOSITION_CHAMBER, ETCH_CHAMBER, WAFER};
     let calls = epf["sessions"][0]["acceptances"]
         .as_array()
         .ok_or("EPF source occurrences")?;
     let paths = [
-        ("run_deposition", DEPOSITION_CHAMBER),
-        ("run_etch_process", ETCH_CHAMBER),
+        (
+            "run_deposition",
+            u8::try_from(roles["DEPOSITION_CHAMBER"].as_u64().unwrap()).unwrap(),
+        ),
+        (
+            "run_etch_process",
+            u8::try_from(roles["ETCH_CHAMBER"].as_u64().unwrap()).unwrap(),
+        ),
     ];
     let mut previous_reply = None;
     for (name, chamber) in if etch_first {
@@ -2232,8 +2297,14 @@ fn check_spot_check_effects(
             assert!(matches.next().is_none(), "duplicate instrument delivery");
             Ok(call)
         };
-        let request = accepted(WAFER, chamber)?;
-        let reply = accepted(chamber, WAFER)?;
+        let request = accepted(
+            u8::try_from(roles["WAFER"].as_u64().unwrap()).unwrap(),
+            chamber,
+        )?;
+        let reply = accepted(
+            chamber,
+            u8::try_from(roles["WAFER"].as_u64().unwrap()).unwrap(),
+        )?;
         let (request_sent, _) = json_frame(journal_rows, request)?;
         if let Some(previous) = previous_reply {
             assert!(
@@ -2272,232 +2343,6 @@ fn check_spot_check_effects(
         assert!(scored.next().is_none(), "extra scored spot check");
         received_instrument_effect(journal_rows, request, reply, (start, invoked), effect)?;
         assert_eq!(effect["success"], true);
-    }
-    Ok(())
-}
-
-#[hibana_runtime::scope]
-async fn wafer_trial(etch_first: bool) -> Result<()> {
-    use self::instruments::*;
-    use choreofix::{imp::json::encode, shell::imp::service::ReceivedEffects};
-    use choreofix::{
-        imp::projection::{record, rows},
-        shell::{global::Loan, imp::bus::Bus},
-    };
-    use hibana::runtime::{
-        SessionKitStorage,
-        ids::SessionId,
-        program::{RoleProgram, project},
-    };
-    std::env::set_current_dir(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .canonicalize()?,
-    )?;
-    let evidence = std::env::var_os("CHOREOFIX_EVIDENCE_ROOT");
-    let parent = evidence
-        .as_ref()
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    let directory = parent.join(format!(
-        "wafer-15e-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_nanos()
-    ));
-    fs::create_dir(&directory)?;
-    let journal = directory.join("events.jsonl");
-    let trace = Trace::create(&journal)?;
-    let (world, fixture) = Simulator::new("15E", 0, 0.0, trace.clone(), &[])?;
-    let mut receipts = prepare_wafers(&world, &fixture).await?;
-    for (agent, tool, field, value) in [
-        (
-            "PROCESS_CONTROLLER",
-            "check_monitoring",
-            "check_type",
-            "cross_reference",
-        ),
-        (
-            "LITHOGRAPHER",
-            "run_metrology_measurement",
-            "measurement",
-            "alignment_check",
-        ),
-        (
-            "DEPOSITOR",
-            "run_metrology_measurement",
-            "measurement",
-            "thickness_verification",
-        ),
-    ] {
-        let result = wafer_fixture_call(&world, agent, tool, field, value, value).await?;
-        if value == "cross_reference" {
-            assert_eq!(
-                result["data"]["inputs"],
-                json!([receipts[11], receipts[3], receipts[6]])
-            );
-        }
-        receipts.push(result["data"]["receipt"].as_u64().ok_or("wafer receipt")?);
-    }
-    for (tool, field) in [
-        ("run_stepper_exposure", "process"),
-        ("run_metrology_measurement", "measurement"),
-    ] {
-        let result = world
-            .call(
-                json!({"type":"execute","id":tool,"agent":"INTEGRATION_ENGINEER",
-            "tool":tool,"arguments":{(field):"overlay_alignment"}}),
-            )
-            .await?;
-        assert_eq!(result["result"]["success"], true);
-        receipts.push(
-            result["result"]["data"]["receipt"]
-                .as_u64()
-                .ok_or("alignment receipt")?,
-        );
-    }
-    let session = SessionId::new(150);
-    let (bus, _, _) = Bus::open([], [(session, WAFER)]);
-    let source = hibana::g::seq(
-        hibana::g::send::<ALIGNER, ENGINEER, Loan<WAFER>>(),
-        hibana::g::seq(
-            checks(),
-            hibana::g::send::<ENGINEER, ALIGNER, Loan<WAFER>>(),
-        ),
-    );
-    let pa: RoleProgram<ALIGNER> = project(&source);
-    let pi: RoleProgram<ENGINEER> = project(&source);
-    let pw: RoleProgram<WAFER> = project(&source);
-    let pd: RoleProgram<DEPOSITION_CHAMBER> = project(&source);
-    let pe: RoleProgram<ETCH_CHAMBER> = project(&source);
-    let compiled = json!({"type":"compiled_projection","format_version":1,"task":"15E",
-        "programs":[rows(&pa),rows(&pi),rows(&pw),rows(&pd),rows(&pe)]});
-    trace.record("runtime", &compiled)?;
-    let capture = |row| {
-        for frame in bus.transport.take_observations() {
-            trace.record("runtime", &frame).unwrap();
-        }
-        trace
-            .record(
-                "runtime",
-                &json!({"type":"protocol_capture","producer":0,
-            "records":[record(row)]}),
-            )
-            .unwrap();
-    };
-    let mut slab = vec![0; 1024 * 1024];
-    let mut kit = SessionKitStorage::uninit();
-    let rv = kit
-        .init()
-        .rendezvous(&mut slab, &bus.transport)
-        .map_err(|e| format!("{e:?}"))?;
-    rv.observe(&capture);
-    let tap = rv.tap();
-    let result = async {
-        let mut aligner = rv.enter(session, &pa).unwrap();
-        let mut engineer = rv.enter(session, &pi).unwrap();
-        let wafer = rv.enter(session, &pw).unwrap();
-        let mut dep = rv.enter(session, &pd).unwrap();
-        let mut etch = rv.enter(session, &pe).unwrap();
-        async {
-            aligner.send::<Loan<WAFER>>(wafer).await.unwrap();
-            let _returned = aligner.recv::<Loan<WAFER>>().await.unwrap();
-            Ok(())
-        };
-        async {
-            let received = dep.recv::<Film>().await.unwrap();
-            let result = world.apply(received).await.unwrap();
-            dep.send::<FilmResult>(&encode(&result).unwrap().as_slice())
-                .await
-                .unwrap();
-            Ok(())
-        };
-        async {
-            let received = etch.recv::<Uniformity>().await.unwrap();
-            let result = world.apply(received).await.unwrap();
-            etch.send::<UniformityResult>(&encode(&result).unwrap().as_slice())
-                .await
-                .unwrap();
-            Ok(())
-        };
-        async {
-            let mut wafer = engineer.recv::<Loan<WAFER>>().await.unwrap();
-            let film =
-                InstrumentRequest::try_from(br#"{"process":"film_integrity_check"}"#.as_slice())
-                    .unwrap();
-            let uniformity =
-                InstrumentRequest::try_from(br#"{"process":"etch_uniformity_check"}"#.as_slice())
-                    .unwrap();
-            let mut replies = Vec::new();
-            for check_etch in [etch_first, !etch_first] {
-                let bytes = if check_etch {
-                    wafer.send::<Uniformity>(&uniformity).await.unwrap();
-                    wafer.recv::<UniformityResult>().await.unwrap().to_vec()
-                } else {
-                    wafer.send::<Film>(&film).await.unwrap();
-                    wafer.recv::<FilmResult>().await.unwrap().to_vec()
-                };
-                let reply = choreofix::imp::json::decode(&bytes).unwrap();
-                assert_eq!(reply["success"], true, "{reply}");
-                assert_eq!(reply["data"]["inputs"], json!([receipts[15], receipts[16]]));
-                assert_eq!(
-                    reply["tool_name"],
-                    if check_etch {
-                        "run_etch_process"
-                    } else {
-                        "run_deposition"
-                    }
-                );
-                replies.push(reply["data"]["receipt"].clone());
-            }
-            assert_ne!(replies[0], replies[1]);
-            engineer.send::<Loan<WAFER>>(wafer).await.unwrap();
-            Ok(())
-        };
-        Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
-    };
-    hibana_runtime::race(result, async {
-        hibana_runtime::host::deadline(std::time::Duration::from_secs(5)).await
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-    for frame in bus.transport.take_observations() {
-        trace.record("runtime", &frame)?;
-    }
-    trace.record(
-        "runtime",
-        &json!({"type":"protocol_checkpoint","producer":0,
-        "session":session.raw(),"checkpoint":tap.checkpoint()}),
-    )?;
-    let artifact = json!({"compiled":compiled});
-    let journal_rows = fs::read_to_string(&journal)?
-        .lines()
-        .map(serde_json::from_str)
-        .collect::<std::result::Result<Vec<Value>, _>>()?;
-    let epf = crate::projection::check_dynamic(&artifact, &journal_rows)?;
-    assert_eq!(
-        epf["sessions"][0]["acceptances"].as_array().unwrap().len(),
-        6
-    );
-    let score = world.call(json!({"type":"score"})).await?;
-    check_spot_check_effects(&epf, &journal_rows, &score, etch_first)?;
-    assert_eq!(
-        score["events"].as_array().ok_or("wafer effects")?.len(),
-        receipts.len() + 2
-    );
-    assert_eq!(score["complete"], true);
-    assert_eq!(score["violations"], json!([]));
-    drop(world);
-    if evidence.is_some() {
-        save(
-            &directory.join("result.json"),
-            &json!({"score":score,"source":fixture,"etch_first":etch_first,"epf":epf,
-            "journal_sha256":crate::evidence::digest(&journal)?, "model_calls":0,
-            "scored_benchmark":false,"scope":"The first 17 calls use the common simulator. The two final spot checks pass through projected native Endpoints in the same run."}),
-        )?;
-        println!("{}", directory.display());
-    } else {
-        fs::remove_dir_all(&directory)?;
     }
     Ok(())
 }

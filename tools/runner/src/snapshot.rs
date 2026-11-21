@@ -97,6 +97,7 @@ pub fn freeze(task: &str, output: &Path) -> Result<Value> {
         "8E" => "API",
         "8M" => "FULL_STACK_API",
         "9E" | "9M" | "9H" => "PHILOSOPHERS",
+        "15E" => "WAFER",
         "16E" => "CICD",
         "16M" => "CICD_PIPELINE",
         _ => return Err("task has no delegated WASI implementation".into()),

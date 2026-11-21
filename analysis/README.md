@@ -319,6 +319,8 @@ The separate 7H cancellation record is in
 `output/verification/7h-schema-guide-20261119.FTJvex/material-delivery-depth-0.json`.
 
 
+The [15E depth-zero pilot](15e-wafer-live.json) used six live agents. All 18 effects matched committed instrument requests, actual replies and the common world score. The seven scripted trials on the same binary cover 144 effects, including failures and retries.
+
 ### 4H service migration before deployment
 
 The [4H effect table](4h-preparation-effects.csv) identifies the shell request,
