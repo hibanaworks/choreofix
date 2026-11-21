@@ -152,12 +152,18 @@ pub async fn station_job<const SERVICE: u8, const MACHINE: u8, const JOB: u8>(
         Ok::<(), ShellError>(())
     }
     .await?;
-    let [mut returned, mut file] = endpoint.par()?;
+    let [mut returned, mut file, mut inspector] = endpoint.par()?;
     async {
         returned.send::<JobLoan<MACHINE>>(machine).await?;
     };
     async {
         file.send::<JobResult>(&bytes.as_slice()).await?;
+    };
+    async {
+        let part = imp::encode(&result["data"]["part"])?;
+        inspector
+            .send::<FinishedPart<JOB>>(&part.as_slice())
+            .await?;
     };
     Ok(())
 }

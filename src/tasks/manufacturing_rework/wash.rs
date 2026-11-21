@@ -53,7 +53,7 @@ const fn inspect(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
         FdBinding::write(FdWriteRow::Object),
     )
 }
-const INSPECTION_FILES: [ChoreoFsObject<'static>; 7] = [
+const INSPECTION_FILES: [ChoreoFsObject<'static>; 10] = [
     readable(b"service/parts/alpha_job_a", 4),
     readable(b"service/parts/beta_job_b", 5),
     readable(b"service/parts/gamma_job_c", 6),
@@ -61,6 +61,9 @@ const INSPECTION_FILES: [ChoreoFsObject<'static>; 7] = [
     inspect(b"service/inspect/beta_job_b", 8),
     inspect(b"service/inspect/gamma_job_c", 9),
     readable(b"service/inspection_result", 10),
+    readable(b"service/parts/beta_job_a", 11),
+    readable(b"service/parts/gamma_job_b", 12),
+    readable(b"service/parts/alpha_job_c", 13),
 ];
 
 const fn request_reply(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
@@ -492,6 +495,8 @@ pub async fn run(path: &str) -> ShellResult<()> {
             let [mut alpha, mut beta, mut gamma] = [(); 3].map(|_| vec![0; GUEST_MEMORY_BYTES]);
             let [mut check_a, mut check_b, mut check_c, mut verdict] =
                 [(); 4].map(|_| vec![0; GUEST_MEMORY_BYTES]);
+            let [mut beta_a, mut gamma_b, mut alpha_c] =
+                [(); 3].map(|_| vec![0; GUEST_MEMORY_BYTES]);
             let parts = ChoreoFsFile::new(INSPECTION_FILES[0], inbox)
                 .read_as::<FinishedPart<WORKER_A>>(&mut alpha)
                 .file(INSPECTION_FILES[1])?
@@ -505,7 +510,13 @@ pub async fn run(path: &str) -> ShellResult<()> {
                 .file(INSPECTION_FILES[5])?
                 .write_as::<CheckPart<WORKER_C>>(&mut check_c)
                 .file(INSPECTION_FILES[6])?
-                .read_as::<InspectionResult>(&mut verdict);
+                .read_as::<InspectionResult>(&mut verdict)
+                .file(INSPECTION_FILES[7])?
+                .read_as::<FinishedPart<BETA_JOB_A>>(&mut beta_a)
+                .file(INSPECTION_FILES[8])?
+                .read_as::<FinishedPart<GAMMA_JOB_B>>(&mut gamma_b)
+                .file(INSPECTION_FILES[9])?
+                .read_as::<FinishedPart<ALPHA_JOB_C>>(&mut alpha_c);
             let files = ChoreoFsFiles::new(inspector_vm).file(parts)?;
             let mut memory = vec![0; GUEST_MEMORY_BYTES];
             let mut storage = Box::new(HibanaWasiGuestStorage::uninit());

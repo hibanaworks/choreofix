@@ -267,7 +267,10 @@ fn workstation<
                     g::send::<SERVICE, MACHINE, JobResult>(),
                     g::par(
                         g::send::<SERVICE, OWNER, JobLoan<MACHINE>>(),
-                        g::send::<SERVICE, OTHER_FILE, JobResult>(),
+                        g::par(
+                            g::send::<SERVICE, OTHER_FILE, JobResult>(),
+                            g::send::<SERVICE, INSPECTOR, FinishedPart<OTHER_JOB>>(),
+                        ),
                     ),
                 ),
             ),

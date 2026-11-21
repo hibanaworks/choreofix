@@ -1001,6 +1001,15 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                             let result = data::decode(inspector.recv::<InspectionResult>().await?)?;
                             data::inspected(&data::decode(&bytes)?, &arguments, &result)?;
                         }
+                        for job in [ALPHA_JOB_C, BETA_JOB_A, GAMMA_JOB_B] {
+                            let part = match job {
+                                ALPHA_JOB_C => inspector.recv::<FinishedPart<ALPHA_JOB_C>>().await?,
+                                BETA_JOB_A => inspector.recv::<FinishedPart<BETA_JOB_A>>().await?,
+                                GAMMA_JOB_B => inspector.recv::<FinishedPart<GAMMA_JOB_B>>().await?,
+                                _ => unreachable!(),
+                            };
+                            assert_eq!(data::decode(part)?["job_id"], data::JOBS[usize::from(job)]);
+                        }
                     };
                     async {
                         bus.fixture_peer::<6>(&effects, &["do_job", "inspect_quality"])

@@ -2555,6 +2555,8 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                             let part = shell_json_result(&guest.command(agent, "cat /service/do_job_at_other_station".into()).await?)?;
                             assert_eq!(part["data"]["part"]["job_id"], job);
                             assert_eq!(part["data"]["part"]["attempt"], 1);
+                            let received = shell_json_result(&guest.command("INSPECTOR", format!("cat /service/parts/{job}")).await?)?;
+                            assert_eq!(received, part["data"]["part"]);
                             Ok(())
                         };
                         for &i in &order {
@@ -2915,6 +2917,23 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                 let effect = received_instrument_effect(&rows, actual, reply, start, score)?;
                 assert_eq!(json_frame(&rows, request)?.1, effect["arguments"]);
                 assert_eq!(json_frame(&rows, published)?.1, effect["result"]);
+                let job_id = match i {
+                    0 => 5,
+                    1 => 3,
+                    2 => 4,
+                    _ => unreachable!(),
+                };
+                let delivered = wire(job_id, cpu, &roles["INSPECTOR"])?;
+                assert_eq!(
+                    json_frame(&rows, delivered)?.1,
+                    effect["result"]["data"]["part"]
+                );
+                assert!(
+                    json_frame(&rows, delivered)?.0 as u64
+                        > effect["effect_end_row"]
+                            .as_u64()
+                            .ok_or("manufacturing completion")?
+                );
                 assert_eq!(score["agent"], agent);
                 other_effects.push(effect);
             }
