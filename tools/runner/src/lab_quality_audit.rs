@@ -1,6 +1,6 @@
 //! Actual scientific requests/effects/results. Dynamic source execution belongs to EPF.
 use crate::{
-    evidence::{Result, digest},
+    evidence::Result,
     journal::{self, Call, Frame, one},
 };
 use serde_json::{Value, json};
@@ -1261,7 +1261,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
             .ok_or_else(|| format!("QC auditor accepted {name}"))?;
         reports.push(json!({"name":name,"rejected":true,"error":error.to_string()}));
     }
-    let report = json!({"status":"passed","task":"13M","record_counterexamples":reports,"original_events_sha256":digest(path)?,
+    let report = json!({"status":"passed","task":"13M","record_counterexamples":reports,"original_events_sha256":evidence.events_hash,
   "dynamic_capture_checked_once":true,"runtime_attacks":false,"model_calls":0,"scored_runs":0});
     crate::evidence::save(output, &report)?;
     Ok((baseline, report))

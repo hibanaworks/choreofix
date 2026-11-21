@@ -1,7 +1,7 @@
 //! Actual file/resource receives and real effects; source execution belongs to EPF.
 use crate::{
-    evidence::{Result, digest, save},
-    journal::{Frame, records},
+    evidence::{Result, save},
+    journal::Frame,
 };
 use serde_json::{Value, json};
 use std::{
@@ -302,18 +302,10 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     )
 }
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    let (artifact, _) = crate::projection::load(path)?;
-    let rows = records(path)?;
-    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
-    let mut baseline = check(&rows, &artifact, &dynamic)?;
-    baseline["source_events_sha256"] = json!(digest(path)?);
-    baseline["runtime_binary_sha256"] = artifact["runtime_binary_sha256"].clone();
-    baseline["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("manufacturing evidence directory")?
-            .join("projection.json")
-    )?);
+    let evidence = crate::journal::Evidence::open(path)?;
+    let baseline = evidence.audit("11E")?;
+    let (rows, artifact) = (evidence.rows, evidence.projection);
+    let dynamic = &baseline["dynamic_protocol"];
     let ids = baseline["matched_effect_frame_ids"]
         .as_array()
         .ok_or("manufacturing JSON ids")?
@@ -321,7 +313,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .map(|id| id.as_u64().ok_or_else(|| "manufacturing frame id".into()))
         .collect::<Result<Vec<_>>>()?;
     let mut checked = crate::journal::json_frame_mutants(&rows, &ids, |changed| {
-        check(changed, &artifact, &dynamic)
+        check(changed, &artifact, dynamic)
     })?;
     let first = *ids.first().ok_or("manufacturing frame")?;
     for field in ["frame_label", "lane"] {
@@ -340,7 +332,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         if observations != 1 {
             return Err("manufacturing header mutation must change one actual acceptance".into());
         }
-        let error = check(&changed, &artifact, &dynamic)
+        let error = check(&changed, &artifact, dynamic)
             .err()
             .ok_or("coherently altered manufacturing wire header accepted")?;
         checked.push(

@@ -1,8 +1,5 @@
 //! Offline actual-data/receipt correspondence; EPF alone interprets the source.
-use crate::{
-    evidence::{Result, save},
-    journal::records,
-};
+use crate::evidence::{Result, save};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -829,9 +826,9 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     // Establish the complete baseline once. Mutations retain this checked
     // source execution and independently challenge effect/argument matching.
-    let baseline = crate::journal::Evidence::open(path)?.audit("10M")?;
-    let (artifact, _) = crate::projection::load(path)?;
-    let rows = records(path)?;
+    let evidence = crate::journal::Evidence::open(path)?;
+    let baseline = evidence.audit("10M")?;
+    let (rows, artifact) = (evidence.rows, evidence.projection);
     let dynamic = &baseline["dynamic_protocol"];
     let ids = baseline["matched_effect_frame_ids"]
         .as_array()

@@ -1,8 +1,5 @@
 //! Actual compile/link data and unique effect receipts; EPF owns source ordering.
-use crate::{
-    evidence::{Result, save},
-    journal::records,
-};
+use crate::evidence::{Result, save};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -257,10 +254,10 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     )
 }
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    let (artifact, _) = crate::projection::load(path)?;
-    let rows = records(path)?;
-    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
-    let baseline = check(&rows, &artifact, &dynamic)?;
+    let evidence = crate::journal::Evidence::open(path)?;
+    let baseline = evidence.audit("10E")?;
+    let (rows, artifact) = (evidence.rows, evidence.projection);
+    let dynamic = &baseline["dynamic_protocol"];
     let ids = baseline["matched_effect_frame_ids"]
         .as_array()
         .ok_or("build effect frame ids")?
@@ -268,7 +265,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .map(|id| id.as_u64().ok_or_else(|| "build effect frame id".into()))
         .collect::<Result<Vec<_>>>()?;
     let checked = crate::journal::json_frame_mutants(&rows, &ids, |changed| {
-        check(changed, &artifact, &dynamic)
+        check(changed, &artifact, dynamic)
     })?;
     fs::create_dir(output)?;
     let result = json!({"status":"passed","baseline":baseline,"checked":checked,

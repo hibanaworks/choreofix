@@ -1,8 +1,8 @@
 //! EPF source conformance and actual data/effect/result correspondence.
 //! Observations are consumed once; no holder, phase or workflow is replayed.
 use crate::{
-    evidence::{Result, digest, save},
-    journal::{Call, Frame, one, records},
+    evidence::{Result, save},
+    journal::{Call, Frame, one},
 };
 use serde_json::{Value, json};
 use std::{
@@ -494,21 +494,17 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
 }
 
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    let rows = records(path)?;
-    let (projection, _) = crate::projection::load(path)?;
-    let dynamic = crate::projection::check_dynamic(&projection, &rows)?;
-    let mut audit = check(&rows, &projection, &dynamic)?;
-    audit["source_events_sha256"] = json!(digest(path)?);
-    audit["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("codebase directory")?
-            .join("projection.json")
-    )?);
-    audit["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
+    let evidence = crate::journal::Evidence::open(path)?;
+    let task = evidence.projection["compiled"]["task"]
+        .as_str()
+        .filter(|task| matches!(*task, "1E" | "1M" | "1H"))
+        .ok_or("expected a codebase projection")?;
+    let audit = evidence.audit(task)?;
+    let (rows, projection) = (evidence.rows, evidence.projection);
+    let dynamic = &audit["dynamic_protocol"];
     fs::create_dir(output)?;
     save(&output.join("audit.json"), &audit)?;
-    let journal = crate::journal::read(&rows, &projection, &dynamic)?;
+    let journal = crate::journal::read(&rows, &projection, dynamic)?;
     let ids = journal
         .frames
         .iter()
@@ -516,7 +512,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .map(|(id, _)| *id)
         .collect::<Vec<_>>();
     let mut rejected = crate::journal::json_frame_mutants(&rows, &ids, |changed| {
-        check(changed, &projection, &dynamic)
+        check(changed, &projection, dynamic)
     })?;
     for field in ["frame_label", "lane"] {
         let mut changed = rows.clone();
@@ -525,7 +521,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 row["message"][field] = json!(if field == "lane" { 255 } else { 65535 });
             }
         }
-        let error = check(&changed, &projection, &dynamic)
+        let error = check(&changed, &projection, dynamic)
             .err()
             .ok_or("coherent invalid wire header accepted")?;
         rejected.push(json!({"kind":format!("coherent_wrong_{field}"),"rejected":true,"error":error.to_string()}));
@@ -589,7 +585,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
             }
             return Err(format!("no input for record mutation {kind}").into());
         };
-        let error = check(&changed, &projection, &dynamic)
+        let error = check(&changed, &projection, dynamic)
             .err()
             .ok_or_else(|| format!("accepted record mutation {kind}"))?;
         rejected

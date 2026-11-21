@@ -2,7 +2,7 @@
 use crate::journal::file::{FileContents, same_path};
 use crate::{
     evidence::{Result, digest},
-    journal::{self, one, records},
+    journal::{self, one},
 };
 use hibana_wasip1_runtime::protocol;
 use serde_json::{Value, json};
@@ -277,8 +277,9 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
 }
 
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    crate::journal::Evidence::open(path)?.audit("16E")?;
-    let (artifact, _) = crate::projection::load(path)?;
+    let evidence = crate::journal::Evidence::open(path)?;
+    evidence.audit("16E")?;
+    let (rows, artifact) = (evidence.rows, evidence.projection);
     let bindings = artifact["compiled"]["operation_files"]
         .as_array()
         .ok_or("operation bindings")?;
@@ -289,7 +290,6 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let owner = field(&first["effect_owner"])?;
     let request = field(&first["request_label"])?;
     let response = field(&first["result_label"])?;
-    let rows = records(path)?;
     let labels = crate::projection::frames(&artifact, &rows)?;
     fs::create_dir(output)?;
     let mut results = Vec::new();

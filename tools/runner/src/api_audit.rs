@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File},
-    io::{BufRead, BufReader, Write},
+    io::Write,
     path::Path,
 };
 
@@ -406,12 +406,10 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
     )
 }
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    crate::journal::Evidence::open(path)?.audit("8E")?;
+    let evidence = crate::journal::Evidence::open(path)?;
+    evidence.audit("8E")?;
+    let rows = evidence.rows;
     fs::create_dir(output)?;
-    let rows = BufReader::new(File::open(path)?)
-        .lines()
-        .map(|l| Ok(serde_json::from_str::<Value>(&l?)?))
-        .collect::<Result<Vec<_>>>()?;
     let mut reports = Vec::new();
     for kind in [
         "wrong_frame_label",

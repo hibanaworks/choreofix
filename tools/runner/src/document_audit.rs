@@ -1,7 +1,7 @@
 //! Actual document requests, material and receipts; EPF checks source execution.
 use crate::{
     evidence::{Result, save},
-    journal::{Call, json_frame_mutants, records},
+    journal::{Call, json_frame_mutants},
 };
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, fs, path::Path};
@@ -516,10 +516,10 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
 }
 
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    let (artifact, _) = crate::projection::load(path)?;
-    let rows = records(path)?;
-    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
-    let baseline = check(&rows, &artifact, &dynamic)?;
+    let evidence = crate::journal::Evidence::open(path)?;
+    let baseline = evidence.audit("7E")?;
+    let (rows, artifact) = (evidence.rows, evidence.projection);
+    let dynamic = &baseline["dynamic_protocol"];
     let ids = baseline["matched_effect_frame_ids"]
         .as_array()
         .ok_or("effect frame IDs")?
@@ -528,7 +528,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .collect::<std::result::Result<Vec<_>, _>>()?;
     fs::create_dir(output)?;
     let mut verdicts =
-        json_frame_mutants(&rows, &ids, |changed| check(changed, &artifact, &dynamic))?;
+        json_frame_mutants(&rows, &ids, |changed| check(changed, &artifact, dynamic))?;
     for field in ["frame_label", "lane"] {
         let mut changed = rows.clone();
         for row in &mut changed {
@@ -536,7 +536,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 row["message"][field] = json!(if field == "lane" { 255 } else { 65535 });
             }
         }
-        let error = check(&changed, &artifact, &dynamic)
+        let error = check(&changed, &artifact, dynamic)
             .err()
             .ok_or("coherent invalid wire header accepted")?;
         verdicts.push(json!({"kind":format!("coherent_wrong_{field}"),"rejected":true,"error":error.to_string()}));

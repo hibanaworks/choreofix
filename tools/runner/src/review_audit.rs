@@ -1,5 +1,5 @@
 //! Actual review requests, results and effects. EPF checks source execution.
-use crate::evidence::{Result, digest, save};
+use crate::evidence::{Result, save};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -7,7 +7,7 @@ use std::{
     path::Path,
 };
 
-use crate::journal::{Call, one, records};
+use crate::journal::{Call, one};
 
 impl Call<'_> {
     fn target(&self) -> Result<&str> {
@@ -370,19 +370,11 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
 }
 
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    let rows = records(path)?;
-    let (projection, _) = crate::projection::load(path)?;
-    let dynamic = crate::projection::check_dynamic(&projection, &rows)?;
-    let mut audited = check(&rows, &projection, &dynamic)?;
-    audited["source_events_sha256"] = json!(digest(path)?);
-    audited["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("evidence directory")?
-            .join("projection.json")
-    )?);
-    audited["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
-    let journal = crate::journal::read(&rows, &projection, &dynamic)?;
+    let evidence = crate::journal::Evidence::open(path)?;
+    let audited = evidence.audit("6E")?;
+    let (rows, projection) = (evidence.rows, evidence.projection);
+    let dynamic = &audited["dynamic_protocol"];
+    let journal = crate::journal::read(&rows, &projection, dynamic)?;
     let business = business_roles(&projection)?;
     let selected = journal
         .frames
@@ -402,7 +394,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .collect::<Vec<_>>();
     fs::create_dir(output)?;
     let mut verdicts = crate::journal::json_frame_mutants(&rows, &selected, |changed| {
-        check(changed, &projection, &dynamic)
+        check(changed, &projection, dynamic)
     })?;
     let id = *selected.first().ok_or("business frame")?;
     for (field, value) in [("frame_label", 65535), ("lane", 255)] {
@@ -412,12 +404,12 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 row["message"][field] = json!(value);
             }
         }
-        let error = check(&changed, &projection, &dynamic)
+        let error = check(&changed, &projection, dynamic)
             .err()
             .ok_or("coherent invalid wire header accepted")?;
         verdicts.push(json!({"frame_id":id,"kind":format!("coherent_wrong_{field}"),"rejected":true,"error":error.to_string()}));
     }
-    let result = json!({"status":"passed","task":"6E","source_events_sha256":digest(path)?,"audit":audited,"count":verdicts.len(),"mutants":verdicts,"scope":"Saved-record typed file, admission, actual request/result, feedback and reply mutations with checked receive occurrences; static wire-header membership. Does not repeat EPF replay or certify runtime attacks.","model_calls":0});
+    let result = json!({"status":"passed","task":"6E","source_events_sha256":evidence.events_hash,"audit":audited,"count":verdicts.len(),"mutants":verdicts,"scope":"Saved-record typed file, admission, actual request/result, feedback and reply mutations with checked receive occurrences; static wire-header membership. Does not repeat EPF replay or certify runtime attacks.","model_calls":0});
     save(&output.join("summary.json"), &result)?;
     Ok(result)
 }

@@ -5,12 +5,12 @@ use crate::{
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+#[cfg(test)]
+use std::path::Path;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Write,
 };
-#[cfg(test)]
-use {crate::evidence::digest, std::path::Path};
 
 fn python_string(value: &str) -> Result<String> {
     let mut out = String::new();
@@ -550,7 +550,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
         }
     }
     let report = json!({"task":"4M","status":"passed","record_counterexamples":reports,
-        "original_events_sha256":digest(path)?,"dynamic_capture_checked_once":true,
+        "original_events_sha256":evidence.events_hash,"dynamic_capture_checked_once":true,
         "runtime_attacks":false,"model_calls":0,"scored_runs":0});
     crate::evidence::save(output, &report)?;
     Ok((baseline, report))

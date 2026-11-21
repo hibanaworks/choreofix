@@ -1,7 +1,7 @@
 //! Independent actual-input/effect correspondence. EPF checks source execution.
 use crate::{
     evidence::{Result, digest, save},
-    journal::{Call, one, records, take_json_frame},
+    journal::{Call, one, take_json_frame},
 };
 use serde_json::{Value, json};
 use std::{
@@ -808,11 +808,11 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
     )
 }
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    let (projection, _) = crate::projection::load(path)?;
-    let rows = records(path)?;
-    let dynamic = crate::projection::check_dynamic(&projection, &rows)?;
-    let audited = check(&rows, &projection, &dynamic)?;
-    let journal = crate::journal::read(&rows, &projection, &dynamic)?;
+    let evidence = crate::journal::Evidence::open(path)?;
+    let audited = evidence.audit("6H")?;
+    let (rows, projection) = (evidence.rows, evidence.projection);
+    let dynamic = &audited["dynamic_protocol"];
+    let journal = crate::journal::read(&rows, &projection, dynamic)?;
     let roles = [
         "REPO",
         "REPO_OWNER",
@@ -860,7 +860,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .collect::<Vec<_>>();
     fs::create_dir(output)?;
     let mut verdicts = crate::journal::json_frame_mutants(&rows, &selected, |changed| {
-        check(changed, &projection, &dynamic)
+        check(changed, &projection, dynamic)
     })?;
     let id = *selected.first().ok_or("actual business frame")?;
     for (field, value) in [("frame_label", 65535), ("lane", 255)] {
@@ -870,12 +870,12 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 row["message"][field] = json!(value);
             }
         }
-        let error = check(&changed, &projection, &dynamic)
+        let error = check(&changed, &projection, dynamic)
             .err()
             .ok_or("coherent invalid header accepted")?;
         verdicts.push(json!({"frame_id":id,"kind":format!("coherent_wrong_{field}"),"rejected":true,"error":error.to_string()}));
     }
-    let result = json!({"status":"passed","task":"6H","source_events_sha256":digest(path)?,"audit":audited,
+    let result = json!({"status":"passed","task":"6H","source_events_sha256":evidence.events_hash,"audit":audited,
         "count":verdicts.len(),"mutants":verdicts,"model_calls":0,
         "verifier_binary_sha256":digest(&std::env::current_exe()?)?,
         "scope":"Recorded request/effect/result and compiled wire counterexamples with EPF-checked receive occurrences; not runtime attacks"});

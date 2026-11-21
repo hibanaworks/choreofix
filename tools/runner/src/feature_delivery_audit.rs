@@ -1,7 +1,7 @@
 //! Actual file requests, material receipts, effects and replies; EPF checks execution.
 use crate::{
-    evidence::{Result, digest, save},
-    journal::{Call, Frame, one, records, take_json_frame},
+    evidence::{Result, save},
+    journal::{Call, Frame, one, take_json_frame},
 };
 use serde_json::{Value, json};
 use std::{
@@ -612,9 +612,9 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
 }
 
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    let rows = records(path)?;
-    let (projection, _) = crate::projection::load(path)?;
-    let audited = crate::journal::Evidence::open(path)?.audit("6M")?;
+    let evidence = crate::journal::Evidence::open(path)?;
+    let audited = evidence.audit("6M")?;
+    let (rows, projection) = (evidence.rows, evidence.projection);
     let dynamic = &audited["dynamic_protocol"];
     let journal = crate::journal::read(&rows, &projection, dynamic)?;
     let roles = BUSINESS_ROLES
@@ -644,7 +644,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
             .ok_or("coherent invalid header accepted")?;
         verdicts.push(json!({"frame_id":id,"kind":format!("coherent_wrong_{field}"),"rejected":true,"error":error.to_string()}));
     }
-    let result = json!({"status":"passed","task":"6M","source_events_sha256":digest(path)?,"audit":audited,"count":verdicts.len(),"mutants":verdicts,
+    let result = json!({"status":"passed","task":"6M","source_events_sha256":evidence.events_hash,"audit":audited,"count":verdicts.len(),"mutants":verdicts,
         "scope":"Recorded actual requests, material receipts, effects and replies with EPF-checked receive occurrences; compiled wire membership. Not runtime attacks.","model_calls":0});
     save(&output.join("summary.json"), &result)?;
     Ok(result)

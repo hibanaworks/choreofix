@@ -1,7 +1,7 @@
 //! Actual file/resource/material receives and effects; EPF owns source execution.
 use crate::{
-    evidence::{Result, digest, save},
-    journal::{Frame, records},
+    evidence::{Result, save},
+    journal::Frame,
 };
 use serde_json::{Value, json};
 use std::{
@@ -301,19 +301,10 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     )
 }
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    let (artifact, _) = crate::projection::load(path)?;
-    let rows = records(path)?;
-    // Mutations below leave source capture untouched. Check that capture once.
-    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
-    let mut baseline = check(&rows, &artifact, &dynamic)?;
-    baseline["source_events_sha256"] = json!(digest(path)?);
-    baseline["runtime_binary_sha256"] = artifact["runtime_binary_sha256"].clone();
-    baseline["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("kitchen event directory")?
-            .join("projection.json")
-    )?);
+    let evidence = crate::journal::Evidence::open(path)?;
+    let baseline = evidence.audit("12E")?;
+    let (rows, artifact) = (evidence.rows, evidence.projection);
+    let dynamic = &baseline["dynamic_protocol"];
     let ids = baseline["matched_json_frame_ids"]
         .as_array()
         .ok_or("JSON receipts")?
@@ -321,7 +312,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .map(|id| id.as_u64().ok_or_else(|| "frame ID".into()))
         .collect::<Result<Vec<_>>>()?;
     let mut checked = crate::journal::json_frame_mutants(&rows, &ids, |changed| {
-        check(changed, &artifact, &dynamic)
+        check(changed, &artifact, dynamic)
     })?;
     let first = *ids.first().ok_or("missing kitchen frame")?;
     for field in ["frame_label", "lane"] {
@@ -340,7 +331,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         if count != 1 {
             return Err("kitchen header mutation must change one actual acceptance".into());
         }
-        let error = check(&changed, &artifact, &dynamic)
+        let error = check(&changed, &artifact, dynamic)
             .err()
             .ok_or("accepted coherently changed kitchen header")?;
         checked.push(

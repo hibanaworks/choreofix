@@ -2,8 +2,8 @@
 //! Effect boundaries use checked Endpoint receives. Queued transport log rows
 //! do not establish source ordering or the time at which a request was accepted.
 use crate::{
-    evidence::{Result, digest, save},
-    journal::{Call, Frame, one, records},
+    evidence::{Result, save},
+    journal::{Call, Frame, one},
 };
 use serde_json::{Value, json};
 use std::{
@@ -673,19 +673,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
 }
 
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    let rows = records(path)?;
-    let (projection, _) = crate::projection::load(path)?;
-    let dynamic = crate::projection::check_dynamic(&projection, &rows)?;
-    let mut audit = check(&rows, &projection, &dynamic)?;
-    audit["source_events_sha256"] = json!(digest(path)?);
-    audit["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("report directory")?
-            .join("projection.json")
-    )?);
-    audit["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
-    let journal = crate::journal::read(&rows, &projection, &dynamic)?;
+    let evidence = crate::journal::Evidence::open(path)?;
+    let audit = evidence.audit("3E")?;
+    let (rows, projection) = (evidence.rows, evidence.projection);
+    let dynamic = &audit["dynamic_protocol"];
+    let journal = crate::journal::read(&rows, &projection, dynamic)?;
     let ids = journal
         .frames
         .iter()
@@ -698,7 +690,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     // bind_receives still requires every changed journal to match the checked
     // receive occurrences. Real audits always check their own capture above.
     let mut rejected = crate::journal::json_frame_mutants(&rows, &ids, |changed| {
-        check(changed, &projection, &dynamic)
+        check(changed, &projection, dynamic)
     })?;
     for field in ["frame_label", "lane"] {
         let mut changed = rows.clone();
@@ -707,7 +699,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
                 row["message"][field] = json!(if field == "lane" { 255 } else { 65535 });
             }
         }
-        let error = check(&changed, &projection, &dynamic)
+        let error = check(&changed, &projection, dynamic)
             .err()
             .ok_or("coherent invalid report wire header accepted")?;
         rejected.push(json!({"kind":format!("coherent_wrong_{field}"),"rejected":true,"error":error.to_string()}));
@@ -766,8 +758,8 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         // Capture rows and their positions are unchanged. The journal must
         // remain internally valid; rejection must come from the actual
         // request/effect/result boundary, not malformed effect intervals.
-        crate::journal::read(&changed, &projection, &dynamic)?;
-        let error = check(&changed, &projection, &dynamic)
+        crate::journal::read(&changed, &projection, dynamic)?;
+        let error = check(&changed, &projection, dynamic)
             .err()
             .ok_or_else(|| format!("accepted {kind}"))?;
         if !error.to_string().starts_with("missing matching frame") {

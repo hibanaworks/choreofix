@@ -6,7 +6,7 @@ use crate::{
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 #[cfg(test)]
-use {crate::evidence::digest, std::path::Path};
+use std::path::Path;
 fn target<'a>(call: &Call<'a>) -> Result<&'a str> {
     let key = match call.tool {
         "run_analysis" => "sample",
@@ -533,7 +533,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
             }
         }
     }
-    let report = json!({"status":"passed","task":"13E","record_counterexamples":reports,"original_events_sha256":digest(path)?,
+    let report = json!({"status":"passed","task":"13E","record_counterexamples":reports,"original_events_sha256":evidence.events_hash,
         "dynamic_capture_checked_once":true,"runtime_attacks":false,"model_calls":0,"scored_runs":0});
     crate::evidence::save(output, &report)?;
     Ok((baseline, report))

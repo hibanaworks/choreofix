@@ -1,7 +1,7 @@
 //! Actual typed file/resource receives and clinical effects. EPF owns dynamic order.
 use crate::{
-    evidence::{Result, digest, save},
-    journal::{Call, Frame, one, records},
+    evidence::{Result, save},
+    journal::{Call, Frame, one},
 };
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, fs, path::Path};
@@ -668,11 +668,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     )
 }
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    let (artifact, _) = crate::projection::load(path)?;
-    let rows = records(path)?;
-    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
-    check(&rows, &artifact, &dynamic)?;
-    let journal = crate::journal::read(&rows, &artifact, &dynamic)?;
+    let evidence = crate::journal::Evidence::open(path)?;
+    let baseline = evidence.audit("5H")?;
+    let (rows, artifact) = (evidence.rows, evidence.projection);
+    let dynamic = &baseline["dynamic_protocol"];
+    let journal = crate::journal::read(&rows, &artifact, dynamic)?;
     let contracts = crate::projection::contracts(&artifact["compiled"])?;
     let business = clinical_frames(&artifact["compiled"])?;
     let selected = journal
@@ -686,9 +686,9 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .collect::<Vec<_>>();
     fs::create_dir(output)?;
     let verdicts = crate::journal::json_frame_mutants(&rows, &selected, |changed| {
-        check(changed, &artifact, &dynamic)
+        check(changed, &artifact, dynamic)
     })?;
-    let result = json!({"status":"passed","mutants_rejected":verdicts.len(),"source_events_sha256":digest(path)?,"scope":"saved-record effect audit, not runtime attacks or EPF mutation replay","model_calls":0,"verdicts":verdicts});
+    let result = json!({"status":"passed","mutants_rejected":verdicts.len(),"source_events_sha256":evidence.events_hash,"scope":"saved-record effect audit, not runtime attacks or EPF mutation replay","model_calls":0,"verdicts":verdicts});
     save(&output.join("result.json"), &result)?;
     Ok(result)
 }
