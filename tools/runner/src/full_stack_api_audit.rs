@@ -1,15 +1,13 @@
 //! Check actual full-stack effects against EPF-committed requests and results.
 use crate::{
-    evidence::{Result, digest},
+    evidence::Result,
     journal::{self, one},
     projection,
 };
 use serde_json::{Value, json};
-use std::{collections::BTreeSet, ops::Range, path::Path};
+use std::{collections::BTreeSet, ops::Range};
 
-pub fn audit(path: &Path) -> Result<Value> {
-    let rows = journal::records(path)?;
-    let artifact = projection::load(path)?;
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty full-stack evidence")?["message"];
     let participants = fixture["fixtures"]
@@ -43,10 +41,8 @@ pub fn audit(path: &Path) -> Result<Value> {
             .as_u64()
             .ok_or_else(|| format!("compiled message {name}"))
     };
-    let headers = projection::frames(&artifact, &rows)?;
-    let dynamic = projection::check_dynamic(&artifact, &rows)?;
-    let mut journal = journal::read(&rows, &headers, participants)?;
-    let receipts = journal.bind_receives(&dynamic)?;
+    let headers = projection::frames(artifact, rows)?;
+    let journal = journal::read(rows, &headers, participants, dynamic)?;
     let frames = &journal.frames;
     let events = journal.score["events"]
         .as_array()
@@ -83,8 +79,10 @@ pub fn audit(path: &Path) -> Result<Value> {
             !used.contains(*id)
                 && frame.direction(from_id, to_id)
                 && u64::from(frame.logical_label) == logical
-                && frame.received.is_some_and(|at| interval.contains(&at))
-                && actor.is_none_or(|actor| receipts[id]["receive_commit"]["actor"] == actor)
+                && interval.contains(&frame.received)
+                && actor.is_none_or(|actor| {
+                    journal.frames[id].receipt["receive_commit"]["actor"] == actor
+                })
                 && expected.is_none_or(|value| frame.value().is_ok_and(|payload| payload == *value))
         }))
         .map_err(|error| format!("{message} {from}->{to} in {interval:?}: {error}"))?;
@@ -161,13 +159,13 @@ pub fn audit(path: &Path) -> Result<Value> {
                     let (grant, _) = take(
                         ("BACKEND_SERVICE", "DB_SERVICE", "RequestMigration"),
                         Some("DB_SERVICE"),
-                        frames[&request].received()?..call.emitted,
+                        frames[&request].received..call.emitted,
                         Some(&request_args),
                     )?;
                     let (notice, _) = take(
                         ("DB_SERVICE", "DB_FILE", "SchemaStatus"),
                         Some("DB_VM"),
-                        frames[&grant].received()?..call.emitted,
+                        frames[&grant].received..call.emitted,
                         Some(&request_args),
                     )?;
                     early_requests.push(
@@ -315,7 +313,7 @@ pub fn audit(path: &Path) -> Result<Value> {
                 take(
                     ("TEST_ENV", "TEST_FILE", "TestInputs"),
                     Some("TEST_VM"),
-                    frames[&grant].received()?..call.emitted,
+                    frames[&grant].received..call.emitted,
                     Some(&inputs),
                 )?;
 
@@ -408,7 +406,7 @@ pub fn audit(path: &Path) -> Result<Value> {
                     if selected.as_object().is_none_or(|fields| fields.len() != 1) {
                         return Err("invalid repair receipt".into());
                     }
-                    let decision_at = frames[&decision].received()?;
+                    let decision_at = frames[&decision].received;
                     let notice = json!({"repair":selected,"test":result});
                     for edge in developer_outcomes {
                         let (id, _) = take(edge, None, decision_at + 1..rows.len(), Some(&notice))?;
@@ -465,17 +463,11 @@ pub fn audit(path: &Path) -> Result<Value> {
             returns.push(id);
         }
         let (score_id, _) = one(events.iter().enumerate().filter(|(index, event)| {
-            !seen_scores.contains(index)
-                && event["agent"] == agent
-                && event["tool"] == tool
-                && event["args"] == *args
-                && event["success"] == success
-                && event["result"] == *data
-                && event["violations"] == json!([])
+            !seen_scores.contains(index) && call.matches_score(event, args)
         }))?;
         seen_scores.insert(score_id);
         effects.push(json!({"agent":agent,"tool":tool,"request_frame":request,
-            "request_occurrence":receipts[&request]["occurrence"],"reply_frames":returns,"success":success}));
+            "request_occurrence":journal.frames[&request].receipt["occurrence"],"reply_frames":returns,"success":success}));
     }
 
     if effects
@@ -522,7 +514,7 @@ pub fn audit(path: &Path) -> Result<Value> {
         let (&back, incoming) = one(frames
             .iter()
             .filter(|(_, frame)| belongs(frame) && frame.direction(holder, owner)))?;
-        if outgoing.received()? >= incoming.received()? {
+        if outgoing.received >= incoming.received {
             return Err("resource was not returned after its acquisition".into());
         }
         transfers.push(json!({"resource":resource,"acquired":out,"returned":back}));
@@ -531,8 +523,5 @@ pub fn audit(path: &Path) -> Result<Value> {
         "status":"passed","task":"8M","depth":fixture["depth"],"domain_calls":effects.len(),
         "effects":effects,"early_migration_requests":early_requests,"resource_transfers":transfers,
         "captured_records":dynamic["captured_records"],"simulator_complete":true,"violations":0,
-        "source_events_sha256":digest(path)?,
-        "compiled_projection_sha256":digest(&path.parent().ok_or("evidence directory")?.join("projection.json"))?,
-        "runtime_binary_sha256":artifact["runtime_binary_sha256"],
     }))
 }

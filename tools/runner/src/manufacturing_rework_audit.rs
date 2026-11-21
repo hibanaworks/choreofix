@@ -1,24 +1,15 @@
 //! Match workshop effects to individual file and equipment receives in the recorded execution.
 use crate::{
-    evidence::{Result, digest},
+    evidence::Result,
     journal::{self, Frame},
     projection,
 };
 use serde_json::{Value, json};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::Path,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
-pub(crate) fn audit(path: &Path) -> Result<Value> {
-    let rows = journal::records(path)?;
-    let artifact = projection::load(path)?;
-    let labels = projection::frames(&artifact, &rows)?;
-    let epf = projection::check_dynamic(&artifact, &rows)?;
-    let mut report = verify(&artifact, &rows, &labels, &epf)?;
-    report["compiled_projection_sha256"] = json!(digest(&path.with_file_name("projection.json"))?);
-    report["source_events_sha256"] = json!(digest(path)?);
-    Ok(report)
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+    let labels = projection::frames(artifact, rows)?;
+    verify(artifact, rows, &labels, dynamic)
 }
 
 pub(super) fn verify(
@@ -49,8 +40,7 @@ pub(super) fn verify(
     {
         return Err("workshop task or participants differ".into());
     }
-    let mut history = journal::read(rows, labels, actors)?;
-    history.bind_receives(epf)?;
+    let history = journal::read(rows, labels, actors, epf)?;
     let role = |name: &str| -> Result<u64> {
         compiled["roles"][name]
             .as_u64()
@@ -109,14 +99,12 @@ pub(super) fn verify(
         if call.request["agent"] != expected_agent || result["tool_name"] != tool {
             return Err("workshop effect executed for the wrong participant".into());
         }
-        let (score_idx, _) = journal::one(world.iter().enumerate().filter(|(_, s)| {
-            s["agent"] == expected_agent
-                && s["tool"] == tool
-                && s["args"] == *args
-                && s["success"] == result["success"]
-                && s["result"] == result["data"]
-                && s["violations"] == json!([])
-        }))?;
+        let (score_idx, _) = journal::one(
+            world
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| call.matches_score(s, args)),
+        )?;
         if !scored.insert(score_idx) {
             return Err("workshop score reused".into());
         }
@@ -145,9 +133,7 @@ pub(super) fn verify(
                 })
                 .min_by_key(|(_, f)| f.sent)
                 .ok_or_else(|| format!("missing {job} {tool} frame {edge:?}"))?;
-            if after.is_some_and(|a| f.sent <= a)
-                || before.is_some_and(|b| f.received.is_none_or(|r| r >= b))
-            {
+            if after.is_some_and(|a| f.sent <= a) || before.is_some_and(|b| f.received >= b) {
                 return Err(format!("out-of-order {job} {tool} frame {edge:?}").into());
             }
             spent.insert(*fid);
@@ -189,7 +175,7 @@ pub(super) fn verify(
                     orders[i].map(|(_, at)| at),
                     Some(call.emitted),
                 )?
-                .received()?;
+                .received;
                 let claim = frame(
                     worker,
                     role(&format!("{station}_OWNER"))?,
@@ -198,7 +184,7 @@ pub(super) fn verify(
                     Some(admission),
                     Some(call.emitted),
                 )?
-                .received()?;
+                .received;
                 let drive = role(&format!("{station}_DRIVE"))?;
                 let input = frame(
                     machine,
@@ -208,7 +194,7 @@ pub(super) fn verify(
                     Some(claim),
                     Some(call.emitted),
                 )?
-                .received()?;
+                .received;
                 let equipment_result = if index < 3 {
                     let demand = frame(
                         drive,
@@ -218,14 +204,14 @@ pub(super) fn verify(
                         Some(input),
                         Some(call.emitted),
                     )?
-                    .received()?;
+                    .received;
                     let tools = [role("TOOL_0")?, role("TOOL_1")?];
                     let physical = journal::one(tools.into_iter().filter(|&t| {
                         history.frames.values().any(|f| {
                             f.direction(t, drive)
                                 && u64::from(f.logical_label) == t
                                 && f.sent > demand
-                                && f.received.is_some_and(|at| at < call.emitted)
+                                && f.received < call.emitted
                                 && f.value().is_ok_and(|v| v == *args)
                         })
                     }))?;
@@ -238,7 +224,7 @@ pub(super) fn verify(
                         Some(demand),
                         Some(call.emitted),
                     )?;
-                    frame(drive, physical, label, Some(result), Some(reply_at), None)?.received()?
+                    frame(drive, physical, label, Some(result), Some(reply_at), None)?.received
                 } else {
                     reply_at
                 };
@@ -250,7 +236,7 @@ pub(super) fn verify(
                     Some(equipment_result),
                     None,
                 )?
-                .received()?;
+                .received;
                 frame(worker, file, 21, Some(result), Some(returned), None)?;
                 frame(worker, inspector, index, Some(part), Some(returned), None)?;
                 let delivered = frame(
@@ -261,7 +247,7 @@ pub(super) fn verify(
                     Some(returned),
                     None,
                 )?
-                .received()?;
+                .received;
                 parts[i] = Some((part, delivered));
                 readings[i] = None;
                 orders[i] = None;
@@ -285,7 +271,7 @@ pub(super) fn verify(
                     Some(parts[i].ok_or("inspection without manufacture")?.1),
                     Some(call.emitted),
                 )?
-                .received()?;
+                .received;
                 frame(
                     gauge,
                     readout,
@@ -295,7 +281,7 @@ pub(super) fn verify(
                     Some(call.emitted),
                 )?;
                 let actual =
-                    frame(readout, gauge, 34, Some(result), Some(reply_at), None)?.received()?;
+                    frame(readout, gauge, 34, Some(result), Some(reply_at), None)?.received;
                 frame(gauge, inspector, 34, Some(result), Some(actual), None)?;
                 let approved = result["success"].as_bool().ok_or("missing gauge verdict")?;
                 let verdict_label = if approved { 25 } else { 26 };
@@ -307,7 +293,7 @@ pub(super) fn verify(
                     Some(actual),
                     None,
                 )?
-                .received()?;
+                .received;
                 if approved {
                     frame(worker, file, 36, Some(result), Some(measured), None)?;
                 }
@@ -320,7 +306,7 @@ pub(super) fn verify(
                     Some(measured),
                     None,
                 )?
-                .received()?;
+                .received;
                 readings[i] = Some((result, delivered));
             }
             "dispatch_rework" => {
@@ -353,7 +339,7 @@ pub(super) fn verify(
                     None,
                 )?;
                 let delivered =
-                    frame(worker, file, 36, Some(result), Some(reply_at), None)?.received()?;
+                    frame(worker, file, 36, Some(result), Some(reply_at), None)?.received;
                 orders[i] = Some((result, delivered));
             }
             _ => unreachable!(),

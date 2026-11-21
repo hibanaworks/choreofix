@@ -394,7 +394,8 @@ async fn actual_wasi_initial_orders_and_integrated_ci() -> Result<()> {
         let audit = if index == 0 {
             mutations["audit"].clone()
         } else {
-            crate::feature_delivery_audit::audit(&output.join("events.jsonl"))?
+            crate::journal::Evidence::open(&output.join("events.jsonl"))?
+                .audit(crate::feature_delivery_audit::check)?
         };
         save(&output.join("audit.json"), &audit)?;
         outcomes.push(json!({"case":index,"audit":audit,"record_mutations":mutations}));

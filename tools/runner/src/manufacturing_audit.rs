@@ -11,10 +11,10 @@ use std::{
 };
 
 fn take_frame<'a>(
-    frames: &'a BTreeMap<u64, Frame>,
+    frames: &'a BTreeMap<u64, Frame<'a>>,
     used: &mut BTreeSet<u64>,
     matches: impl Fn(&Frame) -> bool,
-) -> Result<(u64, &'a Frame)> {
+) -> Result<(u64, &'a Frame<'a>)> {
     let mut found = frames.iter().filter(|(_, frame)| matches(frame));
     let (&id, frame) = found.next().ok_or("missing manufacturing occurrence")?;
     if found.next().is_some() || !used.insert(id) {
@@ -22,7 +22,7 @@ fn take_frame<'a>(
     }
     Ok((id, frame))
 }
-fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty manufacturing evidence")?["message"];
     if compiled["task"] != "11E" || fixture["task"] != "11E" || fixture["type"] != "fixtures" {
@@ -52,8 +52,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     };
     let supervisor = name("roles", "SUPERVISOR")?;
     let labels = crate::projection::frames(artifact, rows)?;
-    let mut journal = crate::journal::read(rows, &labels, actors)?;
-    journal.bind_receives(dynamic)?;
+    let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
@@ -147,7 +146,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         let (_, admitted) = take_frame(&frames, &mut used, |frame| {
             frame.direction(file, actor) && frame.logical_label == request_label
         })?;
-        if admitted.received()? >= call.emitted || admitted.value()? != arguments {
+        if admitted.received >= call.emitted || admitted.value()? != arguments {
             return Err("job effect lacks its unique actual file admission".into());
         }
         file_requests += 1;
@@ -155,7 +154,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         let (_, received) = take_frame(&frames, &mut used, |frame| {
             frame.direction(resource, actor) && frame.logical_label == resource_label
         })?;
-        if received.received()? >= call.emitted || received.value()? != arguments {
+        if received.received >= call.emitted || received.value()? != arguments {
             return Err("job resource differs from admitted arguments".into());
         }
         resource_requests += 1;
@@ -171,7 +170,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             if frame.sent <= at || frame.value()? != *result {
                 return Err("job reply or report differs from the actual effect".into());
             }
-            let received = frame.received()?;
+            let received = frame.received;
             if target == supervisor {
                 done_receipts.push(received);
             }
@@ -229,7 +228,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let (_, admitted) = take_frame(&frames, &mut used, |frame| {
         frame.direction(file, supervisor) && frame.logical_label == request
     })?;
-    if admitted.received()? >= call.emitted || admitted.value()? != json!({}) {
+    if admitted.received >= call.emitted || admitted.value()? != json!({}) {
         return Err("report lacks its actual file request".into());
     }
     let reply = name("labels", "Reports")? as u8;
@@ -239,13 +238,11 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     if delivered.sent <= at || delivered.value()? != *result {
         return Err("report file reply differs from actual effect".into());
     }
-    delivered.received()?;
     let mut scored = score["events"]
         .as_array()
         .ok_or("manufacturing score events")?
         .clone();
     for call in calls.values() {
-        let (_, result) = call.result()?;
         // The neutral simulator records collect_reports' declared default,
         // whereas its actual accepted request omits that optional argument.
         let scored_arguments = if call.tool()? == "collect_reports" {
@@ -255,14 +252,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         };
         let index = scored
             .iter()
-            .position(|event| {
-                event["agent"] == call.request["agent"]
-                    && event["tool"] == call.request["tool"]
-                    && event["args"] == scored_arguments
-                    && event["success"] == result["success"]
-                    && event["result"] == result["data"]
-                    && event["violations"] == json!([])
-            })
+            .position(|event| call.matches_score(event, &scored_arguments))
             .ok_or("common score differs from actual effect")?;
         scored.remove(index);
     }
@@ -304,7 +294,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     ];
     let returns = frames
         .values()
-        .filter(|frame| return_labels.contains(&frame.logical_label) && frame.received.is_some())
+        .filter(|frame| return_labels.contains(&frame.logical_label))
         .count();
     if returns != 4 {
         return Err("incomplete machine return coverage".into());
@@ -338,23 +328,8 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         "effect_scope":"unique committed file/resource requests, actual job replies and four-job report; EPF owns source execution and delegation"}),
     )
 }
-pub fn audit(path: &Path) -> Result<Value> {
-    let artifact = crate::projection::load(path)?;
-    let rows = records(path)?;
-    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
-    let mut result = check(&rows, &artifact, &dynamic)?;
-    result["source_events_sha256"] = json!(digest(path)?);
-    result["runtime_binary_sha256"] = artifact["runtime_binary_sha256"].clone();
-    result["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("manufacturing evidence directory")?
-            .join("projection.json")
-    )?);
-    Ok(result)
-}
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    let artifact = crate::projection::load(path)?;
+    let (artifact, _) = crate::projection::load(path)?;
     let rows = records(path)?;
     let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
     let mut baseline = check(&rows, &artifact, &dynamic)?;

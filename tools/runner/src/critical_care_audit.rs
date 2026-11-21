@@ -100,7 +100,7 @@ fn findings(calls: &[&Call], patient: &str, before: usize) -> Result<Value> {
     }
     Ok(value)
 }
-fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty critical-care evidence")?["message"];
     if compiled["task"] != "5H" || fixture["task"] != "5H" || fixture["type"] != "fixtures" {
@@ -140,8 +140,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             .ok_or_else(|| format!("compiled label {name}").into())
     };
     let labels = crate::projection::frames(artifact, rows)?;
-    let mut journal = crate::journal::read(rows, &labels, actors)?;
-    journal.bind_receives(dynamic)?;
+    let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
@@ -382,14 +381,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             };
         let index = scored
             .iter()
-            .position(|e| {
-                e["agent"] == actor
-                    && e["tool"] == tool
-                    && e["args"] == *arguments
-                    && e["success"] == result["success"]
-                    && e["result"] == result["data"]
-                    && e["violations"] == json!([])
-            })
+            .position(|e| call.matches_score(e, arguments))
             .ok_or("effect differs from common-world occurrence")?;
         scored.remove(index);
         for (from, to, name, after) in relations {
@@ -401,7 +393,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     && if *after {
                         f.sent > ended
                     } else {
-                        f.received.is_some_and(|at| at < call.emitted)
+                        f.received < call.emitted
                     }
             });
             let (id, frame) = if *after {
@@ -413,7 +405,6 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             if &frame.value()? != if *after { result } else { arguments } {
                 return Err(format!("altered actual {name}").into());
             }
-            frame.received()?;
             used.insert(*id);
         }
         if tool == "order_tests" {
@@ -446,7 +437,6 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             if frame.value()? != *result {
                 return Err("altered actual panel file reply".into());
             }
-            frame.received()?;
             used.insert(*id);
         }
         if !["assess_patient", "review_prescriptions"].contains(&tool) {
@@ -560,7 +550,6 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 | "ResourceLoan"
                 | "ResourceReturn"
         ) {
-            frame.received()?;
             used.insert(*id);
             continue;
         }
@@ -681,7 +670,6 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         if frame.value()? != expected {
             return Err(format!("{name} differs from actual patient data").into());
         }
-        frame.received()?;
         used.insert(*id);
     }
     let mut overlaps = 0;
@@ -700,26 +688,11 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         }
     }
     Ok(
-        json!({"status":"passed","task":"5H","domain_calls":calls.len(),"violations":0,"simulator_complete":true,"common_causal_score":"passed","independent_effect_overlaps":overlaps,"cross_scanner_effect_overlaps":scanners,"effect_receives_bound_to_checked_occurrences":true,"scope":"one-use typed file/resource receive commits, both ICU requests, actual effects and readable findings; EPF owns dynamic order","absent_domain_effects_certified":false}),
+        json!({"dynamic_protocol":dynamic,"status":"passed","task":"5H","domain_calls":calls.len(),"violations":0,"simulator_complete":true,"common_causal_score":"passed","independent_effect_overlaps":overlaps,"cross_scanner_effect_overlaps":scanners,"effect_receives_bound_to_checked_occurrences":true,"scope":"one-use typed file/resource receive commits, both ICU requests, actual effects and readable findings; EPF owns dynamic order","absent_domain_effects_certified":false}),
     )
 }
-pub fn audit(path: &Path) -> Result<Value> {
-    let artifact = crate::projection::load(path)?;
-    let rows = records(path)?;
-    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
-    let mut result = check(&rows, &artifact, &dynamic)?;
-    result["dynamic_protocol"] = dynamic;
-    result["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("evidence directory")?
-            .join("projection.json")
-    )?);
-    result["runtime_binary_sha256"] = artifact["runtime_binary_sha256"].clone();
-    Ok(result)
-}
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    let artifact = crate::projection::load(path)?;
+    let (artifact, _) = crate::projection::load(path)?;
     let rows = records(path)?;
     let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
     check(&rows, &artifact, &dynamic)?;
@@ -727,7 +700,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let actors = rows[0]["message"]["fixtures"]
         .as_array()
         .ok_or("participants")?;
-    let journal = crate::journal::read(&rows, &labels, actors)?;
+    let journal = crate::journal::read(&rows, &labels, actors, &dynamic)?;
     let contracts = crate::projection::contracts(&artifact["compiled"])?;
     let business = clinical_frames(&artifact["compiled"])?;
     let selected = journal

@@ -1,32 +1,16 @@
 //! Bind 13H effects to committed file and instrument requests and actual replies.
 use crate::{
-    evidence::{Result, digest},
+    evidence::Result,
     journal::{self, one},
     projection,
 };
 use serde_json::{Value, json};
-use std::{collections::BTreeSet, ops::Range, path::Path};
+use std::{collections::BTreeSet, ops::Range};
 
 type Edge = (&'static str, &'static str, &'static str);
 type Instrument = (&'static str, &'static str, &'static str, &'static str);
 
-pub fn audit(path: &Path) -> Result<Value> {
-    let rows = journal::records(path)?;
-    let artifact = projection::load(path)?;
-    let dynamic = projection::check_dynamic(&artifact, &rows)?;
-    let mut result = check(&rows, &artifact, &dynamic)?;
-    result["source_events_sha256"] = json!(digest(path)?);
-    result["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("scientific evidence directory")?
-            .join("projection.json")
-    )?);
-    result["runtime_binary_sha256"] = artifact["runtime_binary_sha256"].clone();
-    Ok(result)
-}
-
-fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty scientific history")?["message"];
     let actors = fixture["fixtures"]
@@ -61,8 +45,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             .ok_or_else(|| format!("compiled message {name}"))
     };
     let headers = projection::frames(artifact, rows)?;
-    let mut journal = journal::read(rows, &headers, actors)?;
-    journal.bind_receives(dynamic)?;
+    let journal = journal::read(rows, &headers, actors, dynamic)?;
     let journal::Journal {
         frames,
         calls,
@@ -102,14 +85,14 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 !used.contains(*id)
                     && f.direction(key.0, key.1)
                     && u64::from(f.logical_label) == key.2
-                    && f.received.is_some_and(|at| interval.contains(&at))
+                    && interval.contains(&f.received)
             })
             .min_by_key(|(_, frame)| frame.received)
             .ok_or_else(|| {
                 format!("missing committed scientific {msg} {from}->{to} in {interval:?}")
             })?;
         used.insert(*id);
-        Ok((frame.received()?, frame.value()?))
+        Ok((frame.received, frame.value()?))
     };
     let mut scored = BTreeSet::new();
     let mut ordered = calls.values().collect::<Vec<_>>();
@@ -410,13 +393,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             input
         };
         let (index, _) = one(score_events.iter().enumerate().filter(|(index, event)| {
-            !scored.contains(index)
-                && event["agent"] == who
-                && event["tool"] == tool
-                && event["args"] == *scored_input
-                && event["success"] == success
-                && event["result"] == output["data"]
-                && event["violations"] == json!([])
+            !scored.contains(index) && call.matches_score(event, scored_input)
         }))?;
         scored.insert(index);
     }

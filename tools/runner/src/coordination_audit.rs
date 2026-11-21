@@ -1,15 +1,9 @@
 //! EPF owns execution/custody; this reader checks file bytes and actual effects.
-use crate::{
-    evidence::{Result, digest},
-    journal,
-};
+use crate::{evidence::Result, journal};
 use hibana::runtime::wire::{Payload, WirePayload};
 use hibana_wasip1_runtime::protocol;
 use serde_json::{Value, json};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::Path,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
 fn number(value: &Value) -> Result<u64> {
     value
@@ -32,7 +26,7 @@ fn same_path(observed: &[u8], expected: &str) -> bool {
     objects.choreofs().resolve(observed) == Some(ObjectId(0))
 }
 
-fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty coordination evidence")?["message"];
     if compiled["task"] != "4E" || fixture["task"] != "4E" || fixture["type"] != "fixtures" {
@@ -56,10 +50,8 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
     let store = role("STORE")?;
     let repo = role("REPO")?;
     let environment = role("TEST_ENV")?;
-    let dynamic = crate::projection::check_dynamic(artifact, rows)?;
     let labels = crate::projection::frames(artifact, rows)?;
-    let mut journal = journal::read(rows, &labels, actors)?;
-    let receipts = journal.bind_receives(&dynamic)?;
+    let journal = journal::read(rows, &labels, actors, dynamic)?;
     let frames = &journal.frames;
     if frames
         .values()
@@ -70,42 +62,6 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
     {
         return Err("coordination completion or session differs".into());
     }
-    // Readonly provenance indices into EPF's complete capture. They carry no
-    // workflow state and neither choose nor recheck a protocol transition.
-    let mut locations = BTreeMap::new();
-    let mut ordinals = BTreeMap::<u64, u64>::new();
-    for (row, item) in rows
-        .iter()
-        .enumerate()
-        .filter(|(_, r)| r["direction"] == "runtime")
-    {
-        let message = &item["message"];
-        if message["type"] != "protocol_capture" {
-            continue;
-        }
-        let producer = message["producer"].as_u64().ok_or("capture producer")?;
-        for _ in message["records"].as_array().ok_or("capture records")? {
-            let ordinal = ordinals.entry(producer).or_default();
-            if locations.insert((producer, *ordinal), row).is_some() {
-                return Err("repeated capture provenance".into());
-            }
-            *ordinal += 1;
-        }
-    }
-    let mut send_positions = BTreeMap::new();
-    for (&id, receipt) in &receipts {
-        let producer = receipt["producer"].as_u64().ok_or("acceptance producer")?;
-        let first = receipt["first_poll"]
-            .as_u64()
-            .ok_or("acceptance first poll")?;
-        let position = locations
-            .get(&(producer, first))
-            .copied()
-            .ok_or("accepted send has no capture position")?;
-        send_positions.insert(id, position);
-    }
-    // bind_receives established exactly one receipt for every frame.
-    let send_at = |id: u64| send_positions[&id];
     let contract_label = label("Contract")?;
     let ready_label = label("Ready")?;
     let candidate_before = |before: usize| -> Result<Value> {
@@ -217,14 +173,14 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         let mut offset = 0usize;
         let mut flags = 0u16;
         for ((_, request_id, request), (_, reply_id, reply)) in requests.into_iter().zip(replies) {
-            let request_at = request.received()?;
-            let reply_at = send_at(reply_id);
+            let request_at = request.received;
+            let reply_at = frames[&reply_id].first_poll;
             let receiver = metadata;
-            if receipts[&request_id]["send_actor"] != guest
-                || receipts[&request_id]["receive_commit"]["actor"] != receiver
-                || receipts[&reply_id]["send_actor"] != receiver
-                || receipts[&reply_id]["receive_commit"]["actor"] != guest
-                || reply_at <= request.received()?
+            if journal.frames[&request_id].receipt["send_actor"] != guest
+                || journal.frames[&request_id].receipt["receive_commit"]["actor"] != receiver
+                || journal.frames[&reply_id].receipt["send_actor"] != receiver
+                || journal.frames[&reply_id].receipt["receive_commit"]["actor"] != guest
+                || reply_at <= request.received
             {
                 return Err(
                     "file request/reply crossed its actual participant or occurrence".into(),
@@ -372,8 +328,8 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
                         let (&intent_id, intent) = journal::one(frames.iter().filter(|(_, f)| {
                             f.direction(control, store)
                                 && f.logical_label == intent_label
-                                && f.received
-                                    .is_some_and(|at| at > request_at && at < call.emitted)
+                                && f.received > request_at
+                                && f.received < call.emitted
                         }))?;
                         let input = intent.value()?;
                         if name == "TESTER" {
@@ -389,7 +345,7 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
                                     f.direction(store, file)
                                         && f.logical_label == ready_label
                                         && f.value().is_ok_and(|v| v == candidate)
-                                        && f.received.is_some_and(|at| at < request_at)
+                                        && f.received < request_at
                                 })
                                 .max_by_key(|(_, f)| f.received)
                                 .ok_or("missing current candidate delivery")?;
@@ -409,26 +365,27 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
                                 journal::one(frames.iter().filter(|(_, f)| {
                                     f.direction(resource, store)
                                         && f.logical_label == request_label
-                                        && f.received
-                                            .is_some_and(|at| at > request_at && at < call.emitted)
+                                        && f.received > request_at
+                                        && f.received < call.emitted
                                 }))?;
                             if resource_request.value()? != arguments
                                 || !used_frames.insert(id)
-                                || receipts[&id]["send_actor"] != metadata
-                                || receipts[&id]["receive_commit"]["actor"] != store
+                                || journal.frames[&id].receipt["send_actor"] != metadata
+                                || journal.frames[&id].receipt["receive_commit"]["actor"] != store
                             {
                                 return Err("actual resource request differs or is reused".into());
                             }
                             let (&id, response) = journal::one(frames.iter().filter(|(id, f)| {
                                 f.direction(store, resource)
                                     && f.logical_label == reply_label
-                                    && send_at(**id) > result_at
-                                    && send_at(**id) < reply_at
+                                    && frames[*id].first_poll > result_at
+                                    && frames[*id].first_poll < reply_at
                             }))?;
                             if response.value()? != *result
                                 || !used_frames.insert(id)
-                                || receipts[&id]["send_actor"] != store
-                                || receipts[&id]["receive_commit"]["actor"] != metadata
+                                || journal.frames[&id].receipt["send_actor"] != store
+                                || journal.frames[&id].receipt["receive_commit"]["actor"]
+                                    != metadata
                             {
                                 return Err("actual resource reply differs or is reused".into());
                             }
@@ -438,8 +395,8 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
                             let (&id, notice) = journal::one(frames.iter().filter(|(id, f)| {
                                 f.direction(control, file)
                                     && f.logical_label == ready_label
-                                    && send_at(**id) > result_at
-                                    && send_at(**id) > reply_at
+                                    && frames[*id].first_poll > result_at
+                                    && frames[*id].first_poll > reply_at
                             }))?;
                             if notice.value()? != *result || !used_frames.insert(id) {
                                 return Err(
@@ -454,14 +411,7 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
                         };
                         let at = scored
                             .iter()
-                            .position(|e| {
-                                e["agent"] == agent
-                                    && e["tool"] == tool
-                                    && e["args"] == score_args
-                                    && e["success"] == result["success"]
-                                    && e["result"] == result["data"]
-                                    && e["violations"] == json!([])
-                            })
+                            .position(|e| call.matches_score(e, &score_args))
                             .ok_or("actual effect differs from original score")?;
                         scored.remove(at);
                         result.clone()
@@ -480,8 +430,8 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
                             journal::one(frames.iter().filter(|(id, f)| {
                                 f.direction(control, store)
                                     && f.logical_label == order
-                                    && send_at(**id) > request_at
-                                    && send_at(**id) < reply_at
+                                    && frames[*id].first_poll > request_at
+                                    && frames[*id].first_poll < reply_at
                             }))?;
                         let (&contract_id, contract) = frames
                             .iter()
@@ -489,7 +439,7 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
                                 f.direction(store, file)
                                     && f.logical_label == contract_label
                                     && !used_frames.contains(*id)
-                                    && f.received.is_some_and(|at| at < request_at)
+                                    && f.received < request_at
                             })
                             .max_by_key(|(_, f)| f.received)
                             .ok_or("missing actual API contract")?;
@@ -501,14 +451,14 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
                             return Err("agreement contract differs or is reused".into());
                         }
                         let result = json!({"success":true,"api_contract":actual,"first":arguments["first"]});
-                        let order_received = order_frame.received()?;
+                        let order_received = order_frame.received;
                         let accepted_label = label("AgreementAccepted")?;
                         let (&accepted_id, accepted) =
                             journal::one(frames.iter().filter(|(_, f)| {
                                 f.direction(store, control)
                                     && f.logical_label == accepted_label
-                                    && f.received
-                                        .is_some_and(|at| at > order_received && at < reply_at)
+                                    && f.received > order_received
+                                    && f.received < reply_at
                             }))?;
                         if accepted.value()? != result || !used_frames.insert(accepted_id) {
                             return Err("actual agreement acceptance differs or is reused".into());
@@ -519,17 +469,16 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
                                 f.direction(file, control)
                                     && f.logical_label == protocol::LABEL_WASI_FD_CLOSE_OBJECT
                             })
-                            .filter_map(|f| f.received)
+                            .map(|f| f.received)
                             .filter(|at| *at > request_at)
                             .min();
                         let (&reply_id, actual_reply) =
                             journal::one(frames.iter().filter(|(id, f)| {
                                 f.direction(control, file)
                                     && f.logical_label == contract_label
-                                    && send_at(**id) > reply_at
-                                    && next_close_at.is_none_or(|at| send_at(**id) < at)
+                                    && frames[*id].first_poll > reply_at
+                                    && next_close_at.is_none_or(|at| frames[*id].first_poll < at)
                                     && !used_frames.contains(id)
-                                    && f.received.is_some()
                             }))?;
                         if actual_reply.value()? != result || !used_frames.insert(reply_id) {
                             return Err("incoming agreement response differs or is reused".into());
@@ -539,8 +488,8 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
                         let (&id, notice) = journal::one(frames.iter().filter(|(id, f)| {
                             f.direction(control, backend_file)
                                 && f.logical_label == backend_notice
-                                && send_at(**id) > request_at
-                                && send_at(**id) < reply_at
+                                && frames[*id].first_poll > request_at
+                                && frames[*id].first_poll < reply_at
                         }))?;
                         if notice.value()? != result || !used_frames.insert(id) {
                             return Err("backend agreement notice differs or is reused".into());
@@ -618,9 +567,9 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
                 .filter(|(_, f)| f.direction(store, file) && f.logical_label == result_label),
         )?;
         if result.value()? != *actual_result
-            || send_at(id) <= test_result_at
+            || frames[&id].first_poll <= test_result_at
             || !used_frames.insert(id)
-            || receipts[&id]["receive_commit"]["actor"] != guest
+            || journal.frames[&id].receipt["receive_commit"]["actor"] != guest
         {
             return Err("incoming outcome differs from the actual test result".into());
         }
@@ -646,7 +595,7 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         .filter(|(_, f)| f.direction(store, tester_file) && f.logical_label == ready_label)
     {
         if !used_frames.contains(&id) {
-            if frame.value()? != candidate_before(send_at(id))? {
+            if frame.value()? != candidate_before(frames[&id].first_poll)? {
                 return Err("candidate notification differs from actual completed work".into());
             }
             used_frames.insert(id);
@@ -693,19 +642,4 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         "simulator_complete":true,"violations":0,"dynamic_protocol":dynamic,
         "effect_scope":"EPF-checked receives, actual mounted-file bytes, unique admitted values/resource requests/effects/replies, current test candidate and common score"}),
     )
-}
-
-pub fn audit(path: &Path) -> Result<Value> {
-    let artifact = crate::projection::load(path)?;
-    let rows = journal::records(path)?;
-    let mut result = check(&rows, &artifact)?;
-    result["source_events_sha256"] = json!(digest(path)?);
-    result["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("evidence directory")?
-            .join("projection.json")
-    )?);
-    result["runtime_binary_sha256"] = artifact["runtime_binary_sha256"].clone();
-    Ok(result)
 }

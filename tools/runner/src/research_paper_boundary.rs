@@ -1,7 +1,7 @@
 use crate::{
     drug_discovery_boundary::{read, write},
     evidence::{Result, Trace, archive_build_receipt, digest, save},
-    oracle, process, projection, research_paper_audit,
+    oracle, process, projection,
 };
 use serde_json::json;
 use std::{
@@ -163,7 +163,8 @@ async fn actual_wasm_publishes_three_independent_chapters() -> Result<()> {
             .len(),
         if failures.is_empty() { 16 } else { 24 }
     );
-    let audit = research_paper_audit::audit(&events)?;
+    let audit =
+        crate::journal::Evidence::open(&events)?.audit(crate::research_paper_audit::check)?;
     assert_eq!(audit["status"], "passed");
     save(&directory.join("effect-audit.json"), &audit)?;
     Ok(())

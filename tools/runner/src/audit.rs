@@ -388,7 +388,6 @@ pub fn run(root: &Path) -> Result<Value> {
     if result["versions"] != versions
         || !result["error"].is_null()
         || result["scored_benchmark"] != false
-        || result["events_sha256"] != digest(&root.join("events.jsonl"))?
     {
         return Err("failed or altered case result".into());
     }
@@ -438,7 +437,11 @@ pub fn run(root: &Path) -> Result<Value> {
         return Err("runtime, source or build receipt differs".into());
     }
     snapshot::runtime_sources(root, &root.join("build-source.sha256"))?;
-    let rows = records(&root.join("events.jsonl"))?;
+    let evidence = crate::journal::Evidence::open(&root.join("events.jsonl"))?;
+    if result["events_sha256"] != evidence.events_hash {
+        return Err("altered event journal".into());
+    }
+    let rows = &evidence.rows;
     let fixture = &rows.first().ok_or("no runtime evidence")?["message"];
     let metadata = load(
         &root
@@ -523,7 +526,7 @@ pub fn run(root: &Path) -> Result<Value> {
         participants.push(participant(
             root,
             actor["agent"].as_str().ok_or("actor")?,
-            &rows,
+            rows,
         )?);
     }
     let mut times = Vec::new();
@@ -549,45 +552,42 @@ pub fn run(root: &Path) -> Result<Value> {
         maximum = maximum.max(active);
     }
     let fixture_task = fixture["task"].clone();
-    // Participant checks have consumed this parsed history. The protocol
-    // auditor owns its own parse; do not retain both copies during EPF search.
-    drop(rows);
-    let protocol = match task {
-        "1E" | "1M" | "1H" => crate::codebase_audit::audit(&root.join("events.jsonl"))?,
-        "2E" | "2M" | "2H" => crate::writing_audit::audit(&root.join("events.jsonl"))?,
-        "3E" => crate::report_audit::audit(&root.join("events.jsonl"))?,
-        "3M" => crate::research_paper_audit::audit(&root.join("events.jsonl"))?,
-        "3H" => crate::survey_paper_audit::audit(&root.join("events.jsonl"))?,
-        "4E" => crate::coordination_audit::audit(&root.join("events.jsonl"))?,
-        "4M" => crate::refactor_audit::audit(&root.join("events.jsonl"))?,
-        "13E" => crate::lab_audit::audit(&root.join("events.jsonl"))?,
-        "13M" => crate::lab_quality_audit::audit(&root.join("events.jsonl"))?,
-        "13H" => crate::lab_cascading_audit::audit(&root.join("events.jsonl"))?,
-        "14E" => crate::drug_discovery_audit::audit(&root.join("events.jsonl"))?,
-        "14M" => crate::regulatory_discovery_audit::audit(&root.join("events.jsonl"))?,
-        "14H" => crate::multi_round_discovery_audit::audit(&root.join("events.jsonl"))?,
-        "5E" => crate::medical_audit::audit(&root.join("events.jsonl"))?,
-        "5M" => crate::multi_specialty_audit::audit(&root.join("events.jsonl"))?,
-        "5H" => crate::critical_care_audit::audit(&root.join("events.jsonl"))?,
-        "6E" => crate::review_audit::audit(&root.join("events.jsonl"))?,
-        "6M" => crate::feature_delivery_audit::audit(&root.join("events.jsonl"))?,
-        "6H" => crate::staged_integration_audit::audit(&root.join("events.jsonl"))?,
-        "7E" => crate::document_audit::audit(&root.join("events.jsonl"))?,
-        "7M" => crate::figure_document_audit::audit(&root.join("events.jsonl"))?,
-        "7H" => crate::large_document_audit::audit(&root.join("events.jsonl"))?,
-        "10E" => crate::build_audit::audit(&root.join("events.jsonl"))?,
-        "11M" => crate::manufacturing_rework_audit::audit(&root.join("events.jsonl"))?,
-        "11E" => crate::manufacturing_audit::audit(&root.join("events.jsonl"))?,
-        "12E" => crate::kitchen_audit::audit(&root.join("events.jsonl"))?,
-        "10M" => crate::cascading_build_audit::audit(&root.join("events.jsonl"))?,
-        "8E" => crate::api_audit::audit(&root.join("events.jsonl"))?,
-        "8M" => crate::full_stack_api_audit::audit(&root.join("events.jsonl"))?,
-        "15E" => crate::wafer_audit::audit(&root.join("events.jsonl"))?,
-        "16E" => crate::cicd_audit::audit(&root.join("events.jsonl"))?,
-        "16M" => crate::cicd_pipeline_audit::audit(&root.join("events.jsonl"))?,
-        "9E" | "9M" | "9H" => crate::philosophers_audit::audit(&root.join("events.jsonl"))?,
+    let protocol = evidence.audit(match task {
+        "1E" | "1M" | "1H" => crate::codebase_audit::check,
+        "2E" | "2M" | "2H" => crate::writing_audit::check,
+        "3E" => crate::report_audit::check,
+        "3M" => crate::research_paper_audit::check,
+        "3H" => crate::survey_paper_audit::check,
+        "4E" => crate::coordination_audit::check,
+        "4M" => crate::refactor_audit::check,
+        "13E" => crate::lab_audit::check,
+        "13M" => crate::lab_quality_audit::check,
+        "13H" => crate::lab_cascading_audit::check,
+        "14E" => crate::drug_discovery_audit::check,
+        "14M" => crate::regulatory_discovery_audit::check,
+        "14H" => crate::multi_round_discovery_audit::check,
+        "5E" => crate::medical_audit::check,
+        "5M" => crate::multi_specialty_audit::check,
+        "5H" => crate::critical_care_audit::check,
+        "6E" => crate::review_audit::check,
+        "6M" => crate::feature_delivery_audit::check,
+        "6H" => crate::staged_integration_audit::check,
+        "7E" => crate::document_audit::check,
+        "7M" => crate::figure_document_audit::check,
+        "7H" => crate::large_document_audit::check,
+        "10E" => crate::build_audit::check,
+        "11M" => crate::manufacturing_rework_audit::check,
+        "11E" => crate::manufacturing_audit::check,
+        "12E" => crate::kitchen_audit::check,
+        "10M" => crate::cascading_build_audit::check,
+        "8E" => crate::api_audit::check,
+        "8M" => crate::full_stack_api_audit::check,
+        "15E" => crate::wafer_audit::check,
+        "16E" => crate::cicd_audit::check,
+        "16M" => crate::cicd_pipeline_audit::check,
+        "9E" | "9M" | "9H" => crate::philosophers_audit::check,
         _ => return Err("task has no delegated WASI implementation".into()),
-    };
+    })?;
     if protocol["compiled_projection_sha256"] != versions["compiled_projection_sha256"]
         || protocol["runtime_binary_sha256"] != versions["binaries"]["runtime"]
     {

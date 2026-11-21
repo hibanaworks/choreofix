@@ -1,23 +1,15 @@
 //! Match the physical 4H simulator effects to the committed requests that supplied them.
 use crate::{evidence::Result, journal, projection};
 use serde_json::{Value, json};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::Path,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
-pub fn audit(events: &Path) -> Result<Value> {
-    check(&journal::records(events)?, &projection::load(events)?)
-}
-
-pub(super) fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let fixture = &rows.first().ok_or("empty 4H history")?["message"];
     if artifact["compiled"]["task"] != "4H" || fixture["task"] != "4H" {
         return Err("expected a 4H projection and participants".into());
     }
     let actors = fixture["fixtures"].as_array().ok_or("4H participants")?;
     let headers = projection::frames(artifact, rows)?;
-    let dynamic = projection::check_dynamic(artifact, rows)?;
     let expected = BTreeSet::from([
         "ARCHITECT",
         "DEVELOPER_A",
@@ -36,19 +28,14 @@ pub(super) fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
     {
         return Err("incomplete 4H participants".into());
     }
-    let mut history = journal::read(rows, &headers, actors)?;
-    let receipts = history.bind_receives(&dynamic)?;
-    let mut result = preparation(&history, &receipts, &artifact["compiled"]["roles"])?;
+    let history = journal::read(rows, &headers, actors, dynamic)?;
+    let mut result = preparation(&history, &artifact["compiled"]["roles"])?;
     result["epf_records"] = dynamic["captured_records"].clone();
     result["runtime_sha256"] = artifact["runtime_binary_sha256"].clone();
     Ok(result)
 }
 
-pub(super) fn preparation(
-    history: &journal::Journal,
-    receipts: &BTreeMap<u64, &Value>,
-    roles: &Value,
-) -> Result<Value> {
+pub(super) fn preparation(history: &journal::Journal, roles: &Value) -> Result<Value> {
     let role = |name: &str| {
         roles[name]
             .as_u64()
@@ -68,7 +55,7 @@ pub(super) fn preparation(
     let mut calls: Vec<_> = history.calls.iter().collect();
     calls.sort_by_key(|(_, call)| call.emitted);
     let mut used = BTreeSet::new();
-    let deployments = deployment_attempts(history, receipts, roles, &mut used)?;
+    let deployments = deployment_attempts(history, roles, &mut used)?;
     let mut scores = BTreeSet::new();
     let mut correspondence = Vec::new();
     let mut latest: BTreeMap<(&str, &str), (usize, &Value)> = BTreeMap::new();
@@ -179,14 +166,11 @@ pub(super) fn preparation(
         {
             return Err("effect actor, service or unique simulator receipt differs".into());
         }
-        journal::one(scored.iter().filter(|event| {
-            event["agent"] == agent
-                && event["tool"] == tool
-                && event["args"] == *args
-                && event["result"] == *data
-                && event["success"] == result["success"]
-                && event["violations"] == json!([])
-        }))?;
+        journal::one(
+            scored
+                .iter()
+                .filter(|event| call.matches_score(event, args)),
+        )?;
 
         request_edges.insert((file, receiver));
         reply_edges.insert((receiver, file, tool));
@@ -201,20 +185,22 @@ pub(super) fn preparation(
             let (&frame_id, frame) = journal::one(history.frames.iter().filter(|(i, f)| {
                 !used.contains(*i)
                     && f.direction(from, to)
-                    && f.received.is_some_and(|at| {
+                    && {
                         after.is_none_or(|start| start < f.sent)
-                            && before.is_none_or(|end| at < end)
-                    })
+                            && before.is_none_or(|end| f.received < end)
+                    }
                     && f.value().is_ok_and(|v| v == *payload)
             }))?;
-            let observed = receipts
+            let observed = history
+                .frames
                 .get(&frame_id)
-                .ok_or("missing committed 4H frame")?;
+                .ok_or("missing committed 4H frame")?
+                .receipt;
             if observed["send_actor"] != sender || observed["receive_commit"]["actor"] != holder {
                 return Err("wrong physical actor for 4H request or reply".into());
             }
             used.insert(frame_id);
-            Ok((frame_id, frame.received()?))
+            Ok((frame_id, frame.received))
         };
         let (request, effect_request, reply) = if tool == "deploy_service" {
             request_edges.insert((role("STAGING_ENV")?, role("STAGING_SERVER")?));
@@ -357,7 +343,7 @@ pub(super) fn preparation(
                     && matches!(f.bytes.as_slice(), [view, _, _] if u64::from(*view) == service)
                     && f.sent > history.frames[&candidate].sent
             }))?;
-            let granted = transfer.received()?;
+            let granted = transfer.received;
             let (delivery, _) = committed(
                 service,
                 file,
@@ -367,9 +353,11 @@ pub(super) fn preparation(
                 Some(granted),
                 None,
             )?;
-            let owned = receipts
+            let owned = history
+                .frames
                 .get(&loan)
-                .ok_or("missing service transfer commit")?;
+                .ok_or("missing service transfer commit")?
+                .receipt;
             if informed >= granted
                 || owned["send_actor"] != tester
                 || owned["receive_commit"]["actor"] != devops
@@ -432,7 +420,6 @@ pub(super) fn preparation(
 /// Follow one service's real file requests, including a refusal followed by identical arguments.
 fn deployment_attempts(
     history: &journal::Journal,
-    receipts: &BTreeMap<u64, &Value>,
     roles: &Value,
     used: &mut BTreeSet<u64>,
 ) -> Result<BTreeMap<u64, (u64, u64, u64)>> {
@@ -458,7 +445,11 @@ fn deployment_attempts(
                 .get(i + 1)
                 .map_or(usize::MAX, |(_, next)| next.sent);
             let args = request.value()?;
-            let admission = receipts.get(&id).ok_or("missing deployment file commit")?;
+            let admission = history
+                .frames
+                .get(&id)
+                .ok_or("missing deployment file commit")?
+                .receipt;
             if args != json!({"service":name,"environment":"staging"})
                 || admission["send_actor"] != vm
                 || admission["receive_commit"]["actor"] != devops
@@ -495,14 +486,14 @@ fn deployment_attempts(
             let outcome = reply.value()?;
             let (answer_id, answer) = frame(svc, devops, None, Some(&outcome))?;
             let (return_id, returned) = frame(owner, devops, Some(47), None)?;
-            if !(request.received()? < test.sent
+            if !(request.received < test.sent
                 && test.sent < grant.sent
-                && test.received()? < grant.received()?
-                && grant.received()? < forward.received()?
-                && forward.received()? < answer.sent
+                && test.received < grant.received
+                && grant.received < forward.received
+                && forward.received < answer.sent
                 && answer.sent < returned.sent
-                && answer.received()? < returned.received()?
-                && returned.received()? < reply.sent)
+                && answer.received < returned.received
+                && returned.received < reply.sent)
             {
                 return Err("deployment service custody and response are out of order".into());
             }
@@ -514,7 +505,11 @@ fn deployment_attempts(
                 (return_id, owner, devops),
                 (reply_id, devops, vm),
             ] {
-                let epf = receipts.get(&id).ok_or("absent deployment commit")?;
+                let epf = history
+                    .frames
+                    .get(&id)
+                    .ok_or("absent deployment commit")?
+                    .receipt;
                 if epf["send_actor"] != sender
                     || epf["receive_commit"]["actor"] != receiver
                     || !used.insert(id)
@@ -522,7 +517,7 @@ fn deployment_attempts(
                     return Err("wrong or reused deployment occurrence".into());
                 }
             }
-            let forwarded_at = forward.received()?;
+            let forwarded_at = forward.received;
             let physical: Vec<_> = history
                 .frames
                 .iter()
@@ -568,14 +563,14 @@ fn deployment_attempts(
             let (&rpc, call) = journal::one(history.calls.iter().filter(|(_, c)| {
                 c.tool().ok() == Some("deploy_service")
                     && c.request["arguments"] == args
-                    && admitted.received.is_some_and(|at| at < c.emitted)
+                    && admitted.received < c.emitted
                     && c.result()
                         .is_ok_and(|(at, result)| at < answer.sent && *result == outcome)
             }))?;
             let (observed_id, observed) = frame(server, env, None, Some(call.result()?.1))?;
-            if !(forward.received()? < admitted.sent
+            if !(forward.received < admitted.sent
                 && call.result()?.0 < observed.sent
-                && observed.received()? < answer.sent)
+                && observed.received < answer.sent)
                 || outcome["data"]["test"] != evidence["data"]["receipt"]
                 || outcome["data"]["candidate"] != evidence["data"]["candidate"]
                 || answer.logical_label != request.logical_label
@@ -588,7 +583,11 @@ fn deployment_attempts(
             for (id, sender, receiver) in
                 [(physical_id, owner, server), (observed_id, server, owner)]
             {
-                let epf = receipts.get(&id).ok_or("absent physical staging commit")?;
+                let epf = history
+                    .frames
+                    .get(&id)
+                    .ok_or("absent physical staging commit")?
+                    .receipt;
                 if epf["send_actor"] != sender
                     || epf["receive_commit"]["actor"] != receiver
                     || !used.insert(id)

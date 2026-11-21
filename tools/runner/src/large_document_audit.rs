@@ -1,18 +1,13 @@
 //! Match 7H effects to the actual file operations and material received by their actors.
 use crate::{
-    evidence::{Result, digest},
+    evidence::Result,
     journal::{self, Journal, one},
     projection,
 };
 use serde_json::{Value, json};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::Path,
-};
+use std::collections::BTreeSet;
 
-pub(crate) fn audit(path: &Path) -> Result<Value> {
-    let rows = journal::records(path)?;
-    let artifact = projection::load(path)?;
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("missing 7H evidence")?["message"];
     let actors = fixture["fixtures"].as_array().ok_or("7H participants")?;
@@ -36,28 +31,14 @@ pub(crate) fn audit(path: &Path) -> Result<Value> {
     {
         return Err("7H task or participants differ".into());
     }
-    let headers = projection::frames(&artifact, &rows)?;
-    let dynamic = projection::check_dynamic(&artifact, &rows)?;
-    let mut history = journal::read(&rows, &headers, actors)?;
-    let receipts = history.bind_receives(&dynamic)?;
-    let mut report = check(compiled, &history, &receipts)?;
-    report["runtime_binary_sha256"] = artifact["runtime_binary_sha256"].clone();
-    report["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("missing evidence directory")?
-            .join("projection.json")
-    )?);
-    report["events_sha256"] = json!(digest(path)?);
+    let headers = projection::frames(artifact, rows)?;
+    let history = journal::read(rows, &headers, actors, dynamic)?;
+    let mut report = effects(compiled, &history)?;
     report["captured_records"] = dynamic["captured_records"].clone();
     Ok(report)
 }
 
-pub(crate) fn check(
-    compiled: &Value,
-    history: &Journal,
-    receipts: &BTreeMap<u64, &Value>,
-) -> Result<Value> {
+pub(crate) fn effects(compiled: &Value, history: &Journal) -> Result<Value> {
     let role = |name: &str| compiled["roles"][name].as_u64().ok_or("7H projected role");
     let scores = history.score["events"]
         .as_array()
@@ -83,8 +64,8 @@ pub(crate) fn check(
         {
             continue;
         }
-        let at = frame.received()?;
-        let commit = &receipts[id]["receive_commit"];
+        let at = frame.received;
+        let commit = &history.frames[id].receipt["receive_commit"];
         let material = frame.value()?;
         let reviews = material["reviews"]
             .as_array()
@@ -248,7 +229,7 @@ pub(crate) fn check(
                 && operations
                     .iter()
                     .any(|label| compiled["labels"][label] == u64::from(frame.logical_label))
-                && frame.received.is_some_and(|at| at < call.emitted)
+                && frame.received < call.emitted
                 && frame.value().is_ok_and(|value| value == *args)
         }))
         .map_err(|err| format!("7H request {agent} {tool} {section}: {err}"))?;
@@ -260,8 +241,8 @@ pub(crate) fn check(
         } else {
             "FACT_EDITORIAL"
         };
-        let request_commit = &receipts[&request_id]["receive_commit"];
-        let request_at = request.received()?;
+        let request_commit = &history.frames[&request_id].receipt["receive_commit"];
+        let request_at = request.received;
         let operation = operations
             .iter()
             .find(|name| compiled["labels"][name.as_str()] == u64::from(request.logical_label))
@@ -335,13 +316,12 @@ pub(crate) fn check(
                     .iter()
                     .any(|name| role(name).is_ok_and(|source| frame.direction(source, from)))
                 && u64::from(frame.logical_label) == reply_label
-                && frame
-                    .received
-                    .is_some_and(|at| returned < at && next_same_reply.is_none_or(|next| at < next))
+                && returned < frame.received
+                && next_same_reply.is_none_or(|next| frame.received < next)
                 && frame.value().is_ok_and(|value| value == *reply_value)
         }))
         .map_err(|err| format!("7H reply {agent} {tool} {section}: {err}"))?;
-        let reply_commit = &receipts[&reply_id]["receive_commit"];
+        let reply_commit = &history.frames[&reply_id].receipt["receive_commit"];
         if reply_commit["actor"] != role(actor)? {
             return Err("7H effect result went to the wrong actor".into());
         }
@@ -350,14 +330,7 @@ pub(crate) fn check(
         let (score, _) = scores
             .iter()
             .enumerate()
-            .find(|(index, event)| {
-                !scored.contains(index)
-                    && event["agent"] == agent
-                    && event["tool"] == tool
-                    && event["args"] == *args
-                    && event["result"] == result["data"]
-                    && event["success"] == result["success"]
-            })
+            .find(|(index, event)| !scored.contains(index) && call.matches_score(event, args))
             .ok_or("7H domain effect is missing its common score event")?;
         scored.insert(score);
 
@@ -389,12 +362,11 @@ pub(crate) fn check(
                     !used.contains(*id)
                         && frame.direction(source, target)
                         && frame.logical_label == request.logical_label
-                        && frame
-                            .received
-                            .is_some_and(|at| request_at < at && at < call.emitted)
+                        && request_at < frame.received
+                        && frame.received < call.emitted
                         && frame.value().is_ok_and(|value| value == *args)
                 }))?;
-                let commit = &receipts[&id]["receive_commit"];
+                let commit = &history.frames[&id].receipt["receive_commit"];
                 if commit["actor"] != actor {
                     return Err("7H insertion was not received by the resource".into());
                 }
@@ -405,11 +377,11 @@ pub(crate) fn check(
                 !used.contains(*id)
                     && frame.direction(to, store)
                     && frame.logical_label == request.logical_label
-                    && frame.received.is_some_and(|at| returned < at)
+                    && returned < frame.received
                     && frame.value().is_ok_and(|value| value == *result)
             }))?;
-            if receipts[&id]["receive_commit"]["actor"] != role("FIGURE_CREATOR")?
-                || working_reply.received()? >= reply.received()?
+            if history.frames[&id].receipt["receive_commit"]["actor"] != role("FIGURE_CREATOR")?
+                || working_reply.received >= reply.received
             {
                 return Err("7H insertion result did not pass through the figure resource".into());
             }
@@ -437,11 +409,11 @@ pub(crate) fn check(
                         && compiled["labels"][material_label] == u64::from(frame.logical_label)
                         && (tool != "fact_check"
                             || frame.value().is_ok_and(|v| v["sections"].is_object()))
-                        && frame.received.is_some_and(|at| at < request_at)
+                        && frame.received < request_at
                 })
                 .max_by_key(|(_, frame)| frame.received)
                 .ok_or("7H assessment has no material receive")?;
-            let material_commit = &receipts[&material]["receive_commit"];
+            let material_commit = &history.frames[&material].receipt["receive_commit"];
             if material_commit["actor"] != role(actor)? {
                 return Err("7H assessment material went to the wrong actor".into());
             }
@@ -487,10 +459,9 @@ pub(crate) fn check(
                 let checked = input.value()?;
                 let facts = one(ordered.iter().filter(|prior| {
                     prior.tool().ok() == Some("fact_check")
-                        && prior.result().is_ok_and(|(at, value)| {
-                            input.received.is_some_and(|received| at < received)
-                                && *value == checked
-                        })
+                        && prior
+                            .result()
+                            .is_ok_and(|(at, value)| at < input.received && *value == checked)
                 }))?;
                 if checked["success"] != true
                     || checked["data"]["section"] != section
@@ -540,7 +511,7 @@ pub(crate) fn check(
                     frame.direction(to, from)
                         && compiled["labels"]["PublicationMaterial"]
                             == u64::from(frame.logical_label)
-                        && frame.received.is_some_and(|at| at < request_at)
+                        && frame.received < request_at
                 })
                 .max_by_key(|(_, frame)| frame.received)
                 .ok_or("7H editor has no admitted current material")?;
@@ -630,15 +601,14 @@ pub(crate) fn check(
                         role(source).is_ok_and(|source| frame.direction(source, from))
                     })
                     && compiled["labels"][notice_label] == u64::from(frame.logical_label)
-                    && frame
-                        .received
-                        .is_some_and(|received| at < received && received < request_at)
+                    && at < frame.received
+                    && frame.received < request_at
                     && frame.value().is_ok_and(|payload| &payload == assessment)
             }))
             .map_err(|error| {
                 format!("7H revision did not receive its rejected assessment: {error}")
             })?;
-            let commit = &receipts[&id]["receive_commit"];
+            let commit = &history.frames[&id].receipt["receive_commit"];
             if commit["actor"] != role(actor)? {
                 return Err("7H revision notice went to the wrong writer".into());
             }

@@ -90,8 +90,11 @@ progress belong to the projected protocol. The external simulator evaluates
 domain effects and outcomes.
 
 EPF checks recorded Endpoint execution against the compiled protocol. The
-runner's task-specific effect checkers match those observations to simulator
-calls and replies after the run. The project maintains these checkers alongside
+runner binds each physical frame to one EPF-checked receive and hashes the
+same journal and projection bytes it reads. All task checkers use the same
+comparison for the simulator actor, operation, scored arguments, result,
+success and violations. Each task supplies its argument conventions and checks
+which resource receives authorize each effect and where the reply went. The project maintains these checkers alongside
 the localsides. Attributing an effect to a particular receive relies on the
 checker for that task and on the recorded inputs. The common simulator assigns
 the business score from its own world state.

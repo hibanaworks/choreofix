@@ -1,10 +1,7 @@
 //! Join the 3M operation files, their committed Endpoint receives and real effects.
-use crate::{
-    evidence::{Result, digest},
-    journal, projection,
-};
+use crate::{evidence::Result, journal, projection};
 use serde_json::{Value, json};
-use std::{collections::BTreeSet, ops::Range, path::Path};
+use std::{collections::BTreeSet, ops::Range};
 
 const CHAPTERS: [(&str, &str, &str, &str, &str); 3] = [
     (
@@ -30,9 +27,7 @@ const CHAPTERS: [(&str, &str, &str, &str, &str); 3] = [
     ),
 ];
 
-pub fn audit(path: &Path) -> Result<Value> {
-    let rows = journal::records(path)?;
-    let artifact = projection::load(path)?;
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty paper history")?["message"];
     let actors = fixture["fixtures"].as_array().ok_or("3M participants")?;
@@ -66,10 +61,8 @@ pub fn audit(path: &Path) -> Result<Value> {
     };
     let labels = &compiled["labels"];
     let contracts = projection::contracts(compiled)?;
-    let frames = projection::frames(&artifact, &rows)?;
-    let dynamic = projection::check_dynamic(&artifact, &rows)?;
-    let mut history = journal::read(&rows, &frames, actors)?;
-    let receipts = history.bind_receives(&dynamic)?;
+    let frames = projection::frames(artifact, rows)?;
+    let history = journal::read(rows, &frames, actors, dynamic)?;
     let evaluated = history.score["events"]
         .as_array()
         .ok_or("3M score events")?;
@@ -108,7 +101,7 @@ pub fn audit(path: &Path) -> Result<Value> {
                 !used.contains(*id)
                     && frame.direction(from_role, to_role)
                     && u64::from(frame.logical_label) == message
-                    && frame.received.is_some_and(|at| within.contains(&at))
+                    && within.contains(&frame.received)
                     && resource.is_none_or(|resource| {
                         frame.identity["frame_label"]
                             .as_u64()
@@ -143,13 +136,7 @@ pub fn audit(path: &Path) -> Result<Value> {
         let success = output["success"].as_bool().ok_or("paper verdict")?;
         let before = call.emitted.min(start);
         let score = journal::one(evaluated.iter().enumerate().filter(|(index, event)| {
-            !used_scores.contains(index)
-                && event["agent"] == agent
-                && event["tool"] == tool
-                && event["args"] == *arguments
-                && event["success"] == success
-                && event["result"] == output["data"]
-                && event["violations"] == json!([])
+            !used_scores.contains(index) && call.matches_score(event, arguments)
         }))?;
         used_scores.insert(score.0);
         intervals.push((
@@ -167,7 +154,7 @@ pub fn audit(path: &Path) -> Result<Value> {
                 0..before,
                 None,
             )?;
-            let admitted = request.1.received()?;
+            let admitted = request.1.received;
             let mut authorities = Vec::new();
             for (_, _, _, _, section_role) in CHAPTERS {
                 authorities.push(
@@ -263,7 +250,7 @@ pub fn audit(path: &Path) -> Result<Value> {
                 result_at + 1..rows.len(),
                 None,
             )?;
-            let admitted = request.1.received()?;
+            let admitted = request.1.received;
             let authorities = match tool {
                 "fact_check" | "review_sections" => {
                     let (input_name, role_name) = if tool == "fact_check" {
@@ -340,9 +327,9 @@ pub fn audit(path: &Path) -> Result<Value> {
         }
         effects.push(
             json!({"effect_id":effect_id,"tool":tool,"agent":agent,"success":success,
-            "request_frame":request_id,"request_commit":request.received()?,
-            "request_occurrence":receipts[&request_id]["occurrence"],"result_frame":reply_id,
-            "result_commit":reply.received()?,"result_occurrence":receipts[&reply_id]["occurrence"],
+            "request_frame":request_id,"request_commit":request.received,
+            "request_occurrence":history.frames[&request_id].receipt["occurrence"],"result_frame":reply_id,
+            "result_commit":reply.received,"result_occurrence":history.frames[&reply_id].receipt["occurrence"],
             "chapter_receipts":authorities,"score_event":score.0}),
         );
     }
@@ -404,7 +391,7 @@ pub fn audit(path: &Path) -> Result<Value> {
     Ok(
         json!({"status":"passed","task":"3M","participants":actors.len(),"domain_calls":effects.len(),
         "domain_effects":effects,"dynamic_protocol":dynamic,"simulator_complete":true,"violations":0,
-        "cross_resource_overlaps":physical_overlap,"compiled_projection_sha256":digest(&path.with_file_name("projection.json"))?,
-        "runtime_binary_sha256":artifact["runtime_binary_sha256"]}),
+        "cross_resource_overlaps":physical_overlap,
+        }),
     )
 }

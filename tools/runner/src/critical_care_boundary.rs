@@ -199,7 +199,8 @@ async fn actual_wasi_two_patient_care_and_all_ct_orders() -> Result<()> {
     }
     for index in 0..outcomes.len() {
         let output = directory.join(format!("case{index}"));
-        let audit = crate::critical_care_audit::audit(&output.join("events.jsonl"))?;
+        let audit = crate::journal::Evidence::open(&output.join("events.jsonl"))?
+            .audit(crate::critical_care_audit::check)?;
         save(&output.join("audit.json"), &audit)?;
         if index == 8 {
             assert!(
@@ -433,7 +434,8 @@ async fn a_patient_finishes_before_the_other_is_assessed() -> Result<()> {
                     .as_f64()
                     .ok_or("assessment start timestamp")?
         );
-        let audit = crate::critical_care_audit::audit(&output.join("events.jsonl"))?;
+        let audit = crate::journal::Evidence::open(&output.join("events.jsonl"))?
+            .audit(crate::critical_care_audit::check)?;
         save(&output.join("audit.json"), &audit)?;
         outcomes.push(json!({"first_completed_patient":first,"late_patient_assessment_after_first_care":true,"audit":audit}));
         save(

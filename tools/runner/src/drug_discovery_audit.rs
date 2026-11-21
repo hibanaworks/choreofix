@@ -1,14 +1,11 @@
 //! Match committed discovery requests and replies to the actual common-world effects.
 use crate::{
-    evidence::{Result, digest},
+    evidence::Result,
     journal::{self, one},
     projection,
 };
 use serde_json::{Value, json};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::Path,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Bind observed scientific tool arguments to the file and physical instrument
 /// contracts. The regulatory task adds only its own approval operation.
@@ -76,9 +73,7 @@ pub(super) fn operation(
     Some(observed)
 }
 
-pub fn audit(path: &Path) -> Result<Value> {
-    let rows = journal::records(path)?;
-    let artifact = projection::load(path)?;
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty discovery history")?["message"];
     let actors = fixture["fixtures"]
@@ -106,10 +101,8 @@ pub fn audit(path: &Path) -> Result<Value> {
             .as_u64()
             .ok_or_else(|| format!("missing compiled message {name}"))
     };
-    let headers = projection::frames(&artifact, &rows)?;
-    let dynamic = projection::check_dynamic(&artifact, &rows)?;
-    let mut history = journal::read(&rows, &headers, actors)?;
-    history.bind_receives(&dynamic)?;
+    let headers = projection::frames(artifact, rows)?;
+    let history = journal::read(rows, &headers, actors, dynamic)?;
     let score = &history.score;
     let evaluated = score["events"].as_array().ok_or("discovery score events")?;
     if history.calls.len() != 13
@@ -156,9 +149,9 @@ pub fn audit(path: &Path) -> Result<Value> {
         let request = receive(file, owner, operation)?;
         let displayed = receive(agent, file, operation)?;
         if results.insert(operation, (end, output)).is_some()
-            || request.received()? >= call.emitted.min(start)
+            || request.received >= call.emitted.min(start)
             || request.value()? != *arguments
-            || displayed.received()? <= end
+            || displayed.received <= end
             || displayed.value()? != *output
             || output["success"] != true
         {
@@ -169,10 +162,10 @@ pub fn audit(path: &Path) -> Result<Value> {
         if let Some(instrument) = instrument {
             let used = receive(instrument, owner, operation)?;
             let reply = receive(owner, instrument, operation)?;
-            if used.received()? >= call.emitted.min(start)
-                || used.received()? <= request.received()?
+            if used.received >= call.emitted.min(start)
+                || used.received <= request.received
                 || !used.bytes.is_empty()
-                || reply.received()? <= end
+                || reply.received <= end
                 || reply.value()? != *output
             {
                 return Err(format!(
@@ -184,7 +177,7 @@ pub fn audit(path: &Path) -> Result<Value> {
         } else {
             for (from, to) in [("LEAD_SCIENTIST", "CHEMIST"), ("CHEMIST", "CHEM_FILE")] {
                 let delivered = receive(from, to, "DecisionReceipt")?;
-                if delivered.received()? <= end || delivered.value()? != *output {
+                if delivered.received <= end || delivered.value()? != *output {
                     return Err("chemist did not receive the actual decision result".into());
                 }
             }
@@ -192,12 +185,8 @@ pub fn audit(path: &Path) -> Result<Value> {
         }
         let (receipt_index, _) = one(evaluated.iter().enumerate().filter(|(index, event)| {
             !assigned.contains(index)
-                && event["agent"] == agent
-                && event["tool"] == tool
-                && event["args"] == *arguments
+                && call.matches_score(event, arguments)
                 && event["success"] == true
-                && event["result"] == output["data"]
-                && event["violations"] == json!([])
         }))?;
         assigned.insert(receipt_index);
     }
@@ -214,7 +203,7 @@ pub fn audit(path: &Path) -> Result<Value> {
     ] {
         let published = receive("CHEMIST", agent, message)?;
         let shown = receive(agent, file, message)?;
-        if published.received()? <= actual("MolecularId")?.0
+        if published.received <= actual("MolecularId")?.0
             || published.value()? != compound
             || shown.value()? != compound
         {
@@ -243,7 +232,7 @@ pub fn audit(path: &Path) -> Result<Value> {
     ] {
         let report = receive(agent, "LEAD_SCIENTIST", message)?;
         let shown = receive("LEAD_SCIENTIST", "LEAD_FILE", message)?;
-        if report.received()? <= completion
+        if report.received <= completion
             || report.value()? != expected
             || shown.value()? != expected
         {
@@ -267,9 +256,7 @@ pub fn audit(path: &Path) -> Result<Value> {
         "effect_receives_bound_to_checked_occurrences":true,
         "independent_effect_overlaps":independent_overlap,
         "decision":decision.ok_or("missing actual go/no-go receipt")?,
-        "dynamic_protocol":dynamic, "source_events_sha256":digest(path)?,
-        "runtime_binary_sha256":artifact["runtime_binary_sha256"],
-        "compiled_projection_sha256":digest(&path.parent().ok_or("discovery evidence directory")?.join("projection.json"))?,
+        "dynamic_protocol":dynamic,
         "scored_benchmark":false,
     }))
 }

@@ -252,7 +252,8 @@ async fn run(cases: Vec<(Vec<bool>, f64)>) -> Result<()> {
                 .len(),
             3 * orders.len() + 1
         );
-        let audit = crate::coordination_audit::audit(&output.join("events.jsonl"))?;
+        let audit = crate::journal::Evidence::open(&output.join("events.jsonl"))?
+            .audit(crate::coordination_audit::check)?;
         save(&output.join("audit.json"), &audit)?;
         save(&output.join("result.json"), &result)?;
         outcomes.push(json!({"case":index,"frontend_first":orders,"audit":audit,"result":result}));

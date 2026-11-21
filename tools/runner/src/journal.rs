@@ -3,25 +3,25 @@ use crate::evidence::Result;
 use hibana::runtime::wire::{Payload, WirePayload};
 use hibana_wasip1_runtime::protocol;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     path::Path,
 };
 
-pub(crate) struct Frame {
+pub(crate) struct Frame<'a> {
     pub(crate) logical_label: u8,
-    pub(crate) identity: Value,
+    pub(crate) identity: &'a Value,
     pub(crate) bytes: Vec<u8>,
     pub(crate) sent: usize,
-    pub(crate) received: Option<usize>,
+    pub(crate) first_poll: usize,
+    pub(crate) received: usize,
+    pub(crate) receipt: &'a Value,
 }
-impl Frame {
+impl Frame<'_> {
     pub(crate) fn direction(&self, from: u64, to: u64) -> bool {
         self.identity["source"] == from && self.identity["target"] == to
-    }
-    pub(crate) fn received(&self) -> Result<usize> {
-        self.received.ok_or_else(|| "unreceived frame".into())
     }
     pub(crate) fn value(&self) -> Result<Value> {
         Ok(serde_json::from_slice(&self.bytes)?)
@@ -48,6 +48,22 @@ impl Call {
             .map(|(at, value)| (*at, value))
             .ok_or_else(|| "missing original result".into())
     }
+    /// Match the scoring event to the recorded call and reply. Some simulator
+    /// tools publish normalized arguments; the caller supplies those exact values.
+    pub(crate) fn matches_score(&self, event: &Value, scored_arguments: &Value) -> bool {
+        self.result.as_ref().is_some_and(|(_, result)| {
+            event["agent"] == self.request["agent"]
+                && event["tool"] == self.request["tool"]
+                && event.get("args") == Some(scored_arguments)
+                && result["success"]
+                    .as_bool()
+                    .is_some_and(|success| event["success"] == success)
+                && event
+                    .get("result")
+                    .is_some_and(|value| value == &result["data"])
+                && event["violations"].as_array().is_some_and(Vec::is_empty)
+        })
+    }
     pub(crate) fn tool(&self) -> Result<&str> {
         self.request["tool"]
             .as_str()
@@ -63,10 +79,47 @@ pub(crate) fn one<T>(items: impl Iterator<Item = T>) -> Result<T> {
     Ok(frame)
 }
 pub(crate) fn records(path: &Path) -> Result<Vec<Value>> {
-    fs::read_to_string(path)?
-        .lines()
+    parse_records(&fs::read_to_string(path)?)
+}
+
+fn parse_records(text: &str) -> Result<Vec<Value>> {
+    text.lines()
         .map(|line| serde_json::from_str(line).map_err(Into::into))
         .collect()
+}
+
+/// The exact files used for a saved run's evidence and their content hashes.
+pub(crate) struct Evidence {
+    pub(crate) rows: Vec<Value>,
+    pub(crate) projection: Value,
+    pub(crate) events_hash: String,
+    projection_hash: String,
+}
+
+impl Evidence {
+    pub(crate) fn open(path: &Path) -> Result<Self> {
+        let (projection, projection_hash) = crate::projection::load(path)?;
+        let text = fs::read_to_string(path)?;
+        let events_hash = format!("{:x}", Sha256::digest(text.as_bytes()));
+        Ok(Self {
+            rows: parse_records(&text)?,
+            projection,
+            events_hash,
+            projection_hash,
+        })
+    }
+
+    pub(crate) fn audit(
+        &self,
+        effects: fn(&[Value], &Value, &Value) -> Result<Value>,
+    ) -> Result<Value> {
+        let execution = crate::projection::check_dynamic(&self.projection, &self.rows)?;
+        let mut report = effects(&self.rows, &self.projection, &execution)?;
+        report["source_events_sha256"] = json!(self.events_hash);
+        report["compiled_projection_sha256"] = json!(self.projection_hash);
+        report["runtime_binary_sha256"] = self.projection["runtime_binary_sha256"].clone();
+        Ok(report)
+    }
 }
 
 /// Run a saved-record counterexample in the same production auditor, releasing
@@ -216,65 +269,31 @@ pub(crate) fn check_close_pairs(frames: &BTreeMap<u64, Frame>, pairs: &[(u64, u6
 }
 
 /// Correlated observations owned by the offline auditor, never runtime authority.
-pub(crate) struct Journal {
-    pub(crate) frames: BTreeMap<u64, Frame>,
+pub(crate) struct Journal<'a> {
+    pub(crate) frames: BTreeMap<u64, Frame<'a>>,
     pub(crate) calls: BTreeMap<u64, Call>,
     pub(crate) score: Value,
 }
 
-impl Journal {
-    /// Use EPF's successful Endpoint receives for effect correspondence. The
-    /// transport acceptance alone does not establish a successful receive.
-    pub(crate) fn bind_receives<'a>(
-        &mut self,
-        dynamic: &'a Value,
-    ) -> Result<BTreeMap<u64, &'a Value>> {
-        let receipts = self.receipts(dynamic)?;
-        for (&id, receipt) in &receipts {
-            let at = usize::try_from(
-                receipt["receive_commit"]["journal_row"]
-                    .as_u64()
-                    .ok_or("committed receive journal row")?,
-            )?;
-            self.frames.get_mut(&id).ok_or("accepted frame")?.received = Some(at);
-        }
-        Ok(receipts)
-    }
-
-    /// Bind complete, EPF-checked receives to physical frames. These are
-    /// immutable evidence references, not another source-execution replay.
-    /// Transport observations can be queued after the commit capture; their
-    /// journal arrival order is not the protocol's causal order.
-    pub(crate) fn receipts<'a>(&self, dynamic: &'a Value) -> Result<BTreeMap<u64, &'a Value>> {
-        let mut receipts = BTreeMap::new();
-        for session in dynamic["sessions"].as_array().ok_or("EPF sessions")? {
-            for acceptance in session["acceptances"].as_array().ok_or("EPF acceptances")? {
-                let id = acceptance["frame_id"].as_u64().ok_or("accepted frame")?;
-                let received = &acceptance["receive_commit"];
-                let frame = self.frames.get(&id).ok_or("missing accepted frame")?;
-                if session["session"] != frame.identity["session"]
-                    || received["source_event"] != frame.identity["frame_label"]
-                    || received["view"] != frame.identity["target"]
-                    || acceptance["send_view"] != frame.identity["source"]
-                    || receipts.insert(id, acceptance).is_some()
-                {
-                    return Err("missing or reused committed receive occurrence".into());
-                }
-            }
-        }
-        if receipts.len() != self.frames.len() {
-            return Err("frame without a checked committed receive".into());
-        }
-        Ok(receipts)
-    }
-}
-
-pub(crate) fn read(
-    rows: &[Value],
+/// A completed trial must associate each physical frame with one EPF-checked
+/// receive, including when the transport owner flushes its journal after the commit.
+pub(crate) fn read<'a>(
+    rows: &'a [Value],
     labels: &BTreeMap<u64, u8>,
     actors: &[Value],
-) -> Result<Journal> {
-    let mut frames = BTreeMap::<u64, Frame>::new();
+    dynamic: &'a Value,
+) -> Result<Journal<'a>> {
+    let mut acceptances = BTreeMap::new();
+    for session in dynamic["sessions"].as_array().ok_or("EPF sessions")? {
+        let sid = session["session"].as_u64().ok_or("EPF session ID")?;
+        for receipt in session["acceptances"].as_array().ok_or("EPF acceptances")? {
+            let id = receipt["frame_id"].as_u64().ok_or("accepted frame")?;
+            if acceptances.insert(id, (sid, receipt)).is_some() {
+                return Err("reused frame in checked execution".into());
+            }
+        }
+    }
+    let mut frames = BTreeMap::new();
     let mut calls = BTreeMap::<u64, Call>::new();
     let mut exits = BTreeSet::new();
     let mut verdict = None;
@@ -284,41 +303,52 @@ pub(crate) fn read(
         match (row["direction"].as_str(), m["type"].as_str()) {
             (Some("runtime"), Some("protocol_frame")) => {
                 let id = m["frame_id"].as_u64().ok_or("frame ID")?;
-                let mut identity = m.clone();
-                identity
-                    .as_object_mut()
-                    .ok_or("frame object")?
-                    .remove("action");
-                match m["action"].as_str() {
-                    Some("send") => {
-                        let bytes = m["payload"]
-                            .as_array()
-                            .ok_or("frame payload")?
-                            .iter()
-                            .map(|v| {
-                                v.as_u64()
-                                    .and_then(|v| u8::try_from(v).ok())
-                                    .ok_or("frame byte")
-                            })
-                            .collect::<std::result::Result<Vec<_>, _>>()?;
-                        if frames
-                            .insert(
-                                id,
-                                Frame {
-                                    logical_label: *labels.get(&id).ok_or("unmapped frame")?,
-                                    identity,
-                                    bytes,
-                                    sent: index,
-                                    received: None,
-                                },
-                            )
-                            .is_some()
-                        {
-                            return Err("duplicate frame send".into());
-                        }
-                    }
-                    _ => return Err("unknown frame action".into()),
+                if m["action"] != "send" {
+                    return Err("unknown frame action".into());
                 }
+                let (sid, receipt) = acceptances
+                    .remove(&id)
+                    .ok_or("missing or reused EPF acceptance")?;
+                let commit = &receipt["receive_commit"];
+                if m["session"] != sid
+                    || commit["source_event"] != m["frame_label"]
+                    || commit["view"] != m["target"]
+                    || receipt["send_view"] != m["source"]
+                {
+                    return Err("frame differs from its checked receive".into());
+                }
+                let first_poll = usize::try_from(
+                    receipt["first_poll_row"]
+                        .as_u64()
+                        .ok_or("missing send poll position")?,
+                )?;
+                let received = usize::try_from(
+                    commit["journal_row"]
+                        .as_u64()
+                        .ok_or("missing receive commit position")?,
+                )?;
+                let bytes = m["payload"]
+                    .as_array()
+                    .ok_or("frame payload")?
+                    .iter()
+                    .map(|v| {
+                        v.as_u64()
+                            .and_then(|v| u8::try_from(v).ok())
+                            .ok_or("frame byte")
+                    })
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                frames.insert(
+                    id,
+                    Frame {
+                        logical_label: *labels.get(&id).ok_or("unmapped frame")?,
+                        identity: m,
+                        bytes,
+                        sent: index,
+                        first_poll,
+                        received,
+                        receipt,
+                    },
+                );
             }
             (Some("runtime"), Some("execute")) => {
                 let id = m["id"].as_u64().ok_or("effect ID")?;
@@ -391,6 +421,9 @@ pub(crate) fn read(
             }
             _ => {}
         }
+    }
+    if !acceptances.is_empty() {
+        return Err("checked acceptance without a physical frame".into());
     }
     if exits.len() != actors.len() || verdict.is_none() {
         return Err("incomplete observed execution".into());
@@ -480,24 +513,46 @@ mod tests {
         ];
         let labels = crate::projection::frames(&artifact, &rows)?;
         let actors = [json!({"agent":"A"}), json!({"agent":"B"})];
-        let mut journal = read(&rows, &labels, &actors)?;
         let checked = crate::projection::check_dynamic(&artifact, &rows)?;
-        let receipts = journal.receipts(&checked)?;
-        assert_eq!(receipts[&19]["receive_commit"]["journal_row"], 4);
-        assert_eq!(journal.frames[&19].received, None);
-        journal.bind_receives(&checked)?;
-        assert_eq!(journal.frames[&19].received, Some(4));
+        let journal = read(&rows, &labels, &actors, &checked)?;
+        assert_eq!(journal.frames[&19].received, 4);
+        assert_eq!(journal.frames[&19].first_poll, 1);
         let mut duplicate = checked.clone();
         duplicate["sessions"][0]["acceptances"]
             .as_array_mut()
             .unwrap()
-            .push(receipts[&19].clone());
-        assert!(journal.receipts(&duplicate).is_err());
+            .push(journal.frames[&19].receipt.clone());
+        assert!(read(&rows, &labels, &actors, &duplicate).is_err());
         for (field, value) in [("source_event", 1), ("view", 7)] {
             let mut altered = checked.clone();
             altered["sessions"][0]["acceptances"][0]["receive_commit"][field] = json!(value);
-            assert!(journal.receipts(&altered).is_err(), "accepted {field}");
+            assert!(
+                read(&rows, &labels, &actors, &altered).is_err(),
+                "accepted {field}"
+            );
         }
+        for (field, value) in [("send_view", json!(8)), ("first_poll_row", Value::Null)] {
+            let mut altered = checked.clone();
+            altered["sessions"][0]["acceptances"][0][field] = value;
+            assert!(
+                read(&rows, &labels, &actors, &altered).is_err(),
+                "accepted {field}"
+            );
+        }
+        let mut wrong_session = checked.clone();
+        wrong_session["sessions"][0]["session"] = json!(123456);
+        assert!(read(&rows, &labels, &actors, &wrong_session).is_err());
+        let mut missing = checked.clone();
+        missing["sessions"][0]["acceptances"] = json!([]);
+        assert!(read(&rows, &labels, &actors, &missing).is_err());
+        let mut orphan = checked.clone();
+        let mut extra = journal.frames[&19].receipt.clone();
+        extra["frame_id"] = json!(20);
+        orphan["sessions"][0]["acceptances"]
+            .as_array_mut()
+            .unwrap()
+            .push(extra);
+        assert!(read(&rows, &labels, &actors, &orphan).is_err());
         // The transport owner can flush its observations after the capture
         // owner has already recorded a successful receive commit.
         let mut late = rows.clone();
@@ -509,21 +564,16 @@ mod tests {
         late.retain(|row| row["message"]["type"] != "protocol_frame");
         late.splice(4..4, transport);
         let checked_late = crate::projection::check_dynamic(&artifact, &late)?;
-        let mut journal_late = read(&late, &labels, &actors)?;
+        let journal_late = read(&late, &labels, &actors, &checked_late)?;
         assert!(journal_late.frames[&19].sent > 3);
-        assert_eq!(
-            journal_late.receipts(&checked_late)?[&19]["receive_commit"]["journal_row"],
-            3
-        );
-        journal_late.bind_receives(&checked_late)?;
-        assert_eq!(journal_late.frames[&19].received, Some(3));
+        assert_eq!(journal_late.frames[&19].received, 3);
         // EPF correctly permits a finite source prefix with an accepted send.
         // Complete application effect evidence must additionally have its receive.
         rows.remove(4);
         rows[4]["message"]["checkpoint"] = json!(2);
         let prefix = crate::projection::check_dynamic(&artifact, &rows)?;
         assert_eq!(prefix["status"], "passed");
-        assert!(read(&rows, &labels, &actors)?.receipts(&prefix).is_err());
+        assert!(read(&rows, &labels, &actors, &prefix).is_err());
         Ok(())
     }
 
@@ -542,47 +592,71 @@ mod tests {
             json!({"direction":"simulator","message":{"type":"score","complete":true,"events":[],"violations":[]}}),
         ];
         let actors = [json!({"agent":"A"})];
-        assert!(read(&rows, &BTreeMap::new(), &actors).is_ok());
+        let dynamic = json!({"sessions":[]});
+        let journal = read(&rows, &BTreeMap::new(), &actors, &dynamic).unwrap();
+        let call = &journal.calls[&1];
+        let args = json!({"section":"section_a"});
+        let scored = json!({"agent":"A","tool":"write_section","args":args,
+            "success":true,"result":result["data"],"violations":[]});
+        assert!(call.matches_score(&scored, &args));
+        assert!(!call.matches_score(&scored, &request["arguments"]));
+        for field in ["agent", "tool", "args", "success", "result", "violations"] {
+            let mut changed = scored.clone();
+            changed[field] = Value::Null;
+            assert!(
+                !call.matches_score(&changed, &args),
+                "ignored altered {field}"
+            );
+            changed.as_object_mut().unwrap().remove(field);
+            assert!(
+                !call.matches_score(&changed, &args),
+                "ignored missing {field}"
+            );
+        }
         for removed in [0, 1, 2, 3, 4, 5, 6] {
             let mut changed = rows.clone();
             changed.remove(removed);
-            assert!(read(&changed, &BTreeMap::new(), &actors).is_err());
+            assert!(read(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
         }
         let mut changed = rows.clone();
         changed.swap(2, 3);
-        assert!(read(&changed, &BTreeMap::new(), &actors).is_err());
+        assert!(read(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
         let mut changed = rows.clone();
         changed.swap(5, 6);
-        assert!(read(&changed, &BTreeMap::new(), &actors).is_err());
+        assert!(read(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
         let mut changed = rows.clone();
         changed[1]["message"]["arguments"]["section_name"] = json!("section_b");
-        assert!(read(&changed, &BTreeMap::new(), &actors).is_err());
+        assert!(read(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
         let mut changed = rows.clone();
         changed[3]["message"]["result"]["success"] = json!(false);
-        assert!(read(&changed, &BTreeMap::new(), &actors).is_err());
+        assert!(read(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
         let mut changed = rows.clone();
         changed[2]["elapsed_seconds"] = json!(0.05);
-        assert!(read(&changed, &BTreeMap::new(), &actors).is_err());
+        assert!(read(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
         let mut changed = rows.clone();
         changed.insert(1, rows[0].clone());
-        assert!(read(&changed, &BTreeMap::new(), &actors).is_err());
+        assert!(read(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
     }
 
     #[test]
     fn close_records_cannot_reuse_a_request_or_substitute_another_syscall() {
         let request = Frame {
             logical_label: protocol::LABEL_WASI_FD_CLOSE,
-            identity: json!({"source":0,"target":8}),
+            identity: &json!({"source":0,"target":8}),
             bytes: vec![6],
             sent: 0,
-            received: Some(1),
+            received: 1,
+            first_poll: 0,
+            receipt: &Value::Null,
         };
         let reply = Frame {
             logical_label: protocol::LABEL_WASI_FD_CLOSE_RET,
-            identity: json!({"source":8,"target":0}),
+            identity: &json!({"source":8,"target":0}),
             bytes: vec![6, 0, 0],
             sent: 2,
-            received: Some(3),
+            received: 3,
+            first_poll: 0,
+            receipt: &Value::Null,
         };
         let mut frames = BTreeMap::from([(1, request), (2, reply)]);
         assert!(check_close_pairs(&frames, &[(0, 8)]).is_ok());
@@ -599,14 +673,17 @@ mod tests {
         frames.get_mut(&2).unwrap().bytes[0] = 4;
         assert!(check_close_pairs(&frames, &[(0, 8)]).is_err());
         frames.get_mut(&2).unwrap().bytes[0] = 6;
+        let third_identity = json!({"source":8,"target":0});
         frames.insert(
             3,
             Frame {
                 logical_label: protocol::LABEL_WASI_FD_CLOSE_RET,
-                identity: json!({"source":8,"target":0}),
+                identity: &third_identity,
                 bytes: vec![6, 0, 0],
                 sent: 4,
-                received: Some(5),
+                received: 5,
+                first_poll: 0,
+                receipt: &Value::Null,
             },
         );
         assert!(check_close_pairs(&frames, &[(0, 8)]).is_err());

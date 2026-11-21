@@ -1,24 +1,14 @@
 //! Join actual 7M effects to the EPF-checked receives that admitted them.
-use crate::{
-    evidence::{Result, digest},
-    journal, projection,
-};
+use crate::{evidence::Result, journal, projection};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::Range,
-    path::Path,
 };
 
 type Edge = (&'static str, &'static str, &'static str);
 
-pub fn audit(path: &Path) -> Result<Value> {
-    let rows = journal::records(path)?;
-    check(path, &rows)
-}
-
-pub(crate) fn check(path: &Path, rows: &[Value]) -> Result<Value> {
-    let artifact = projection::load(path)?;
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty 7M history")?["message"];
     let actors = fixture["fixtures"].as_array().ok_or("7M participants")?;
@@ -39,9 +29,7 @@ pub(crate) fn check(path: &Path, rows: &[Value]) -> Result<Value> {
     {
         return Err("7M task or participants differ".into());
     }
-    let dynamic = projection::check_dynamic(&artifact, rows)?;
-    let mut history = journal::read(rows, &projection::frames(&artifact, rows)?, actors)?;
-    let receipts = history.bind_receives(&dynamic)?;
+    let history = journal::read(rows, &projection::frames(artifact, rows)?, actors, dynamic)?;
     let scored = history.score["events"]
         .as_array()
         .ok_or("7M score events")?;
@@ -63,7 +51,7 @@ pub(crate) fn check(path: &Path, rows: &[Value]) -> Result<Value> {
                 !used.contains(*id)
                     && frame.direction(source, target)
                     && u64::from(frame.logical_label) == label_id
-                    && frame.received.is_some_and(|at| range.contains(&at))
+                    && range.contains(&frame.received)
             })
             .min_by_key(|(_, frame)| frame.received)
             .ok_or_else(|| format!("missing committed 7M frame {from}/{to}/{label}"))?;
@@ -71,7 +59,7 @@ pub(crate) fn check(path: &Path, rows: &[Value]) -> Result<Value> {
             return Err(format!("7M frame data differs at {from}/{to}/{label}").into());
         }
         used.insert(*id);
-        Ok(json!({"frame":id,"occurrence":receipts[id]["occurrence"]}))
+        Ok(json!({"frame":id,"occurrence":history.frames[id].receipt["occurrence"]}))
     };
     let mut ordered = history.calls.values().collect::<Vec<_>>();
     ordered.sort_by_key(|call| call.emitted);
@@ -129,7 +117,7 @@ pub(crate) fn check(path: &Path, rows: &[Value]) -> Result<Value> {
                     for frame in history.frames.values().filter(|frame| {
                         frame.direction(source, target)
                             && u64::from(frame.logical_label) == label_id
-                            && frame.received.is_some_and(|at| at > returned)
+                            && frame.received > returned
                     }) {
                         if &frame.value()? == result {
                             matched.push((chapter, label));
@@ -218,14 +206,14 @@ pub(crate) fn check(path: &Path, rows: &[Value]) -> Result<Value> {
                     .filter(|(_, frame)| {
                         frame.direction(source, target)
                             && u64::from(frame.logical_label) == label
-                            && frame.received.is_some_and(|at| at < call.emitted)
+                            && frame.received < call.emitted
                     })
                     .max_by_key(|(_, frame)| frame.received)
                     .ok_or("7M fact check lacks its delivered material")?;
                 if frame.value()?[chapter] != result["data"]["input_snapshot"] {
                     return Err("7M fact check differs from its delivered material".into());
                 }
-                vec![json!({"frame": id, "occurrence": receipts[id]["occurrence"]})]
+                vec![json!({"frame": id, "occurrence": history.frames[id].receipt["occurrence"]})]
             }
             "combine_sections" => {
                 if publication.replace(*call).is_some() {
@@ -259,15 +247,7 @@ pub(crate) fn check(path: &Path, rows: &[Value]) -> Result<Value> {
         let (score_index, _) = scored
             .iter()
             .enumerate()
-            .find(|(index, entry)| {
-                !scored_calls.contains(index)
-                    && entry["agent"] == who
-                    && entry["tool"] == tool
-                    && entry["args"] == *args
-                    && entry["success"] == result["success"]
-                    && entry["result"] == result["data"]
-                    && entry["violations"] == json!([])
-            })
+            .find(|(index, entry)| !scored_calls.contains(index) && call.matches_score(entry, args))
             .ok_or("7M effect differs from the common score")?;
         scored_calls.insert(score_index);
         checked.push(
@@ -363,8 +343,6 @@ pub(crate) fn check(path: &Path, rows: &[Value]) -> Result<Value> {
     }
     Ok(
         json!({"status":"passed","task":"7M","simulator_complete":true,"violations":0,
-        "compiled_projection_sha256":digest(&path.with_file_name("projection.json"))?,
-        "runtime_binary_sha256":artifact["runtime_binary_sha256"],
         "dynamic_protocol":dynamic,"effects":checked}),
     )
 }

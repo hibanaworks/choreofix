@@ -2,7 +2,7 @@
 use crate::{
     drug_discovery_boundary::{read, write},
     evidence::{Result, Trace, archive_build_receipt, digest, save},
-    oracle, process, projection, survey_paper_audit,
+    oracle, process, projection,
 };
 use serde_json::json;
 use std::{
@@ -155,7 +155,7 @@ async fn seven_wasm_guests_publish_the_current_survey() -> Result<()> {
     );
     save(
         &directory.join("effect-audit.json"),
-        &survey_paper_audit::audit(&events)?,
+        &crate::journal::Evidence::open(&events)?.audit(crate::survey_paper_audit::check)?,
     )?;
     Ok(())
 }

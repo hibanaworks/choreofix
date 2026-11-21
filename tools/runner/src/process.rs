@@ -574,7 +574,8 @@ mod tests {
         if result["protocol"]["status"] != "complete" || result["score"]["complete"] != true {
             return Err(format!("probe failed: {result}").into());
         }
-        let audit = crate::writing_audit::audit(&output.join("events.jsonl"))?;
+        let audit = crate::journal::Evidence::open(&output.join("events.jsonl"))?
+            .audit(crate::writing_audit::check)?;
         assert_eq!(audit["max_disjoint_writes"], 2);
         crate::evidence::save(
             &output.join("probe.json"),

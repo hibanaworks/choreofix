@@ -1,25 +1,15 @@
 //! Connect each 15E effect to the guest request, instrument and returned result of this run.
-use crate::{
-    evidence::{Result, digest},
-    journal, projection,
-};
+use crate::{evidence::Result, journal, projection};
 use serde_json::{Value, json};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::Path,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
-pub fn audit(path: &Path) -> Result<Value> {
-    let rows = journal::records(path)?;
-    let artifact = projection::load(path)?;
-    let labels = projection::frames(&artifact, &rows)?;
-    let epf = projection::check_dynamic(&artifact, &rows)?;
-    let effects = effects(&rows, &artifact, &labels, &epf)?;
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+    let labels = projection::frames(artifact, rows)?;
+    let effects = effects(rows, artifact, &labels, dynamic)?;
     Ok(
         json!({"status":"passed","task":"15E","simulator_complete":true,"violations":0,
-        "domain_calls":effects.len(),"effects":effects,"captured_records":epf["captured_records"],
-        "compiled_projection_sha256":digest(&path.with_file_name("projection.json"))?,
-        "runtime_binary_sha256":artifact["runtime_binary_sha256"],"source_events_sha256":digest(path)?}),
+        "domain_calls":effects.len(),"effects":effects,"captured_records":dynamic["captured_records"],
+        }),
     )
 }
 
@@ -62,8 +52,7 @@ pub(crate) fn effects(
             .and_then(|n| u8::try_from(n).ok())
             .ok_or_else(|| format!("missing wafer message {name}"))
     };
-    let mut journal = journal::read(rows, labels, actors)?;
-    journal.bind_receives(epf)?;
+    let journal = journal::read(rows, labels, actors, epf)?;
     let pairs = [
         ("ENGINEER", "WAFER"),
         ("DEP", "DEP_INBOX"),
@@ -261,7 +250,7 @@ pub(crate) fn effects(
                 })
                 .min_by_key(|(_, f)| f.sent)
                 .ok_or_else(|| format!("missing {name} {from}->{to} ({label})"))?;
-            let at = f.received()?;
+            let at = f.received;
             if f.sent < earliest || at > latest || f.value()? != *value {
                 return Err(format!("wrong occurrence or payload: {name} {from}->{to} ({label}), send {}, receive {at}, allowed {earliest}..{latest}",f.sent).into());
             }
@@ -352,15 +341,7 @@ pub(crate) fn effects(
         let score_index = events
             .iter()
             .enumerate()
-            .position(|(i, e)| {
-                !scores.contains(&i)
-                    && e["agent"] == agent
-                    && e["tool"] == tool
-                    && e["args"] == *args
-                    && e["result"] == result["data"]
-                    && e["success"] == ok
-                    && e["violations"] == json!([])
-            })
+            .position(|(i, e)| !scores.contains(&i) && call.matches_score(e, args))
             .ok_or("effect missing from common wafer score")?;
         scores.insert(score_index);
         evidence.push(json!({"agent":agent,"tool":tool,"operation":name,"input_frame":input,"result_frame":response,"instrument_frames":instrument,"success":ok,"receipt":result["data"]["receipt"],"score_index":score_index}));
@@ -378,7 +359,7 @@ pub(crate) fn effects(
             .as_array()
             .ok_or("load receipts")?;
         let issued = journal.frames[&ids[1].as_u64().ok_or("load request")?].sent;
-        let released = journal.frames[&release].received()?;
+        let released = journal.frames[&release].received;
         let load_labels = [
             label("reactive_ion_etch")?,
             label("pattern_etch")?,
@@ -391,7 +372,7 @@ pub(crate) fn effects(
                     roles["ETCH_POWER"].as_u64().unwrap(),
                 ) && load_labels.contains(&f.logical_label)
                     && f.sent > issued
-                    && f.received.is_some_and(|at| at < released)
+                    && f.received < released
             })
         {
             return Err("etch chamber reused before its measured wafer was released".into());
@@ -415,7 +396,7 @@ pub(crate) fn effects(
         let f = &journal.frames[&effect["result_frame"]
             .as_u64()
             .ok_or("effect result frame")?];
-        Ok((f.received()?, f.value()?))
+        Ok((f.received, f.value()?))
     };
     let notice =
         |from: &str, to: &str, logical: Option<u8>| -> Result<(usize, usize, Value)> {
@@ -424,7 +405,7 @@ pub(crate) fn effects(
                 journal::one(journal.frames.values().filter(|f| {
                     f.direction(a, b) && logical.is_none_or(|l| l == f.logical_label)
                 }))?;
-            Ok((frame.sent, frame.received()?, frame.value()?))
+            Ok((frame.sent, frame.received, frame.value()?))
         };
     let successful = |tool: &str, name: &str| -> Result<&Value> {
         evidence

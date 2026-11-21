@@ -23,10 +23,10 @@ fn pair(value: &Value) -> Result<Vec<&str>> {
 }
 #[track_caller]
 fn take<'a>(
-    frames: impl Iterator<Item = (u64, &'a Frame)>,
+    frames: impl Iterator<Item = (u64, &'a Frame<'a>)>,
     used: &mut BTreeSet<u64>,
     matches: impl Fn(&Frame) -> bool,
-) -> Result<&'a Frame> {
+) -> Result<&'a Frame<'a>> {
     let location = std::panic::Location::caller();
     let (id, frame) = one(frames.filter(|(id, f)| !used.contains(id) && matches(f)))
         .map_err(|e| format!("{e} at {location}"))?;
@@ -45,7 +45,7 @@ fn prior<'a>(calls: &'a BTreeMap<u64, Call>, call: &Call, tool: &str) -> Result<
         .ok_or("missing actual completed input")?;
     Ok(earlier.result()?.1)
 }
-fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let fixture = &rows.first().ok_or("empty codebase evidence")?["message"];
     let task = fixture["task"].as_str().ok_or("codebase task")?;
     let participants = match task {
@@ -67,8 +67,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     }
     let labels = crate::projection::frames(artifact, rows)?;
     let headers = crate::projection::contracts(compiled)?;
-    let mut journal = crate::journal::read(rows, &labels, actors)?;
-    journal.bind_receives(dynamic)?;
+    let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     // This immutable index only narrows observation searches. Keep every
     // occurrence and all original matching/uniqueness checks below; it owns
     // neither protocol progress nor resource permissions.
@@ -170,7 +169,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             let submission = take(frames_for((file, inbox, role)), &mut used, |f| {
                 f.value().is_ok_and(|v| v == *args)
             })?
-            .received()?;
+            .received;
             let (sender, dispatched) = if task == "1M" {
                 let bindings = actor["modules"].as_array().ok_or("assigned modules")?;
                 let mut sources = Vec::new();
@@ -194,14 +193,14 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 let grant = take(frames_for((repository, *first, role)), &mut used, |f| {
                     submission < f.sent && f.value().is_ok_and(|v| v == *args)
                 })?
-                .received()?;
+                .received;
                 let followup = take(frames_for((*first, inbox, file)), &mut used, |f| {
                     grant < f.sent && f.value().is_ok_and(|v| v == *args)
                 })?
-                .received()?;
+                .received;
                 take(frames_for((repository, *second, file)), &mut used, |f| {
                     followup < f.sent
-                        && f.received.is_some_and(|at| at < call.emitted)
+                        && f.received < call.emitted
                         && f.value().is_ok_and(|v| v == *args)
                 })?;
                 (*first, grant)
@@ -210,7 +209,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             };
             take(frames_for((sender, role, request_label)), &mut used, |f| {
                 dispatched < f.sent
-                    && f.received.is_some_and(|at| at < call.emitted)
+                    && f.received < call.emitted
                     && f.value().is_ok_and(|v| v == *args)
             })?;
         } else if task == "1H" && tool == "commit_changes" {
@@ -234,24 +233,24 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 return Err("missing primary or secondary module for this commit".into());
             };
             let submission = take(frames_for((file, *first_inbox, role)), &mut used, |f| {
-                f.received.is_some_and(|t| t < call.emitted) && f.value().is_ok_and(|v| v == *args)
+                f.received < call.emitted && f.value().is_ok_and(|v| v == *args)
             })?
-            .received()?;
+            .received;
             take(frames_for((*first, *second_inbox, file)), &mut used, |f| {
                 submission < f.sent
-                    && f.received.is_some_and(|t| t < call.emitted)
+                    && f.received < call.emitted
                     && f.value().is_ok_and(|v| v == *args)
             })?;
             take(frames_for((*first, role, request_label)), &mut used, |f| {
                 submission < f.sent
-                    && f.received.is_some_and(|t| t < call.emitted)
+                    && f.received < call.emitted
                     && f.value().is_ok_and(|v| v == *args)
             })?;
         } else {
             take(frames_for((file, role, request_label)), &mut used, |f| {
                 f.direction(file, role)
                     && u64::from(f.logical_label) == request_label
-                    && f.received.is_some_and(|at| at < call.emitted)
+                    && f.received < call.emitted
                     && f.value().is_ok_and(|v| v == *args)
             })?;
         }
@@ -261,7 +260,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             |f| {
                 f.direction(role, file)
                     && f.logical_label == reply_label
-                    && f.received.is_some_and(|at| at > result_at)
+                    && f.received > result_at
                     && f.value().is_ok_and(|v| v == *result)
             },
         )?;
@@ -329,13 +328,13 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     take(frames_for((resource, role, resource)), &mut used, |f| {
                         f.direction(resource, role)
                             && f.logical_label as u64 == resource
-                            && f.received.is_some_and(|at| at < call.emitted)
+                            && f.received < call.emitted
                             && f.value().is_ok_and(|v| v == *args)
                     })?;
                     take(frames_for((role, resource, resource)), &mut used, |f| {
                         f.direction(role, resource)
                             && f.logical_label as u64 == resource
-                            && f.received.is_some_and(|at| at > result_at)
+                            && f.received > result_at
                             && f.value().is_ok_and(|v| v == *result)
                     })?;
                     *expected_returns.entry(resource).or_default() += 1;
@@ -360,7 +359,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                         if actor == role
                             && check == resolver
                             && result_at < id.0
-                            && id.0 < reply.received()?
+                            && id.0 < reply.received
                         {
                             if decision != u64::from(result["success"] != true)
                                 || !used_decisions.insert(*id)
@@ -381,14 +380,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         }
         let index = score_events
             .iter()
-            .position(|event| {
-                event["agent"] == agent
-                    && event["tool"] == tool
-                    && event["args"] == *args
-                    && event["success"] == result["success"]
-                    && event["result"] == result["data"]
-                    && event["violations"] == json!([])
-            })
+            .position(|event| call.matches_score(event, args))
             .ok_or("score differs from actual effect")?;
         score_events.remove(index);
     }
@@ -461,7 +453,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 let service = binding["service"].as_u64().ok_or("module service")?;
                 let inbox = binding["requests"].as_u64().ok_or("module requests")?;
                 take(frames_for((file, inbox, service)), &mut used, |f| {
-                    f.sent > last_test && f.received.is_some() && f.bytes == [0; 4]
+                    f.sent > last_test && f.bytes == [0; 4]
                 })?;
             }
         }
@@ -484,8 +476,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             .frames
             .values()
             .filter(|f| {
-                f.received.is_some()
-                    && f.identity["target"] == binding["service"]
+                f.identity["target"] == binding["service"]
                     && f.identity["frame_label"]
                         .as_u64()
                         .and_then(|v| u16::try_from(v).ok())
@@ -520,25 +511,10 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         json!({"status":"passed","task":task,"kind":"direct_file_module_requests_and_actual_source","scored_benchmark":false,"participants":participants,"domain_calls":journal.calls.len(),"actual_resource_endpoint_requests":returned,"actual_resource_endpoint_returns":returned,"max_disjoint_commits":maximum,"actual_test_resolver_decisions":used_decisions.len(),"simulator_complete":journal.score["complete"],"violations":0,"guest_exits":participants,"dynamic_protocol":dynamic}),
     )
 }
-pub fn audit(path: &Path) -> Result<Value> {
-    let rows = records(path)?;
-    let projection = crate::projection::load(path)?;
-    let dynamic = crate::projection::check_dynamic(&projection, &rows)?;
-    let mut result = check(&rows, &projection, &dynamic)?;
-    result["source_events_sha256"] = json!(digest(path)?);
-    result["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("codebase directory")?
-            .join("projection.json")
-    )?);
-    result["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
-    Ok(result)
-}
 
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let rows = records(path)?;
-    let projection = crate::projection::load(path)?;
+    let (projection, _) = crate::projection::load(path)?;
     let dynamic = crate::projection::check_dynamic(&projection, &rows)?;
     let mut audit = check(&rows, &projection, &dynamic)?;
     audit["source_events_sha256"] = json!(digest(path)?);
@@ -555,7 +531,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .as_array()
         .ok_or("codebase inputs")?;
     let labels = crate::projection::frames(&projection, &rows)?;
-    let journal = crate::journal::read(&rows, &labels, actors)?;
+    let journal = crate::journal::read(&rows, &labels, actors, &dynamic)?;
     let ids = journal
         .frames
         .iter()

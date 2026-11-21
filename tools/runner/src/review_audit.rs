@@ -46,7 +46,7 @@ fn business_roles(projection: &Value) -> Result<BTreeSet<u64>> {
     .collect()
 }
 
-fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
     if projection["compiled"]["task"] != "6E" {
         return Err("review compiled protocol task".into());
     }
@@ -68,8 +68,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
     {
         return Err("6E participants".into());
     }
-    let mut journal = crate::journal::read(rows, &labels, actors)?;
-    journal.bind_receives(dynamic)?;
+    let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
@@ -155,14 +154,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         }
         let at = scored
             .iter()
-            .position(|e| {
-                e["agent"] == call.request["agent"]
-                    && e["tool"] == call.request["tool"]
-                    && e["args"] == args
-                    && e["success"] == result["success"]
-                    && e["result"] == result["data"]
-                    && e["violations"] == json!([])
-            })
+            .position(|e| call.matches_score(e, &args))
             .ok_or("score differs from original calls")?;
         scored.remove(at);
     }
@@ -219,7 +211,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
             f.direction(from, to)
                 && u64::from(f.logical_label) == request_label
                 && !checked_json.contains(&f.sent)
-                && f.received.is_some_and(|at| at < call.emitted)
+                && f.received < call.emitted
                 && f.value().is_ok_and(|v| v == call.request["arguments"])
         }))?;
         checked_json.insert(request.sent);
@@ -231,7 +223,6 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                 && f.sent < next
                 && f.value().is_ok_and(|v| v == *result)
         }))?;
-        reply.received()?;
         checked_json.insert(reply.sent);
         used_calls.insert(*id);
         match call.tool()? {
@@ -246,7 +237,6 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                         && f.sent < next
                         && f.value().is_ok_and(|v| v == *result)
                 }))?;
-                ready.received()?;
                 if !checked_json.insert(ready.sent) {
                     return Err("reused implementation readiness".into());
                 }
@@ -274,14 +264,13 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                     return Err("review before implementation".into());
                 }
                 let (impl_at, impl_result) = implementation.result()?;
-                let ready = one(frames.values().filter(|f| {
+                one(frames.values().filter(|f| {
                     f.direction(repo, reviewer)
                         && u64::from(f.logical_label) == 5 + feature
                         && f.sent > impl_at
-                        && f.received.is_some_and(|at| at < call.emitted)
+                        && f.received < call.emitted
                         && f.value().is_ok_and(|v| v == *impl_result)
                 }))?;
-                ready.received()?;
                 if result["data"]["target"] != call.request["arguments"]["pr_id"]
                     || result["data"]["candidate_sha256"] != impl_result["data"]["candidate_sha256"]
                 {
@@ -303,7 +292,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                         && !checked_json.contains(&f.sent)
                         && f.value().is_ok_and(|v| v == *result)
                 }))?;
-                let approved_at = approval.received()?;
+                let approved_at = approval.received;
                 checked_json.insert(approval.sent);
                 let feedback = one(frames.values().filter(|f| {
                     f.direction(repo, file)
@@ -313,7 +302,6 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                         && !checked_json.contains(&f.sent)
                         && f.value().is_ok_and(|v| v == *result)
                 }))?;
-                feedback.received()?;
                 checked_json.insert(feedback.sent);
             }
             "merge_code" => {
@@ -393,34 +381,17 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         .map(|call| call.target())
         .collect::<Result<Vec<_>>>()?;
     Ok(
-        json!({"status":"passed","task":"6E","kind":"completed_actual_wasi_review_trace","scored_benchmark":false,
+        json!({"wire_validation":"compiled wire membership, review contracts and EPF source-execution interpretation","status":"passed","task":"6E","kind":"completed_actual_wasi_review_trace","scored_benchmark":false,
         "depth":fixture["depth"],"carrier_frames":frames.len(),"domain_calls":calls.len(),"actual_resource_endpoint_requests":repository_calls,
         "repository_endpoint_lifetime":"one initial loan, retained by its owner until run end","actual_review_requests":reviews,"guest_exits":actors.len(),"simulator_complete":true,
         "violations":0,"overlapping_effect_pairs":overlap,"review_targets":targets,
         "direct_file_requests_and_replies":true,"effect_receives_bound_to_checked_occurrences":true,"dynamic_protocol":dynamic}),
     )
 }
-pub fn audit(path: &Path) -> Result<Value> {
-    let projection = crate::projection::load(path)?;
-    let rows = records(path)?;
-    let dynamic = crate::projection::check_dynamic(&projection, &rows)?;
-    let mut result = check(&rows, &projection, &dynamic)?;
-    result["source_events_sha256"] = json!(digest(path)?);
-    result["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("event directory")?
-            .join("projection.json")
-    )?);
-    result["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
-    result["wire_validation"] =
-        json!("compiled wire membership, review contracts and EPF source-execution interpretation");
-    Ok(result)
-}
 
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let rows = records(path)?;
-    let projection = crate::projection::load(path)?;
+    let (projection, _) = crate::projection::load(path)?;
     let dynamic = crate::projection::check_dynamic(&projection, &rows)?;
     let mut audited = check(&rows, &projection, &dynamic)?;
     audited["source_events_sha256"] = json!(digest(path)?);
@@ -435,7 +406,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let actors = rows.first().ok_or("fixture")?["message"]["fixtures"]
         .as_array()
         .ok_or("participants")?;
-    let journal = crate::journal::read(&rows, &labels, actors)?;
+    let journal = crate::journal::read(&rows, &labels, actors, &dynamic)?;
     let business = business_roles(&projection)?;
     let selected = journal
         .frames

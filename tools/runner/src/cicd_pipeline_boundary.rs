@@ -1,5 +1,4 @@
 use crate::{
-    cicd_pipeline_audit,
     evidence::{Result, Trace, archive_build_receipt, digest, save},
     oracle, process, projection,
 };
@@ -430,7 +429,8 @@ async fn actual_wash_pipeline_recovers_builds_qa_and_deployment() -> Result<()> 
                 _ => assert_eq!(compiles, [first, other]),
             }
         }
-        let audit = cicd_pipeline_audit::audit(&directory.join("events.jsonl"))?;
+        let audit = crate::journal::Evidence::open(&directory.join("events.jsonl"))?
+            .audit(crate::cicd_pipeline_audit::check)?;
         assert_eq!(audit["dynamic"]["status"], "passed");
         assert_eq!(audit["runtime_binary_sha256"], runtime_sha);
         assert_eq!(audit["simulator_complete"], complete);

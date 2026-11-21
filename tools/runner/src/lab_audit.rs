@@ -1,13 +1,12 @@
 //! Scientific input/effect correspondence. EPF alone checks protocol execution.
 use crate::{
-    evidence::{Result, digest},
+    evidence::Result,
     journal::{self, Call, Frame, one},
 };
 use serde_json::{Value, json};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::Path,
-};
+use std::collections::{BTreeMap, BTreeSet};
+#[cfg(test)]
+use {crate::evidence::digest, std::path::Path};
 fn target(call: &Call) -> Result<&str> {
     let key = match call.tool()? {
         "run_analysis" => "sample",
@@ -30,10 +29,10 @@ fn result<'a>(
     .map(|(_, v)| v)
 }
 fn frame<'a>(
-    (frames, used): (&'a BTreeMap<u64, Frame>, &mut BTreeSet<usize>),
+    (frames, used): (&'a BTreeMap<u64, Frame<'a>>, &mut BTreeSet<usize>),
     (from, to, label): (u64, u64, u64),
     (value, after, before): (&Value, usize, usize),
-) -> Result<&'a Frame> {
+) -> Result<&'a Frame<'a>> {
     let frame = one(frames.values().filter(|f| {
         f.direction(from, to)
             && u64::from(f.logical_label) == label
@@ -42,11 +41,10 @@ fn frame<'a>(
             && !used.contains(&f.sent)
             && f.value().is_ok_and(|v| v == *value)
     }))?;
-    frame.received()?;
     used.insert(frame.sent);
     Ok(frame)
 }
-fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &projection["compiled"];
     let fixture = &rows.first().ok_or("empty lab capture")?["message"];
     if compiled["task"] != "13E" || fixture["type"] != "fixtures" || fixture["task"] != "13E" {
@@ -74,8 +72,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         return Err("laboratory participants differ".into());
     }
     let contracts = crate::projection::frames(projection, rows)?;
-    let mut journal = journal::read(rows, &contracts, actors)?;
-    journal.bind_receives(dynamic)?;
+    let journal = journal::read(rows, &contracts, actors, dynamic)?;
     let journal::Journal {
         frames,
         calls,
@@ -288,16 +285,16 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
             (role(file)?, role(native)?, label(request)?),
             (args, 0, call.emitted),
         )?;
-        if admitted.received()? >= call.emitted {
+        if admitted.received >= call.emitted {
             return Err("scientific effect preceded its actual file request receive".into());
         }
         if let (Some(resource), Some(operation)) = (resource, operation) {
             let received = frame(
                 (&frames, &mut used),
                 (role(native)?, role(resource)?, label(operation)?),
-                (&packet, admitted.received()?, call.emitted),
+                (&packet, admitted.received, call.emitted),
             )?;
-            if received.received()? >= call.emitted {
+            if received.received >= call.emitted {
                 return Err(
                     "instrument effect preceded its evidence-bearing resource receive".into(),
                 );
@@ -319,12 +316,8 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         }
         let (index, _) = one(events.iter().enumerate().filter(|(i, event)| {
             !scored.contains(i)
-                && event["agent"] == actor
-                && event["tool"] == tool
-                && event["args"] == score_args
-                && event["result"] == *data
+                && call.matches_score(event, &score_args)
                 && event["success"] == true
-                && event["violations"] == json!([])
         }))?;
         if data["artifact_id"] != index {
             return Err("scientific artifact identifies another actual world occurrence".into());
@@ -418,7 +411,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
             (role(from)?, role(to)?, label(message)?),
             (value, after, before),
         )?;
-        if material.received()? >= before {
+        if material.received >= before {
             return Err("scientific effect used undelivered material".into());
         }
     }
@@ -447,8 +440,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         let (owner, init, message) = (role(owner)?, role("INIT")?, label(message)?);
         one(frames
             .values()
-            .filter(|f| f.direction(owner, init) && u64::from(f.logical_label) == message))?
-        .received()?;
+            .filter(|f| f.direction(owner, init) && u64::from(f.logical_label) == message))?;
     }
     Ok(
         json!({"status":"passed","task":"13E","domain_calls":calls.len(),"violations":0,"simulator_complete":true,
@@ -456,27 +448,11 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         "actual_instrument_endpoint_returns":2,"guest_exits":3,"dynamic_protocol":dynamic,"scored_benchmark":false}),
     )
 }
-fn audited(path: &Path) -> Result<(Value, Vec<Value>, Value)> {
-    let artifact = crate::projection::load(path)?;
-    let rows = journal::records(path)?;
-    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
-    let mut result = check(&rows, &artifact, &dynamic)?;
-    result["source_events_sha256"] = json!(digest(path)?);
-    result["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("event directory")?
-            .join("projection.json")
-    )?);
-    result["runtime_binary_sha256"] = artifact["runtime_binary_sha256"].clone();
-    Ok((result, rows, artifact))
-}
-pub fn audit(path: &Path) -> Result<Value> {
-    Ok(audited(path)?.0)
-}
 #[cfg(test)]
 pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
-    let (baseline, rows, artifact) = audited(path)?;
+    let evidence = crate::journal::Evidence::open(path)?;
+    let baseline = evidence.audit(check)?;
+    let (rows, artifact) = (evidence.rows, evidence.projection);
     let dynamic = &baseline["dynamic_protocol"];
     let final_effect = rows
         .iter()

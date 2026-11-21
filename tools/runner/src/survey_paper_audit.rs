@@ -1,10 +1,7 @@
 //! Bind each survey effect to its committed file operation and chapter evidence.
-use crate::{
-    evidence::{Result, digest},
-    journal, projection,
-};
+use crate::{evidence::Result, journal, projection};
 use serde_json::{Value, json};
-use std::{collections::BTreeSet, ops::Range, path::Path};
+use std::{collections::BTreeSet, ops::Range};
 
 const CHAPTERS: [(&str, &str, &str, &str, &str); 4] = [
     (
@@ -37,9 +34,7 @@ const CHAPTERS: [(&str, &str, &str, &str, &str); 4] = [
     ),
 ];
 
-pub fn audit(path: &Path) -> Result<Value> {
-    let rows = journal::records(path)?;
-    let artifact = projection::load(path)?;
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty survey journal")?["message"];
     let actors = fixture["fixtures"]
@@ -72,11 +67,9 @@ pub fn audit(path: &Path) -> Result<Value> {
             .as_u64()
             .ok_or_else(|| format!("missing survey role {name}"))
     };
-    let labels = projection::frames(&artifact, &rows)?;
+    let labels = projection::frames(artifact, rows)?;
     let contracts = projection::contracts(compiled)?;
-    let dynamic = projection::check_dynamic(&artifact, &rows)?;
-    let mut history = journal::read(&rows, &labels, actors)?;
-    let receipts = history.bind_receives(&dynamic)?;
+    let history = journal::read(rows, &labels, actors, dynamic)?;
     let scores = history.score["events"].as_array().ok_or("survey score")?;
     if history.score["complete"] != true
         || history.score["violations"] != json!([])
@@ -113,7 +106,7 @@ pub fn audit(path: &Path) -> Result<Value> {
                 !used.contains(*id)
                     && frame.direction(from_role, to_role)
                     && frame.logical_label == label
-                    && frame.received.is_some_and(|at| within.contains(&at))
+                    && within.contains(&frame.received)
                     && owned.is_none_or(|resource| {
                         frame.identity["frame_label"]
                             .as_u64()
@@ -150,13 +143,7 @@ pub fn audit(path: &Path) -> Result<Value> {
         let success = output["success"].as_bool().ok_or("survey effect verdict")?;
         let before = call.emitted.min(start);
         let score = journal::one(scores.iter().enumerate().filter(|(index, event)| {
-            !used_scores.contains(index)
-                && event["agent"] == agent
-                && event["tool"] == tool
-                && event["args"] == *args
-                && event["success"] == success
-                && event["result"] == output["data"]
-                && event["violations"] == json!([])
+            !used_scores.contains(index) && call.matches_score(event, args)
         }))?;
         used_scores.insert(score.0);
         intervals.push((
@@ -179,7 +166,7 @@ pub fn audit(path: &Path) -> Result<Value> {
                 0..before,
                 None,
             )?;
-            let admitted = request.1.received()?;
+            let admitted = request.1.received;
             if tool == "make_editorial_decision" {
                 let input = take("EDITOR_IN_CHIEF", "EDITOR_FILE", 10, 0..admitted, None)?.1;
                 let displayed = input.value()?;
@@ -193,16 +180,10 @@ pub fn audit(path: &Path) -> Result<Value> {
                 for (chapter, _, _, _, section) in CHAPTERS {
                     let logical = role(section)?;
                     let label = u8::try_from(logical)?;
-                    let review = take(
-                        section,
-                        "EDITOR_IN_CHIEF",
-                        label,
-                        0..input.received()?,
-                        None,
-                    )?
-                    .1;
+                    let review =
+                        take(section, "EDITOR_IN_CHIEF", label, 0..input.received, None)?.1;
                     let review_value = review.value()?;
-                    let review_at = review.received()?;
+                    let review_at = review.received;
                     let actual = journal::one(calls.iter().filter_map(|(_, call)| {
                         let (at, result) = call.result().ok()?;
                         (at < review_at
@@ -227,7 +208,7 @@ pub fn audit(path: &Path) -> Result<Value> {
                             "REVIEWER",
                             "EDITOR_IN_CHIEF",
                             label,
-                            review.received()? + 1..input.received()?,
+                            review.received + 1..input.received,
                             Some(logical),
                         )?
                         .0,
@@ -273,10 +254,7 @@ pub fn audit(path: &Path) -> Result<Value> {
                 let to = role("FIGURES")?;
                 Some(
                     journal::one(history.frames.values().filter(|frame| {
-                        frame.direction(from, to)
-                            && frame
-                                .received
-                                .is_some_and(|at| (start..before).contains(&at))
+                        frame.direction(from, to) && (start..before).contains(&frame.received)
                     }))?
                     .logical_label,
                 )
@@ -308,7 +286,7 @@ pub fn audit(path: &Path) -> Result<Value> {
                 _ => return Err("unexpected survey effect".into()),
             };
             let request = take(file, owner, request_label, 0..before, None)?;
-            let admitted = request.1.received()?;
+            let admitted = request.1.received;
             match tool {
                 "update_references" | "create_figure" => {
                     let source = take(
@@ -347,7 +325,7 @@ pub fn audit(path: &Path) -> Result<Value> {
                             author,
                             "DATA_ANALYST",
                             label,
-                            0..input.received()?,
+                            0..input.received,
                             Some(logical),
                         )?
                         .0,
@@ -355,7 +333,7 @@ pub fn audit(path: &Path) -> Result<Value> {
                 }
                 "peer_review" => {
                     let input = take(section, "REVIEW_FILE", 21, 0..admitted, None)?.1;
-                    let draft = take(section, "REVIEWER", 20, 0..input.received()?, None)?.1;
+                    let draft = take(section, "REVIEWER", 20, 0..input.received, None)?.1;
                     let expected = &output["data"]["input_snapshot"];
                     if input.value()? != *expected
                         || draft.value()? != *expected
@@ -363,13 +341,13 @@ pub fn audit(path: &Path) -> Result<Value> {
                     {
                         return Err("peer review differs from the admitted draft".into());
                     }
-                    let interval = draft.received()? + 1..input.received()?;
+                    let interval = draft.received + 1..input.received;
                     let analyst = role("DATA_ANALYST")?;
                     let reviewer = role("REVIEWER")?;
                     let initial = history.frames.values().any(|f| {
                         f.direction(analyst, reviewer)
                             && f.logical_label == label
-                            && f.received.is_some_and(|at| interval.contains(&at))
+                            && interval.contains(&f.received)
                     });
                     let sender = if initial { "DATA_ANALYST" } else { author };
                     authorities.push(take(sender, "REVIEWER", label, interval, Some(logical))?.0);
@@ -419,8 +397,8 @@ pub fn audit(path: &Path) -> Result<Value> {
         }
         effects.push(
             json!({"effect_id":id,"tool":tool,"agent":agent,"success":success,
-            "request_frame":request.0,"request_occurrence":receipts[&request.0]["occurrence"],
-            "result_frame":reply.0,"result_occurrence":receipts[&reply.0]["occurrence"],
+            "request_frame":request.0,"request_occurrence":history.frames[&request.0].receipt["occurrence"],
+            "result_frame":reply.0,"result_occurrence":history.frames[&reply.0].receipt["occurrence"],
             "chapter_authorities":authorities,"score_event":score.0}),
         );
     }
@@ -444,9 +422,7 @@ pub fn audit(path: &Path) -> Result<Value> {
     }
     Ok(
         json!({"status":"passed","task":"3H","participants":actors.len(),"domain_calls":effects.len(),
-        "violations":0,"effects":effects,"dynamic_protocol":dynamic,"events_sha256":digest(path)?,
-        "compiled_projection_sha256":digest(&path.with_file_name("projection.json"))?,
-        "runtime_binary_sha256":artifact["runtime_binary_sha256"],
+        "violations":0,"effects":effects,"dynamic_protocol":dynamic,
         "simulator_complete":history.score["complete"],
         "scored_benchmark":false}),
     )

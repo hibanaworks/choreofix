@@ -104,10 +104,10 @@ fn assignment(call: &Call, fixture: &Value) -> Result<()> {
 // Evidence consumption, never application authority or protocol progress.
 #[track_caller]
 fn take<'a>(
-    frames: &'a BTreeMap<u64, Frame>,
+    frames: &'a BTreeMap<u64, Frame<'a>>,
     used: &mut BTreeSet<u64>,
     matches: impl Fn(&Frame) -> bool,
-) -> Result<&'a Frame> {
+) -> Result<&'a Frame<'a>> {
     let caller = std::panic::Location::caller();
     let (id, frame) = one(frames
         .iter()
@@ -155,7 +155,7 @@ fn material(calls: &[&Call], before: usize) -> Result<Value> {
 fn scoped(snapshot: &Value, scope: &str) -> Value {
     json!({"sections":{scope:snapshot["sections"][scope]},"references":{scope:snapshot["references"][scope]}})
 }
-fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty report evidence")?["message"];
     if fixture["type"] != "fixtures" || fixture["task"] != "3E" || compiled["task"] != "3E" {
@@ -175,8 +175,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     }
     let headers = crate::projection::contracts(compiled)?;
     let labels = crate::projection::frames(artifact, rows)?;
-    let mut journal = crate::journal::read(rows, &labels, actors)?;
-    journal.bind_receives(dynamic)?;
+    let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
@@ -245,17 +244,17 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 let request = take(&frames, &mut used, |f| {
                     f.direction(file, research)
                         && f.logical_label == request_label
-                        && f.received.is_some_and(|at| at < call.emitted)
+                        && f.received < call.emitted
                         && f.value().is_ok_and(|v| v == *args)
                 })?;
                 let reply = take(&frames, &mut used, |f| {
                     f.direction(research, file)
                         && f.logical_label == research_result_label
-                        && f.received.is_some_and(|at| at > result_at)
+                        && f.received > result_at
                         && f.value().is_ok_and(|v| v == *result)
                 })?;
-                if request.received()? >= call.started()?.0
-                    || reply.received()? <= result_at
+                if request.received >= call.started()?.0
+                    || reply.received <= result_at
                     || !result["data"]["artifact"]["id"].is_string()
                 {
                     return Err("research result lacks its actual request and artifact".into());
@@ -340,7 +339,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 take(&frames, &mut used, |f| {
                     f.direction(resource, service)
                         && f.logical_label == request_label
-                        && f.received.is_some_and(|at| at < call.emitted)
+                        && f.received < call.emitted
                         && f.value().is_ok_and(|v| v == *args)
                 })?;
                 let admission_label = label(admitted_name)?;
@@ -358,7 +357,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                         },
                         admission_target,
                     ) && f.logical_label == admission_label
-                        && f.received.is_some_and(|at| at < call.emitted)
+                        && f.received < call.emitted
                         && f.value().is_ok_and(|v| v == *args)
                 })?;
                 if let Some(forward_name) = forward_name {
@@ -366,14 +365,14 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     take(&frames, &mut used, |f| {
                         f.direction(service, actor)
                             && f.logical_label == forwarded_label
-                            && f.received.is_some_and(|at| at < call.emitted)
+                            && f.received < call.emitted
                             && f.value().is_ok_and(|v| v == *args)
                     })?;
                 } else {
                     take(&frames, &mut used, |f| {
                         f.direction(file, editor)
                             && f.logical_label == admission_label
-                            && f.received.is_some_and(|at| at < call.emitted)
+                            && f.received < call.emitted
                             && f.value().is_ok_and(|v| v == *args)
                     })?;
                 }
@@ -381,14 +380,14 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 take(&frames, &mut used, |f| {
                     f.direction(service, resource)
                         && f.logical_label == reply_label
-                        && f.received.is_some_and(|at| at > result_at)
+                        && f.received > result_at
                         && f.value().is_ok_and(|v| v == *result)
                 })?;
                 let file_reply_label = label(file_result)?;
                 take(&frames, &mut used, |f| {
                     f.direction(actor, file)
                         && f.logical_label == file_reply_label
-                        && f.received.is_some_and(|at| at > result_at)
+                        && f.received > result_at
                         && f.value().is_ok_and(|v| v == *result)
                 })?;
                 resource_requests += 1;
@@ -401,7 +400,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     take(&frames, &mut used, |f| {
                         f.direction(db_service, initial_doc)
                             && f.logical_label == forwarded_label
-                            && f.received.is_some_and(|at| at > result_at)
+                            && f.received > result_at
                             && f.value().is_ok_and(|v| v == *result)
                     })?;
                 }
@@ -473,22 +472,22 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                         take(&frames, &mut used, |f| {
                             f.direction(editor, service)
                                 && f.logical_label == confirmation
-                                && f.received.is_some_and(|received| received > at)
-                                && f.received.is_some_and(|r| r < call.emitted)
+                                && f.received > at
+                                && f.received < call.emitted
                                 && f.value().is_ok_and(|v| v == *value)
                         })?;
                         take(&frames, &mut used, |f| {
                             f.direction(service, doc_service)
                                 && f.logical_label == confirmation
-                                && f.received.is_some_and(|received| received > at)
-                                && f.received.is_some_and(|r| r < call.emitted)
+                                && f.received > at
+                                && f.received < call.emitted
                                 && f.value().is_ok_and(|v| v == *value)
                         })?;
                         let notice = label(notice)?;
                         take(&frames, &mut used, |f| {
                             f.direction(editor, author)
                                 && f.logical_label == notice
-                                && f.received.is_some_and(|at| at > result_at)
+                                && f.received > result_at
                                 && f.value().is_ok_and(|v| v == *result)
                         })?;
                     }
@@ -544,7 +543,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     take(&frames, &mut used, |f| {
                         f.direction(from, to)
                             && f.logical_label == request_label
-                            && f.received.is_some_and(|at| at < call.emitted)
+                            && f.received < call.emitted
                             && f.value().is_ok_and(|v| v == *args)
                     })?;
                 }
@@ -553,7 +552,6 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     f.direction(editor, doc_service)
                         && f.logical_label == request_label
                         && f.sent < call.emitted
-                        && f.received.is_some()
                         && f.value().is_ok_and(|v| v == *args)
                 })?;
                 let verdict = result["success"]
@@ -578,15 +576,14 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     let forwarded = take(&frames, &mut used, |f| {
                         f.direction(doc_service, initial_doc)
                             && f.logical_label == reply_label
-                            && f.received.is_some_and(|at| at > result_at)
+                            && f.received > result_at
                             && f.value().is_ok_and(|v| v == *result)
                     })?;
                     let handoff_label = label("ReportMaterial")?;
                     let handoff = take(&frames, &mut used, |f| {
                         f.direction(initial_doc, doc_service)
                             && f.logical_label == handoff_label
-                            && f.sent > forwarded.received.expect("matched delivered review")
-                            && f.received.is_some()
+                            && f.sent > forwarded.received
                     })?;
                     let actual = material(&ordered, handoff.sent)?;
                     if ["section_a", "section_b"].into_iter().any(|key| {
@@ -602,14 +599,14 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     take(&frames, &mut used, |f| {
                         f.direction(outcome, recipient)
                             && f.logical_label == reply_label
-                            && f.received.is_some_and(|at| at > result_at)
+                            && f.received > result_at
                             && f.value().is_ok_and(|v| v == *result)
                     })?;
                     if recipient == own || recipient == other {
                         take(&frames, &mut used, |f| {
                             f.direction(recipient, outcome)
                                 && f.logical_label == reply_label
-                                && f.received.is_some_and(|at| at > result_at)
+                                && f.received > result_at
                                 && f.value().is_ok_and(|v| v == *result)
                         })?;
                     }
@@ -618,7 +615,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                         take(&frames, &mut used, |f| {
                             f.direction(own, own_file)
                                 && f.logical_label == feedback
-                                && f.received.is_some_and(|at| at > result_at)
+                                && f.received > result_at
                                 && f.value().is_ok_and(|v| v == *result)
                         })?;
                     }
@@ -627,7 +624,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                         take(&frames, &mut used, |f| {
                             f.direction(editor, file)
                                 && f.logical_label == file_result
-                                && f.received.is_some_and(|at| at > result_at)
+                                && f.received > result_at
                                 && f.value().is_ok_and(|v| v == *result)
                         })?;
                     }
@@ -637,14 +634,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         }
         let index = originals
             .iter()
-            .position(|event| {
-                event["agent"] == call.request["agent"]
-                    && event["tool"] == call.request["tool"]
-                    && event["args"] == *args
-                    && event["success"] == result["success"]
-                    && event["result"] == result["data"]
-                    && event["violations"] == json!([])
-            })
+            .position(|event| call.matches_score(event, args))
             .ok_or("actual report effect differs from the shared score")?;
         originals.remove(index);
     }
@@ -700,24 +690,9 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     )
 }
 
-pub fn audit(path: &Path) -> Result<Value> {
-    let projection = crate::projection::load(path)?;
-    let rows = records(path)?;
-    let dynamic = crate::projection::check_dynamic(&projection, &rows)?;
-    let mut result = check(&rows, &projection, &dynamic)?;
-    result["source_events_sha256"] = json!(digest(path)?);
-    result["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("report directory")?
-            .join("projection.json")
-    )?);
-    result["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
-    Ok(result)
-}
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let rows = records(path)?;
-    let projection = crate::projection::load(path)?;
+    let (projection, _) = crate::projection::load(path)?;
     let dynamic = crate::projection::check_dynamic(&projection, &rows)?;
     let mut audit = check(&rows, &projection, &dynamic)?;
     audit["source_events_sha256"] = json!(digest(path)?);
@@ -732,8 +707,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .as_array()
         .ok_or("report actors")?;
     let labels = crate::projection::frames(&projection, &rows)?;
-    let mut journal = crate::journal::read(&rows, &labels, actors)?;
-    journal.bind_receives(&dynamic)?;
+    let journal = crate::journal::read(&rows, &labels, actors, &dynamic)?;
     let ids = journal
         .frames
         .iter()
@@ -789,7 +763,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         (
             "effect_before_actual_receive",
             call.emitted,
-            rows[..request.received()?]
+            rows[..request.received]
                 .iter()
                 .rposition(|row| {
                     row["direction"] == "runtime" && row["message"]["type"] == "terminal"
@@ -801,7 +775,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
             result_at,
             rows.iter()
                 .enumerate()
-                .skip(reply.received()? + 1)
+                .skip(reply.received + 1)
                 .find(|(_, row)| {
                     row["direction"] == "to_runtime" && row["message"]["type"] == "command"
                 })
@@ -814,7 +788,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         // Capture rows and their positions are unchanged. The journal must
         // remain internally valid; rejection must come from the actual
         // request/effect/result boundary, not malformed effect intervals.
-        crate::journal::read(&changed, &labels, actors)?;
+        crate::journal::read(&changed, &labels, actors, &dynamic)?;
         let error = check(&changed, &projection, &dynamic)
             .err()
             .ok_or_else(|| format!("accepted {kind}"))?;

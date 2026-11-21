@@ -697,7 +697,8 @@ async fn five_wash_guests_complete_the_document_and_reconsider() -> Result<()> {
             _ => unreachable!(),
         };
         assert_eq!(revisions, expected_revisions, "{case}: revised chapters");
-        let checked = crate::figure_document_audit::audit(&output.join("events.jsonl"))?;
+        let checked = crate::journal::Evidence::open(&output.join("events.jsonl"))?
+            .audit(crate::figure_document_audit::check)?;
         assert_eq!(checked["status"], "passed");
         save(&output.join("audit.json"), &checked)?;
         if depth == 2 {
@@ -721,7 +722,9 @@ async fn five_wash_guests_complete_the_document_and_reconsider() -> Result<()> {
                 .expect("actual figure-store request");
             let arguments = json!({"section_name":"CHAPTER_3","figure_id":"another-figure"});
             frame["message"]["payload"] = json!(serde_json::to_vec(&arguments)?);
-            let error = crate::figure_document_audit::check(&path, &altered)
+            let (artifact, _) = crate::projection::load(&path)?;
+            let execution = crate::projection::check_dynamic(&artifact, &altered)?;
+            let error = crate::figure_document_audit::check(&altered, &artifact, &execution)
                 .expect_err("a substituted resource request cannot account for the actual effect");
             assert!(
                 error

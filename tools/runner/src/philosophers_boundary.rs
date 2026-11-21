@@ -469,7 +469,8 @@ pub(super) async fn verify_action_words<'a>(
                     .map(|(agent, tool)| (Some(agent.as_str()), Some(*tool)))),
             "{name}: {scored:?}"
         );
-        let audit = philosophers_audit::audit(&events)?;
+        let audit =
+            crate::journal::Evidence::open(&events)?.audit(crate::philosophers_audit::check)?;
         assert_eq!(result["score"]["complete"], true);
         assert_eq!(result["score"]["violations"], json!([]));
         assert_eq!(audit["actual_resource_endpoint_returns"], 2 * count);

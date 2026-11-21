@@ -17,25 +17,9 @@ fn validate<P: WirePayload>(frame: &journal::Frame) -> Result<()> {
         .map_err(|error| format!("WASI payload: {error:?}").into())
 }
 
-pub fn audit(path: &Path) -> Result<Value> {
-    let records = journal::records(path)?;
-    let projection = crate::projection::load(path)?;
-    let mut result = check(&records, &projection)?;
-    result["source_events_sha256"] = json!(crate::evidence::digest(path)?);
-    result["compiled_projection_sha256"] = json!(crate::evidence::digest(
-        &path
-            .parent()
-            .ok_or("event directory")?
-            .join("projection.json"),
-    )?);
-    result["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
-    Ok(result)
-}
-
-fn check(records: &[Value], projection: &Value) -> Result<Value> {
+pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
     use crate::philosopher_identity::{AGENTS, THINK_COMPLETED, THINK_REQUEST, roles};
     let labels = crate::projection::frames(projection, records)?;
-    let dynamic = crate::projection::check_dynamic(projection, records)?;
     let fixture = &records.first().ok_or("empty evidence")?["message"];
     if projection["compiled"]["task"] != fixture["task"]
         || fixture["terminal_review_failure"] != false
@@ -160,8 +144,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
     {
         return Err("dining participant identities".into());
     }
-    let journal = journal::read(records, &labels, actors)?;
-    let receipts = journal.receipts(&dynamic)?;
+    let journal = journal::read(records, &labels, actors, dynamic)?;
     let table = u64::from(roles::TABLE);
     let requests_role = u64::from(roles::MEAL_REQUESTS);
     let programs = projection["compiled"]["programs"]
@@ -179,14 +162,6 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
     {
         return Err("different dining session".into());
     }
-    let committed = |id: u64| -> Result<usize> {
-        usize::try_from(
-            receipts.get(&id).ok_or("frame receipt")?["receive_commit"]["journal_row"]
-                .as_u64()
-                .ok_or("receive commit observation")?,
-        )
-        .map_err(Into::into)
-    };
     let forks: BTreeMap<_, _> = layout
         .iter()
         .map(|(name, ids)| (*name, (u64::from(ids[1]), u64::from(ids[4]))))
@@ -237,7 +212,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                         && frame.logical_label == 165
                         && frame.bytes.first().copied().map(u64::from) == Some(controller)
                 }))?;
-                if receipts[&id]["receive_commit"]["actor"] != vm {
+                if journal.frames[&id].receipt["receive_commit"]["actor"] != vm {
                     return Err("close authority was not received by the actual guest".into());
                 }
                 Some(id)
@@ -258,8 +233,8 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                             && (frame.logical_label == protocol::LABEL_WASI_FD_CLOSE_OBJECT
                                 || (tool == "think" && frame.logical_label == THINK_REQUEST)))
                 })
-                .map(|(&id, frame)| Ok((committed(id)?, id, frame)))
-                .collect::<Result<Vec<_>>>()?;
+                .map(|(&id, frame)| (frame.received, id, frame))
+                .collect::<Vec<_>>();
             let mut replies = journal
                 .frames
                 .iter()
@@ -282,8 +257,8 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                             && frame.direction(controller, view)
                             && frame.logical_label == THINK_COMPLETED)
                 })
-                .map(|(&id, frame)| Ok((committed(id)?, id, frame)))
-                .collect::<Result<Vec<_>>>()?;
+                .map(|(&id, frame)| (frame.received, id, frame))
+                .collect::<Vec<_>>();
             requests.sort_by_key(|&(at, _, _)| at);
             replies.sort_by_key(|&(at, _, _)| at);
             if requests.len() != replies.len() {
@@ -297,10 +272,10 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
             for ((at, request_id, request), (replied, reply_id, reply)) in
                 requests.into_iter().zip(replies)
             {
-                if receipts[&request_id]["send_actor"] != vm
-                    || receipts[&request_id]["receive_commit"]["actor"] != owner
-                    || receipts[&reply_id]["send_actor"] != owner
-                    || receipts[&reply_id]["receive_commit"]["actor"] != vm
+                if journal.frames[&request_id].receipt["send_actor"] != vm
+                    || journal.frames[&request_id].receipt["receive_commit"]["actor"] != owner
+                    || journal.frames[&reply_id].receipt["send_actor"] != owner
+                    || journal.frames[&reply_id].receipt["receive_commit"]["actor"] != vm
                 {
                     return Err("object I/O request/reply occurrence mismatch".into());
                 }
@@ -426,7 +401,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                                     f.direction(controller, requests_role)
                                         && u64::from(f.logical_label) == controller
                                 }))?;
-                            let ready_at = committed(*ready_id)?;
+                            let ready_at = journal.frames[ready_id].received;
                             let args = ready.value()?;
                             let granted_at = if grants_to_forks {
                                 let mut latest = ready_at;
@@ -450,7 +425,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                                                 .into(),
                                         );
                                     }
-                                    latest = latest.max(committed(*id)?);
+                                    latest = latest.max(journal.frames[id].received);
                                 }
                                 latest
                             } else {
@@ -465,10 +440,11 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                                             .into(),
                                     );
                                 }
-                                committed(*grant_id)?
+                                journal.frames[grant_id].received
                             };
-                            let returned_at =
-                                committed(authority_id.ok_or("missing meal Endpoint")?)?;
+                            let returned_at = journal.frames
+                                [&authority_id.ok_or("missing meal Endpoint")?]
+                                .received;
                             if args != *arguments.as_ref().ok_or("malformed admitted meal")?
                                 || at >= ready_at
                                 || ready_at >= granted_at
@@ -608,7 +584,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                             |(frame_id, frame)| {
                                 frame.direction(source, target)
                                     && u64::from(frame.logical_label) == label
-                                    && receipts[*frame_id]["send_actor"] == sender
+                                    && journal.frames[*frame_id].receipt["send_actor"] == sender
                             },
                         ))
                         .map_err(|error| {
@@ -638,14 +614,16 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                         if intent.value()? != call.request["arguments"]
                             || request.value()? != call.request["arguments"]
                             || reply.value()? != *result
-                            || !(committed(request_id)? < call.emitted
-                                && committed(loan_id)? < call.emitted
-                                && result_at < committed(reply_id)?)
-                            || receipts[&request_id]["send_actor"] != fork_owner
-                            || receipts[&request_id]["receive_commit"]["actor"] != owner
-                            || receipts[&loan_id]["receive_commit"]["actor"] != owner
-                            || receipts[&reply_id]["send_actor"] != owner
-                            || receipts[&reply_id]["receive_commit"]["actor"] != fork_owner
+                            || !(journal.frames[&request_id].received < call.emitted
+                                && journal.frames[&loan_id].received < call.emitted
+                                && result_at < journal.frames[&reply_id].received)
+                            || journal.frames[&request_id].receipt["send_actor"] != fork_owner
+                            || journal.frames[&request_id].receipt["receive_commit"]["actor"]
+                                != owner
+                            || journal.frames[&loan_id].receipt["receive_commit"]["actor"] != owner
+                            || journal.frames[&reply_id].receipt["send_actor"] != owner
+                            || journal.frames[&reply_id].receipt["receive_commit"]["actor"]
+                                != fork_owner
                         {
                             return Err("effect lacks its two committed resource requests, Endpoints or actual replies".into());
                         }
@@ -655,8 +633,8 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                             }
                         }
                         resources.push(json!({"resource":resource,"intent_frame":intent_id,
-                        "request_frame":request_id,"request_receive":receipts[&request_id]["receive_commit"],
-                        "endpoint_frame":loan_id,"endpoint_receive":receipts[&loan_id]["receive_commit"],
+                        "request_frame":request_id,"request_receive":journal.frames[&request_id].receipt["receive_commit"],
+                        "endpoint_frame":loan_id,"endpoint_receive":journal.frames[&loan_id].receipt["receive_commit"],
                         "result_frame":reply_id,"return_frame":return_id}));
                     }
                     meals.push((call.started()?.1, call.ended()?.1, names));
@@ -666,15 +644,12 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                 } else {
                     json!({"left_fork":assignment["forks"][0],"right_fork":assignment["forks"][1]})
                 };
-                if event["args"] != expected_args
-                    || event["result"] != result["data"]
-                    || event["success"] != result["success"]
-                {
+                if !call.matches_score(event, &expected_args) {
                     return Err("original simulator score and actual effect differ".into());
                 }
                 effect_receipts.push(json!({"effect_id":id,"agent":agent,"tool":tool,
-                "object_frame":close_id,"object_receive":receipts[&close_id]["receive_commit"],
-                "close_authority_frame":authority_id,"close_authority_receive":authority_id.map(|id| &receipts[&id]["receive_commit"]),
+                "object_frame":close_id,"object_receive":journal.frames[&close_id].receipt["receive_commit"],
+                "close_authority_frame":authority_id,"close_authority_receive":authority_id.map(|id| &journal.frames[&id].receipt["receive_commit"]),
                 "arguments":call.request["arguments"],"resources":resources}));
             }
         }
@@ -733,8 +708,8 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
 }
 
 pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
-    let baseline = audit(path)?;
-    let projection = crate::projection::load(path)?;
+    let baseline = crate::journal::Evidence::open(path)?.audit(check)?;
+    let (projection, _) = crate::projection::load(path)?;
     let records = journal::records(path)?;
     let labels = crate::projection::frames(&projection, &records)?;
     let first_eat = baseline["effect_receipts"]

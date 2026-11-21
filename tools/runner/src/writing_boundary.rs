@@ -465,7 +465,8 @@ async fn writers_can_finish_in_different_orders() -> Result<()> {
                 .map(|e| e["agent"].as_str().ok_or("writer"))
                 .collect::<std::result::Result<_, _>>()?;
             assert_eq!(actual, expected);
-            let audit = crate::writing_audit::audit(&events)?;
+            let audit =
+                crate::journal::Evidence::open(&events)?.audit(crate::writing_audit::check)?;
             assert_eq!(audit["actual_resource_endpoint_returns"], 2 * order.len());
             assert_eq!(audit["violations"], 0);
             save(&case.join("audit.json"), &audit)?;

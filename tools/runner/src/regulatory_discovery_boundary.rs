@@ -1,7 +1,7 @@
 use crate::{
     drug_discovery_boundary::{read, write},
     evidence::{Result, Trace, archive_build_receipt, digest, save},
-    oracle, process, projection, regulatory_discovery_audit,
+    oracle, process, projection,
 };
 use serde_json::{Value, json};
 use std::{
@@ -193,7 +193,8 @@ async fn actual_wasm_reconsideration() -> Result<()> {
         .as_array()
         .ok_or("14M effect journal")?;
     assert_eq!(effects.len(), effect_count);
-    let audit = regulatory_discovery_audit::audit(&output.join("events.jsonl"))?;
+    let audit = crate::journal::Evidence::open(&output.join("events.jsonl"))?
+        .audit(crate::regulatory_discovery_audit::check)?;
     assert_eq!(audit["domain_calls"], effect_count);
     assert_eq!(audit["rejections"], rejections);
     assert_eq!(audit["analysis_failures"], analysis_failures);

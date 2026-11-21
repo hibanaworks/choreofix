@@ -200,7 +200,8 @@ async fn all_causal_orders_and_parallel_instruments_use_actual_wasm() -> Result<
             (audit, Some(report))
         } else {
             (
-                crate::lab_audit::audit(&directory.join("events.jsonl"))?,
+                crate::journal::Evidence::open(&directory.join("events.jsonl"))?
+                    .audit(crate::lab_audit::check)?,
                 None,
             )
         };

@@ -331,7 +331,7 @@ async fn run_wash_order(
         .lines()
         .map(|s| Ok(serde_json::from_str::<Value>(&s?)?))
         .collect::<Result<Vec<_>>>()?;
-    let observed = projection::load(&output.join("events.jsonl"))?;
+    let (observed, _) = projection::load(&output.join("events.jsonl"))?;
     assert_eq!(observed, artifact);
     let headers = projection::frames(&artifact, &rows)?;
     let audit = projection::check_dynamic(&artifact, &rows)?;
@@ -339,10 +339,9 @@ async fn run_wash_order(
     let actors = rows[0]["message"]["fixtures"]
         .as_array()
         .ok_or("4H participants")?;
-    let mut history = journal::read(&rows, &headers, actors)?;
-    let receipts = history.bind_receives(&audit)?;
+    let history = journal::read(&rows, &headers, actors, &audit)?;
     let roles = &artifact["compiled"]["roles"];
-    let effects = crate::microservice_migration_audit::preparation(&history, &receipts, roles)?;
+    let effects = crate::microservice_migration_audit::preparation(&history, roles)?;
     save(&output.join("effect-receipts.json"), &effects)?;
     if recovery == Some((1, 2)) {
         let failed = journal::one(history.calls.iter().filter(|(_, c)| {
@@ -359,11 +358,12 @@ async fn run_wash_order(
         let forward = tested["effect_request"]
             .as_u64()
             .ok_or("4H test environment request")?;
-        let ready = history.frames[&forward].received()?;
+        let ready = history.frames[&forward].received;
         let mut premature = rows.clone();
         let rpc = premature.remove(retry.emitted);
         premature.insert(ready, rpc);
-        let err = crate::microservice_migration_audit::check(&premature, &artifact)
+        let execution = projection::check_dynamic(&artifact, &premature)?;
+        let err = crate::microservice_migration_audit::check(&premature, &artifact, &execution)
             .expect_err("a previous test request cannot admit a premature retry");
         assert!(err.to_string().contains("missing matching frame"), "{err}");
         drop(premature);
@@ -384,7 +384,8 @@ async fn run_wash_order(
             .as_array_mut()
             .ok_or("score events")?
             .retain(|e| e["result"]["receipt"] != outcome["data"]["receipt"]);
-        let err = crate::microservice_migration_audit::check(&missing, &artifact)
+        let execution = projection::check_dynamic(&artifact, &missing)?;
+        let err = crate::microservice_migration_audit::check(&missing, &artifact, &execution)
             .expect_err("a dropped RPC and score must leave an unmatched request");
         assert!(
             err.to_string().contains("multiple matching frames")
@@ -409,8 +410,14 @@ async fn run_wash_order(
     };
     let (&issued, issued_frame) = loan(architect, schemas)?;
     let (&returned, returned_frame) = loan(schemas, architect)?;
-    assert_eq!(receipts[&issued]["receive_commit"]["actor"], schemas);
-    assert_eq!(receipts[&returned]["receive_commit"]["actor"], architect);
+    assert_eq!(
+        history.frames[&issued].receipt["receive_commit"]["actor"],
+        schemas
+    );
+    assert_eq!(
+        history.frames[&returned].receipt["receive_commit"]["actor"],
+        architect
+    );
     let mut test_results = Vec::new();
     for call in history
         .calls
@@ -452,22 +459,22 @@ async fn run_wash_order(
                 && reviewed_at < f.sent
                 && f.value().is_ok_and(|v| v == *approved)
         }))?;
-        let admitted = notice.received()?;
+        let admitted = notice.received;
         let arguments = &call.request["arguments"];
         assert_eq!(arguments, &json!({"suite":value["data"]["service"]}));
         let (&command, request) = journal::one(history.frames.iter().filter(|(_, f)| {
             f.direction(file, owner)
                 && f.logical_label as u64 == tester
                 && admitted < f.sent
-                && f.received.is_some_and(|r| r < call.emitted)
+                && f.received < call.emitted
                 && f.value().is_ok_and(|v| v == *arguments)
         }))?;
-        let accepted = request.received()?;
+        let accepted = request.received;
         let (&forward, forwarded) = journal::one(history.frames.iter().filter(|(_, f)| {
             f.direction(environment, tester)
                 && f.logical_label as u64 == tester
                 && accepted < f.sent
-                && f.received.is_some_and(|r| r < call.emitted)
+                && f.received < call.emitted
                 && f.value().is_ok_and(|v| v == *arguments)
         }))?;
         let is_environment = |f: &journal::Frame| {
@@ -477,12 +484,15 @@ async fn run_wash_order(
             is_environment(f)
                 && f.direction(owner, tester)
                 && forwarded.sent < f.sent
-                && f.received.is_some_and(|r| r < call.emitted)
+                && f.received < call.emitted
         }))?;
-        assert!(forwarded.received()? < grant.received()?);
-        assert_eq!(receipts[&command]["send_actor"], test_vm);
-        assert_eq!(receipts[&forward]["send_actor"], owner);
-        assert_eq!(receipts[&forward]["receive_commit"]["actor"], tester);
+        assert!(forwarded.received < grant.received);
+        assert_eq!(history.frames[&command].receipt["send_actor"], test_vm);
+        assert_eq!(history.frames[&forward].receipt["send_actor"], owner);
+        assert_eq!(
+            history.frames[&forward].receipt["receive_commit"]["actor"],
+            tester
+        );
         let (&reply, shell_reply) = journal::one(history.frames.iter().filter(|(_, f)| {
             f.direction(owner, file)
                 && f.logical_label as u64 == tester
@@ -493,9 +503,12 @@ async fn run_wash_order(
             is_environment(f)
                 && f.direction(tester, owner)
                 && completed < f.sent
-                && f.received.is_some_and(|r| r < shell_reply.sent)
+                && f.received < shell_reply.sent
         }))?;
-        assert_eq!(receipts[&reply]["receive_commit"]["actor"], test_vm);
+        assert_eq!(
+            history.frames[&reply].receipt["receive_commit"]["actor"],
+            test_vm
+        );
         let positive = value["success"].as_bool().ok_or("missing test success")?;
         let (&tested, result_frame) = journal::one(history.frames.iter().filter(|(_, f)| {
             f.direction(service, developer)
@@ -508,16 +521,16 @@ async fn run_wash_order(
                 && f.logical_label == 95
                 && f.value().is_ok_and(|v| v == *value)
         }))?;
-        assert!(result_frame.received()? < report.sent);
-        assert_eq!(receipts[&tested]["send_actor"], tester);
+        assert!(result_frame.received < report.sent);
+        assert_eq!(history.frames[&tested].receipt["send_actor"], tester);
         assert_eq!(
-            receipts[&reported]["receive_commit"]["actor"],
+            history.frames[&reported].receipt["receive_commit"]["actor"],
             role(format!("{suffix}_VM"))?
         );
-        let mut entry = json!({"test":value, "approval_read":receipts[&approval],
-                "test_command":receipts[&command], "environment_request":receipts[&forward],
-                "environment_loan":receipts[&checkout], "environment_return":receipts[&returned],
-                "tester_read":receipts[&reply], "outcome":receipts[&tested], "shell_read":receipts[&reported]});
+        let mut entry = json!({"test":value, "approval_read":history.frames[&approval].receipt,
+                "test_command":history.frames[&command].receipt, "environment_request":history.frames[&forward].receipt,
+                "environment_loan":history.frames[&checkout].receipt, "environment_return":history.frames[&returned].receipt,
+                "tester_read":history.frames[&reply].receipt, "outcome":history.frames[&tested].receipt, "shell_read":history.frames[&reported].receipt});
         let review_file = role("REVIEW_FILE".to_owned())?;
         let reviewer_vm = role("REVIEW_VM".to_owned())?;
         let reviewer = role(format!("REVIEWER_{suffix}"))?;
@@ -527,7 +540,10 @@ async fn run_wash_order(
                     && f.logical_label == 47
                     && f.bytes.first().copied().map(u64::from) == Some(service)
             }))?;
-            assert_eq!(receipts[&loan_id]["receive_commit"]["actor"], developer);
+            assert_eq!(
+                history.frames[&loan_id].receipt["receive_commit"]["actor"],
+                developer
+            );
             let repairs: Vec<_> = history
                 .calls
                 .values()
@@ -539,24 +555,26 @@ async fn run_wash_order(
                 .collect();
             assert_eq!(repairs.len(), 1 + rejected_reviews as usize);
 
-            let mut after = loan.received()?;
+            let mut after = loan.received;
             let mut revisions = Vec::new();
             for repair in repairs {
                 let (finished, fixed) = repair.result()?;
                 let (&request_id, _) = journal::one(history.frames.iter().filter(|(_, f)| {
                     f.direction(developer_file, service)
                         && f.logical_label == 82
-                        && f.received
-                            .is_some_and(|at| after < at && at < repair.emitted)
+                        && after < f.received
+                        && f.received < repair.emitted
                         && f.value().is_ok_and(|v| v == repair.request["arguments"])
                 }))?;
-                assert_eq!(receipts[&request_id]["receive_commit"]["actor"], developer);
-                let (&reply_id, reply) = journal::one(history.frames.iter().filter(|(_, f)| {
+                assert_eq!(
+                    history.frames[&request_id].receipt["receive_commit"]["actor"],
+                    developer
+                );
+                let (&reply_id, _) = journal::one(history.frames.iter().filter(|(_, f)| {
                     f.direction(service, developer_file)
                         && f.sent > finished
                         && f.value().is_ok_and(|v| v == *fixed)
                 }))?;
-                reply.received()?;
                 let (&submission_id, submission) =
                     journal::one(history.frames.iter().filter(|(_, f)| {
                         f.direction(service, review_file)
@@ -564,10 +582,13 @@ async fn run_wash_order(
                             && f.sent > finished
                             && f.value().is_ok_and(|v| v == *fixed)
                     }))?;
-                let submitted = submission.received()?;
-                assert_eq!(receipts[&submission_id]["send_actor"], reviewer);
+                let submitted = submission.received;
                 assert_eq!(
-                    receipts[&submission_id]["receive_commit"]["actor"],
+                    history.frames[&submission_id].receipt["send_actor"],
+                    reviewer
+                );
+                assert_eq!(
+                    history.frames[&submission_id].receipt["receive_commit"]["actor"],
                     reviewer_vm
                 );
                 assert_eq!(fixed["data"]["plan"], value["data"]["plan"]);
@@ -584,22 +605,20 @@ async fn run_wash_order(
                     f.direction(review_file, service)
                         && u64::from(f.logical_label) == service
                         && f.sent > submitted
-                        && f.received.is_some_and(|at| at < review.emitted)
+                        && f.received < review.emitted
                         && f.value().is_ok_and(|v| v == review.request["arguments"])
                 }))?;
                 assert_eq!(
-                    receipts[&review_request]["receive_commit"]["actor"],
+                    history.frames[&review_request].receipt["receive_commit"]["actor"],
                     reviewer
                 );
-                let (&review_reply, result_frame) =
-                    journal::one(history.frames.iter().filter(|(_, f)| {
-                        f.direction(service, review_file)
-                            && f.sent > ended
-                            && f.value().is_ok_and(|v| v == *reviewed)
-                    }))?;
-                result_frame.received()?;
+                let (&review_reply, _) = journal::one(history.frames.iter().filter(|(_, f)| {
+                    f.direction(service, review_file)
+                        && f.sent > ended
+                        && f.value().is_ok_and(|v| v == *reviewed)
+                }))?;
                 assert_eq!(
-                    receipts[&review_reply]["receive_commit"]["actor"],
+                    history.frames[&review_reply].receipt["receive_commit"]["actor"],
                     reviewer_vm
                 );
                 let (&developer_reply, decision) =
@@ -608,28 +627,30 @@ async fn run_wash_order(
                             && f.sent > ended
                             && f.value().is_ok_and(|v| v == *reviewed)
                     }))?;
-                after = decision.received()?;
+                after = decision.received;
                 assert_eq!(
-                    receipts[&developer_reply]["receive_commit"]["actor"],
+                    history.frames[&developer_reply].receipt["receive_commit"]["actor"],
                     role(format!("{suffix}_VM"))?
                 );
-                revisions.push(json!({"request":receipts[&request_id],"build_reply":receipts[&reply_id],
-                    "reviewer_read":receipts[&submission_id],"candidate":fixed,"review_request":receipts[&review_request],
-                    "review":reviewed,"review_reply":receipts[&review_reply],"developer_read":receipts[&developer_reply]}));
+                revisions.push(json!({"request":history.frames[&request_id].receipt,"build_reply":history.frames[&reply_id].receipt,
+                    "reviewer_read":history.frames[&submission_id].receipt,"candidate":fixed,"review_request":history.frames[&review_request].receipt,
+                    "review":reviewed,"review_reply":history.frames[&review_reply].receipt,"developer_read":history.frames[&developer_reply].receipt}));
             }
             entry["recovery"] =
-                json!({"returned_service":receipts[&loan_id],"revisions":revisions});
+                json!({"returned_service":history.frames[&loan_id].receipt,"revisions":revisions});
         } else {
-            let (&id, message) = journal::one(history.frames.iter().filter(|(_, f)| {
+            let (&id, _) = journal::one(history.frames.iter().filter(|(_, f)| {
                 f.direction(reviewer, review_file)
                     && u64::from(f.logical_label) == service
                     && f.sent > completed
                     && f.value().is_ok_and(|v| v == *value)
             }))?;
-            message.received()?;
-            assert_eq!(receipts[&id]["send_actor"], reviewer);
-            assert_eq!(receipts[&id]["receive_commit"]["actor"], reviewer_vm);
-            entry["reviewer_read"] = receipts[&id].clone();
+            assert_eq!(history.frames[&id].receipt["send_actor"], reviewer);
+            assert_eq!(
+                history.frames[&id].receipt["receive_commit"]["actor"],
+                reviewer_vm
+            );
+            entry["reviewer_read"] = history.frames[&id].receipt.clone();
             let checked = journal::one(
                 effects["effects"]
                     .as_array()
@@ -644,7 +665,7 @@ async fn run_wash_order(
                 let frame = checked["staging_candidate"][field]
                     .as_u64()
                     .ok_or("staging handoff frame")?;
-                staging.insert(field.into(), receipts[&frame].clone());
+                staging.insert(field.into(), history.frames[&frame].receipt.clone());
             }
             entry["staging_candidate"] = Value::Object(staging);
         }
@@ -668,28 +689,33 @@ async fn run_wash_order(
         let (returned_at, result) = call.result()?;
         let (&request, frame) = journal::one(history.frames.iter().filter(|(_, frame)| {
             frame.direction(file, schemas)
-                && frame.received.is_some_and(|at| at < call.emitted)
+                && frame.received < call.emitted
                 && frame.value().is_ok_and(|v| v == *args)
         }))?;
         let (&response, reply) = journal::one(history.frames.iter().filter(|(_, reply)| {
             reply.direction(schemas, file)
                 && reply.sent > returned_at
-                && reply.received.is_some()
                 && reply.logical_label == frame.logical_label
                 && reply.value().is_ok_and(|v| v == *result)
         }))?;
-        assert!(issued_frame.received()? < frame.received()? && reply.sent < returned_frame.sent);
-        assert_eq!(receipts[&request]["send_actor"], vm);
-        assert_eq!(receipts[&request]["receive_commit"]["actor"], schemas);
-        assert_eq!(receipts[&response]["send_actor"], schemas);
-        assert_eq!(receipts[&response]["receive_commit"]["actor"], vm);
+        assert!(issued_frame.received < frame.received && reply.sent < returned_frame.sent);
+        assert_eq!(history.frames[&request].receipt["send_actor"], vm);
+        assert_eq!(
+            history.frames[&request].receipt["receive_commit"]["actor"],
+            schemas
+        );
+        assert_eq!(history.frames[&response].receipt["send_actor"], schemas);
+        assert_eq!(
+            history.frames[&response].receipt["receive_commit"]["actor"],
+            vm
+        );
         migrations.push(json!({"call_id":id, "arguments":args, "simulator_receipt":result["data"]["receipt"],
-            "request":receipts[&request]["receive_commit"], "reply":receipts[&response]["receive_commit"]}));
+            "request":history.frames[&request].receipt["receive_commit"], "reply":history.frames[&response].receipt["receive_commit"]}));
     }
     assert_eq!(migrations.len(), 3);
     save(
         &output.join("schema-receipts.json"),
-        &json!({"migrations":migrations,"staging_loan":receipts[&issued], "staging_return":receipts[&returned], "model_calls":0, "scored_benchmark":false}),
+        &json!({"migrations":migrations,"staging_loan":history.frames[&issued].receipt, "staging_return":history.frames[&returned].receipt, "model_calls":0, "scored_benchmark":false}),
     )?;
     Ok(())
 }

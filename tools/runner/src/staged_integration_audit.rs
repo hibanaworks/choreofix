@@ -72,10 +72,10 @@ fn input<'a>(
     Ok(previous)
 }
 fn consume<'a>(
-    (frames, used): (&'a BTreeMap<u64, Frame>, &mut BTreeSet<usize>),
+    (frames, used): (&'a BTreeMap<u64, Frame<'a>>, &mut BTreeSet<usize>),
     (from, to, labels): (u64, u64, &[u64]),
     (value, after, before): (&Value, usize, usize),
-) -> Result<&'a Frame> {
+) -> Result<&'a Frame<'a>> {
     let frame = one(frames.values().filter(|frame| {
         frame.direction(from, to)
             && labels.contains(&u64::from(frame.logical_label))
@@ -84,12 +84,11 @@ fn consume<'a>(
             && !used.contains(&frame.sent)
             && frame.value().is_ok_and(|actual| actual == *value)
     }))?;
-    frame.received()?;
     used.insert(frame.sent);
     Ok(frame)
 }
 
-fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &projection["compiled"];
     let fixture = &rows.first().ok_or("empty execution evidence")?["message"];
     if compiled["task"] != "6H" || fixture["type"] != "fixtures" || fixture["task"] != "6H" {
@@ -127,8 +126,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         return Err("staged-development participants differ".into());
     }
     let headers = crate::projection::frames(projection, rows)?;
-    let mut journal = crate::journal::read(rows, &headers, actors)?;
-    journal.bind_receives(dynamic)?;
+    let journal = crate::journal::read(rows, &headers, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
@@ -252,14 +250,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         };
         let scored_at = scored
             .iter()
-            .position(|event| {
-                event["agent"] == agent
-                    && event["tool"] == tool
-                    && event["args"] == score_args
-                    && event["result"] == *data
-                    && event["success"] == result["success"]
-                    && event["violations"] == json!([])
-            })
+            .position(|event| call.matches_score(event, &score_args))
             .ok_or("scored effect differs from actual effect")?;
         scored.remove(scored_at);
         let next = ordered
@@ -328,7 +319,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
             (from, to, &[label(&request)?]),
             (arguments, 0, call.emitted),
         )?;
-        if accepted.received()? >= call.emitted {
+        if accepted.received >= call.emitted {
             return Err("effect before EPF-checked request receive".into());
         }
         consume(
@@ -407,7 +398,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                             (repo, peer, &[label(&message)?]),
                             (&context, test.result()?.0, call.emitted),
                         )?;
-                        if ready.received()? >= call.emitted {
+                        if ready.received >= call.emitted {
                             return Err("review before its actual candidate delivery".into());
                         }
                     }
@@ -425,7 +416,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                         (reviewer, repo, &labels),
                         (result, at, next),
                     )?
-                    .received()?;
+                    .received;
                     for peer in ["A_FILE", "B_FILE", "C_FILE", "TEST_ENV", "TEST_FILE"]
                         .into_iter()
                         .map(role)
@@ -442,9 +433,9 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                 let admitted = consume(
                     (&frames, &mut used),
                     (owner, repo, &[label(&format!("Admit{suffix}"))?]),
-                    (arguments, accepted.received()?, call.emitted),
+                    (arguments, accepted.received, call.emitted),
                 )?;
-                if admitted.received()? >= call.emitted {
+                if admitted.received >= call.emitted {
                     return Err(
                         "publication began before repository received its admitted request".into(),
                     );
@@ -531,7 +522,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                             .value()
                             .is_ok_and(|value| value["publication"] == *published)
                 }))?;
-                if context.received()? >= call.emitted {
+                if context.received >= call.emitted {
                     return Err("CI before its actual inputs".into());
                 }
                 used.insert(context.sent);
@@ -544,7 +535,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                         .filter(|frame| {
                             frame.direction(environment, repo)
                                 && u64::from(frame.logical_label) == tested
-                                && frame.received.is_some_and(|at| at < context.sent)
+                                && frame.received < context.sent
                         })
                         .max_by_key(|frame| frame.received);
                     received_tests.push(match latest {
@@ -618,7 +609,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                     (build, repo, &labels),
                     (result, at, next),
                 )?
-                .received()?;
+                .received;
                 consume(
                     (&frames, &mut used),
                     (
@@ -704,7 +695,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                     ),
                     (&readiness, own_ci.result()?.0, call.emitted),
                 )?
-                .received()?;
+                .received;
                 consume(
                     (&frames, &mut used),
                     (
@@ -717,21 +708,21 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                 let checked = consume(
                     (&frames, &mut used),
                     (stage, requests, &[label(&format!("CheckStage{suffix}"))?]),
-                    (arguments, accepted.received()?, call.emitted),
+                    (arguments, accepted.received, call.emitted),
                 )?
-                .received()?;
+                .received;
                 let latest = consume(
                     (&frames, &mut used),
                     (owner, repo, &[label(&format!("LatestChecked{suffix}"))?]),
                     (arguments, checked, call.emitted),
                 )?
-                .received()?;
+                .received;
                 let before_effect = consume(
                     (&frames, &mut used),
                     (repo, stage, &[label(&format!("StageInputs{suffix}"))?]),
                     (&inputs, latest.max(ci.result()?.0), call.emitted),
                 )?
-                .received()?;
+                .received;
                 if before_effect >= call.emitted {
                     return Err("deploy before receiving the checked repository head".into());
                 }
@@ -741,7 +732,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                     (stage, repo, &[installed]),
                     (result, at, next),
                 )?
-                .received()?;
+                .received;
                 consume(
                     (&frames, &mut used),
                     (repo, owner, &[installed]),
@@ -766,7 +757,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                     (stage, repo, &[label(&format!("Stage{outcome}{suffix}"))?]),
                     (result, at, next),
                 )?
-                .received()?;
+                .received;
                 let after = if result["success"] == true {
                     committed
                 } else {
@@ -786,7 +777,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                                 value == *rollback.result().expect("checked rollback result").1
                             })
                     }))?;
-                    returned.received()?
+                    returned.received
                 };
                 for peer in [
                     role("A_FILE")?,
@@ -871,31 +862,15 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         }
     }
     Ok(
-        json!({"status":"passed","task":"6H","depth":fixture["depth"],"domain_calls":calls.len(),
+        json!({"verifier_binary_sha256":digest(&std::env::current_exe()?)?,"status":"passed","task":"6H","depth":fixture["depth"],"domain_calls":calls.len(),
         "carrier_frames":frames.len(),"guest_exits":actors.len(),"direct_file_requests_and_replies":true,
         "effect_receives_bound_to_checked_occurrences":true,"actual_candidate_review_test_ci_and_staging_receipts":true,
         "simulator_complete":true,"violations":0,"overlapping_effect_pairs":overlaps,
         "dynamic_protocol":dynamic,"scored_benchmark":false}),
     )
 }
-pub fn audit(path: &Path) -> Result<Value> {
-    let projection = crate::projection::load(path)?;
-    let rows = records(path)?;
-    let dynamic = crate::projection::check_dynamic(&projection, &rows)?;
-    let mut result = check(&rows, &projection, &dynamic)?;
-    result["source_events_sha256"] = json!(digest(path)?);
-    result["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("evidence directory")?
-            .join("projection.json")
-    )?);
-    result["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
-    result["verifier_binary_sha256"] = json!(digest(&std::env::current_exe()?)?);
-    Ok(result)
-}
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    let projection = crate::projection::load(path)?;
+    let (projection, _) = crate::projection::load(path)?;
     let rows = records(path)?;
     let dynamic = crate::projection::check_dynamic(&projection, &rows)?;
     let audited = check(&rows, &projection, &dynamic)?;
@@ -903,7 +878,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let actors = rows[0]["message"]["fixtures"]
         .as_array()
         .ok_or("original participants")?;
-    let journal = crate::journal::read(&rows, &headers, actors)?;
+    let journal = crate::journal::read(&rows, &headers, actors, &dynamic)?;
     let roles = [
         "REPO",
         "REPO_OWNER",

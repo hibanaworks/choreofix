@@ -11,10 +11,10 @@ use std::{
 };
 
 fn take<'a>(
-    frames: &'a BTreeMap<u64, Frame>,
+    frames: &'a BTreeMap<u64, Frame<'a>>,
     used: &mut BTreeSet<u64>,
     predicate: impl Fn(&Frame) -> bool,
-) -> Result<(u64, &'a Frame)> {
+) -> Result<(u64, &'a Frame<'a>)> {
     let mut candidates = frames.iter().filter(|(_, frame)| predicate(frame));
     let (&id, frame) = candidates.next().ok_or("missing kitchen receipt")?;
     if candidates.next().is_some() || !used.insert(id) {
@@ -22,7 +22,7 @@ fn take<'a>(
     }
     Ok((id, frame))
 }
-fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty kitchen trace")?["message"];
     if compiled["task"] != "12E" || fixture["task"] != "12E" || fixture["type"] != "fixtures" {
@@ -45,8 +45,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             .ok_or_else(|| format!("compiled {group} {key}").into())
     };
     let labels = crate::projection::frames(artifact, rows)?;
-    let mut journal = crate::journal::read(rows, &labels, actors)?;
-    journal.bind_receives(dynamic)?;
+    let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
@@ -125,7 +124,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             let (_, request) = take(&frames, &mut used, |f| {
                 f.direction(file, service) && f.logical_label == request_label
             })?;
-            if request.value()? != args || request.received()? >= call.emitted {
+            if request.value()? != args || request.received >= call.emitted {
                 return Err("effect before its actual operation-file receive".into());
             }
             let (result_at, result) = call.result()?;
@@ -151,12 +150,8 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 .enumerate()
                 .find(|(index, event)| {
                     !scored_used.contains(index)
-                        && event["agent"] == chef
-                        && event["tool"] == tool
-                        && event["args"] == args
+                        && call.matches_score(event, &args)
                         && event["success"] == true
-                        && event["result"] == result["data"]
-                        && event["violations"] == json!([])
                 })
                 .map(|(index, _)| index)
                 .ok_or("world score differs from the kitchen effect")?;
@@ -170,7 +165,6 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             if reply.value()? != *result || reply.sent <= result_at {
                 return Err("operation-file reply differs from actual result".into());
             }
-            reply.received()?;
             if tool == "prepare_base_dish" {
                 for (resource, prefix) in [(oven, "Oven"), (stove, "Stove")] {
                     if letter == "C" && resource == stove {
@@ -185,13 +179,12 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                         f.direction(actor, resource) && f.logical_label == response_label
                     })?;
                     if actual.value()? != args
-                        || actual.received()? >= call.emitted
+                        || actual.received >= call.emitted
                         || response.value()? != *result
                         || response.sent <= result_at
                     {
                         return Err("equipment request or reply differs from actual effect".into());
                     }
-                    response.received()?;
                 }
                 bases.insert(chef, (score_index, end));
                 intervals.push((chef, start, end));
@@ -206,7 +199,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                         "incoming ingredient differs from its actual completed effect".into(),
                     );
                 }
-                ingredients.insert(ingredient, (score_index, end, ready.received()?));
+                ingredients.insert(ingredient, (score_index, end, ready.received));
             } else {
                 combinations.push((
                     chef,
@@ -290,7 +283,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     .collect::<Result<BTreeSet<_>>>()?;
     let returns = frames
         .values()
-        .filter(|frame| return_labels.contains(&frame.logical_label) && frame.received.is_some())
+        .filter(|frame| return_labels.contains(&frame.logical_label))
         .count();
     if returns != 5 {
         return Err("incomplete kitchen equipment return coverage".into());
@@ -318,23 +311,8 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         "effect_scope":"unique committed operation-file/resource/material receives, actual effect/result and completed world inputs; EPF owns source execution and delegation"}),
     )
 }
-pub fn audit(path: &Path) -> Result<Value> {
-    let artifact = crate::projection::load(path)?;
-    let rows = records(path)?;
-    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
-    let mut result = check(&rows, &artifact, &dynamic)?;
-    result["source_events_sha256"] = json!(digest(path)?);
-    result["runtime_binary_sha256"] = artifact["runtime_binary_sha256"].clone();
-    result["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("kitchen event directory")?
-            .join("projection.json")
-    )?);
-    Ok(result)
-}
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    let artifact = crate::projection::load(path)?;
+    let (artifact, _) = crate::projection::load(path)?;
     let rows = records(path)?;
     // Mutations below leave source capture untouched. Check that capture once.
     let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;

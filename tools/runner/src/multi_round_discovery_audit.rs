@@ -1,13 +1,9 @@
 //! Bind scientific task outcomes to the compiled protocol's committed receives.
-use crate::{
-    evidence::{Result, digest},
-    journal, projection,
-};
+use crate::{evidence::Result, journal, projection};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::Range,
-    path::Path,
 };
 
 type Operation = (
@@ -118,9 +114,7 @@ fn operation(agent: &str, tool: &str, arguments: &Value) -> Option<Operation> {
     })
 }
 
-pub fn audit(path: &Path) -> Result<Value> {
-    let rows = journal::records(path)?;
-    let artifact = projection::load(path)?;
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty 14H history")?["message"];
     let actors = fixture["fixtures"].as_array().ok_or("14H participants")?;
@@ -155,10 +149,8 @@ pub fn audit(path: &Path) -> Result<Value> {
             .as_u64()
             .ok_or_else(|| format!("missing compiled label {name}"))
     };
-    let headers = projection::frames(&artifact, &rows)?;
-    let dynamic = projection::check_dynamic(&artifact, &rows)?;
-    let mut history = journal::read(&rows, &headers, actors)?;
-    history.bind_receives(&dynamic)?;
+    let headers = projection::frames(artifact, rows)?;
+    let history = journal::read(rows, &headers, actors, dynamic)?;
     let scored = history.score["events"]
         .as_array()
         .ok_or("14H score events")?;
@@ -197,7 +189,7 @@ pub fn audit(path: &Path) -> Result<Value> {
                 !used_frames.contains(*id)
                     && frame.direction(from_id, to_id)
                     && u64::from(frame.logical_label) == operation_label
-                    && frame.received.is_some_and(|at| within.contains(&at))
+                    && within.contains(&frame.received)
             })
             .min_by_key(|(_, frame)| frame.received)
             .ok_or_else(|| {
@@ -229,7 +221,7 @@ pub fn audit(path: &Path) -> Result<Value> {
         let (end, output) = call.result()?;
         let before = call.emitted.min(start);
         let request = take(file, owner, code, 0..before)?;
-        let received = request.received()?;
+        let received = request.received;
         let shown = take(agent, file, code, end + 1..rows.len())?;
         if request.value()? != *arguments || shown.value()? != *output {
             return Err(format!("{name} differs from its actual file request or reply").into());
@@ -255,14 +247,7 @@ pub fn audit(path: &Path) -> Result<Value> {
         let score_event = scored
             .get(usize::try_from(id)?)
             .ok_or("14H scorer omits effect")?;
-        if !effect_ids.insert(id)
-            || score_event["agent"] != agent
-            || score_event["tool"] != tool
-            || score_event["args"] != *arguments
-            || score_event["success"] != success
-            || score_event["result"] != output["data"]
-            || score_event["violations"] != json!([])
-        {
+        if !effect_ids.insert(id) || !call.matches_score(score_event, arguments) {
             return Err("14H scorer differs from the actual effect".into());
         }
         if resources.contains(&"BIOLOGICAL_SAMPLES") {
@@ -289,7 +274,7 @@ pub fn audit(path: &Path) -> Result<Value> {
             result_view,
             result_target,
             result_label,
-            end + 1..shown.received()?,
+            end + 1..shown.received,
         )?;
         if name == "Decision" {
             let envelope = result.value()?;
@@ -304,7 +289,7 @@ pub fn audit(path: &Path) -> Result<Value> {
                 "REG_FILE",
                 "REGULATORY_SPECIALIST",
                 label("Publish")?,
-                at + 1..notice.received()?,
+                at + 1..notice.received,
             )?;
             if published.value()? != json!({"evidence":"regulatory"})
                 || notice.value()? != **review
@@ -348,7 +333,7 @@ pub fn audit(path: &Path) -> Result<Value> {
         }
         effects.push(
             json!({"event_id":id,"operation":name,"request_commit":received,
-            "effect_start":start,"effect_result":end,"file_reply_commit":shown.received()?,
+            "effect_start":start,"effect_result":end,"file_reply_commit":shown.received,
             "resources":resources,"success":success}),
         );
     }
@@ -384,8 +369,6 @@ pub fn audit(path: &Path) -> Result<Value> {
         "samples_consumed":sample_units.len(),"terminal_outcome":outcome["outcome"],
         "documentation":documentation,"simulator_complete":true,"violations":0,
         "effect_receives_bound_to_checked_occurrences":true,"dynamic_protocol":dynamic,
-        "runtime_binary_sha256":artifact["runtime_binary_sha256"],
-        "compiled_projection_sha256":digest(&path.parent().ok_or("effect evidence directory")?.join("projection.json"))?,
-        "source_events_sha256":digest(path)?,"scored_benchmark":false,
+        "scored_benchmark":false,
     }))
 }

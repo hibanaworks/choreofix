@@ -51,10 +51,10 @@ fn material<'a>(calls: &'a BTreeMap<u64, Call>, tool: &str, id: u64) -> Result<&
     }))
 }
 fn consume<'a>(
-    (frames, used): (&'a BTreeMap<u64, Frame>, &mut BTreeSet<usize>),
+    (frames, used): (&'a BTreeMap<u64, Frame<'a>>, &mut BTreeSet<usize>),
     (from, to, label): (u64, u64, u64),
     (value, after, before): (&Value, usize, usize),
-) -> Result<&'a Frame> {
+) -> Result<&'a Frame<'a>> {
     let frame = one(frames.values().filter(|f| {
         f.direction(from, to)
             && u64::from(f.logical_label) == label
@@ -63,7 +63,6 @@ fn consume<'a>(
             && !used.contains(&f.sent)
             && f.value().is_ok_and(|v| v == *value)
     }))?;
-    frame.received()?;
     used.insert(frame.sent);
     Ok(frame)
 }
@@ -98,7 +97,7 @@ fn business(frame: &Frame, roles: &BTreeSet<u64>) -> bool {
         && frame.value().is_ok_and(|v| v.is_object())
 }
 
-fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &projection["compiled"];
     if compiled["task"] != "6M" {
         return Err("feature-delivery compiled task".into());
@@ -129,8 +128,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         return Err("6M participants".into());
     }
     let headers = crate::projection::frames(projection, rows)?;
-    let mut journal = crate::journal::read(rows, &headers, actors)?;
-    journal.bind_receives(dynamic)?;
+    let journal = crate::journal::read(rows, &headers, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
@@ -244,14 +242,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         };
         let scored_at = scored
             .iter()
-            .position(|e| {
-                e["agent"] == agent
-                    && e["tool"] == tool
-                    && e["args"] == score_args
-                    && e["success"] == result["success"]
-                    && e["result"] == result["data"]
-                    && e["violations"] == json!([])
-            })
+            .position(|e| call.matches_score(e, &score_args))
             .ok_or("common score differs from actual effect")?;
         scored.remove(scored_at);
         let next = ordered
@@ -315,13 +306,13 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                     repo,
                     label(&format!("InitialMerge{suffix}"))?,
                 ),
-                (arguments, request.received()?, call.emitted),
+                (arguments, request.received, call.emitted),
             )?;
-            if authorized.received()? >= call.emitted {
+            if authorized.received >= call.emitted {
                 return Err("initial merge predates receipt by the repository".into());
             }
         }
-        if request.received()? >= call.emitted {
+        if request.received >= call.emitted {
             return Err("effect before its checked request receive".into());
         }
         consume(
@@ -393,7 +384,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                             && !used.contains(&v.sent)
                             && v.value().is_ok_and(|v| v == *result)
                     }))?;
-                    let committed = accepted.received()?;
+                    let committed = accepted.received;
                     used.insert(accepted.sent);
                     if result["success"] == true && u64::from(accepted.logical_label) == outcomes[0]
                     {
@@ -463,7 +454,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                     (reviewer, merge_file, label(&format!("MergeReady{suffix}"))?),
                     (approved, review.result()?.0, call.emitted),
                 )?;
-                if ready.received()? >= request.received()? {
+                if ready.received >= request.received {
                     return Err("merge before actual readiness".into());
                 }
                 let publication_label = label(&format!("Publication{suffix}"))?;
@@ -502,7 +493,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                         .filter(|frame| {
                             frame.direction(environment, repo)
                                 && u64::from(frame.logical_label) == tested
-                                && frame.received.is_some_and(|row| row < call.emitted)
+                                && frame.received < call.emitted
                         })
                         .max_by_key(|frame| frame.received);
                     let test = &tests[index];
@@ -526,7 +517,6 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                         return Err("publication carries a test for another candidate".into());
                     }
                 }
-                publication.received()?;
                 used.insert(publication.sent);
             }
             "run_tests" => {
@@ -551,7 +541,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                 let publication = one(frames.values().filter(|v| {
                     v.direction(repo, build)
                         && u64::from(v.logical_label) == publication_label
-                        && v.received.is_some_and(|n| n < call.emitted)
+                        && v.received < call.emitted
                         && v.value().is_ok_and(|v| v["publication"] == *merged)
                 }))?;
                 if !publication_inputs.insert(publication.sent) {
@@ -584,7 +574,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                     ),
                     (merged, merge.result()?.0, call.emitted),
                 )?;
-                if incoming.received()? >= call.emitted {
+                if incoming.received >= call.emitted {
                     return Err("CI request before actual publication delivery".into());
                 }
                 let publisher = role(if f == 0 {
@@ -613,9 +603,9 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                 let outcome = consume(
                     (&frames, &mut used),
                     (reviewer, repo, decision),
-                    (result, to_reviewer.received()?, next),
+                    (result, to_reviewer.received, next),
                 )?;
-                let committed = outcome.received()?;
+                let committed = outcome.received;
                 consume(
                     (&frames, &mut used),
                     (repo, build, decision),
@@ -665,31 +655,16 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
     )
 }
 
-pub fn audit(path: &Path) -> Result<Value> {
-    let projection = crate::projection::load(path)?;
-    let rows = records(path)?;
-    let dynamic = crate::projection::check_dynamic(&projection, &rows)?;
-    let mut result = check(&rows, &projection, &dynamic)?;
-    result["source_events_sha256"] = json!(digest(path)?);
-    result["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("evidence directory")?
-            .join("projection.json")
-    )?);
-    result["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
-    Ok(result)
-}
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let rows = records(path)?;
-    let projection = crate::projection::load(path)?;
-    let audited = audit(path)?;
+    let (projection, _) = crate::projection::load(path)?;
+    let audited = crate::journal::Evidence::open(path)?.audit(check)?;
     let dynamic = &audited["dynamic_protocol"];
     let headers = crate::projection::frames(&projection, &rows)?;
     let actors = rows.first().ok_or("fixture")?["message"]["fixtures"]
         .as_array()
         .ok_or("actors")?;
-    let journal = crate::journal::read(&rows, &headers, actors)?;
+    let journal = crate::journal::read(&rows, &headers, actors, dynamic)?;
     let roles = BUSINESS_ROLES
         .into_iter()
         .map(|name| named(&projection["compiled"], "roles", name))

@@ -1,19 +1,12 @@
 //! Bind actual 14M requests, effects and replies to EPF-checked receives.
-use crate::{
-    drug_discovery_audit::operation,
-    evidence::{Result, digest},
-    journal, projection,
-};
+use crate::{drug_discovery_audit::operation, evidence::Result, journal, projection};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::Range,
-    path::Path,
 };
 
-pub fn audit(path: &Path) -> Result<Value> {
-    let rows = journal::records(path)?;
-    let artifact = projection::load(path)?;
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty regulatory history")?["message"];
     let actors = fixture["fixtures"].as_array().ok_or("14M participants")?;
@@ -46,10 +39,8 @@ pub fn audit(path: &Path) -> Result<Value> {
             .as_u64()
             .ok_or_else(|| format!("missing compiled label {name}"))
     };
-    let headers = projection::frames(&artifact, &rows)?;
-    let dynamic = projection::check_dynamic(&artifact, &rows)?;
-    let mut history = journal::read(&rows, &headers, actors)?;
-    history.bind_receives(&dynamic)?;
+    let headers = projection::frames(artifact, rows)?;
+    let history = journal::read(rows, &headers, actors, dynamic)?;
     let evaluated = history.score["events"]
         .as_array()
         .ok_or("14M score events")?;
@@ -90,7 +81,7 @@ pub fn audit(path: &Path) -> Result<Value> {
                 !consumed.contains(*id)
                     && frame.direction(from, to)
                     && labels.contains(&u64::from(frame.logical_label))
-                    && frame.received.is_some_and(|index| within.contains(&index))
+                    && within.contains(&frame.received)
             })
             .min_by_key(|(_, frame)| frame.received)
             .ok_or_else(|| {
@@ -130,7 +121,7 @@ pub fn audit(path: &Path) -> Result<Value> {
         let code = label(name)?;
         let before = call.emitted.min(start);
         let accepted = take((file, owner), &[code], 0..before)?;
-        let request_at = accepted.received()?;
+        let request_at = accepted.received;
         let shown = take((agent, file), &[code], end + 1..rows.len())?;
         if accepted.value()? != *arguments || shown.value()? != *output {
             return Err(format!("{name} differs from the actual request or result").into());
@@ -147,14 +138,7 @@ pub fn audit(path: &Path) -> Result<Value> {
         let event = evaluated
             .get(usize::try_from(id)?)
             .ok_or("score omits effect")?;
-        if !score_ids.insert(id)
-            || event["agent"] != agent
-            || event["tool"] != tool
-            || event["args"] != *arguments
-            || event["result"] != output["data"]
-            || event["success"] != success
-            || event["violations"] != json!([])
-        {
+        if !score_ids.insert(id) || !call.matches_score(event, arguments) {
             return Err("scorer does not contain the actual effect exactly once".into());
         }
         let mut use_at = None;
@@ -163,7 +147,7 @@ pub fn audit(path: &Path) -> Result<Value> {
             if !used.bytes.is_empty() {
                 return Err("instrument use has an unexpected payload".into());
             }
-            use_at = Some(used.received()?);
+            use_at = Some(used.received);
             intervals.push((instrument, started, ended));
             let (source, result_labels) = match name {
                 "SynthesisQc" => (
@@ -229,11 +213,7 @@ pub fn audit(path: &Path) -> Result<Value> {
                 _ => return Err("unexpected mass spectrometer failure".into()),
             };
             let receiver = if source == owner { instrument } else { agent };
-            let result = take(
-                (source, receiver),
-                &result_labels,
-                end + 1..shown.received()?,
-            )?;
+            let result = take((source, receiver), &result_labels, end + 1..shown.received)?;
             if result.value()? != *output {
                 return Err(format!("{name} did not deliver the actual instrument result").into());
             }
@@ -260,7 +240,7 @@ pub fn audit(path: &Path) -> Result<Value> {
             let displayed = take(
                 ("REGULATORY_SPECIALIST", "REG_FILE"),
                 &[label("DecisionReceipt")?],
-                forwarded.received()? + 1..request_at,
+                forwarded.received + 1..request_at,
             )?;
             let submitted = take(
                 ("STUDY", "REVIEW_OWNER"),
@@ -281,7 +261,7 @@ pub fn audit(path: &Path) -> Result<Value> {
                 } else {
                     "ComplianceRejected"
                 })?],
-                end + 1..shown.received()?,
+                end + 1..shown.received,
             )?;
             let lead = take(
                 ("STUDY", "LEAD_SCIENTIST"),
@@ -295,7 +275,7 @@ pub fn audit(path: &Path) -> Result<Value> {
             let lead_file = take(
                 ("LEAD_SCIENTIST", "LEAD_FILE"),
                 &[label("ReviewResult")?],
-                lead.received()? + 1..rows.len(),
+                lead.received + 1..rows.len(),
             )?;
             if result.value()? != *output
                 || lead.value()? != *output
@@ -315,7 +295,7 @@ pub fn audit(path: &Path) -> Result<Value> {
                     let shown = take(
                         (agent, file),
                         &[label("StudyNotice")?],
-                        approved.received()? + 1..rows.len(),
+                        approved.received + 1..rows.len(),
                     )?;
                     if approved.value()? != *output || shown.value()? != *output {
                         return Err("scientist received a different approval".into());
@@ -329,7 +309,7 @@ pub fn audit(path: &Path) -> Result<Value> {
                 let chem_file = take(
                     ("CHEMIST", "CHEM_FILE"),
                     &[label("ApprovalNotice")?],
-                    chemist.received()? + 1..rows.len(),
+                    chemist.received + 1..rows.len(),
                 )?;
                 if chemist.value()? != *output || chem_file.value()? != *output {
                     return Err("chemist received a different approval".into());
@@ -340,7 +320,7 @@ pub fn audit(path: &Path) -> Result<Value> {
         }
         audited_effects.push(json!({
             "event_id":id, "operation":name, "request_commit":request_at, "instrument_commit":use_at,
-            "effect_start":start,"effect_result":end,"file_reply_commit":shown.received()?, "success":success,
+            "effect_start":start,"effect_result":end,"file_reply_commit":shown.received, "success":success,
         }));
     }
     let plan_file = role("LEAD_FILE")?;
@@ -368,7 +348,7 @@ pub fn audit(path: &Path) -> Result<Value> {
         let biology = choice["biology"].as_bool().ok_or("biology choice")?;
         let toxicology = choice["toxicology"].as_bool().ok_or("toxicology choice")?;
         let mask = u64::from(biology) | (u64::from(toxicology) << 1);
-        let after = requested.received()? + 1;
+        let after = requested.received + 1;
         let next_structure = audited_effects
             .iter()
             .filter(|effect| effect["operation"] == "Structure")
@@ -425,8 +405,6 @@ pub fn audit(path: &Path) -> Result<Value> {
         "simulator_complete":true,"violations":0,"rejections":review_denials,"analysis_failures":analysis_failures,
         "reanalysis_choices":choices,"independent_effect_overlaps":overlaps,"effects":audited_effects,
         "effect_receives_bound_to_checked_occurrences":true,"dynamic_protocol":dynamic,
-        "source_events_sha256":digest(path)?,"runtime_binary_sha256":artifact["runtime_binary_sha256"],
-        "compiled_projection_sha256":digest(&path.parent().ok_or("effect evidence directory")?.join("projection.json"))?,
         "scored_benchmark":false,
     }))
 }

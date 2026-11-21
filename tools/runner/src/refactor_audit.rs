@@ -1,6 +1,6 @@
 //! Code-content and actual effect correspondence; EPF owns protocol execution.
 use crate::{
-    evidence::{Result, digest},
+    evidence::Result,
     journal::{self, Call, Frame, one},
 };
 use serde_json::{Value, json};
@@ -8,8 +8,9 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Write,
-    path::Path,
 };
+#[cfg(test)]
+use {crate::evidence::digest, std::path::Path};
 
 fn python_string(value: &str) -> Result<String> {
     let mut out = String::new();
@@ -63,10 +64,10 @@ fn candidate(calls: &BTreeMap<u64, Call>, module: &str, before: usize) -> Result
     )
 }
 fn consume<'a>(
-    (frames, used): (&'a BTreeMap<u64, Frame>, &mut BTreeSet<usize>),
+    (frames, used): (&'a BTreeMap<u64, Frame<'a>>, &mut BTreeSet<usize>),
     (from, to, label): (u64, u64, u64),
     (value, after, before): (&Value, usize, usize),
-) -> Result<&'a Frame> {
+) -> Result<&'a Frame<'a>> {
     let frame = one(frames.values().filter(|f| {
         f.direction(from, to)
             && u64::from(f.logical_label) == label
@@ -75,7 +76,6 @@ fn consume<'a>(
             && !used.contains(&f.sent)
             && f.value().is_ok_and(|v| v == *value)
     }))?;
-    frame.received()?;
     used.insert(frame.sent);
     Ok(frame)
 }
@@ -103,7 +103,7 @@ fn checked(value: &Value, module: &str, hash: &str) -> Result<()> {
     }
     Ok(())
 }
-fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
     let c = &projection["compiled"];
     let fixture = &rows.first().ok_or("empty refactor record")?["message"];
     if c["task"] != "4M" || fixture["task"] != "4M" || fixture["type"] != "fixtures" {
@@ -138,8 +138,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         return Err("shared-refactor participants differ".into());
     }
     let headers = crate::projection::frames(projection, rows)?;
-    let mut journal = journal::read(rows, &headers, actors)?;
-    journal.bind_receives(dynamic)?;
+    let journal = journal::read(rows, &headers, actors, dynamic)?;
     let journal::Journal {
         frames,
         calls,
@@ -173,7 +172,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         let request = one(frames
             .values()
             .filter(|f| f.direction(owner, repo) && u64::from(f.logical_label) == request_label))?;
-        if !request.bytes.is_empty() || request.received()? >= snapshot.sent {
+        if !request.bytes.is_empty() || request.received >= snapshot.sent {
             return Err("repository snapshot does not answer its typed read".into());
         }
         used.insert(request.sent);
@@ -192,7 +191,6 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         {
             return Err("snapshot differs from the actual repository contents".into());
         }
-        snapshot.received()?;
         used.insert(at);
     }
     let mut matched = BTreeSet::new();
@@ -283,7 +281,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
             (from, to, label(&request)?),
             (args, 0, call.emitted),
         )?;
-        if input.received()? >= call.emitted {
+        if input.received >= call.emitted {
             return Err("effect preceded its checked receive".into());
         }
         consume(
@@ -298,14 +296,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         };
         let index = scored
             .iter()
-            .position(|e| {
-                e["agent"] == agent
-                    && e["tool"] == tool
-                    && e["args"] == score_args
-                    && e["result"] == *data
-                    && e["success"] == true
-                    && e["violations"] == json!([])
-            })
+            .position(|e| call.matches_score(e, &score_args) && e["success"] == true)
             .ok_or("effect differs from common score")?;
         scored.remove(index);
         match tool {
@@ -339,7 +330,7 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                         && u64::from(f.logical_label) == ready_label
                         && f.sent < call.emitted
                 }))?;
-                if ready.value()?[module] != hash || ready.received()? >= call.emitted {
+                if ready.value()?[module] != hash || ready.received >= call.emitted {
                     return Err("validation input differs from actual current code".into());
                 }
                 used.insert(ready.sent);
@@ -437,9 +428,9 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
                         role("REPO")?,
                         label(&format!("Publication{suffix}"))?,
                     ),
-                    (&admitted, input.received()?, call.emitted),
+                    (&admitted, input.received, call.emitted),
                 )?;
-                if publication.received()? >= call.emitted {
+                if publication.received >= call.emitted {
                     return Err("publication effect preceded its evidence-bearing receive".into());
                 }
                 consume(
@@ -494,30 +485,13 @@ fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
         "dynamic_protocol":dynamic,"scored_benchmark":false}),
     )
 }
-fn audited(path: &Path) -> Result<(Value, Vec<Value>, Value)> {
-    let artifact = crate::projection::load(path)?;
-    let rows = journal::records(path)?;
-    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
-    let mut result = check(&rows, &artifact, &dynamic)?;
-    result["source_events_sha256"] = json!(digest(path)?);
-    result["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("evidence directory")?
-            .join("projection.json")
-    )?);
-    result["runtime_binary_sha256"] = artifact["runtime_binary_sha256"].clone();
-    Ok((result, rows, artifact))
-}
-
-pub fn audit(path: &Path) -> Result<Value> {
-    Ok(audited(path)?.0)
-}
 
 /// Data/effect counterexamples reuse this capture's one EPF check.
 #[cfg(test)]
 pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
-    let (baseline, rows, artifact) = audited(path)?;
+    let evidence = crate::journal::Evidence::open(path)?;
+    let baseline = evidence.audit(check)?;
+    let (rows, artifact) = (evidence.rows, evidence.projection);
     let dynamic = &baseline["dynamic_protocol"];
     let effect = rows
         .iter()

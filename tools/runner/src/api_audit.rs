@@ -31,21 +31,7 @@ fn validate<P: WirePayload>(frame: &journal::Frame) -> Result<()> {
     P::validate_payload(Payload::new(&frame.bytes))
         .map_err(|error| format!("WASI payload: {error:?}").into())
 }
-pub fn audit(path: &Path) -> Result<Value> {
-    let records = journal::records(path)?;
-    let projection = crate::projection::load(path)?;
-    let mut result = check(&records, &projection)?;
-    result["source_events_sha256"] = json!(crate::evidence::digest(path)?);
-    result["compiled_projection_sha256"] = json!(crate::evidence::digest(
-        &path
-            .parent()
-            .ok_or("event directory")?
-            .join("projection.json")
-    )?);
-    result["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
-    Ok(result)
-}
-fn check(records: &[Value], projection: &Value) -> Result<Value> {
+pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &projection["compiled"];
     let labels = crate::projection::frames(projection, records)?;
     let fixture = &records.first().ok_or("empty evidence")?["message"];
@@ -65,9 +51,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
     };
     let service_fd = u8::try_from(compiled["service_fd"].as_u64().ok_or("operation fd")?)?;
     let outcome_fd = u8::try_from(compiled["outcome_fd"].as_u64().ok_or("outcome fd")?)?;
-    let dynamic = crate::projection::check_dynamic(projection, records)?;
-    let mut journal = journal::read(records, &labels, actors)?;
-    let receipts = journal.bind_receives(&dynamic)?;
+    let journal = journal::read(records, &labels, actors, dynamic)?;
     let frames = &journal.frames;
     let mut effects = BTreeMap::new();
     let mut closes = BTreeSet::new();
@@ -134,8 +118,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
             f.direction(vm, owner)
                 && f.logical_label == 10
                 && f.bytes.first().copied().map(u64::from) == Some(file)
-        }))?
-        .received()?;
+        }))?;
         returned.insert(file);
 
         let mut requests = frames
@@ -182,10 +165,10 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
             } else {
                 owner
             };
-            if receipts[&request_id]["send_actor"] != vm
-                || receipts[&request_id]["receive_commit"]["actor"] != receiver
-                || receipts[&reply_id]["send_actor"] != owner
-                || receipts[&reply_id]["receive_commit"]["actor"] != vm
+            if journal.frames[&request_id].receipt["send_actor"] != vm
+                || journal.frames[&request_id].receipt["receive_commit"]["actor"] != receiver
+                || journal.frames[&reply_id].receipt["send_actor"] != owner
+                || journal.frames[&reply_id].receipt["receive_commit"]["actor"] != vm
             {
                 return Err("operation file crossed a physical participant boundary".into());
             }
@@ -262,13 +245,13 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                         }))?;
                     if request.bytes != bytes
                         || request.value()? != call.request["arguments"]
-                        || request.received()? >= call.emitted
+                        || request.received >= call.emitted
                         || !reply.bytes.is_empty()
                         || published.value()? != *result
                         || result_at >= published.sent
-                        || published.received()? >= reply.sent
-                        || receipts[&result_id]["send_actor"] != controller
-                        || receipts[&result_id]["receive_commit"]["actor"] != owner
+                        || published.received >= reply.sent
+                        || journal.frames[&result_id].receipt["send_actor"] != controller
+                        || journal.frames[&result_id].receipt["receive_commit"]["actor"] != owner
                         || effects
                             .insert(call_id, (request_id, result_id, reply_id))
                             .is_some()
@@ -298,13 +281,13 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
             }))?;
             if intent.value()? != call.request["arguments"]
                 || request.value()? != call.request["arguments"]
-                || request.received()? >= call.emitted
+                || request.received >= call.emitted
                 || reply.value()? != *result
                 || reply.sent <= result_at
-                || receipts[&request_id]["send_actor"] != resource_owner
-                || receipts[&request_id]["receive_commit"]["actor"] != controller
-                || receipts[&reply_id]["send_actor"] != controller
-                || receipts[&reply_id]["receive_commit"]["actor"] != resource_owner
+                || journal.frames[&request_id].receipt["send_actor"] != resource_owner
+                || journal.frames[&request_id].receipt["receive_commit"]["actor"] != controller
+                || journal.frames[&reply_id].receipt["send_actor"] != controller
+                || journal.frames[&reply_id].receipt["receive_commit"]["actor"] != resource_owner
             {
                 return Err("physical resource request/effect/result differs".into());
             }
@@ -318,7 +301,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
                     && f.logical_label == 10
                     && f.bytes.first().copied().map(u64::from) == Some(resource)
             }))?;
-            if loan.received()? >= call.emitted || returned_loan.received()? <= reply.received()? {
+            if loan.received >= call.emitted || returned_loan.received <= reply.received {
                 return Err("resource loan or return did not bracket its effect and reply".into());
             }
             resource_requests += 1;
@@ -436,8 +419,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
             f.direction(vm, owner)
                 && f.logical_label == 10
                 && f.bytes.first().copied().map(u64::from) == Some(file)
-        }))?
-        .received()?;
+        }))?;
     }
     let events = journal.score["events"]
         .as_array()
@@ -449,14 +431,10 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
         return Err("API task score differs from actual terminal result".into());
     }
     for call in journal.calls.values() {
-        let (_, result) = call.result()?;
         let event = journal::one(events.iter().filter(|event| {
             event["agent"] == call.request["agent"] && event["tool"] == call.request["tool"]
         }))?;
-        if event["args"] != call.request["arguments"]
-            || event["success"] != result["success"]
-            || event["result"] != result["data"]
-        {
+        if !call.matches_score(event, &call.request["arguments"]) {
             return Err("API task score differs from the actual effect".into());
         }
     }
@@ -488,7 +466,7 @@ fn check(records: &[Value], projection: &Value) -> Result<Value> {
     )
 }
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    audit(path)?;
+    crate::journal::Evidence::open(path)?.audit(check)?;
     fs::create_dir(output)?;
     let rows = BufReader::new(File::open(path)?)
         .lines()

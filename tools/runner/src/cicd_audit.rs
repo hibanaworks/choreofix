@@ -29,20 +29,7 @@ fn same_path(bytes: &[u8], path: &str) -> bool {
     )]);
     objects.choreofs().resolve(bytes) == Some(ObjectId(0))
 }
-pub fn audit(path: &Path) -> Result<Value> {
-    let artifact = crate::projection::load(path)?;
-    let mut result = check(&records(path)?, &artifact)?;
-    result["source_events_sha256"] = json!(digest(path)?);
-    result["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("event directory")?
-            .join("projection.json")
-    )?);
-    result["runtime_binary_sha256"] = artifact["runtime_binary_sha256"].clone();
-    Ok(result)
-}
-fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty evidence")?["message"];
     if compiled["task"] != "16E" || fixture["task"] != "16E" || fixture["type"] != "fixtures" {
@@ -60,10 +47,8 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
     {
         return Err("CI/CD participants differ".into());
     }
-    let dynamic = crate::projection::check_dynamic(artifact, rows)?;
     let labels = crate::projection::frames(artifact, rows)?;
-    let mut journal = journal::read(rows, &labels, actors)?;
-    let receipts = journal.bind_receives(&dynamic)?;
+    let journal = journal::read(rows, &labels, actors, dynamic)?;
     let frames = &journal.frames;
     if frames
         .values()
@@ -79,38 +64,6 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
     {
         return Err("CI/CD completion or score differs".into());
     }
-    // Immutable capture indices identify send-poll occurrences. They grant no
-    // permission and do not replay another protocol or holder state machine.
-    let mut locations = BTreeMap::new();
-    let mut ordinals = BTreeMap::<u64, u64>::new();
-    for (at, row) in rows
-        .iter()
-        .enumerate()
-        .filter(|(_, r)| r["direction"] == "runtime")
-    {
-        let m = &row["message"];
-        if m["type"] != "protocol_capture" {
-            continue;
-        }
-        let producer = m["producer"].as_u64().ok_or("capture producer")?;
-        for _ in m["records"].as_array().ok_or("capture records")? {
-            let ordinal = ordinals.entry(producer).or_default();
-            locations.insert((producer, *ordinal), at);
-            *ordinal += 1;
-        }
-    }
-    let mut positions = BTreeMap::new();
-    for (&id, receipt) in &receipts {
-        let producer = receipt["producer"].as_u64().ok_or("send producer")?;
-        let ordinal = receipt["first_poll"].as_u64().ok_or("send first poll")?;
-        positions.insert(
-            id,
-            *locations
-                .get(&(producer, ordinal))
-                .ok_or("send capture position")?,
-        );
-    }
-    let send_at = |id: u64| positions[&id];
     let operations = compiled["operation_files"]
         .as_array()
         .ok_or("operation files")?;
@@ -185,12 +138,12 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
         let mut offset = 0usize;
         let mut flags = 0u16;
         for ((_, request_id, request), (_, reply_id, reply)) in requests.into_iter().zip(replies) {
-            let request_at = request.received()?;
-            let reply_at = send_at(reply_id);
-            if receipts[&request_id]["send_actor"] != guest
-                || receipts[&request_id]["receive_commit"]["actor"] != owner
-                || receipts[&reply_id]["send_actor"] != owner
-                || receipts[&reply_id]["receive_commit"]["actor"] != guest
+            let request_at = request.received;
+            let reply_at = frames[&reply_id].first_poll;
+            if journal.frames[&request_id].receipt["send_actor"] != guest
+                || journal.frames[&request_id].receipt["receive_commit"]["actor"] != owner
+                || journal.frames[&reply_id].receipt["send_actor"] != owner
+                || journal.frames[&reply_id].receipt["receive_commit"]["actor"] != guest
                 || reply_at <= request_at
             {
                 return Err("operation file request/reply actor or occurrence differs".into());
@@ -292,12 +245,12 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
                     }))?;
                     if intent.value()? != arguments
                         || resource_request.value()? != arguments
-                        || intent.received()? <= request_at
-                        || intent.received()? >= call.emitted
-                        || resource_request.received()? >= call.emitted
+                        || intent.received <= request_at
+                        || intent.received >= call.emitted
+                        || resource_request.received >= call.emitted
                         || response.value()? != *result
-                        || send_at(response_id) <= result_at
-                        || response.received()? >= reply_at
+                        || frames[&response_id].first_poll <= result_at
+                        || response.received >= reply_at
                     {
                         return Err(
                             "actual resource request or reply differs from admitted effect".into(),
@@ -317,12 +270,7 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
                         .ok_or("score events")?
                         .iter()
                         .filter(|e| e["agent"] == agent))?;
-                    if event["tool"] != tool
-                        || event["args"] != arguments
-                        || event["result"] != result["data"]
-                        || event["success"] != result["success"]
-                        || event["violations"] != json!([])
-                    {
+                    if !call.matches_score(event, &arguments) {
                         return Err("common score differs from the actual effect".into());
                     }
                     if results
@@ -370,8 +318,8 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
             .ok_or("notification without actual result")?;
         if !notices.insert(id)
             || frame.value()? != json!({"kind":kind,"result":result})
-            || send_at(id) <= *result_at
-            || send_at(id) <= *reply_at
+            || frames[&id].first_poll <= *result_at
+            || frames[&id].first_poll <= *reply_at
         {
             return Err("incoming notification/result differs or is reused".into());
         }
@@ -398,8 +346,8 @@ fn check(rows: &[Value], artifact: &Value) -> Result<Value> {
 }
 
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    audit(path)?;
-    let artifact = crate::projection::load(path)?;
+    crate::journal::Evidence::open(path)?.audit(check)?;
+    let (artifact, _) = crate::projection::load(path)?;
     let bindings = artifact["compiled"]["operation_files"]
         .as_array()
         .ok_or("operation bindings")?;

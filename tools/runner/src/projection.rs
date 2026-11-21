@@ -1,6 +1,7 @@
 //! Offline frame-header checks against observations from the selected executable.
 use crate::evidence::{Result, digest};
 use serde_json::{Value, json};
+use sha2::Digest;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File},
@@ -195,10 +196,12 @@ pub fn archive(runtime: &Path, output: &Path, task: &str) -> Result<Value> {
     Ok(artifact)
 }
 
-pub fn load(events: &Path) -> Result<Value> {
+pub fn load(events: &Path) -> Result<(Value, String)> {
     let directory = events.parent().ok_or("event directory")?;
     let path = directory.join("projection.json");
-    let artifact: Value = serde_json::from_slice(&fs::read(&path)?)?;
+    let bytes = fs::read(&path)?;
+    let projection_hash = format!("{:x}", sha2::Sha256::digest(&bytes));
+    let artifact: Value = serde_json::from_slice(&bytes)?;
     if artifact["format_version"] != 1
         || artifact["runtime_binary_sha256"]
             .as_str()
@@ -232,12 +235,12 @@ pub fn load(events: &Path) -> Result<Value> {
         _ => return Err("missing mechanism-case or model-run receipt".into()),
     };
     if binary != artifact["runtime_binary_sha256"]
-        || receipt["compiled_projection_sha256"] != digest(&path)?
+        || receipt["compiled_projection_sha256"] != projection_hash
     {
         return Err("compiled projection differs from the selected executable receipt".into());
     }
     contracts(&artifact["compiled"])?;
-    Ok(artifact)
+    Ok((artifact, projection_hash))
 }
 
 /// Return each frame's logical message label after checking every observation.

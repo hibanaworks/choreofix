@@ -207,7 +207,7 @@ fn the_projection_artifact_must_match_the_saved_run_receipt() -> Result<()> {
         "compiled_projection_sha256":digest(&path)?});
     fs::write(directory.join("case.json"), serde_json::to_vec(&receipt)?)?;
     let events = directory.join("events.jsonl");
-    assert_eq!(load(&events)?, artifact);
+    assert_eq!(load(&events)?.0, artifact);
     let mut wrong = receipt.clone();
     wrong["runtime_binary_sha256"] = json!("b".repeat(64));
     fs::write(directory.join("case.json"), serde_json::to_vec(&wrong)?)?;
@@ -219,10 +219,10 @@ fn the_projection_artifact_must_match_the_saved_run_receipt() -> Result<()> {
         directory.join("versions.json"),
         serde_json::to_vec(&versions)?,
     )?;
-    assert_eq!(load(&events)?, artifact);
+    assert_eq!(load(&events)?.0, artifact);
     let mut case = json!({"versions":versions});
     fs::write(directory.join("case.json"), serde_json::to_vec(&case)?)?;
-    assert_eq!(load(&events)?, artifact);
+    assert_eq!(load(&events)?.0, artifact);
     case["versions"]["binaries"]["runtime"] = json!("b".repeat(64));
     fs::write(directory.join("case.json"), serde_json::to_vec(&case)?)?;
     assert!(load(&events).is_err());

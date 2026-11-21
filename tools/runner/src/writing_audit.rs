@@ -22,10 +22,10 @@ fn pair(value: &Value) -> Result<Vec<&str>> {
 }
 #[track_caller]
 fn take<'a>(
-    frames: &'a BTreeMap<u64, Frame>,
+    frames: &'a BTreeMap<u64, Frame<'a>>,
     used: &mut BTreeSet<u64>,
     matches: impl Fn(&Frame) -> bool,
-) -> Result<&'a Frame> {
+) -> Result<&'a Frame<'a>> {
     let location = std::panic::Location::caller();
     let (id, frame) = one(frames
         .iter()
@@ -43,7 +43,7 @@ fn prior<'a>(calls: &'a BTreeMap<u64, Call>, call: &Call, tool: &str) -> Result<
     let p = one(earlier)?;
     Ok(p.result()?.1)
 }
-fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let fixture = &rows.first().ok_or("empty writing evidence")?["message"];
     let task = fixture["task"].as_str().ok_or("writing task")?;
     let participants = match task {
@@ -65,8 +65,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     }
     let labels = crate::projection::frames(artifact, rows)?;
     let headers = crate::projection::contracts(compiled)?;
-    let mut journal = crate::journal::read(rows, &labels, actors)?;
-    journal.bind_receives(dynamic)?;
+    let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     let mut used = BTreeSet::new();
     let mut completed = BTreeSet::new();
     let mut score_events = journal.score["events"]
@@ -120,7 +119,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     && u64::from(f.logical_label) == role
                     && f.value().is_ok_and(|value| value == *args)
             })?
-            .received()?;
+            .received;
             if task == "2E" {
                 (editor, Some(received))
             } else {
@@ -148,19 +147,19 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                         && received < f.sent
                         && f.value().is_ok_and(|v| v == *args)
                 })?
-                .received()?;
+                .received;
                 let followup = take(&journal.frames, &mut used, |f| {
                     f.direction(*first, inbox)
                         && u64::from(f.logical_label) == file
                         && grant < f.sent
                         && f.value().is_ok_and(|v| v == *args)
                 })?
-                .received()?;
+                .received;
                 take(&journal.frames, &mut used, |f| {
                     f.direction(editor, *second)
                         && u64::from(f.logical_label) == file
                         && followup < f.sent
-                        && f.received.is_some_and(|at| at < call.emitted)
+                        && f.received < call.emitted
                         && f.value().is_ok_and(|v| v == *args)
                 })?;
                 (*first, Some(grant))
@@ -172,13 +171,13 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             f.direction(sender, role)
                 && f.logical_label == request_label
                 && submitted.is_none_or(|at| at < f.sent)
-                && f.received.is_some_and(|at| at < call.emitted)
+                && f.received < call.emitted
                 && f.value().is_ok_and(|v| v == *args)
         })?;
         take(&journal.frames, &mut used, |f| {
             f.direction(role, file)
                 && f.logical_label == reply_label
-                && f.received.is_some_and(|at| at > result_at)
+                && f.received > result_at
                 && f.value().is_ok_and(|v| v == *result)
         })?;
         match tool {
@@ -229,13 +228,13 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     take(&journal.frames, &mut used, |f| {
                         f.direction(resource, role)
                             && f.logical_label as u64 == resource
-                            && f.received.is_some_and(|at| at < call.emitted)
+                            && f.received < call.emitted
                             && f.value().is_ok_and(|v| v == *args)
                     })?;
                     take(&journal.frames, &mut used, |f| {
                         f.direction(role, resource)
                             && f.logical_label as u64 == resource
-                            && f.received.is_some_and(|at| at > result_at)
+                            && f.received > result_at
                             && f.value().is_ok_and(|v| v == *result)
                     })?;
                     resource_requests += 1;
@@ -256,14 +255,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         }
         let index = score_events
             .iter()
-            .position(|event| {
-                event["agent"] == call.request["agent"]
-                    && event["tool"] == tool
-                    && event["args"] == *args
-                    && event["success"] == result["success"]
-                    && event["result"] == result["data"]
-                    && event["violations"] == json!([])
-            })
+            .position(|event| call.matches_score(event, args))
             .ok_or("original score differs from the actual effect")?;
         score_events.remove(index);
     }
@@ -354,25 +346,9 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     )
 }
 
-pub fn audit(path: &Path) -> Result<Value> {
-    let rows = records(path)?;
-    let projection = crate::projection::load(path)?;
-    let dynamic = crate::projection::check_dynamic(&projection, &rows)?;
-    let mut result = check(&rows, &projection, &dynamic)?;
-    result["source_events_sha256"] = json!(digest(path)?);
-    result["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("writing directory")?
-            .join("projection.json")
-    )?);
-    result["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
-    Ok(result)
-}
-
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let rows = records(path)?;
-    let projection = crate::projection::load(path)?;
+    let (projection, _) = crate::projection::load(path)?;
     let dynamic = crate::projection::check_dynamic(&projection, &rows)?;
     let mut audit = check(&rows, &projection, &dynamic)?;
     audit["source_events_sha256"] = json!(digest(path)?);
@@ -389,7 +365,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         .as_array()
         .ok_or("writing inputs")?;
     let labels = crate::projection::frames(&projection, &rows)?;
-    let journal = crate::journal::read(&rows, &labels, actors)?;
+    let journal = crate::journal::read(&rows, &labels, actors, &dynamic)?;
     let ids = journal
         .frames
         .iter()

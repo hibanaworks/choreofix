@@ -1,7 +1,7 @@
 use crate::{
     drug_discovery_boundary::{read, write},
     evidence::{Result, Trace, archive_build_receipt, digest, save},
-    multi_round_discovery_audit, oracle, process, projection,
+    oracle, process, projection,
 };
 use serde_json::{Value, json};
 use std::{
@@ -194,7 +194,8 @@ async fn actual_wasm_runs_multi_round_study() -> Result<()> {
             .len(),
         count
     );
-    let audit = multi_round_discovery_audit::audit(&events)?;
+    let audit = crate::journal::Evidence::open(&events)?
+        .audit(crate::multi_round_discovery_audit::check)?;
     assert_eq!(audit["domain_calls"], count);
     assert_eq!(
         audit["terminal_outcome"],

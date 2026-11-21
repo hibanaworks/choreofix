@@ -214,7 +214,7 @@ async fn run_cases<const N: usize>(group: &str, cases: [DocumentCase<'_>; N]) ->
         reports.push(json!({
             "case": case, "depth": depth, "effects":audit["effects"],
             "captured_records":audit["captured_records"],
-            "events_sha256":audit["events_sha256"], "audit_sha256":digest(&audit_path)?
+            "events_sha256":audit["source_events_sha256"], "audit_sha256":digest(&audit_path)?
         }));
     }
     save(
@@ -813,7 +813,7 @@ async fn publication_case(
 
     let events = output.join("events.jsonl");
     let rows = journal::records(&events)?;
-    let artifact = projection::load(&events)?;
+    let (artifact, _) = projection::load(&events)?;
     let compiled = &artifact["compiled"];
     let headers = projection::frames(&artifact, &rows)?;
     let dynamic = projection::check_dynamic(&artifact, &rows)?;
@@ -837,8 +837,7 @@ async fn publication_case(
         .cloned()
         .collect();
     assert_eq!(participants.len(), 7);
-    let mut journal = journal::read(&rows, &headers, &participants)?;
-    let receipts = journal.bind_receives(&dynamic)?;
+    let journal = journal::read(&rows, &headers, &participants, &dynamic)?;
     let scores = journal.score["events"]
         .as_array()
         .ok_or("7H score events")?;
@@ -859,7 +858,7 @@ async fn publication_case(
     assert_eq!(journal.calls.len(), effects);
     assert_eq!(journal.score["complete"], complete);
     assert_eq!(journal.score["violations"], json!([]));
-    let checked = crate::large_document_audit::check(compiled, &journal, &receipts)?;
+    let checked = crate::large_document_audit::effects(compiled, &journal)?;
     let correspondence = &checked["correspondence"];
     let fact_checks = checked["fact_checks"].as_array().ok_or("checked facts")?;
     let review_verdicts = checked["review_verdicts"]
@@ -903,7 +902,7 @@ async fn publication_case(
     let (&id, _) = one(journal.frames.iter().filter(|(_, frame)| {
         compiled["labels"]["EvaluationToChapter3"] == u64::from(frame.logical_label)
     }))?;
-    let evaluation_received = receipts[&id]["receive_commit"]["journal_row"]
+    let evaluation_received = journal.frames[&id].receipt["receive_commit"]["journal_row"]
         .as_u64()
         .ok_or("evaluation receipt journal row")?;
     assert!(evaluation_creation.ended()?.0 < evaluation_received as usize);
@@ -979,7 +978,7 @@ async fn publication_case(
             checked["data"]["input_snapshot"]["sections"][chapter],
             current
         );
-        assert!(checked_at < accepted.received()?);
+        assert!(checked_at < accepted.received);
         inputs.insert(chapter.to_owned(), current);
     }
     for (chapter, label) in [("CHAPTER_1", "Finalize1"), ("CHAPTER_2", "Finalize2")] {
@@ -992,8 +991,8 @@ async fn publication_case(
         let (&reply_id, reply) = one(journal.frames.iter().filter(|(_, frame)| {
             frame.direction(document, file) && u64::from(frame.logical_label) == label
         }))?;
-        let request_commit = &receipts[&id]["receive_commit"];
-        let reply_commit = &receipts[&reply_id]["receive_commit"];
+        let request_commit = &journal.frames[&id].receipt["receive_commit"];
+        let reply_commit = &journal.frames[&reply_id].receipt["receive_commit"];
         assert_eq!(request_commit["actor"], drafting);
         assert_eq!(reply_commit["actor"], writer);
         let actual = reply.value()?;
@@ -1071,16 +1070,22 @@ async fn publication_case(
     let (&fact_return_id, fact_return) = one(journal.frames.iter().filter(|(_, frame)| {
         frame.direction(fact, owner) && u64::from(frame.logical_label) == loan_label
     }))?;
-    assert_eq!(receipts[&fact_grant_id]["receive_commit"]["actor"], fact);
-    assert_eq!(receipts[&fact_return_id]["receive_commit"]["actor"], owner);
+    assert_eq!(
+        journal.frames[&fact_grant_id].receipt["receive_commit"]["actor"],
+        fact
+    );
+    assert_eq!(
+        journal.frames[&fact_return_id].receipt["receive_commit"]["actor"],
+        owner
+    );
     let mut initial_part_i: Vec<_> = journal
         .calls
         .values()
         .filter(|call| {
             call.tool().ok() == Some("fact_check")
                 && call.request["arguments"]["section_name"] == "CHAPTERS_1_2"
-                && fact_grant.received.is_some_and(|at| at < call.emitted)
-                && fact_return.received.is_some_and(|at| call.emitted < at)
+                && fact_grant.received < call.emitted
+                && call.emitted < fact_return.received
         })
         .collect();
     initial_part_i.sort_by_key(|call| call.emitted);
@@ -1158,8 +1163,8 @@ async fn publication_case(
             matches.sort_by_key(|(_, frame)| frame.received);
             let mut previous = result_at;
             for (&id, frame) in matches {
-                let received_at = frame.received()?;
-                let commit = &receipts[&id]["receive_commit"];
+                let received_at = frame.received;
+                let commit = &journal.frames[&id].receipt["receive_commit"];
                 assert_eq!(commit["actor"], actor);
                 assert!(previous < received_at);
                 previous = received_at;
@@ -1255,9 +1260,12 @@ async fn publication_case(
                     && compiled["labels"][message] == u64::from(frame.logical_label)
                     && frame.value().is_ok_and(|payload| payload == *check)
             }))?;
-            let at = frame.received()?;
+            let at = frame.received;
             assert!(checked_at < at);
-            assert_eq!(receipts[&id]["receive_commit"]["actor"], receiver);
+            assert_eq!(
+                journal.frames[&id].receipt["receive_commit"]["actor"],
+                receiver
+            );
             if recipient == file {
                 rejection_received = Some(at);
             }
@@ -1333,13 +1341,13 @@ async fn publication_case(
             let ((&grant, granted), (&returned, reclaimed)) =
                 (transfers[2 * attempt], transfers[2 * attempt + 1]);
             assert!(granted.direction(owner, editor) && reclaimed.direction(editor, owner));
-            let grant = &receipts[&grant]["receive_commit"];
-            let returned = &receipts[&returned]["receive_commit"];
+            let grant = &journal.frames[&grant].receipt["receive_commit"];
+            let returned = &journal.frames[&returned].receipt["receive_commit"];
             assert_eq!(grant["actor"], editor);
             assert_eq!(returned["actor"], owner);
-            assert!(granted.received()? < material_frame.received()?);
-            assert!(material_frame.received()? < decided.started()?.0);
-            let returned_at = reclaimed.received()?;
+            assert!(granted.received < material_frame.received);
+            assert!(material_frame.received < decided.started()?.0);
+            let returned_at = reclaimed.received;
             assert!(decided.ended()?.0 < returned_at);
             let material = material_frame.value()?;
             let decision = decided.result()?.1;
@@ -1365,7 +1373,7 @@ async fn publication_case(
                 let (result_at, result) = combined.result()?;
                 outcomes.push((editor, result.clone(), result_at, [None; 3]));
             } else {
-                let next_grant = transfers[2 * attempt + 2].1.received()?;
+                let next_grant = transfers[2 * attempt + 2].1.received;
                 assert!(returned_at < next_grant);
                 let ((&fact_grant_id, fact_grant), (&fact_return_id, fact_return)) = (
                     reassessment_loans[2 * attempt],
@@ -1375,11 +1383,11 @@ async fn publication_case(
                     fact_grant.direction(owner, reassessor)
                         && fact_return.direction(reassessor, owner)
                 );
-                let grant_at = fact_grant.received()?;
-                let return_at = fact_return.received()?;
+                let grant_at = fact_grant.received;
+                let return_at = fact_return.received;
                 assert!(returned_at < grant_at && grant_at < return_at && return_at < next_grant);
-                let grant_commit = &receipts[&fact_grant_id]["receive_commit"];
-                let return_commit = &receipts[&fact_return_id]["receive_commit"];
+                let grant_commit = &journal.frames[&fact_grant_id].receipt["receive_commit"];
+                let return_commit = &journal.frames[&fact_return_id].receipt["receive_commit"];
                 assert_eq!(grant_commit["actor"], reassessor);
                 assert_eq!(return_commit["actor"], owner);
                 let revised = one(journal.calls.values().filter(|call| {
@@ -1502,8 +1510,8 @@ async fn publication_case(
             };
             assert!(frame.direction(expected_source, file));
             assert_eq!(&frame.value()?, result);
-            let received = frame.received()?;
-            let commit = &receipts[&id]["receive_commit"];
+            let received = frame.received;
+            let commit = &journal.frames[&id].receipt["receive_commit"];
             assert_eq!(commit["actor"], actor);
             assert!(*available_at < received);
             assert!(next_effects[target].is_none_or(|at| received < at));

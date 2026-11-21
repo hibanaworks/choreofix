@@ -1,6 +1,6 @@
 //! Actual document requests, material and receipts; EPF checks source execution.
 use crate::{
-    evidence::{Result, digest, save},
+    evidence::{Result, save},
     journal::{Call, json_frame_mutants, records},
 };
 use serde_json::{Value, json};
@@ -39,7 +39,7 @@ fn snapshot(calls: &[&Call], before: usize) -> Result<Value> {
     Ok(material)
 }
 
-fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty document evidence")?["message"];
     if compiled["task"] != "7E" || fixture["task"] != "7E" || fixture["type"] != "fixtures" {
@@ -70,8 +70,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let editor_file = name("roles", "ALLOCATION_FILE")?;
     let session = compiled["session"].as_u64().ok_or("document session")?;
     let labels = crate::projection::frames(artifact, rows)?;
-    let mut journal = crate::journal::read(rows, &labels, actors)?;
-    journal.bind_receives(dynamic)?;
+    let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
@@ -166,7 +165,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             .filter(|(_, frame)| {
                 frame.direction(target, service)
                     && frame.logical_label == request_label
-                    && frame.received.is_some_and(|at| at < call.emitted)
+                    && frame.received < call.emitted
             })
             .max_by_key(|(_, frame)| frame.received)
             .ok_or("missing received document request")?;
@@ -188,7 +187,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                         service,
                     ) && frame.logical_label == label
                         && frame.sent < request.sent
-                        && frame.received.is_some_and(|at| at < call.emitted)
+                        && frame.received < call.emitted
                 })
                 .max_by_key(|(_, frame)| frame.received)
                 .ok_or("missing admitted document arguments")?;
@@ -207,7 +206,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     .filter(|(_, frame)| {
                         frame.direction(editor_file, editor)
                             && frame.logical_label == label
-                            && frame.received.is_some_and(|at| at < admitted.sent)
+                            && frame.received < admitted.sent
                     })
                     .max_by_key(|(_, frame)| frame.received)
                     .ok_or("revision lacks an actual reconsideration request")?;
@@ -236,8 +235,8 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     .filter(|(_, frame)| {
                         frame.direction(editor, service)
                             && frame.logical_label == label
-                            && frame.sent > chosen.received.unwrap()
-                            && frame.received.is_some_and(|at| at < admitted.sent)
+                            && frame.sent > chosen.received
+                            && frame.received < admitted.sent
                     })
                     .max_by_key(|(_, frame)| frame.received)
                     .ok_or("actual reconsidered review was not delivered")?;
@@ -259,8 +258,8 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     .filter(|(_, frame)| {
                         frame.direction(service, actor)
                             && frame.logical_label == label
-                            && frame.sent > admitted.received.unwrap()
-                            && frame.received.is_some_and(|at| at < request.sent)
+                            && frame.sent > admitted.received
+                            && frame.received < request.sent
                     })
                     .max_by_key(|(_, frame)| frame.received)
                     .ok_or("missing actual worker arguments")?;
@@ -274,7 +273,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     .filter(|(_, frame)| {
                         frame.direction(editor_file, editor)
                             && frame.logical_label == label
-                            && frame.received.is_some_and(|at| at < admitted.sent)
+                            && frame.received < admitted.sent
                     })
                     .max_by_key(|(_, frame)| frame.received)
                     .ok_or("missing actual editor file input")?;
@@ -296,7 +295,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         if reply.value()? != *result || !used.insert(*id) {
             return Err("document reply altered or reused".into());
         }
-        let reply_at = reply.received()?;
+        let reply_at = reply.received;
         let copied = match (agent, tool) {
             ("WRITER_A", "write_section") => Some((actor, file, "WriteResultA")),
             ("WRITER_B", "write_section") => Some((actor, file, "WriteResultB")),
@@ -327,18 +326,10 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             if copy.value()? != *result || !used.insert(*id) {
                 return Err("actual result delivery altered or reused".into());
             }
-            copy.received()?;
         }
         let index = originals
             .iter()
-            .position(|event| {
-                event["agent"] == agent
-                    && event["tool"] == tool
-                    && event["args"] == *args
-                    && event["success"] == result["success"]
-                    && event["result"] == result["data"]
-                    && event["violations"] == json!([])
-            })
+            .position(|event| call.matches_score(event, args))
             .ok_or("original document effect differs")?;
         originals.remove(index);
         if result["data"]["agent"] != agent {
@@ -440,9 +431,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                             frame.direction(editor, service)
                                 && frame.logical_label == label
                                 && frame.sent > at
-                                && frame
-                                    .received
-                                    .is_some_and(|received| received < call.emitted)
+                                && frame.received < call.emitted
                         })
                         .max_by_key(|(_, frame)| frame.received)
                         .ok_or("publication lacks actual review confirmation")?;
@@ -457,7 +446,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                         frame.direction(editor, writer_a)
                             && frame.logical_label == label
                             && frame.sent < request.sent
-                            && frame.received.is_some_and(|at| at < call.emitted)
+                            && frame.received < call.emitted
                     })
                     .max_by_key(|(_, frame)| frame.received)
                     .ok_or("resource request without actual editor input")?;
@@ -543,32 +532,15 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         .into());
     }
     Ok(
-        json!({"status":"passed","task":"7E","domain_calls":calls.len(),
+        json!({"dynamic_protocol":dynamic,"status":"passed","task":"7E","domain_calls":calls.len(),
         "actual_resource_endpoint_requests":resources,"actual_review_requests":reviews,
         "simulator_complete":true,"violations":0,"matched_effect_frame_ids":used,
         "effect_scope":"one-use actual admitted requests and replies; current chapter/reference material; completed matching review receipts at publication"}),
     )
 }
 
-pub fn audit(path: &Path) -> Result<Value> {
-    let artifact = crate::projection::load(path)?;
-    let rows = records(path)?;
-    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
-    let mut result = check(&rows, &artifact, &dynamic)?;
-    result["dynamic_protocol"] = dynamic;
-    result["source_events_sha256"] = json!(digest(path)?);
-    result["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("evidence directory")?
-            .join("projection.json")
-    )?);
-    result["runtime_binary_sha256"] = artifact["runtime_binary_sha256"].clone();
-    Ok(result)
-}
-
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    let artifact = crate::projection::load(path)?;
+    let (artifact, _) = crate::projection::load(path)?;
     let rows = records(path)?;
     let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
     let baseline = check(&rows, &artifact, &dynamic)?;

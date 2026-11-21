@@ -982,72 +982,29 @@ async fn main() -> Result<()> {
             "{}",
             serde_json::to_string_pretty(&qualification::run(Path::new(output), Some(filter))?)?
         ),
-        [mode, events] if mode == "--audit-philosophers" => println!("{}", serde_json::to_string_pretty(&philosophers_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-philosophers-mutants" => println!("{}", serde_json::to_string_pretty(&philosophers_audit::check_mutants(Path::new(events), Path::new(output))?.1)?),
-        [mode, events] if mode == "--audit-api" => println!("{}", serde_json::to_string_pretty(&api_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-full-stack-api" => println!("{}", serde_json::to_string_pretty(&full_stack_api_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-api-mutants" => println!("{}", serde_json::to_string_pretty(&api_audit::check_mutants(Path::new(events), Path::new(output))?)?),
-        [mode, events] if mode == "--audit-review" => println!("{}", serde_json::to_string_pretty(&review_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-staged-integration" => println!("{}", serde_json::to_string_pretty(&staged_integration_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-staged-integration-mutants" => println!("{}", serde_json::to_string_pretty(&staged_integration_audit::check_mutants(Path::new(events),Path::new(output))?)?),
-        [mode, events] if mode == "--audit-feature-delivery" => println!("{}", serde_json::to_string_pretty(&feature_delivery_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-feature-delivery-mutants" => println!("{}", serde_json::to_string_pretty(&feature_delivery_audit::check_mutants(Path::new(events),Path::new(output))?)?),
-        [mode, events] if mode == "--audit-refactor" => println!("{}", serde_json::to_string_pretty(&refactor_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-lab-quality" => println!("{}", serde_json::to_string_pretty(&lab_quality_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-lab-cascading" => println!("{}", serde_json::to_string_pretty(&lab_cascading_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-drug-discovery" => println!("{}", serde_json::to_string_pretty(&drug_discovery_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-regulatory-discovery" => println!("{}", serde_json::to_string_pretty(&regulatory_discovery_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-multi-round-discovery" => println!("{}", serde_json::to_string_pretty(&multi_round_discovery_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-lab-quality-mutants" => println!("{}", serde_json::to_string_pretty(&lab_quality_audit::check_mutants(Path::new(events), Path::new(output))?.1)?),
-        [mode, events] if mode == "--audit-lab" => println!("{}", serde_json::to_string_pretty(&lab_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-coordination" => println!("{}", serde_json::to_string_pretty(&coordination_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-medical" => println!("{}", serde_json::to_string_pretty(&medical_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-medical-mutants" => println!("{}", serde_json::to_string_pretty(&medical_audit::check_mutants(Path::new(events),Path::new(output))?)?),
-        [mode, events] if mode == "--audit-multi-specialty" => println!("{}", serde_json::to_string_pretty(&multi_specialty_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-critical-care" => println!("{}", serde_json::to_string_pretty(&critical_care_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-critical-care-mutants" => println!("{}", serde_json::to_string_pretty(&critical_care_audit::check_mutants(Path::new(events),Path::new(output))?)?),
         [mode, events, output] if mode == "--check-multi-specialty-mutants" => println!("{}", serde_json::to_string_pretty(&multi_specialty_audit::check_mutants(Path::new(events),Path::new(output))?)?),
-        [mode, events] if mode == "--audit-migration" => println!("{}", serde_json::to_string_pretty(&microservice_migration_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-report" => println!("{}", serde_json::to_string_pretty(&report_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-research-paper" => println!("{}", serde_json::to_string_pretty(&research_paper_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-survey-paper" => println!("{}", serde_json::to_string_pretty(&survey_paper_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-figure-document" => println!("{}", serde_json::to_string_pretty(&figure_document_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-large-document" => println!("{}", serde_json::to_string_pretty(&large_document_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-document" => println!("{}", serde_json::to_string_pretty(&document_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-kitchen" => println!("{}", serde_json::to_string_pretty(&kitchen_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-kitchen-mutants" => println!("{}", serde_json::to_string_pretty(&kitchen_audit::check_mutants(Path::new(events),Path::new(output))?)?),
-        [mode, events] if mode == "--audit-wafer" => println!("{}", serde_json::to_string_pretty(&wafer_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-workshop" => println!("{}", serde_json::to_string_pretty(&manufacturing_rework_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-manufacturing" => println!("{}", serde_json::to_string_pretty(&manufacturing_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-manufacturing-mutants" => println!("{}", serde_json::to_string_pretty(&manufacturing_audit::check_mutants(Path::new(events), Path::new(output))?)?),
-        [mode, events] if mode == "--audit-build" => println!("{}", serde_json::to_string_pretty(&build_audit::audit(Path::new(events))?)?),
-        [mode, events] if mode == "--audit-cascading-build" => println!("{}", serde_json::to_string_pretty(&cascading_build_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-cascading-build-mutants" => println!("{}", serde_json::to_string_pretty(&cascading_build_audit::check_mutants(Path::new(events),Path::new(output))?)?),
         [mode, events, output] if mode == "--check-build-mutants" => println!("{}", serde_json::to_string_pretty(&build_audit::check_mutants(Path::new(events), Path::new(output))?)?),
         [mode, events, output] if mode == "--check-document-mutants" => println!("{}", serde_json::to_string_pretty(&document_audit::check_mutants(Path::new(events), Path::new(output))?)?),
         [mode, events, output] if mode == "--check-report-mutants" => println!("{}", serde_json::to_string_pretty(&report_audit::check_mutants(Path::new(events), Path::new(output))?)?),
         [mode, events, output] if mode == "--check-review-mutants" => println!("{}", serde_json::to_string_pretty(&review_audit::check_mutants(Path::new(events), Path::new(output))?)?),
-        [mode, events] if mode == "--audit-writing" => println!("{}", serde_json::to_string_pretty(&writing_audit::audit(Path::new(events))?)?),
         [mode, events, output] if mode == "--check-writing-mutants" => println!("{}", serde_json::to_string_pretty(&writing_audit::check_mutants(Path::new(events), Path::new(output))?)?),
-        [mode, events] if mode == "--audit-cicd" => println!(
-            "{}",
-            serde_json::to_string_pretty(&cicd_audit::audit(Path::new(events))?)?
-        ),
-        [mode, events] if mode == "--audit-cicd-pipeline" => println!(
-            "{}",
-            serde_json::to_string_pretty(&cicd_pipeline_audit::audit(Path::new(events))?)?
-        ),
         [mode, events, output] if mode == "--check-cicd-mutants" => println!(
             "{}",
             serde_json::to_string_pretty(&cicd_audit::check_mutants(Path::new(events), Path::new(output))?)?
         ),
-        [mode, events] if mode == "--audit" => println!(
-            "{}",
-            serde_json::to_string_pretty(&codebase_audit::audit(Path::new(events))?)?
-        ),
         [mode, events] if mode == "--audit-protocol" => {
             let events = Path::new(events);
-            let artifact = projection::load(events)?;
+            let (artifact, _) = projection::load(events)?;
             let rows = journal::records(events)?;
             let frames = projection::frames(&artifact, &rows)?;
             println!("{}", serde_json::to_string_pretty(&json!({
@@ -1071,6 +1028,47 @@ async fn main() -> Result<()> {
             "{}",
             serde_json::to_string_pretty(&audit::run(Path::new(output))?)?
         ),
+        [mode, events] if mode == "--audit" || mode.starts_with("--audit-") => {
+            let check: fn(&[Value], &Value, &Value) -> Result<Value> = match mode.as_str() {
+                "--audit-philosophers" => philosophers_audit::check,
+                "--audit-api" => api_audit::check,
+                "--audit-full-stack-api" => full_stack_api_audit::check,
+                "--audit-review" => review_audit::check,
+                "--audit-staged-integration" => staged_integration_audit::check,
+                "--audit-feature-delivery" => feature_delivery_audit::check,
+                "--audit-refactor" => refactor_audit::check,
+                "--audit-lab-quality" => lab_quality_audit::check,
+                "--audit-lab-cascading" => lab_cascading_audit::check,
+                "--audit-drug-discovery" => drug_discovery_audit::check,
+                "--audit-regulatory-discovery" => regulatory_discovery_audit::check,
+                "--audit-multi-round-discovery" => multi_round_discovery_audit::check,
+                "--audit-lab" => lab_audit::check,
+                "--audit-coordination" => coordination_audit::check,
+                "--audit-medical" => medical_audit::check,
+                "--audit-multi-specialty" => multi_specialty_audit::check,
+                "--audit-critical-care" => critical_care_audit::check,
+                "--audit-migration" => microservice_migration_audit::check,
+                "--audit-report" => report_audit::check,
+                "--audit-research-paper" => research_paper_audit::check,
+                "--audit-survey-paper" => survey_paper_audit::check,
+                "--audit-figure-document" => figure_document_audit::check,
+                "--audit-large-document" => large_document_audit::check,
+                "--audit-document" => document_audit::check,
+                "--audit-kitchen" => kitchen_audit::check,
+                "--audit-wafer" => wafer_audit::check,
+                "--audit-workshop" => manufacturing_rework_audit::check,
+                "--audit-manufacturing" => manufacturing_audit::check,
+                "--audit-build" => build_audit::check,
+                "--audit-cascading-build" => cascading_build_audit::check,
+                "--audit-writing" => writing_audit::check,
+                "--audit-cicd" => cicd_audit::check,
+                "--audit-cicd-pipeline" => cicd_pipeline_audit::check,
+                "--audit" => codebase_audit::check,
+                _ => return Err(format!("unknown effect audit: {mode}").into()),
+            };
+            let report = journal::Evidence::open(Path::new(events))?.audit(check)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        },
         [task, depth, output] => {
             let result = match run(task, depth.parse()?, Path::new(output)).await {
                 Ok(result) => result,

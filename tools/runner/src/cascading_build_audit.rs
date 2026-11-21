@@ -1,6 +1,6 @@
 //! Offline actual-data/receipt correspondence; EPF alone interprets the source.
 use crate::{
-    evidence::{Result, digest, save},
+    evidence::{Result, save},
     journal::records,
 };
 use serde_json::{Value, json};
@@ -11,7 +11,7 @@ use std::{
     path::Path,
 };
 
-fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty build record")?["message"];
     if compiled["task"] != "10M" || fixture["task"] != "10M" || fixture["type"] != "fixtures" {
@@ -63,8 +63,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         ["ConfigBuilt", "ModelsBuilt"],
     ];
     let frame_labels = crate::projection::frames(artifact, rows)?;
-    let mut journal = crate::journal::read(rows, &frame_labels, actors)?;
-    journal.bind_receives(dynamic)?;
+    let journal = crate::journal::read(rows, &frame_labels, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
@@ -101,14 +100,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         let (at, result) = call.result()?;
         let matched = scored
             .iter()
-            .position(|event| {
-                event["agent"] == agent
-                    && event["tool"] == tool
-                    && event["args"] == *args
-                    && event["success"] == result["success"]
-                    && event["result"] == result["data"]
-                    && event["violations"] == json!([])
-            })
+            .position(|event| call.matches_score(event, args))
             .ok_or("score differs from actual build effect")?;
         scored.remove(matched);
         if args.as_object().is_none_or(|fields| fields.len() != 1)
@@ -155,7 +147,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             .filter(|(_, f)| {
                 f.direction(source, target)
                     && f.logical_label == request_label
-                    && f.received.is_some_and(|before| before < call.emitted)
+                    && f.received < call.emitted
             })
             .max_by_key(|(_, f)| f.received)
             .ok_or("effect has no actual admitted request")?;
@@ -182,7 +174,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 !used.contains(*id)
                     && frame.direction(file, source)
                     && frame.logical_label == request_label
-                    && frame.received.is_some_and(|before| before < admitted.sent)
+                    && frame.received < admitted.sent
             })
             .max_by_key(|(_, frame)| frame.received)
             .ok_or("effect lacks its typed file input")?;
@@ -204,7 +196,6 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         if reply.value()? != *result || !used.insert(*id) {
             return Err("actual operation file result changed or reused".into());
         }
-        reply.received()?;
         let admitted_value = admitted.value()?;
         if tool == "compile_module" {
             let index = index.ok_or("compile module index")?;
@@ -247,7 +238,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     .filter(|(_, f)| {
                         f.direction(resource, compiler)
                             && f.logical_label == request_label
-                            && f.received.is_some_and(|before| before < call.emitted)
+                            && f.received < call.emitted
                     })
                     .max_by_key(|(_, f)| f.received)
                     .ok_or("compile lacks an actual resource request")?;
@@ -267,7 +258,6 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 if frame.value()? != *result || !used.insert(*id) {
                     return Err("resource reply altered or reused".into());
                 }
-                frame.received()?;
             }
             let report_label = label(["TestObjectA", "TestObjectB", "TestObjectC"][index])?;
             let (id, frame) = frames
@@ -280,7 +270,6 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             if frame.value()? != *result || !used.insert(*id) {
                 return Err("build report altered or reused".into());
             }
-            frame.received()?;
             if result["data"]["artifacts_modified"] == true {
                 for (other, target_name) in agents
                     .iter()
@@ -301,7 +290,6 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     if frame.value()? != *result || !used.insert(*id) {
                         return Err("shared input update altered or reused".into());
                     }
-                    frame.received()?;
                 }
             }
             objects.insert(modules[index].into(), object.clone());
@@ -340,7 +328,6 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 if frame.value()? != *result || !used.insert(*id) {
                     return Err("test result delivery altered or reused".into());
                 }
-                frame.received()?;
             }
             test_history.push((at, index, result.clone()));
         } else {
@@ -422,7 +409,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     .filter(|(_, f)| {
                         f.direction(integrator, target)
                             && f.logical_label == reply_label
-                            && f.sent > frame.received.unwrap_or(at)
+                            && f.sent > frame.received
                     })
                     .min_by_key(|(_, f)| f.sent)
                     .ok_or("final actual link notification missing")?;
@@ -534,7 +521,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         if frame.logical_label == repair_label {
             let next = compile_history
                 .iter()
-                .filter(|(at, _, _)| *at > frame.received.unwrap_or(frame.sent))
+                .filter(|(at, _, _)| *at > frame.received)
                 .min_by_key(|(at, _, _)| *at)
                 .ok_or("repair without another actual build")?;
             let index = next.1;
@@ -572,13 +559,13 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 return Err("missing candidate read or shell repair choice".into());
             }
             let attempts = offers.len();
-            let mut previous = frame.received()?;
+            let mut previous = frame.received;
             for (attempt, ((offer_id, offer), (choice_id, choice))) in
                 offers.into_iter().zip(choices).enumerate()
             {
                 if offer.value()? != expected_notice
                     || offer.sent <= previous
-                    || choice.sent <= offer.received()?
+                    || choice.sent <= offer.received
                     || !used.insert(*offer_id)
                     || !used.insert(*choice_id)
                 {
@@ -586,7 +573,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                         "repair choice differs from the offered candidate or its occurrence".into(),
                     );
                 }
-                previous = choice.received()?;
+                previous = choice.received;
                 let requested = std::str::from_utf8(&choice.bytes).ok().map(str::trim);
                 if attempt + 1 == attempts {
                     if requested != Some(modules[index]) {
@@ -664,8 +651,8 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         .ok_or("link file input missing")?;
     if candidates.len() != 1
         || candidate.value()? != proof
-        || candidate.sent <= ready.received()?
-        || candidate.received()? >= request.sent
+        || candidate.sent <= ready.received
+        || candidate.received >= request.sent
         || !used.insert(*id)
     {
         return Err(
@@ -678,7 +665,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         .iter()
         .find(|(_, f)| f.direction(integrator, compiler) && f.logical_label == finish_label)
         .ok_or("final actual checks missing")?;
-    if finish.value()? != proof || finish.sent <= ready.received()? || !used.insert(*id) {
+    if finish.value()? != proof || finish.sent <= ready.received || !used.insert(*id) {
         return Err("final checks changed the actual ready candidate".into());
     }
     for (resource, name) in [
@@ -693,8 +680,8 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             .collect::<Vec<_>>();
         if candidates.len() != 1
             || candidates[0].1.bytes.first() != Some(&(role(resource)? as u8))
-            || candidates[0].1.sent <= finish.received()?
-            || candidates[0].1.received()? >= links[0].emitted
+            || candidates[0].1.sent <= finish.received
+            || candidates[0].1.received >= links[0].emitted
         {
             return Err("link begins before actual editing Endpoint return".into());
         }
@@ -780,8 +767,8 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         };
         if let Some((source, target, label)) = forwarded {
             let value = frame.value()?;
-            let received = frame.received()?;
-            let (id, reply) = frames
+            let received = frame.received;
+            let (id, _) = frames
                 .iter()
                 .filter(|(id, reply)| {
                     !used.contains(*id)
@@ -792,7 +779,6 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 })
                 .min_by_key(|(_, reply)| reply.sent)
                 .ok_or("actual incoming file data missing")?;
-            reply.received()?;
             if !used.insert(*id) {
                 return Err("incoming file data reused".into());
             }
@@ -855,35 +841,18 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         .copied()
         .collect::<Vec<_>>();
     Ok(
-        json!({"status":"passed","task":"10M","domain_calls":calls.len(),"violations":0,
+        json!({"dynamic_protocol_checked":true,"status":"passed","task":"10M","domain_calls":calls.len(),"violations":0,
         "simulator_complete":score["complete"],
         "matched_effect_frame_ids":ids,"matched_typed_file_requests":file_requests,"dynamic_protocol":dynamic,
         "effect_scope":"unique actual admitted, resource, test, candidate and link occurrences; editing Endpoint return before link"}),
     )
 }
 
-pub fn audit(path: &Path) -> Result<Value> {
-    let artifact = crate::projection::load(path)?;
-    let rows = records(path)?;
-    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
-    let mut result = check(&rows, &artifact, &dynamic)?;
-    result["source_events_sha256"] = json!(digest(path)?);
-    result["runtime_binary_sha256"] = artifact["runtime_binary_sha256"].clone();
-    result["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("record directory")?
-            .join("projection.json")
-    )?);
-    result["dynamic_protocol_checked"] = json!(true);
-    Ok(result)
-}
-
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     // Establish the complete baseline once. Mutations retain this checked
     // source execution and independently challenge effect/argument matching.
-    let baseline = audit(path)?;
-    let artifact = crate::projection::load(path)?;
+    let baseline = crate::journal::Evidence::open(path)?.audit(check)?;
+    let (artifact, _) = crate::projection::load(path)?;
     let rows = records(path)?;
     let dynamic = &baseline["dynamic_protocol"];
     let ids = baseline["matched_effect_frame_ids"]

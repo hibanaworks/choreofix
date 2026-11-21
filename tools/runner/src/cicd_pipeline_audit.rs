@@ -1,15 +1,13 @@
 //! Check 16M effects against the selected executable's committed requests and replies.
 use crate::{
-    evidence::{Result, digest},
+    evidence::Result,
     journal::{self, one},
     projection,
 };
 use serde_json::{Value, json};
-use std::{collections::BTreeSet, ops::Range, path::Path};
+use std::{collections::BTreeSet, ops::Range};
 
-pub fn audit(path: &Path) -> Result<Value> {
-    let rows = journal::records(path)?;
-    let artifact = projection::load(path)?;
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("missing pipeline fixture")?["message"];
     if compiled["task"] != "16M" || fixture["task"] != "16M" {
@@ -18,10 +16,8 @@ pub fn audit(path: &Path) -> Result<Value> {
     let participants = fixture["fixtures"]
         .as_array()
         .ok_or("pipeline participants")?;
-    let headers = projection::frames(&artifact, &rows)?;
-    let dynamic = projection::check_dynamic(&artifact, &rows)?;
-    let mut journal = journal::read(&rows, &headers, participants)?;
-    let receipts = journal.bind_receives(&dynamic)?;
+    let headers = projection::frames(artifact, rows)?;
+    let journal = journal::read(rows, &headers, participants, dynamic)?;
     let score = journal.score["events"]
         .as_array()
         .ok_or("pipeline score events")?;
@@ -42,10 +38,8 @@ pub fn audit(path: &Path) -> Result<Value> {
             !used.contains(*id)
                 && frame.direction(from, to)
                 && u64::from(frame.logical_label) == logical
-                && frame.received.is_some_and(|at| window.contains(&at))
-                && receipts
-                    .get(id)
-                    .is_some_and(|receipt| receipt["receive_commit"]["actor"] == actor)
+                && window.contains(&frame.received)
+                && frame.receipt["receive_commit"]["actor"] == actor
                 && frame.value().is_ok_and(|value| value == *expected)
         }))
         .map_err(|error| format!("{label} {from}->{to}: {error}"))?;
@@ -68,12 +62,8 @@ pub fn audit(path: &Path) -> Result<Value> {
             .filter(|event| event["result"]["receipt"] == receipt))
         .map_err(|_| "common score receipt is missing or duplicated")?;
         if !scored.insert(receipt)
-            || observed["agent"] != agent
-            || observed["tool"] != tool
-            || observed["args"] != *arguments
+            || !call.matches_score(observed, arguments)
             || observed["completed_at"].as_f64().is_none()
-            || observed["success"] != result["success"]
-            || observed["result"] != result["data"]
         {
             return Err("common score changed the actual pipeline effect".into());
         }
@@ -121,12 +111,12 @@ pub fn audit(path: &Path) -> Result<Value> {
             let receipt = take((file, agent, "Publish", agent), 0..call.emitted, arguments)?;
             let workspace = take(
                 ("BUILD_SERVER", resource, "ReadBuild", holder),
-                journal.frames[&receipt].received()?..call.emitted,
+                journal.frames[&receipt].received..call.emitted,
                 arguments,
             )?;
             let registry = take(
                 ("ARTIFACT_STORE", resource, input, holder),
-                journal.frames[&receipt].received()?..call.emitted,
+                journal.frames[&receipt].received..call.emitted,
                 arguments,
             )?;
             let real = take(
@@ -136,7 +126,7 @@ pub fn audit(path: &Path) -> Result<Value> {
             )?;
             let delivered = take(
                 (agent, file, output, vm),
-                journal.frames[&real].received()?..rows.len(),
+                journal.frames[&real].received..rows.len(),
                 result,
             )?;
             (vec![receipt, workspace, registry], vec![real, delivered])
@@ -153,8 +143,6 @@ pub fn audit(path: &Path) -> Result<Value> {
         "task": "16M",
         "simulator_complete": journal.score["complete"],
         "violations": 0,
-        "compiled_projection_sha256": digest(&path.with_file_name("projection.json"))?,
-        "runtime_binary_sha256": artifact["runtime_binary_sha256"],
         "dynamic": dynamic,
         "effects": effects,
     }))

@@ -1,6 +1,6 @@
 //! Actual compile/link data and unique effect receipts; EPF owns source ordering.
 use crate::{
-    evidence::{Result, digest, save},
+    evidence::{Result, save},
     journal::records,
 };
 use serde_json::{Value, json};
@@ -10,7 +10,7 @@ use std::{
     path::Path,
 };
 
-fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty build evidence")?["message"];
     if compiled["task"] != "10E" || fixture["task"] != "10E" || fixture["type"] != "fixtures" {
@@ -37,8 +37,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let types = name("roles", "SHARED_TYPES")?;
     let session = compiled["session"].as_u64().ok_or("build session")?;
     let labels = crate::projection::frames(artifact, rows)?;
-    let mut journal = crate::journal::read(rows, &labels, actors)?;
-    journal.bind_receives(dynamic)?;
+    let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
@@ -78,14 +77,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         }
         let index = scored
             .iter()
-            .position(|event| {
-                event["agent"] == agent
-                    && event["tool"] == tool
-                    && event["args"] == *arguments
-                    && event["success"] == result["success"]
-                    && event["result"] == result["data"]
-                    && event["violations"] == json!([])
-            })
+            .position(|event| call.matches_score(event, arguments))
             .ok_or("original build score differs from actual effect")?;
         scored.remove(index);
         let actor = name("roles", agent)?;
@@ -97,7 +89,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 !used.contains(*id)
                     && frame.direction(file, actor)
                     && frame.logical_label == label
-                    && frame.received.is_some_and(|before| before < call.emitted)
+                    && frame.received < call.emitted
             })
             .max_by_key(|(_, frame)| frame.received)
             .ok_or("build effect lacks its actual admitted input")?;
@@ -156,8 +148,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 if reports.len() != usize::from(module == "module_a" || !reports.is_empty()) {
                     return Err("build result notification missing or duplicated".into());
                 }
-                for (id, frame) in reports {
-                    frame.received()?;
+                for (id, _) in reports {
                     if !used.insert(*id) {
                         return Err("build result notification reused".into());
                     }
@@ -197,7 +188,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     !used.contains(*id)
                         && frame.direction(resource, actor)
                         && frame.logical_label == label
-                        && frame.received.is_some_and(|before| before < call.emitted)
+                        && frame.received < call.emitted
                 })
                 .max_by_key(|(_, frame)| frame.received)
                 .ok_or("compile lacks one actual resource receive")?;
@@ -221,7 +212,6 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             if frame.value()? != *result || !used.insert(*id) {
                 return Err("actual build reply altered or reused".into());
             }
-            frame.received()?;
         }
     }
     let business_labels = [
@@ -266,11 +256,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         let label = name("labels", label)? as u8;
         if frames
             .values()
-            .filter(|frame| {
-                frame.direction(final_holder, service)
-                    && frame.logical_label == label
-                    && frame.received.is_some()
-            })
+            .filter(|frame| frame.direction(final_holder, service) && frame.logical_label == label)
             .count()
             != 1
         {
@@ -286,23 +272,8 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         "effect_scope":"unique committed file/resource receives, actual object replies and current linked inputs"}),
     )
 }
-pub fn audit(path: &Path) -> Result<Value> {
-    let artifact = crate::projection::load(path)?;
-    let rows = records(path)?;
-    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
-    let mut result = check(&rows, &artifact, &dynamic)?;
-    result["source_events_sha256"] = json!(digest(path)?);
-    result["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("evidence directory")?
-            .join("projection.json")
-    )?);
-    result["runtime_binary_sha256"] = artifact["runtime_binary_sha256"].clone();
-    Ok(result)
-}
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    let artifact = crate::projection::load(path)?;
+    let (artifact, _) = crate::projection::load(path)?;
     let rows = records(path)?;
     let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
     let baseline = check(&rows, &artifact, &dynamic)?;

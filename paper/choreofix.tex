@@ -223,6 +223,10 @@ EPF checks the captured Endpoint execution against the compiled protocol.
 To attribute a simulator effect to particular Endpoint receives, we also trust
 the capture and its association with the run, the runner's journal reader, and
 the task-specific rules that match receives, arguments, effects and replies.
+All families share the check that pairs each transport frame with a distinct
+EPF receive and the comparison between a simulator call, its reply and a
+scored event. Task-specific rules supply the scored arguments when the
+simulator uses different names or values from the wire request.
 These rules run offline. They cannot grant a participant an operation.
 
 The project maintains both the localsides and these checkers. For example,

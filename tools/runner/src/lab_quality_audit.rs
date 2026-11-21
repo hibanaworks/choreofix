@@ -9,7 +9,7 @@ use std::{
     path::Path,
 };
 type Calls = BTreeMap<u64, Call>;
-type Frames = BTreeMap<u64, Frame>;
+type Frames<'a> = BTreeMap<u64, Frame<'a>>;
 fn target(call: &Call) -> Result<&str> {
     let key = match call.tool()? {
         "run_analysis" => "sample",
@@ -34,10 +34,10 @@ fn shape(value: &Value, required: &[&str], optional: &[&str]) -> Result<()> {
     Ok(())
 }
 fn frame<'a>(
-    (frames, used): (&'a Frames, &mut BTreeSet<usize>),
+    (frames, used): (&'a Frames<'a>, &mut BTreeSet<usize>),
     (from, to, labels): (u64, u64, &[u64]),
     (expected, after, before): (Option<&Value>, usize, usize),
-) -> Result<&'a Frame> {
+) -> Result<&'a Frame<'a>> {
     let found = frames
         .values()
         .filter(|f| {
@@ -54,8 +54,8 @@ fn frame<'a>(
                 "missing scientific frame {from}->{to} labels={labels:?} interval={after}..{before}"
             )
         })?;
-    if found.received()? >= before {
-        return Err(format!("scientific receive {from}->{to} labels={labels:?}, send={}, commit={}, required_before={before}",found.sent,found.received()?).into());
+    if found.received >= before {
+        return Err(format!("scientific receive {from}->{to} labels={labels:?}, send={}, commit={}, required_before={before}",found.sent,found.received).into());
     }
     used.insert(found.sent);
     Ok(found)
@@ -259,7 +259,7 @@ fn quality(context: (&Calls, usize), value: &Value) -> Result<Value> {
     inputs["verification"] = json!(verification);
     Ok(inputs)
 }
-fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty QC history")?["message"];
     if compiled["task"] != "13M" || fixture["type"] != "fixtures" || fixture["task"] != "13M" {
@@ -286,8 +286,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         return Err("QC scientists differ from the original task".into());
     }
     let contracts = crate::projection::frames(artifact, rows)?;
-    let mut journal = journal::read(rows, &contracts, actors)?;
-    journal.bind_receives(dynamic)?;
+    let journal = journal::read(rows, &contracts, actors, dynamic)?;
     let journal::Journal {
         frames,
         calls,
@@ -410,14 +409,14 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     role("SPEC_SERVICE")?,
                     &labels(&selection_names)?,
                 ),
-                (Some(args), admitted.received()?, call.emitted),
+                (Some(args), admitted.received, call.emitted),
             )?;
             let selection = u64::from(selected.logical_label);
             for peer in ["QC_SERVICE", native] {
                 frame(
                     (&frames, &mut used),
                     (role("QC_CONTROLLER")?, role(peer)?, &[selection]),
-                    (Some(args), admitted.received()?, call.emitted),
+                    (Some(args), admitted.received, call.emitted),
                 )?;
             }
             if selection != label(selection_names[2])? {
@@ -434,7 +433,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                         })?,
                         &[selection],
                     ),
-                    (Some(args), admitted.received()?, usize::MAX),
+                    (Some(args), admitted.received, usize::MAX),
                 )?;
                 if other.sent >= call.emitted {
                     return Err("QC selection was sent after its effect".into());
@@ -447,7 +446,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     role("QC_SERVICE")?,
                     &[label("QcAdmission")?],
                 ),
-                (None, admitted.received()?, call.emitted),
+                (None, admitted.received, call.emitted),
             )?;
             let packet = admitted.value()?;
             shape(&packet, &["arguments", "materials"], &[])?;
@@ -465,9 +464,9 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                         "BiologyReport"
                     })?],
                 ),
-                (Some(&packet["materials"]), 0, admitted.received()?),
+                (Some(&packet["materials"]), 0, admitted.received),
             )?;
-            if report.received()? >= admitted.received()? {
+            if report.received >= admitted.received {
                 return Err("QC admission preceded its actual scientific report".into());
             }
             for (resource, message) in [
@@ -477,7 +476,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 frame(
                     (&frames, &mut used),
                     (role(resource)?, role("QC_SERVICE")?, &[label(message)?]),
-                    (Some(&packet), admitted.received()?, call.emitted),
+                    (Some(&packet), admitted.received, call.emitted),
                 )?;
             }
             for (resource, message) in [
@@ -637,7 +636,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             let intent = frame(
                 (&frames, &mut used),
                 (role(normal)?, role(owner)?, &labels(&intents)?),
-                (None, admitted.received()?, call.emitted),
+                (None, admitted.received, call.emitted),
             )?;
             let packet = intent.value()?;
             let context = (&calls, call.emitted);
@@ -748,7 +747,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                             }
                         })?],
                     ),
-                    (Some(&packet), intent.received()?, call.emitted),
+                    (Some(&packet), intent.received, call.emitted),
                 )?;
                 frame(
                     (&frames, &mut used),
@@ -870,15 +869,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         let (index, _) = events
             .iter()
             .enumerate()
-            .find(|(i, e)| {
-                !scored.contains(i)
-                    && e["agent"] == actor
-                    && e["tool"] == tool
-                    && e["args"] == score_args
-                    && e["result"] == *data
-                    && e["success"] == success
-                    && e["violations"] == json!([])
-            })
+            .find(|(i, e)| !scored.contains(i) && call.matches_score(e, &score_args))
             .ok_or("missing corresponding scored effect")?;
         if if success {
             data["artifact_id"] != index
@@ -912,7 +903,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 role("CENT_SERVICE")?,
                 &labels(&["BioRequest", "Retest", "LastRetest"])?,
             ),
-            (None, admitted.received()?, usize::MAX),
+            (None, admitted.received, usize::MAX),
         )?;
         let packet = intent.value()?;
         shape(&packet, &["arguments", "materials"], &[])?;
@@ -921,7 +912,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         {
             return Err("unassigned bioassay request is not a dynamic input refusal".into());
         }
-        let expected_inputs = biological((&calls, intent.received()?), &packet["materials"])?;
+        let expected_inputs = biological((&calls, intent.received), &packet["materials"])?;
         let family = if u64::from(intent.logical_label) == label("BioRequest")? {
             "Bio"
         } else if u64::from(intent.logical_label) == label("Retest")? {
@@ -936,7 +927,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                 role("BIOLOGIST")?,
                 &[label(&format!("{family}Failed"))?],
             ),
-            (None, intent.received()?, usize::MAX),
+            (None, intent.received, usize::MAX),
         )?;
         let value = reply.value()?;
         if value["tool_name"] != "run_bioassay"
@@ -1154,8 +1145,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         let message = label(message)?;
         one(frames
             .values()
-            .filter(|f| f.direction(from, init) && u64::from(f.logical_label) == message))?
-        .received()?;
+            .filter(|f| f.direction(from, init) && u64::from(f.logical_label) == message))?;
     }
     Ok(
         json!({"status":"passed","task":"13M","domain_calls":calls.len(),"input_refusals":refusals,
@@ -1164,26 +1154,10 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
   "actual_candidate_retirements":2,"guest_exits":4,"dynamic_protocol":dynamic,"scored_benchmark":false}),
     )
 }
-fn audited(path: &Path) -> Result<(Value, Vec<Value>, Value)> {
-    let artifact = crate::projection::load(path)?;
-    let rows = journal::records(path)?;
-    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
-    let mut result = check(&rows, &artifact, &dynamic)?;
-    result["source_events_sha256"] = json!(digest(path)?);
-    result["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("QC event directory")?
-            .join("projection.json")
-    )?);
-    result["runtime_binary_sha256"] = artifact["runtime_binary_sha256"].clone();
-    Ok((result, rows, artifact))
-}
-pub fn audit(path: &Path) -> Result<Value> {
-    Ok(audited(path)?.0)
-}
 pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
-    let (baseline, rows, artifact) = audited(path)?;
+    let evidence = crate::journal::Evidence::open(path)?;
+    let baseline = evidence.audit(check)?;
+    let (rows, artifact) = (evidence.rows, evidence.projection);
     let dynamic = &baseline["dynamic_protocol"];
     let effect = rows
         .iter()

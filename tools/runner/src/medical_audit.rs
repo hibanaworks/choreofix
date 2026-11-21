@@ -38,7 +38,7 @@ fn panel(calls: &[&Call], actor: &str, before: usize) -> Result<Value> {
     Ok(Value::Object(panel))
 }
 
-fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
+pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty medical evidence")?["message"];
     if compiled["task"] != "5E" || fixture["task"] != "5E" || fixture["type"] != "fixtures" {
@@ -70,8 +70,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     };
     let records_actor = role("RECORDS")?;
     let labels = crate::projection::frames(artifact, rows)?;
-    let mut journal = crate::journal::read(rows, &labels, actors)?;
-    journal.bind_receives(dynamic)?;
+    let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
@@ -264,14 +263,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         };
         let index = scored
             .iter()
-            .position(|event| {
-                event["agent"] == actor
-                    && event["tool"] == tool
-                    && event["args"] == *arguments
-                    && event["success"] == result["success"]
-                    && event["result"] == result["data"]
-                    && event["violations"] == json!([])
-            })
+            .position(|event| call.matches_score(event, arguments))
             .ok_or("clinical effect differs from its common-world occurrence")?;
         scored.remove(index);
         for &(from, to, name, after) in messages {
@@ -287,7 +279,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
                     && if after {
                         frame.sent > ended
                     } else {
-                        frame.received.is_some_and(|at| at < call.emitted)
+                        frame.received < call.emitted
                     }
             });
             let (id, frame) = if after {
@@ -299,7 +291,6 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
             if frame.value()? != *value {
                 return Err(format!("altered actual {name}").into());
             }
-            frame.received()?;
             used_frames.insert(*id);
         }
     }
@@ -329,7 +320,6 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         ) {
             // Static projection and EPF validate the actual owned carrier; it
             // is not a JSON address, receipt or another application owner map.
-            frame.received()?;
             used_frames.insert(*id);
             continue;
         }
@@ -386,7 +376,6 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         if frame.value()? != expected {
             return Err(format!("{name} differs from actual completed patient data").into());
         }
-        frame.received()?;
         used_frames.insert(*id);
     }
     let mut overlaps = 0;
@@ -408,7 +397,7 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
         }
     }
     Ok(
-        json!({"status":"passed","task":"5E","domain_calls":calls.len(),"violations":0,
+        json!({"dynamic_protocol":dynamic,"status":"passed","task":"5E","domain_calls":calls.len(),"violations":0,
         "simulator_complete":true,"common_causal_score":"passed","independent_effect_overlaps":overlaps,
         "panel_imaging_overlaps":panel_imaging_overlaps,
         "scope":"one-use typed file and resource receive commits, actual effects, results and readable findings; EPF owns dynamic order",
@@ -417,25 +406,8 @@ fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     )
 }
 
-pub fn audit(path: &Path) -> Result<Value> {
-    let artifact = crate::projection::load(path)?;
-    let rows = records(path)?;
-    let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
-    let mut result = check(&rows, &artifact, &dynamic)?;
-    result["dynamic_protocol"] = dynamic;
-    result["source_events_sha256"] = json!(digest(path)?);
-    result["compiled_projection_sha256"] = json!(digest(
-        &path
-            .parent()
-            .ok_or("evidence directory")?
-            .join("projection.json")
-    )?);
-    result["runtime_binary_sha256"] = artifact["runtime_binary_sha256"].clone();
-    Ok(result)
-}
-
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    let artifact = crate::projection::load(path)?;
+    let (artifact, _) = crate::projection::load(path)?;
     let rows = records(path)?;
     let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
     check(&rows, &artifact, &dynamic)?;
@@ -443,7 +415,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let actors = rows.first().ok_or("fixture")?["message"]["fixtures"]
         .as_array()
         .ok_or("participants")?;
-    let journal = crate::journal::read(&rows, &labels, actors)?;
+    let journal = crate::journal::read(&rows, &labels, actors, &dynamic)?;
     let contracts = crate::projection::contracts(&artifact["compiled"])?;
     let selected = journal
         .frames
