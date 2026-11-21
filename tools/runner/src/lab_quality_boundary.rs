@@ -224,8 +224,7 @@ async fn actual_wasm_qc_retries_subject_choices_and_instrument_overlap() -> Resu
             (audit, Some(report))
         } else {
             (
-                crate::journal::Evidence::open(&directory.join("events.jsonl"))?
-                    .audit(crate::lab_quality_audit::check)?,
+                crate::journal::Evidence::open(&directory.join("events.jsonl"))?.audit("13M")?,
                 None,
             )
         };

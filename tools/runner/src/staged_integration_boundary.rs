@@ -255,8 +255,7 @@ async fn clean_publication(schedule: Schedule) -> Result<()> {
     };
     assert_eq!(result["error"], Value::Null, "{result}");
     save(&directory.join("runtime-result.json"), &result)?;
-    let audit = crate::journal::Evidence::open(&directory.join("events.jsonl"))?
-        .audit(crate::staged_integration_audit::check)?;
+    let audit = crate::journal::Evidence::open(&directory.join("events.jsonl"))?.audit("6H")?;
     assert_eq!(audit["domain_calls"], 21);
     let mut boundary = json!({"task":"6H","conditions":1,"model_calls":0,
         "scored_benchmark":false,"audit":audit});
@@ -705,8 +704,7 @@ async fn seven_actual_wasm_guests_repair_review_ci_and_staging_failures() -> Res
     }).await?;
     assert_eq!(result["error"], Value::Null, "{result}");
     save(&directory.join("runtime-result.json"), &result)?;
-    let audit = crate::journal::Evidence::open(&directory.join("events.jsonl"))?
-        .audit(crate::staged_integration_audit::check)?;
+    let audit = crate::journal::Evidence::open(&directory.join("events.jsonl"))?.audit("6H")?;
     assert_eq!(audit["domain_calls"], 53, "{audit}");
     save(&directory.join("effect-audit.json"), &audit)?;
     save(

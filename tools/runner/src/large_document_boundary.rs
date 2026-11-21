@@ -342,7 +342,7 @@ async fn publication_case(
                 .flatten(),
         )
         .collect();
-    let (simulator, fixture) = oracle::Simulator::new("7H", depth, 0.05, trace.clone(), &failures)?;
+    let (simulator, _) = oracle::Simulator::new("7H", depth, 0.05, trace.clone(), &failures)?;
     let (guest, finish) = process::guest(&runtime, &wash, &["7H"], &output, trace, simulator)?;
     let (result, (), (), (), ()) = hibana_runtime::race(async {
         let response = |reply: Value| -> Result<Value> {
@@ -815,32 +815,9 @@ async fn publication_case(
     let rows = journal::records(&events)?;
     let (artifact, _) = projection::load(&events)?;
     let compiled = &artifact["compiled"];
-    let headers = projection::frames(&artifact, &rows)?;
     let dynamic = projection::check_dynamic(&artifact, &rows)?;
-    let participants = fixture["fixtures"].as_array().ok_or("7H participants")?;
-    let participants: Vec<_> = participants
-        .iter()
-        .filter(|actor| {
-            matches!(
-                actor["agent"].as_str(),
-                Some(
-                    "WRITER_A"
-                        | "WRITER_B"
-                        | "WRITER_C"
-                        | "FIGURE_CREATOR"
-                        | "FACT_CHECKER"
-                        | "REVIEWER"
-                        | "EDITOR_IN_CHIEF"
-                )
-            )
-        })
-        .cloned()
-        .collect();
-    assert_eq!(participants.len(), 7);
-    let journal = journal::read(&rows, &headers, &participants, &dynamic)?;
-    let scores = journal.score["events"]
-        .as_array()
-        .ok_or("7H score events")?;
+    let journal = journal::read(&rows, &artifact, &dynamic)?;
+    let scores = journal.scored_events;
     let complete = true;
     let effects = 22
         + 2 * usize::from(complete)
@@ -856,8 +833,7 @@ async fn publication_case(
         + usize::from(!minor_sections.is_empty());
     assert_eq!(scores.len(), effects);
     assert_eq!(journal.calls.len(), effects);
-    assert_eq!(journal.score["complete"], complete);
-    assert_eq!(journal.score["violations"], json!([]));
+    assert_eq!(journal.simulator_complete, complete);
     let checked = crate::large_document_audit::effects(compiled, &journal)?;
     let correspondence = &checked["correspondence"];
     let fact_checks = checked["fact_checks"].as_array().ok_or("checked facts")?;
@@ -1521,7 +1497,7 @@ async fn publication_case(
         "review_verdicts":review_verdicts,
         "publication":{"material_commits":material_commits,"loan_transfers":2 * editorial_evidence.len(),
             "editorial":editorial_evidence,"outcome_receives":outcome_receives},
-        "violations":0,"simulator_complete":journal.score["complete"],
+        "violations":0,"simulator_complete":journal.simulator_complete,
         "model_calls":0,"scored_benchmark":false});
     save(&output.join("preparation-audit.json"), &audit)?;
     Ok(audit)

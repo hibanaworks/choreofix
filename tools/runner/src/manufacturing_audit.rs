@@ -28,10 +28,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "11E" || fixture["task"] != "11E" || fixture["type"] != "fixtures" {
         return Err("manufacturing source or fixture differs".into());
     }
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/11E/metadata.json"),
-    )?;
+    let journal = crate::journal::read(rows, artifact, dynamic)?;
 
     let name = |group: &str, key: &str| -> Result<u64> {
         compiled[group][key]
@@ -40,16 +37,15 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             .ok_or_else(|| format!("compiled {group} {key}").into())
     };
     let supervisor = name("roles", "SUPERVISOR")?;
-    let labels = crate::projection::frames(artifact, rows)?;
-    let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
-        score,
+        scored_events,
+        simulator_complete,
+        ..
     } = journal;
     if calls.len() != 5
-        || score["complete"] != true
-        || score["violations"] != json!([])
+        || !simulator_complete
         || frames
             .values()
             .any(|frame| frame.identity["session"] != compiled["session"])
@@ -224,11 +220,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if delivered.sent <= at || delivered.value()? != *result {
         return Err("report file reply differs from actual effect".into());
     }
-    let mut scored = score["events"]
-        .as_array()
-        .ok_or("manufacturing score events")?
-        .iter()
-        .collect::<Vec<_>>();
+    let mut scored = scored_events.iter().collect::<Vec<_>>();
     for call in calls.values() {
         // The neutral simulator records collect_reports' declared default,
         // whereas its actual accepted request omits that optional argument.
@@ -282,9 +274,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if returns != 4 {
         return Err("incomplete machine return coverage".into());
     }
-    let jobs = score["events"]
-        .as_array()
-        .ok_or("scored manufacturing jobs")?
+    let jobs = scored_events
         .iter()
         .filter(|event| event["tool"] == "do_job")
         .collect::<Vec<_>>();

@@ -194,8 +194,7 @@ async fn actual_wasm_runs_multi_round_study() -> Result<()> {
             .len(),
         count
     );
-    let audit = crate::journal::Evidence::open(&events)?
-        .audit(crate::multi_round_discovery_audit::check)?;
+    let audit = crate::journal::Evidence::open(&events)?.audit("14H")?;
     assert_eq!(audit["domain_calls"], count);
     assert_eq!(
         audit["terminal_outcome"],

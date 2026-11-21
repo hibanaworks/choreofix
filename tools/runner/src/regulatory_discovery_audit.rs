@@ -1,5 +1,5 @@
 //! Bind actual 14M requests, effects and replies to EPF-checked receives.
-use crate::{drug_discovery_audit::operation, evidence::Result, journal, projection};
+use crate::{drug_discovery_audit::operation, evidence::Result, journal};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -9,10 +9,8 @@ use std::{
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty regulatory history")?["message"];
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/14M/metadata.json"),
-    )?;
+    let history = crate::journal::read(rows, artifact, dynamic)?;
+    let actors = history.participants;
 
     if compiled["task"] != "14M" || fixture["type"] != "fixtures" || fixture["task"] != "14M" {
         return Err("foreign task fixture or projection".into());
@@ -27,14 +25,8 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             .as_u64()
             .ok_or_else(|| format!("missing compiled label {name}"))
     };
-    let headers = projection::frames(artifact, rows)?;
-    let history = journal::read(rows, &headers, actors, dynamic)?;
-    let evaluated = history.score["events"]
-        .as_array()
-        .ok_or("14M score events")?;
-    if history.score["complete"] != true
-        || history.score["violations"] != json!([])
-        || evaluated.len() != history.calls.len()
+    let evaluated = history.scored_events;
+    if !history.simulator_complete
         || history
             .frames
             .values()

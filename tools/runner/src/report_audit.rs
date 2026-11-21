@@ -161,26 +161,23 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if fixture["type"] != "fixtures" || fixture["task"] != "3E" || compiled["task"] != "3E" {
         return Err("report task differs".into());
     }
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/3E/metadata.json"),
-    )?;
+    let journal = crate::journal::read(rows, artifact, dynamic)?;
+    let actors = journal.participants;
 
     let headers = crate::projection::contracts(compiled)?;
-    let labels = crate::projection::frames(artifact, rows)?;
-    let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
-        score,
+        scored_events,
+        simulator_complete,
+        ..
     } = journal;
     let session = compiled["session"].as_u64().ok_or("report session")?;
     if frames
         .values()
         .any(|frame| frame.identity["session"] != session)
         || calls.is_empty()
-        || score["complete"] != true
-        || score["violations"] != json!([])
+        || !simulator_complete
     {
         return Err("report session or actual outcome differs".into());
     }
@@ -199,11 +196,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut ordered = calls.values().collect::<Vec<_>>();
     ordered.sort_by_key(|call| call.emitted);
     let mut used = BTreeSet::new();
-    let mut originals = score["events"]
-        .as_array()
-        .ok_or("report score events")?
-        .iter()
-        .collect::<Vec<_>>();
+    let mut originals = scored_events.iter().collect::<Vec<_>>();
     let mut resource_requests = 0;
     let mut review_count = 0;
     let mut publications = 0;
@@ -692,11 +685,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
             .join("projection.json")
     )?);
     audit["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
-    let actors = rows[0]["message"]["fixtures"]
-        .as_array()
-        .ok_or("report actors")?;
-    let labels = crate::projection::frames(&projection, &rows)?;
-    let journal = crate::journal::read(&rows, &labels, actors, &dynamic)?;
+    let journal = crate::journal::read(&rows, &projection, &dynamic)?;
     let ids = journal
         .frames
         .iter()
@@ -777,7 +766,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
         // Capture rows and their positions are unchanged. The journal must
         // remain internally valid; rejection must come from the actual
         // request/effect/result boundary, not malformed effect intervals.
-        crate::journal::read(&changed, &labels, actors, &dynamic)?;
+        crate::journal::read(&changed, &projection, &dynamic)?;
         let error = check(&changed, &projection, &dynamic)
             .err()
             .ok_or_else(|| format!("accepted {kind}"))?;

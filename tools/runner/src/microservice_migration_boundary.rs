@@ -333,13 +333,9 @@ async fn run_wash_order(
         .collect::<Result<Vec<_>>>()?;
     let (observed, _) = projection::load(&output.join("events.jsonl"))?;
     assert_eq!(observed, artifact);
-    let headers = projection::frames(&artifact, &rows)?;
     let audit = projection::check_dynamic(&artifact, &rows)?;
     save(&output.join("epf.json"), &audit)?;
-    let actors = rows[0]["message"]["fixtures"]
-        .as_array()
-        .ok_or("4H participants")?;
-    let history = journal::read(&rows, &headers, actors, &audit)?;
+    let history = journal::read(&rows, &artifact, &audit)?;
     let roles = &artifact["compiled"]["roles"];
     let effects = crate::microservice_migration_audit::preparation(&history, roles)?;
     save(&output.join("effect-receipts.json"), &effects)?;

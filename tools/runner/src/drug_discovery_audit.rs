@@ -2,7 +2,6 @@
 use crate::{
     evidence::Result,
     journal::{self, one},
-    projection,
 };
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -76,10 +75,8 @@ pub(super) fn operation(
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty discovery history")?["message"];
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/14E/metadata.json"),
-    )?;
+    let history = crate::journal::read(rows, artifact, dynamic)?;
+    let actors = history.participants;
     if compiled["task"] != "14E" || fixture["type"] != "fixtures" || fixture["task"] != "14E" {
         return Err("foreign task fixture or projection".into());
     }
@@ -93,14 +90,9 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             .as_u64()
             .ok_or_else(|| format!("missing compiled message {name}"))
     };
-    let headers = projection::frames(artifact, rows)?;
-    let history = journal::read(rows, &headers, actors, dynamic)?;
-    let score = &history.score;
-    let evaluated = score["events"].as_array().ok_or("discovery score events")?;
+    let evaluated = history.scored_events;
     if history.calls.len() != 13
-        || evaluated.len() != history.calls.len()
-        || score["complete"] != true
-        || score["violations"] != json!([])
+        || !history.simulator_complete
         || history
             .frames
             .values()

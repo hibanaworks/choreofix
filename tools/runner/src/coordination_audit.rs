@@ -18,10 +18,8 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "4E" || fixture["task"] != "4E" || fixture["type"] != "fixtures" {
         return Err("coordination task differs".into());
     }
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/4E/metadata.json"),
-    )?;
+    let journal = crate::journal::read(rows, artifact, dynamic)?;
+    let actors = journal.participants;
 
     let role = |name: &str| number(&compiled["roles"][name]);
     let label =
@@ -29,14 +27,11 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let store = role("STORE")?;
     let repo = role("REPO")?;
     let environment = role("TEST_ENV")?;
-    let labels = crate::projection::frames(artifact, rows)?;
-    let journal = journal::read(rows, &labels, actors, dynamic)?;
     let frames = &journal.frames;
     if frames
         .values()
         .any(|f| f.identity["session"] != compiled["session"])
-        || journal.score["complete"] != true
-        || journal.score["violations"] != json!([])
+        || !journal.simulator_complete
         || journal.calls.is_empty()
     {
         return Err("coordination completion or session differs".into());
@@ -65,11 +60,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut accepted_closes = 0;
     let mut rejected_closes = 0;
     let mut resource_receipts = BTreeMap::<u64, usize>::new();
-    let mut scored = journal.score["events"]
-        .as_array()
-        .ok_or("original score events")?
-        .iter()
-        .collect::<Vec<_>>();
+    let mut scored = journal.scored_events.iter().collect::<Vec<_>>();
     let operations = compiled["operation_files"]
         .as_array()
         .ok_or("compiled operation files")?;

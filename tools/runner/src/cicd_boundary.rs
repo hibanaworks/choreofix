@@ -242,8 +242,7 @@ async fn run(depth: u8, delay: f64, adversarial: bool) -> Result<()> {
         3
     );
     save(&output.join("result.json"), &result)?;
-    let audit = crate::journal::Evidence::open(&output.join("events.jsonl"))?
-        .audit(crate::cicd_audit::check)?;
+    let audit = crate::journal::Evidence::open(&output.join("events.jsonl"))?.audit("16E")?;
     save(&output.join("audit.json"), &audit)?;
     let mutants = cicd_audit::check_mutants(&output.join("events.jsonl"), &output.join("mutants"))?;
     assert_eq!(

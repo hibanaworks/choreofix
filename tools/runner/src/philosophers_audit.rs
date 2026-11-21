@@ -14,20 +14,14 @@ use std::{
 
 pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
     use crate::philosopher_identity::{AGENTS, THINK_COMPLETED, THINK_REQUEST, roles};
-    let labels = crate::projection::frames(projection, records)?;
     let fixture = &records.first().ok_or("empty evidence")?["message"];
-    if projection["compiled"]["task"] != fixture["task"]
+    if !matches!(fixture["task"].as_str(), Some("9E" | "9M" | "9H"))
         || fixture["terminal_review_failure"] != false
     {
         return Err("different task or invalid dining configuration".into());
     }
-    let description = match fixture["task"].as_str() {
-        Some("9E") => include_str!("../../../benchmark/descriptions/9E/metadata.json"),
-        Some("9M") => include_str!("../../../benchmark/descriptions/9M/metadata.json"),
-        Some("9H") => include_str!("../../../benchmark/descriptions/9H/metadata.json"),
-        _ => return Err("unknown dining task".into()),
-    };
-    let actors = crate::journal::participants(fixture, description)?;
+    let journal = crate::journal::read(records, projection, dynamic)?;
+    let actors = journal.participants;
     let count = actors.len();
     // Physical integration identities, shared with the actual application.
     // This is not a source execution or a current-holder table.
@@ -139,7 +133,6 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
     {
         return Err("dining participant identities".into());
     }
-    let journal = journal::read(records, &labels, actors, dynamic)?;
     let table = u64::from(roles::TABLE);
     let requests_role = u64::from(roles::MEAL_REQUESTS);
     let programs = projection["compiled"]["programs"]
@@ -471,9 +464,8 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
                 .filter(|call| call.request["agent"] == agent && call.request["tool"] == tool)
                 .collect();
             calls.sort_by_key(|call| call.emitted);
-            let events: Vec<_> = journal.score["events"]
-                .as_array()
-                .ok_or("original events")?
+            let events: Vec<_> = journal
+                .scored_events
                 .iter()
                 .filter(|event| event["agent"] == agent && event["tool"] == tool)
                 .collect();
@@ -626,13 +618,8 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
         }
         maximum_eaters = maximum_eaters.max(overlaps);
     }
-    if journal.score["complete"] != true
-        || journal.score["violations"] != json!([])
-        || journal.score["events"]
-            .as_array()
-            .ok_or("score events")?
-            .len()
-            != effects.len()
+    if !journal.simulator_complete
+        || journal.scored_events.len() != effects.len()
         || maximum_eaters == 0
         || maximum_eaters > count / 2
     {
@@ -652,9 +639,16 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
 }
 
 pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
-    let baseline = crate::journal::Evidence::open(path)?.audit(check)?;
-    let (projection, _) = crate::projection::load(path)?;
-    let records = journal::records(path)?;
+    let evidence = crate::journal::Evidence::open(path)?;
+    let task = evidence.projection["compiled"]["task"]
+        .as_str()
+        .ok_or("dining task")?;
+    if !matches!(task, "9E" | "9M" | "9H") {
+        return Err("expected dining evidence".into());
+    }
+    let baseline = evidence.audit(task)?;
+    let projection = evidence.projection;
+    let records = evidence.rows;
     let labels = crate::projection::frames(&projection, &records)?;
     let first_eat = baseline["effect_receipts"]
         .as_array()

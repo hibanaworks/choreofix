@@ -276,8 +276,7 @@ async fn real_wasi_outcome_metadata_preserves_all_original_results() -> Result<(
                 .count();
             assert!(forwarded >= 2, "metadata did not reach file owner {owner}");
         }
-        let audit = crate::journal::Evidence::open(&output.join("events.jsonl"))?
-            .audit(crate::api_audit::check)?;
+        let audit = crate::journal::Evidence::open(&output.join("events.jsonl"))?.audit("8E")?;
         assert_eq!(audit["actual_resource_endpoint_requests"], 2);
         assert_eq!(audit["actual_resource_endpoint_returns"], 2);
         let mutants =

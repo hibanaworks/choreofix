@@ -16,10 +16,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "10E" || fixture["task"] != "10E" || fixture["type"] != "fixtures" {
         return Err("shared build task differs".into());
     }
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/10E/metadata.json"),
-    )?;
+    let journal = crate::journal::read(rows, artifact, dynamic)?;
 
     let name = |group: &str, key: &str| -> Result<u64> {
         compiled[group][key]
@@ -31,27 +28,22 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let core = name("roles", "CORE_LIB")?;
     let types = name("roles", "SHARED_TYPES")?;
     let session = compiled["session"].as_u64().ok_or("build session")?;
-    let labels = crate::projection::frames(artifact, rows)?;
-    let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
-        score,
+        scored_events,
+        simulator_complete,
+        ..
     } = journal;
     if calls.is_empty()
         || frames.values().any(|f| f.identity["session"] != session)
-        || score["complete"] != true
-        || score["violations"] != json!([])
+        || !simulator_complete
     {
         return Err("shared build completion or session differs".into());
     }
     let mut used = BTreeSet::new();
     let mut resource_requests = 0;
-    let mut scored = score["events"]
-        .as_array()
-        .ok_or("build score effects")?
-        .iter()
-        .collect::<Vec<_>>();
+    let mut scored = scored_events.iter().collect::<Vec<_>>();
     let mut objects = BTreeMap::new();
     let mut ordered: Vec<_> = calls.values().collect();
     ordered.sort_by_key(|call| call.emitted);

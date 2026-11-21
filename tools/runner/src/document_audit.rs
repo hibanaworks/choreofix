@@ -45,10 +45,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "7E" || fixture["task"] != "7E" || fixture["type"] != "fixtures" {
         return Err("document task differs".into());
     }
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/7E/metadata.json"),
-    )?;
+    let journal = crate::journal::read(rows, artifact, dynamic)?;
 
     let name = |group: &str, key: &str| -> Result<u64> {
         compiled[group][key]
@@ -62,28 +59,23 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let writer_a = name("roles", "WRITER_A")?;
     let editor_file = name("roles", "ALLOCATION_FILE")?;
     let session = compiled["session"].as_u64().ok_or("document session")?;
-    let labels = crate::projection::frames(artifact, rows)?;
-    let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
-        score,
+        scored_events,
+        simulator_complete,
+        ..
     } = journal;
     if frames.values().any(|f| f.identity["session"] != session)
         || calls.is_empty()
-        || score["complete"] != true
-        || score["violations"] != json!([])
+        || !simulator_complete
     {
         return Err("document session or completion differs".into());
     }
     let mut ordered = calls.values().collect::<Vec<_>>();
     ordered.sort_by_key(|call| call.emitted);
     let mut used = BTreeSet::new();
-    let mut originals = score["events"]
-        .as_array()
-        .ok_or("document score events")?
-        .iter()
-        .collect::<Vec<_>>();
+    let mut originals = scored_events.iter().collect::<Vec<_>>();
     let mut resources = 0;
     let mut reviews = 0;
     let mut publications = 0;

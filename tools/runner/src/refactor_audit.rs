@@ -103,20 +103,17 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             .as_u64()
             .ok_or_else(|| format!("compiled label {name}").into())
     };
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/4M/metadata.json"),
-    )?;
+    let journal = crate::journal::read(rows, projection, dynamic)?;
+    let actors = journal.participants;
 
-    let headers = crate::projection::frames(projection, rows)?;
-    let journal = journal::read(rows, &headers, actors, dynamic)?;
     let journal::Journal {
         frames,
         calls,
-        score,
+        scored_events,
+        simulator_complete,
+        ..
     } = journal;
-    if score["complete"] != true
-        || score["violations"] != json!([])
+    if !simulator_complete
         || calls.len() != 12
         || frames
             .values()
@@ -131,11 +128,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
         .into_iter()
         .collect::<Result<Vec<_>>>()?;
     journal::check_close_pairs(&frames, &pairs)?;
-    let mut scored = score["events"]
-        .as_array()
-        .ok_or("scored effects")?
-        .iter()
-        .collect::<Vec<_>>();
+    let mut scored = scored_events.iter().collect::<Vec<_>>();
     let mut used = BTreeSet::new();
     for (suffix, module) in [("A", "module_a"), ("B", "module_b")] {
         let candidate_label = label(&format!("Candidate{suffix}"))?;
@@ -367,11 +360,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
                         .as_u64()
                         .ok_or("publication validation occurrence")?
                         as usize;
-                    let event = score["events"]
-                        .as_array()
-                        .ok_or("score events")?
-                        .get(index)
-                        .ok_or("validation event index")?;
+                    let event = scored_events.get(index).ok_or("validation event index")?;
                     if event["agent"] != actor
                         || event["tool"] != operation
                         || event["result"][key] != target
@@ -461,7 +450,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
 #[cfg(test)]
 pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
     let evidence = crate::journal::Evidence::open(path)?;
-    let baseline = evidence.audit(check)?;
+    let baseline = evidence.audit("4M")?;
     let (rows, artifact) = (evidence.rows, evidence.projection);
     let dynamic = &baseline["dynamic_protocol"];
     let effect = rows

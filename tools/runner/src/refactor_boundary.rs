@@ -243,8 +243,7 @@ async fn independent_and_interleaved_modules_preserve_current_publications() -> 
             (audit, Some(report))
         } else {
             (
-                crate::journal::Evidence::open(&directory.join("events.jsonl"))?
-                    .audit(crate::refactor_audit::check)?,
+                crate::journal::Evidence::open(&directory.join("events.jsonl"))?.audit("4M")?,
                 None,
             )
         };

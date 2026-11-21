@@ -170,8 +170,7 @@ async fn actual_wasm_delivers_repair_decisions_and_revalidates() -> Result<()> {
     }).await?;
     assert_eq!(result["error"], Value::Null);
     save(&output.join("runtime-result.json"), &result)?;
-    let checked = crate::journal::Evidence::open(&output.join("events.jsonl"))?
-        .audit(crate::full_stack_api_audit::check)?;
+    let checked = crate::journal::Evidence::open(&output.join("events.jsonl"))?.audit("8M")?;
     assert_eq!(checked["status"], "passed");
     assert_eq!(
         checked["early_migration_requests"]

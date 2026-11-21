@@ -2,7 +2,6 @@
 use crate::{
     evidence::Result,
     journal::{self, one},
-    projection,
 };
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, ops::Range};
@@ -10,10 +9,7 @@ use std::{collections::BTreeSet, ops::Range};
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty full-stack evidence")?["message"];
-    let participants = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/8M/metadata.json"),
-    )?;
+    let journal = crate::journal::read(rows, artifact, dynamic)?;
     if compiled["task"] != "8M" || fixture["task"] != "8M" || fixture["type"] != "fixtures" {
         return Err("foreign task fixture or projection".into());
     }
@@ -27,15 +23,9 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             .as_u64()
             .ok_or_else(|| format!("compiled message {name}"))
     };
-    let headers = projection::frames(artifact, rows)?;
-    let journal = journal::read(rows, &headers, participants, dynamic)?;
     let frames = &journal.frames;
-    let events = journal.score["events"]
-        .as_array()
-        .ok_or("common score events")?;
-    if journal.score["complete"] != true
-        || journal.score["violations"] != json!([])
-        || events.len() != journal.calls.len()
+    let events = journal.scored_events;
+    if !journal.simulator_complete
         || frames
             .values()
             .any(|frame| frame.identity["session"] != compiled["session"])

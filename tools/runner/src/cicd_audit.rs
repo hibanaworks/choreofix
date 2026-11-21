@@ -23,25 +23,16 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "16E" || fixture["task"] != "16E" || fixture["type"] != "fixtures" {
         return Err("CI/CD task or source differs".into());
     }
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/16E/metadata.json"),
-    )?;
+    let journal = crate::journal::read(rows, artifact, dynamic)?;
+    let actors = journal.participants;
 
-    let labels = crate::projection::frames(artifact, rows)?;
-    let journal = journal::read(rows, &labels, actors, dynamic)?;
     let frames = &journal.frames;
     if frames
         .values()
         .any(|f| f.identity["session"] != compiled["session"])
         || journal.calls.len() != 3
-        || journal.score["complete"] != true
-        || journal.score["violations"] != json!([])
-        || journal.score["events"]
-            .as_array()
-            .ok_or("score events")?
-            .len()
-            != 3
+        || !journal.simulator_complete
+        || journal.scored_events.len() != 3
     {
         return Err("CI/CD completion or score differs".into());
     }
@@ -209,11 +200,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
                     // accepting the return does not imply its peer has received
                     // it before the caller's close reply is sent.
                     returns += 1;
-                    let event = one(journal.score["events"]
-                        .as_array()
-                        .ok_or("score events")?
-                        .iter()
-                        .filter(|e| e["agent"] == agent))?;
+                    let event = one(journal.scored_events.iter().filter(|e| e["agent"] == agent))?;
                     if !call.matches_score(event, &arguments) {
                         return Err("common score differs from the actual effect".into());
                     }
@@ -290,7 +277,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
 }
 
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    crate::journal::Evidence::open(path)?.audit(check)?;
+    crate::journal::Evidence::open(path)?.audit("16E")?;
     let (artifact, _) = crate::projection::load(path)?;
     let bindings = artifact["compiled"]["operation_files"]
         .as_array()

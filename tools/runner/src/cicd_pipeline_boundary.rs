@@ -429,8 +429,8 @@ async fn actual_wash_pipeline_recovers_builds_qa_and_deployment() -> Result<()> 
                 _ => assert_eq!(compiles, [first, other]),
             }
         }
-        let audit = crate::journal::Evidence::open(&directory.join("events.jsonl"))?
-            .audit(crate::cicd_pipeline_audit::check)?;
+        let audit =
+            crate::journal::Evidence::open(&directory.join("events.jsonl"))?.audit("16M")?;
         assert_eq!(audit["dynamic"]["status"], "passed");
         assert_eq!(audit["runtime_binary_sha256"], runtime_sha);
         assert_eq!(audit["simulator_complete"], complete);

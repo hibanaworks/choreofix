@@ -163,8 +163,7 @@ async fn actual_wasm_publishes_three_independent_chapters() -> Result<()> {
             .len(),
         if failures.is_empty() { 16 } else { 24 }
     );
-    let audit =
-        crate::journal::Evidence::open(&events)?.audit(crate::research_paper_audit::check)?;
+    let audit = crate::journal::Evidence::open(&events)?.audit("3M")?;
     assert_eq!(audit["status"], "passed");
     save(&directory.join("effect-audit.json"), &audit)?;
     Ok(())

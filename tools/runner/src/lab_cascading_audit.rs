@@ -2,7 +2,6 @@
 use crate::{
     evidence::Result,
     journal::{self, one},
-    projection,
 };
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, ops::Range};
@@ -13,10 +12,8 @@ type Instrument = (&'static str, &'static str, &'static str, &'static str);
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty scientific history")?["message"];
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/13H/metadata.json"),
-    )?;
+    let journal = crate::journal::read(rows, artifact, dynamic)?;
+    let actors = journal.participants;
     if compiled["task"] != "13H" || fixture["type"] != "fixtures" || fixture["task"] != "13H" {
         return Err("foreign task fixture or projection".into());
     }
@@ -30,21 +27,17 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             .as_u64()
             .ok_or_else(|| format!("compiled message {name}"))
     };
-    let headers = projection::frames(artifact, rows)?;
-    let journal = journal::read(rows, &headers, actors, dynamic)?;
     let journal::Journal {
         frames,
         calls,
-        score,
+        scored_events,
+        simulator_complete,
+        ..
     } = journal;
-    let score_events = score["events"]
-        .as_array()
-        .ok_or("scientific score events")?;
-    if calls.len() != score_events.len()
-        || score["violations"] != json!([])
-        || frames
-            .values()
-            .any(|frame| frame.identity["session"] != compiled["session"])
+    let score_events = scored_events;
+    if frames
+        .values()
+        .any(|frame| frame.identity["session"] != compiled["session"])
     {
         return Err("incomplete scientific history or physical resource violation".into());
     }
@@ -386,7 +379,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let (at, terminal) = terminal.ok_or("missing actual scientific verdict")?;
     let complete = terminal["success"] == true;
     if inspection.is_none()
-        || score["complete"] != complete
+        || simulator_complete != complete
         || complete != final_validation.is_some()
         || final_validation.is_some_and(|(validation, result)| {
             validation <= at

@@ -91,8 +91,11 @@ domain effects and outcomes.
 
 EPF checks recorded Endpoint execution against the compiled protocol. The
 runner binds each physical frame to one EPF-checked receive and hashes the
-same journal and projection bytes it reads. The reader checks the participants
-against the original benchmark description. For each simulator call it pairs
+same journal and projection bytes it reads. The task ID selects both the
+benchmark description and the effect checker. The journal reader verifies the
+participant roster, requires one score entry per completed call and rejects a
+missing or nonempty violation list. It preserves the simulator's completion
+verdict, including expected failures. For each simulator call it pairs
 the request, start, finish and reply by RPC ID, including when identical calls
 overlap and finish in reverse order. Each task checker receives the complete
 call and uses a shared comparison for scored arguments, actor, operation,

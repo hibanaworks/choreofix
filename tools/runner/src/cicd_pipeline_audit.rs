@@ -1,9 +1,5 @@
 //! Check 16M effects against the selected executable's committed requests and replies.
-use crate::{
-    evidence::Result,
-    journal::{self, one},
-    projection,
-};
+use crate::{evidence::Result, journal::one};
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, ops::Range};
 
@@ -13,18 +9,8 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "16M" || fixture["task"] != "16M" {
         return Err("foreign pipeline task".into());
     }
-    let participants = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/16M/metadata.json"),
-    )?;
-    let headers = projection::frames(artifact, rows)?;
-    let journal = journal::read(rows, &headers, participants, dynamic)?;
-    let score = journal.score["events"]
-        .as_array()
-        .ok_or("pipeline score events")?;
-    if journal.score["violations"] != json!([]) || score.len() != journal.calls.len() {
-        return Err("pipeline score and actual effects disagree".into());
-    }
+    let journal = crate::journal::read(rows, artifact, dynamic)?;
+    let score = journal.scored_events;
     let role = |name: &str| compiled["roles"][name].as_u64().ok_or("pipeline role");
     let mut used = BTreeSet::new();
     let mut take = |(from, to, label, actor): (&str, &str, &str, &str),
@@ -142,7 +128,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     Ok(json!({
         "status": "passed",
         "task": "16M",
-        "simulator_complete": journal.score["complete"],
+        "simulator_complete": journal.simulator_complete,
         "violations": 0,
         "dynamic": dynamic,
         "effects": effects,

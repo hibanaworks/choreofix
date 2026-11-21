@@ -1,8 +1,7 @@
 //! Match 7H effects to the actual file operations and material received by their actors.
 use crate::{
     evidence::Result,
-    journal::{self, Journal, one},
-    projection,
+    journal::{Journal, one},
 };
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -10,15 +9,10 @@ use std::collections::BTreeSet;
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("missing 7H evidence")?["message"];
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/7H/metadata.json"),
-    )?;
+    let history = crate::journal::read(rows, artifact, dynamic)?;
     if fixture["type"] != "fixtures" || fixture["task"] != "7H" || compiled["task"] != "7H" {
         return Err("foreign task fixture or projection".into());
     }
-    let headers = projection::frames(artifact, rows)?;
-    let history = journal::read(rows, &headers, actors, dynamic)?;
     let mut report = effects(compiled, &history)?;
     report["captured_records"] = dynamic["captured_records"].clone();
     Ok(report)
@@ -26,15 +20,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
 
 pub(crate) fn effects(compiled: &Value, history: &Journal) -> Result<Value> {
     let role = |name: &str| compiled["roles"][name].as_u64().ok_or("7H projected role");
-    let scores = history.score["events"]
-        .as_array()
-        .ok_or("7H score events")?;
-    if scores.len() != history.calls.len()
-        || history.score["complete"].as_bool().is_none()
-        || history.score["violations"] != json!([])
-    {
-        return Err("7H score differs from completed domain effects".into());
-    }
+    let scores = history.scored_events;
     let mut ordered: Vec<_> = history.calls.values().collect();
     ordered.sort_by_key(|call| call.emitted);
     let (document, editor, editor_file, editor_vm) = (
@@ -614,12 +600,12 @@ pub(crate) fn effects(compiled: &Value, history: &Journal) -> Result<Value> {
             call.request["tool"] == "combine_sections" && call.result.1["success"] == true
         })
         .count();
-    if publications != usize::from(history.score["complete"] == true) {
+    if publications != usize::from(history.simulator_complete) {
         return Err("7H successful publications differ from common completion".into());
     }
     Ok(
         json!({"task":"7H","status":"passed","violations":0,"effects":ordered.len(),
-        "simulator_complete":history.score["complete"],"correspondence":correspondence,
+        "simulator_complete":history.simulator_complete,"correspondence":correspondence,
         "editor_material_commits":editor_materials.iter().map(|(_, _, commit)| *commit).collect::<Vec<_>>(),
         "fact_checks":fact_checks,"review_verdicts":review_verdicts}),
     )

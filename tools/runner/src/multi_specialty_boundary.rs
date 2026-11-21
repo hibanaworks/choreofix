@@ -151,17 +151,12 @@ async fn actual_wasi_all_imaging_orders_and_partial_panels() -> Result<()> {
     }
     for index in 0..outcomes.len() {
         let output = directory.join(format!("case{index}"));
-        let audit = crate::journal::Evidence::open(&output.join("events.jsonl"))?
-            .audit(crate::multi_specialty_audit::check)?;
+        let audit = crate::journal::Evidence::open(&output.join("events.jsonl"))?.audit("5M")?;
         save(&output.join("audit.json"), &audit)?;
         if index == 8 {
             let rows = crate::journal::records(&output.join("events.jsonl"))?;
             let (artifact, _) = crate::projection::load(&output.join("events.jsonl"))?;
-            let labels = crate::projection::frames(&artifact, &rows)?;
-            let actors = rows[0]["message"]["fixtures"]
-                .as_array()
-                .ok_or("participants")?;
-            let journal = crate::journal::read(&rows, &labels, actors, &audit["dynamic_protocol"])?;
+            let journal = crate::journal::read(&rows, &artifact, &audit["dynamic_protocol"])?;
             for tool in ["perform_imaging", "interpret_imaging"] {
                 let calls = journal
                     .calls

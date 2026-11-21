@@ -42,10 +42,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "5E" || fixture["task"] != "5E" || fixture["type"] != "fixtures" {
         return Err("medical task differs".into());
     }
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/5E/metadata.json"),
-    )?;
+    let journal = crate::journal::read(rows, artifact, dynamic)?;
 
     let role = |name: &str| -> Result<u64> {
         compiled["roles"][name]
@@ -60,16 +57,15 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             .ok_or_else(|| format!("compiled label {name}").into())
     };
     let records_actor = role("RECORDS")?;
-    let labels = crate::projection::frames(artifact, rows)?;
-    let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
-        score,
+        scored_events,
+        simulator_complete,
+        ..
     } = journal;
     if calls.len() < 6
-        || score["complete"] != true
-        || score["violations"] != json!([])
+        || !simulator_complete
         || frames
             .values()
             .any(|frame| frame.identity["session"] != compiled["session"])
@@ -160,11 +156,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             return Err(format!("missing or extra {name} occurrence").into());
         }
     }
-    let mut scored = score["events"]
-        .as_array()
-        .ok_or("common-world effects")?
-        .iter()
-        .collect::<Vec<_>>();
+    let mut scored = scored_events.iter().collect::<Vec<_>>();
     let mut used_frames = BTreeSet::new();
     for call in &ordered {
         let actor = call.request["agent"].as_str().ok_or("effect actor")?;
@@ -399,11 +391,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let rows = records(path)?;
     let dynamic = crate::projection::check_dynamic(&artifact, &rows)?;
     check(&rows, &artifact, &dynamic)?;
-    let labels = crate::projection::frames(&artifact, &rows)?;
-    let actors = rows.first().ok_or("fixture")?["message"]["fixtures"]
-        .as_array()
-        .ok_or("participants")?;
-    let journal = crate::journal::read(&rows, &labels, actors, &dynamic)?;
+    let journal = crate::journal::read(&rows, &artifact, &dynamic)?;
     let contracts = crate::projection::contracts(&artifact["compiled"])?;
     let selected = journal
         .frames

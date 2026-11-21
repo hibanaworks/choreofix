@@ -1,5 +1,5 @@
 //! Join actual 7M effects to the EPF-checked receives that admitted them.
-use crate::{evidence::Result, journal, projection};
+use crate::evidence::Result;
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -11,21 +11,12 @@ type Edge = (&'static str, &'static str, &'static str);
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty 7M history")?["message"];
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/7M/metadata.json"),
-    )?;
+    let history = crate::journal::read(rows, artifact, dynamic)?;
     if fixture["task"] != "7M" || compiled["task"] != "7M" {
         return Err("foreign task fixture or projection".into());
     }
-    let history = journal::read(rows, &projection::frames(artifact, rows)?, actors, dynamic)?;
-    let scored = history.score["events"]
-        .as_array()
-        .ok_or("7M score events")?;
-    if history.score["complete"] != true
-        || history.score["violations"] != json!([])
-        || scored.len() != history.calls.len()
-    {
+    let scored = history.scored_events;
+    if !history.simulator_complete {
         return Err("incomplete 7M score or resource violation".into());
     }
     let role = |name: &str| compiled["roles"][name].as_u64().ok_or("7M role");

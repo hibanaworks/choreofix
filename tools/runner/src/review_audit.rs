@@ -50,7 +50,6 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
     if projection["compiled"]["task"] != "6E" {
         return Err("review compiled protocol task".into());
     }
-    let labels = crate::projection::frames(projection, rows)?;
     let fixture = &rows.first().ok_or("empty evidence")?["message"];
     if fixture["type"] != "fixtures"
         || fixture["task"] != "6E"
@@ -58,16 +57,15 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
     {
         return Err("6E fixture".into());
     }
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/6E/metadata.json"),
-    )?;
+    let journal = crate::journal::read(rows, projection, dynamic)?;
+    let actors = journal.participants;
 
-    let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
-        score,
+        scored_events,
+        simulator_complete,
+        ..
     } = journal;
     if frames.values().any(|frame| frame.identity["session"] != 6) {
         return Err("wrong session".into());
@@ -121,14 +119,10 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
         return Err("review overrides must extend the original failure prefix".into());
     }
     let expected = 6 + 2 * rejections;
-    if score["complete"] != true || score["violations"] != json!([]) || calls.len() != expected {
+    if !simulator_complete || calls.len() != expected {
         return Err("original completion or call count".into());
     }
-    let mut scored = score["events"]
-        .as_array()
-        .ok_or("original scored events")?
-        .iter()
-        .collect::<Vec<_>>();
+    let mut scored = scored_events.iter().collect::<Vec<_>>();
     if scored.len() != expected {
         return Err("original event count".into());
     }
@@ -388,11 +382,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
             .join("projection.json")
     )?);
     audited["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
-    let labels = crate::projection::frames(&projection, &rows)?;
-    let actors = rows.first().ok_or("fixture")?["message"]["fixtures"]
-        .as_array()
-        .ok_or("participants")?;
-    let journal = crate::journal::read(&rows, &labels, actors, &dynamic)?;
+    let journal = crate::journal::read(&rows, &projection, &dynamic)?;
     let business = business_roles(&projection)?;
     let selected = journal
         .frames

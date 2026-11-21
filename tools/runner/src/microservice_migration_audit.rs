@@ -1,5 +1,5 @@
 //! Match the physical 4H simulator effects to the committed requests that supplied them.
-use crate::{evidence::Result, journal, projection};
+use crate::{evidence::Result, journal};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -8,13 +8,8 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if artifact["compiled"]["task"] != "4H" || fixture["task"] != "4H" {
         return Err("expected a 4H projection and participants".into());
     }
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/4H/metadata.json"),
-    )?;
-    let headers = projection::frames(artifact, rows)?;
+    let history = crate::journal::read(rows, artifact, dynamic)?;
 
-    let history = journal::read(rows, &headers, actors, dynamic)?;
     let mut result = preparation(&history, &artifact["compiled"]["roles"])?;
     result["epf_records"] = dynamic["captured_records"].clone();
     result["runtime_sha256"] = artifact["runtime_binary_sha256"].clone();
@@ -27,13 +22,8 @@ pub(super) fn preparation(history: &journal::Journal, roles: &Value) -> Result<V
             .as_u64()
             .ok_or_else(|| format!("missing 4H role {name}"))
     };
-    let scored = history.score["events"]
-        .as_array()
-        .ok_or("4H score events")?;
-    if scored.len() != history.calls.len()
-        || history.score["violations"] != json!([])
-        || history.score["complete"] != false
-    {
+    let scored = history.scored_events;
+    if history.simulator_complete {
         return Err("4H score and effect inventory disagree or contain a violation".into());
     }
 
@@ -399,7 +389,7 @@ pub(super) fn preparation(history: &journal::Journal, roles: &Value) -> Result<V
     }
     Ok(
         json!({"scope":"tested_services_on_staging","effects":correspondence,
-        "simulator_complete":history.score["complete"],"violations":history.score["violations"]}),
+        "simulator_complete":history.simulator_complete,"violations":[]}),
     )
 }
 

@@ -277,24 +277,17 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             .ok_or_else(|| format!("compiled QC message {name}").into())
     };
     let labels = |names: &[&str]| -> Result<Vec<u64>> { names.iter().map(|n| label(n)).collect() };
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/13M/metadata.json"),
-    )?;
+    let journal = crate::journal::read(rows, artifact, dynamic)?;
 
-    let contracts = crate::projection::frames(artifact, rows)?;
-    let journal = journal::read(rows, &contracts, actors, dynamic)?;
     let journal::Journal {
         frames,
         calls,
-        score,
+        scored_events,
+        simulator_complete,
+        ..
     } = journal;
-    let events = score["events"]
-        .as_array()
-        .ok_or("scientific score events")?;
-    if calls.len() != events.len()
-        || score["complete"] != true
-        || score["violations"] != json!([])
+    let events = scored_events;
+    if !simulator_complete
         || frames
             .values()
             .any(|f| f.identity["session"] != compiled["session"])
@@ -1150,7 +1143,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
 }
 pub fn check_mutants(path: &Path, output: &Path) -> Result<(Value, Value)> {
     let evidence = crate::journal::Evidence::open(path)?;
-    let baseline = evidence.audit(check)?;
+    let baseline = evidence.audit("13M")?;
     let (rows, artifact) = (evidence.rows, evidence.projection);
     let dynamic = &baseline["dynamic_protocol"];
     let effect = rows

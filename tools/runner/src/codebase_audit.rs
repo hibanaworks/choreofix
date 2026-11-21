@@ -48,16 +48,11 @@ fn prior<'a>(calls: &'a BTreeMap<u64, Call>, call: &Call, tool: &str) -> Result<
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let fixture = &rows.first().ok_or("empty codebase evidence")?["message"];
     let task = fixture["task"].as_str().ok_or("codebase task")?;
-    let description = match task {
-        "1E" => include_str!("../../../benchmark/descriptions/1E/metadata.json"),
-        "1M" => include_str!("../../../benchmark/descriptions/1M/metadata.json"),
-        "1H" => include_str!("../../../benchmark/descriptions/1H/metadata.json"),
-        _ => return Err("unknown codebase task".into()),
-    };
-    let actors = crate::journal::participants(fixture, description)?;
+    let journal = crate::journal::read(rows, artifact, dynamic)?;
+    let actors = journal.participants;
     let participants = actors.len();
     let compiled = &artifact["compiled"];
-    if compiled["task"] != task
+    if !matches!(task, "1E" | "1M" | "1H")
         || compiled["session"] != 20
         || compiled["participants"]
             .as_object()
@@ -65,9 +60,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     {
         return Err("codebase participant or session differs".into());
     }
-    let labels = crate::projection::frames(artifact, rows)?;
     let headers = crate::projection::contracts(compiled)?;
-    let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     // This immutable index only narrows observation searches. Keep every
     // occurrence and all original matching/uniqueness checks below; it owns
     // neither protocol progress nor resource permissions.
@@ -84,11 +77,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let mut used = BTreeSet::new();
     let mut seen = BTreeSet::new();
     let mut latest_tests = BTreeMap::new();
-    let mut score_events = journal.score["events"]
-        .as_array()
-        .ok_or("original events")?
-        .iter()
-        .collect::<Vec<_>>();
+    let mut score_events = journal.scored_events.iter().collect::<Vec<_>>();
     let mut commits = Vec::new();
     let mut expected_returns = BTreeMap::<u64, usize>::new();
     let mut decisions = BTreeMap::<(usize, usize), (u64, u64, u64)>::new();
@@ -384,8 +373,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if !score_events.is_empty()
         || seen.len() != 4 * participants
         || latest_tests.len() != participants
-        || journal.score["complete"] != passed
-        || journal.score["violations"] != json!([])
+        || journal.simulator_complete != passed
         || used_decisions.len() != decisions.len()
     {
         return Err("incomplete original work or invalid score/decision evidence".into());
@@ -501,7 +489,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         maximum = maximum.max(overlap);
     }
     Ok(
-        json!({"status":"passed","task":task,"kind":"direct_file_module_requests_and_actual_source","scored_benchmark":false,"participants":participants,"domain_calls":journal.calls.len(),"actual_resource_endpoint_requests":returned,"actual_resource_endpoint_returns":returned,"max_disjoint_commits":maximum,"actual_test_resolver_decisions":used_decisions.len(),"simulator_complete":journal.score["complete"],"violations":0,"guest_exits":participants,"dynamic_protocol":dynamic}),
+        json!({"status":"passed","task":task,"kind":"direct_file_module_requests_and_actual_source","scored_benchmark":false,"participants":participants,"domain_calls":journal.calls.len(),"actual_resource_endpoint_requests":returned,"actual_resource_endpoint_returns":returned,"max_disjoint_commits":maximum,"actual_test_resolver_decisions":used_decisions.len(),"simulator_complete":journal.simulator_complete,"violations":0,"guest_exits":participants,"dynamic_protocol":dynamic}),
     )
 }
 
@@ -520,11 +508,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     audit["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
     fs::create_dir(output)?;
     save(&output.join("audit.json"), &audit)?;
-    let actors = rows[0]["message"]["fixtures"]
-        .as_array()
-        .ok_or("codebase inputs")?;
-    let labels = crate::projection::frames(&projection, &rows)?;
-    let journal = crate::journal::read(&rows, &labels, actors, &dynamic)?;
+    let journal = crate::journal::read(&rows, &projection, &dynamic)?;
     let ids = journal
         .frames
         .iter()

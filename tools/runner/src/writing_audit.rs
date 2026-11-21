@@ -46,16 +46,11 @@ fn prior<'a>(calls: &'a BTreeMap<u64, Call>, call: &Call, tool: &str) -> Result<
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let fixture = &rows.first().ok_or("empty writing evidence")?["message"];
     let task = fixture["task"].as_str().ok_or("writing task")?;
-    let description = match task {
-        "2E" => include_str!("../../../benchmark/descriptions/2E/metadata.json"),
-        "2M" => include_str!("../../../benchmark/descriptions/2M/metadata.json"),
-        "2H" => include_str!("../../../benchmark/descriptions/2H/metadata.json"),
-        _ => return Err("unknown writing task".into()),
-    };
-    let actors = crate::journal::participants(fixture, description)?;
+    let journal = crate::journal::read(rows, artifact, dynamic)?;
+    let actors = journal.participants;
     let participants = actors.len();
     let compiled = &artifact["compiled"];
-    if compiled["task"] != task
+    if !matches!(task, "2E" | "2M" | "2H")
         || compiled["session"] != 18
         || compiled["participants"]
             .as_object()
@@ -63,16 +58,10 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     {
         return Err("writing participant or session differs".into());
     }
-    let labels = crate::projection::frames(artifact, rows)?;
     let headers = crate::projection::contracts(compiled)?;
-    let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     let mut used = BTreeSet::new();
     let mut completed = BTreeSet::new();
-    let mut score_events = journal.score["events"]
-        .as_array()
-        .ok_or("original events")?
-        .iter()
-        .collect::<Vec<_>>();
+    let mut score_events = journal.scored_events.iter().collect::<Vec<_>>();
     let mut reviews_passed = true;
     let mut resource_requests = 0;
     let mut writes = Vec::new();
@@ -258,8 +247,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     }
     if !score_events.is_empty()
         || completed.len() != 4 * participants
-        || journal.score["complete"] != reviews_passed
-        || journal.score["violations"] != json!([])
+        || journal.simulator_complete != reviews_passed
     {
         return Err("incomplete original work or invalid outcome".into());
     }
@@ -338,7 +326,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         maximum = maximum.max(overlap);
     }
     Ok(
-        json!({"status":"passed","task":task,"kind":"direct_file_section_requests_and_actual_material","scored_benchmark":false,"participants":participants,"domain_calls":journal.calls.len(),"actual_resource_endpoint_requests":resource_requests,"actual_resource_endpoint_returns":2*participants,"max_disjoint_writes":maximum,"simulator_complete":journal.score["complete"],"violations":0,"guest_exits":participants,"dynamic_protocol":dynamic}),
+        json!({"status":"passed","task":task,"kind":"direct_file_section_requests_and_actual_material","scored_benchmark":false,"participants":participants,"domain_calls":journal.calls.len(),"actual_resource_endpoint_requests":resource_requests,"actual_resource_endpoint_returns":2*participants,"max_disjoint_writes":maximum,"simulator_complete":journal.simulator_complete,"violations":0,"guest_exits":participants,"dynamic_protocol":dynamic}),
     )
 }
 
@@ -357,11 +345,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     audit["runtime_binary_sha256"] = projection["runtime_binary_sha256"].clone();
     fs::create_dir(output)?;
     save(&output.join("audit.json"), &audit)?;
-    let actors = rows[0]["message"]["fixtures"]
-        .as_array()
-        .ok_or("writing inputs")?;
-    let labels = crate::projection::frames(&projection, &rows)?;
-    let journal = crate::journal::read(&rows, &labels, actors, &dynamic)?;
+    let journal = crate::journal::read(&rows, &projection, &dynamic)?;
     let ids = journal
         .frames
         .iter()

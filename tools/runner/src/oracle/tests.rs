@@ -1385,7 +1385,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
             "every physical effect must originate at a wash guest"
         );
         let epf = projection::check_dynamic(&artifact, &rows)?;
-        let audited = crate::wafer_audit::effects(&rows, &artifact, &labels, &epf)?;
+        let audited = crate::wafer_audit::effects(&rows, &artifact, &epf)?;
         let compiled = &artifact["compiled"];
         let roles = &compiled["roles"];
         let probe_effects =
@@ -2721,10 +2721,8 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                 .lines()
                 .map(serde_json::from_str)
                 .collect::<std::result::Result<_, _>>()?;
-            let labels = projection::frames(&artifact, &rows)?;
             let epf = projection::check_dynamic(&artifact, &rows)?;
-            let verified =
-                crate::manufacturing_rework_audit::verify(&artifact, &rows, &labels, &epf)?;
+            let verified = crate::manufacturing_rework_audit::check(&rows, &artifact, &epf)?;
             assert_eq!(verified["simulator_complete"], outcome["score"]["complete"]);
             assert_eq!(verified["domain_calls"], events.len());
             let effects = verified["effects"]

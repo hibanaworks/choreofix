@@ -17,10 +17,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "10M" || fixture["task"] != "10M" || fixture["type"] != "fixtures" {
         return Err("cascading build task differs".into());
     }
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/10M/metadata.json"),
-    )?;
+    let journal = crate::journal::read(rows, artifact, dynamic)?;
     let agents = ["BUILDER_A", "BUILDER_B", "BUILDER_C"];
     let modules = ["module_a", "module_b", "module_c"];
 
@@ -51,16 +48,15 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         ["CoreBuilt", "ModelsBuilt"],
         ["ConfigBuilt", "ModelsBuilt"],
     ];
-    let frame_labels = crate::projection::frames(artifact, rows)?;
-    let journal = crate::journal::read(rows, &frame_labels, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
-        score,
+        scored_events,
+        simulator_complete,
+        ..
     } = journal;
     if calls.is_empty()
-        || score["complete"] != true
-        || score["violations"] != json!([])
+        || !simulator_complete
         || frames
             .values()
             .any(|f| f.identity["session"] != compiled["session"])
@@ -69,11 +65,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     }
     let mut used = BTreeSet::new();
     let mut file_requests = 0;
-    let mut scored = score["events"]
-        .as_array()
-        .ok_or("build score events")?
-        .iter()
-        .collect::<Vec<_>>();
+    let mut scored = scored_events.iter().collect::<Vec<_>>();
     let mut ordered: Vec<_> = calls.values().collect();
     ordered.sort_by_key(|call| call.emitted);
     let mut objects = BTreeMap::<String, Value>::new();
@@ -828,7 +820,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
         .collect::<Vec<_>>();
     Ok(
         json!({"dynamic_protocol_checked":true,"status":"passed","task":"10M","domain_calls":calls.len(),"violations":0,
-        "simulator_complete":score["complete"],
+        "simulator_complete":simulator_complete,
         "matched_effect_frame_ids":ids,"matched_typed_file_requests":file_requests,"dynamic_protocol":dynamic,
         "effect_scope":"unique actual admitted, resource, test, candidate and link occurrences; editing Endpoint return before link"}),
     )
@@ -837,7 +829,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     // Establish the complete baseline once. Mutations retain this checked
     // source execution and independently challenge effect/argument matching.
-    let baseline = crate::journal::Evidence::open(path)?.audit(check)?;
+    let baseline = crate::journal::Evidence::open(path)?.audit("10M")?;
     let (artifact, _) = crate::projection::load(path)?;
     let rows = records(path)?;
     let dynamic = &baseline["dynamic_protocol"];

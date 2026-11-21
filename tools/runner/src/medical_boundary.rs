@@ -217,8 +217,7 @@ async fn actual_wasi_partial_panels_and_independent_ct_orders() -> Result<()> {
     }
     for index in 0..outcomes.len() {
         let output = directory.join(format!("case{index}"));
-        let audit = crate::journal::Evidence::open(&output.join("events.jsonl"))?
-            .audit(crate::medical_audit::check)?;
+        let audit = crate::journal::Evidence::open(&output.join("events.jsonl"))?.audit("5E")?;
         save(&output.join("audit.json"), &audit)?;
         if index == 0 {
             assert!(

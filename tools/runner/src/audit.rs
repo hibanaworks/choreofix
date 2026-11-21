@@ -381,53 +381,63 @@ fn participant(root: &Path, agent: &str, runtime: &[Value]) -> Result<Value> {
     )
 }
 
-pub(crate) fn effects(task: &str, evidence: &crate::journal::Evidence) -> Result<Value> {
-    if evidence.projection["compiled"]["task"] != task
-        || evidence
-            .rows
-            .first()
-            .and_then(|row| row["message"]["task"].as_str())
-            != Some(task)
-    {
-        return Err("expected task differs from the compiled projection or run fixture".into());
+type EffectCheck = fn(&[Value], &Value, &Value) -> Result<Value>;
+
+/// Bind each task to the benchmark description embedded in the verifier and its effect checks.
+pub(crate) fn task_audit(task: &str) -> Result<(&'static str, EffectCheck)> {
+    macro_rules! tasks {
+        ($($id:literal => $module:ident),+ $(,)?) => {
+            match task {
+                $($id => Ok((
+                    include_str!(concat!("../../../benchmark/descriptions/", $id, "/metadata.json")),
+                    crate::$module::check,
+                )),)+
+                _ => Err("task has no delegated WASI implementation".into()),
+            }
+        };
     }
-    evidence.audit(match task {
-        "1E" | "1M" | "1H" => crate::codebase_audit::check,
-        "2E" | "2M" | "2H" => crate::writing_audit::check,
-        "3E" => crate::report_audit::check,
-        "3M" => crate::research_paper_audit::check,
-        "3H" => crate::survey_paper_audit::check,
-        "4E" => crate::coordination_audit::check,
-        "4M" => crate::refactor_audit::check,
-        "4H" => crate::microservice_migration_audit::check,
-        "13E" => crate::lab_audit::check,
-        "13M" => crate::lab_quality_audit::check,
-        "13H" => crate::lab_cascading_audit::check,
-        "14E" => crate::drug_discovery_audit::check,
-        "14M" => crate::regulatory_discovery_audit::check,
-        "14H" => crate::multi_round_discovery_audit::check,
-        "5E" => crate::medical_audit::check,
-        "5M" => crate::multi_specialty_audit::check,
-        "5H" => crate::critical_care_audit::check,
-        "6E" => crate::review_audit::check,
-        "6M" => crate::feature_delivery_audit::check,
-        "6H" => crate::staged_integration_audit::check,
-        "7E" => crate::document_audit::check,
-        "7M" => crate::figure_document_audit::check,
-        "7H" => crate::large_document_audit::check,
-        "10E" => crate::build_audit::check,
-        "11M" => crate::manufacturing_rework_audit::check,
-        "11E" => crate::manufacturing_audit::check,
-        "12E" => crate::kitchen_audit::check,
-        "10M" => crate::cascading_build_audit::check,
-        "8E" => crate::api_audit::check,
-        "8M" => crate::full_stack_api_audit::check,
-        "15E" => crate::wafer_audit::check,
-        "16E" => crate::cicd_audit::check,
-        "16M" => crate::cicd_pipeline_audit::check,
-        "9E" | "9M" | "9H" => crate::philosophers_audit::check,
-        _ => return Err("task has no delegated WASI implementation".into()),
-    })
+    tasks! {
+        "1E" => codebase_audit,
+        "1M" => codebase_audit,
+        "1H" => codebase_audit,
+        "2E" => writing_audit,
+        "2M" => writing_audit,
+        "2H" => writing_audit,
+        "3E" => report_audit,
+        "3M" => research_paper_audit,
+        "3H" => survey_paper_audit,
+        "4E" => coordination_audit,
+        "4M" => refactor_audit,
+        "4H" => microservice_migration_audit,
+        "5E" => medical_audit,
+        "5M" => multi_specialty_audit,
+        "5H" => critical_care_audit,
+        "6E" => review_audit,
+        "6M" => feature_delivery_audit,
+        "6H" => staged_integration_audit,
+        "7E" => document_audit,
+        "7M" => figure_document_audit,
+        "7H" => large_document_audit,
+        "8E" => api_audit,
+        "8M" => full_stack_api_audit,
+        "9E" => philosophers_audit,
+        "9M" => philosophers_audit,
+        "9H" => philosophers_audit,
+        "10E" => build_audit,
+        "10M" => cascading_build_audit,
+        "11E" => manufacturing_audit,
+        "11M" => manufacturing_rework_audit,
+        "12E" => kitchen_audit,
+        "13E" => lab_audit,
+        "13M" => lab_quality_audit,
+        "13H" => lab_cascading_audit,
+        "14E" => drug_discovery_audit,
+        "14M" => regulatory_discovery_audit,
+        "14H" => multi_round_discovery_audit,
+        "15E" => wafer_audit,
+        "16E" => cicd_audit,
+        "16M" => cicd_pipeline_audit,
+    }
 }
 
 pub fn run(root: &Path) -> Result<Value> {
@@ -601,7 +611,7 @@ pub fn run(root: &Path) -> Result<Value> {
         maximum = maximum.max(active);
     }
     let fixture_task = fixture["task"].clone();
-    let protocol = effects(task, &evidence)?;
+    let protocol = evidence.audit(task)?;
     if protocol["compiled_projection_sha256"] != versions["compiled_projection_sha256"]
         || protocol["runtime_binary_sha256"] != versions["binaries"]["runtime"]
     {

@@ -29,12 +29,9 @@ fn payload(message: &Value) -> Result<Vec<u8>> {
 }
 pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &projection["compiled"];
-    let labels = crate::projection::frames(projection, records)?;
     let fixture = &records.first().ok_or("empty evidence")?["message"];
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/8E/metadata.json"),
-    )?;
+    let journal = crate::journal::read(records, projection, dynamic)?;
+    let actors = journal.participants;
     if compiled["task"] != "8E" || fixture["task"] != "8E" {
         return Err("unexpected API task".into());
     }
@@ -50,7 +47,6 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
     };
     let service_fd = u8::try_from(compiled["service_fd"].as_u64().ok_or("operation fd")?)?;
     let outcome_fd = u8::try_from(compiled["outcome_fd"].as_u64().ok_or("outcome fd")?)?;
-    let journal = journal::read(records, &labels, actors, dynamic)?;
     let frames = &journal.frames;
     let mut effects = BTreeMap::new();
     let mut closes = BTreeSet::new();
@@ -373,13 +369,8 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
                 && f.bytes.first().copied().map(u64::from) == Some(file)
         }))?;
     }
-    let events = journal.score["events"]
-        .as_array()
-        .ok_or("actual API score events")?;
-    if events.len() != 3
-        || journal.score["complete"] != (depth == 0)
-        || journal.score["violations"] != json!([])
-    {
+    let events = journal.scored_events;
+    if events.len() != 3 || journal.simulator_complete != (depth == 0) {
         return Err("API task score differs from actual terminal result".into());
     }
     for call in journal.calls.values() {
@@ -410,12 +401,12 @@ pub(crate) fn check(records: &[Value], projection: &Value, dynamic: &Value) -> R
         "actual_resource_endpoint_returns":resource_returns,"complete_result_reads":complete_reads,
         "early_result_reads":early_reads,"observed_operation_result_reads":result_reads,
         "effect_receipts":effects,"violations":0,
-        "simulator_complete":journal.score["complete"],"expected_terminal_test_failure":depth!=0,
+        "simulator_complete":journal.simulator_complete,"expected_terminal_test_failure":depth!=0,
         "dynamic_protocol":dynamic}),
     )
 }
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
-    crate::journal::Evidence::open(path)?.audit(check)?;
+    crate::journal::Evidence::open(path)?.audit("8E")?;
     fs::create_dir(output)?;
     let rows = BufReader::new(File::open(path)?)
         .lines()

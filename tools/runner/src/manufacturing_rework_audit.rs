@@ -2,32 +2,17 @@
 use crate::{
     evidence::Result,
     journal::{self, Frame},
-    projection,
 };
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
-    let labels = projection::frames(artifact, rows)?;
-    verify(artifact, rows, &labels, dynamic)
-}
-
-pub(super) fn verify(
-    artifact: &Value,
-    rows: &[Value],
-    labels: &BTreeMap<u64, u8>,
-    epf: &Value,
-) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let inputs = &rows.first().ok_or("missing workshop journal")?["message"];
-    let actors = crate::journal::participants(
-        inputs,
-        include_str!("../../../benchmark/descriptions/11M/metadata.json"),
-    )?;
+    let history = crate::journal::read(rows, artifact, dynamic)?;
     if inputs["task"] != "11M" || compiled["task"] != "11M" {
         return Err("foreign task fixture or projection".into());
     }
-    let history = journal::read(rows, labels, actors, epf)?;
     let role = |name: &str| -> Result<u64> {
         compiled["roles"][name]
             .as_u64()
@@ -39,15 +24,7 @@ pub(super) fn verify(
     let gauge = role("GAUGE")?;
     let readout = role("READOUT")?;
     let cabinet = role("CABINET")?;
-    let world = history.score["events"]
-        .as_array()
-        .ok_or("workshop score events")?;
-    if history.score["violations"] != json!([])
-        || history.score["complete"].as_bool().is_none()
-        || world.len() != history.calls.len()
-    {
-        return Err("workshop effect count, score or violations differ".into());
-    }
+    let world = history.scored_events;
     let mut calls = history.calls.iter().collect::<Vec<_>>();
     calls.sort_by_key(|(_, c)| c.emitted);
     let mut spent = BTreeSet::new();
@@ -359,7 +336,7 @@ pub(super) fn verify(
             return Err("overlapping effects exceed workshop capacity".into());
         }
     }
-    if history.score["complete"]
+    if history.simulator_complete
         != readings
             .iter()
             .all(|r| r.is_some_and(|(r, _)| r["success"] == true))
@@ -367,6 +344,6 @@ pub(super) fn verify(
         return Err("business score differs from the six gauged parts".into());
     }
     Ok(
-        json!({"status":"passed","task":"11M","simulator_complete":history.score["complete"],"violations":0,"domain_calls":evidence.len(),"effects":evidence,"captured_records":epf["captured_records"],"runtime_binary_sha256":artifact["runtime_binary_sha256"]}),
+        json!({"status":"passed","task":"11M","simulator_complete":history.simulator_complete,"violations":0,"domain_calls":evidence.len(),"effects":evidence,"captured_records":dynamic["captured_records"],"runtime_binary_sha256":artifact["runtime_binary_sha256"]}),
     )
 }

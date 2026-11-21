@@ -226,7 +226,10 @@ the task-specific rules that match receives, arguments, effects and replies.
 All families share the check that pairs each transport frame with a distinct
 EPF receive. The journal reader checks the participants against the upstream
 task description and matches each simulator request to its start, finish and
-reply by RPC identifier. Concurrent calls can finish in either order. The
+reply by RPC identifier. Before task-specific matching, it checks that the
+number of scored events equals the number of completed calls and that the
+simulator reported no violations. A trial can pass these checks with a
+negative business outcome. Concurrent calls can finish in either order. The
 families also share the comparison between a completed call and a scored
 event. In a saved seven-diner run, A and F issued \texttt{think} with
 the same argument. A's call started first and F's reply arrived first.

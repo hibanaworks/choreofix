@@ -37,10 +37,8 @@ const CHAPTERS: [(&str, &str, &str, &str, &str); 4] = [
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty survey journal")?["message"];
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/3H/metadata.json"),
-    )?;
+    let history = crate::journal::read(rows, artifact, dynamic)?;
+    let actors = history.participants;
 
     if compiled["task"] != "3H" || fixture["type"] != "fixtures" || fixture["task"] != "3H" {
         return Err("foreign task fixture or projection".into());
@@ -51,14 +49,9 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             .as_u64()
             .ok_or_else(|| format!("missing survey role {name}"))
     };
-    let labels = projection::frames(artifact, rows)?;
     let contracts = projection::contracts(compiled)?;
-    let history = journal::read(rows, &labels, actors, dynamic)?;
-    let scores = history.score["events"].as_array().ok_or("survey score")?;
-    if history.score["complete"] != true
-        || history.score["violations"] != json!([])
-        || scores.len() != history.calls.len()
-    {
+    let scores = history.scored_events;
+    if !history.simulator_complete {
         return Err("incomplete survey score or world violation".into());
     }
     journal::check_close_pairs(
@@ -407,7 +400,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     Ok(
         json!({"status":"passed","task":"3H","participants":actors.len(),"domain_calls":effects.len(),
         "violations":0,"effects":effects,"dynamic_protocol":dynamic,
-        "simulator_complete":history.score["complete"],
+        "simulator_complete":history.simulator_complete,
         "scored_benchmark":false}),
     )
 }

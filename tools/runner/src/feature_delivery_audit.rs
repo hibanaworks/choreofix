@@ -89,20 +89,17 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
     if fixture["type"] != "fixtures" || fixture["task"] != "6M" {
         return Err("6M fixture".into());
     }
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/6M/metadata.json"),
-    )?;
+    let journal = crate::journal::read(rows, projection, dynamic)?;
+    let actors = journal.participants;
 
-    let headers = crate::projection::frames(projection, rows)?;
-    let journal = crate::journal::read(rows, &headers, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
-        score,
+        scored_events,
+        simulator_complete,
+        ..
     } = journal;
-    if score["complete"] != true
-        || score["violations"] != json!([])
+    if !simulator_complete
         || frames
             .values()
             .any(|f| f.identity["session"] != compiled["session"])
@@ -124,14 +121,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
         .into_iter()
         .map(role)
         .collect::<Result<BTreeSet<_>>>()?;
-    let mut scored = score["events"]
-        .as_array()
-        .ok_or("scored actual effects")?
-        .iter()
-        .collect::<Vec<_>>();
-    if scored.len() != calls.len() {
-        return Err("score and effect count differ".into());
-    }
+    let mut scored = scored_events.iter().collect::<Vec<_>>();
     let mut used = BTreeSet::new();
     let mut publication_inputs = BTreeSet::new();
     let mut ordered = calls.values().collect::<Vec<_>>();
@@ -624,13 +614,9 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
 pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let rows = records(path)?;
     let (projection, _) = crate::projection::load(path)?;
-    let audited = crate::journal::Evidence::open(path)?.audit(check)?;
+    let audited = crate::journal::Evidence::open(path)?.audit("6M")?;
     let dynamic = &audited["dynamic_protocol"];
-    let headers = crate::projection::frames(&projection, &rows)?;
-    let actors = rows.first().ok_or("fixture")?["message"]["fixtures"]
-        .as_array()
-        .ok_or("actors")?;
-    let journal = crate::journal::read(&rows, &headers, actors, dynamic)?;
+    let journal = crate::journal::read(&rows, &projection, dynamic)?;
     let roles = BUSINESS_ROLES
         .into_iter()
         .map(|name| named(&projection["compiled"], "roles", name))

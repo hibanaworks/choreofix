@@ -1,11 +1,10 @@
 //! Connect each 15E effect to the guest request, instrument and returned result of this run.
-use crate::{evidence::Result, journal, projection};
+use crate::{evidence::Result, journal};
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
-    let labels = projection::frames(artifact, rows)?;
-    let effects = effects(rows, artifact, &labels, dynamic)?;
+    let effects = effects(rows, artifact, dynamic)?;
     Ok(
         json!({"status":"passed","task":"15E","simulator_complete":true,"violations":0,
         "domain_calls":effects.len(),"effects":effects,"captured_records":dynamic["captured_records"],
@@ -13,17 +12,9 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     )
 }
 
-pub(crate) fn effects(
-    rows: &[Value],
-    artifact: &Value,
-    labels: &BTreeMap<u64, u8>,
-    epf: &Value,
-) -> Result<Vec<Value>> {
+pub(crate) fn effects(rows: &[Value], artifact: &Value, epf: &Value) -> Result<Vec<Value>> {
     let fixture = &rows.first().ok_or("empty wafer journal")?["message"];
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/15E/metadata.json"),
-    )?;
+    let journal = crate::journal::read(rows, artifact, epf)?;
 
     if fixture["task"] != "15E" || artifact["compiled"]["task"] != "15E" {
         return Err("foreign task fixture or projection".into());
@@ -40,7 +31,6 @@ pub(crate) fn effects(
             .and_then(|n| u8::try_from(n).ok())
             .ok_or_else(|| format!("missing wafer message {name}"))
     };
-    let journal = journal::read(rows, labels, actors, epf)?;
     let pairs = [
         ("ENGINEER", "WAFER"),
         ("DEP", "DEP_INBOX"),
@@ -53,13 +43,8 @@ pub(crate) fn effects(
     .map(|(a, b)| Ok((role(a)?, role(b)?)))
     .collect::<Result<Vec<_>>>()?;
     journal::check_close_pairs(&journal.frames, &pairs)?;
-    let events = journal.score["events"]
-        .as_array()
-        .ok_or("wafer score events")?;
-    if journal.score["complete"] != true
-        || journal.score["violations"] != json!([])
-        || events.len() != journal.calls.len()
-    {
+    let events = journal.scored_events;
+    if !journal.simulator_complete {
         return Err("incomplete wafer score or unmatched effects".into());
     }
     let mut used = BTreeSet::new();

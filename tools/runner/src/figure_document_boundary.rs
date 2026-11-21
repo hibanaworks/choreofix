@@ -697,8 +697,7 @@ async fn five_wash_guests_complete_the_document_and_reconsider() -> Result<()> {
             _ => unreachable!(),
         };
         assert_eq!(revisions, expected_revisions, "{case}: revised chapters");
-        let checked = crate::journal::Evidence::open(&output.join("events.jsonl"))?
-            .audit(crate::figure_document_audit::check)?;
+        let checked = crate::journal::Evidence::open(&output.join("events.jsonl"))?.audit("7M")?;
         assert_eq!(checked["status"], "passed");
         save(&output.join("audit.json"), &checked)?;
         if depth == 2 {

@@ -259,8 +259,7 @@ async fn both_first_builders_rebuild_current_types_and_reject_invalid_or_duplica
                 .len(),
             if first == "BUILDER_A" { 3 } else { 4 }
         );
-        let checked = crate::journal::Evidence::open(&output.join("events.jsonl"))?
-            .audit(crate::build_audit::check)?;
+        let checked = crate::journal::Evidence::open(&output.join("events.jsonl"))?.audit("10E")?;
         save(&output.join("audit.json"), &checked)?;
         let mutants = crate::build_audit::check_mutants(
             &output.join("events.jsonl"),

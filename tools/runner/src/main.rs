@@ -1030,7 +1030,7 @@ async fn main() -> Result<()> {
         ),
         [mode, task, events] if mode == "--audit" => {
             let evidence = journal::Evidence::open(Path::new(events))?;
-            println!("{}", serde_json::to_string_pretty(&audit::effects(task, &evidence)?)?);
+            println!("{}", serde_json::to_string_pretty(&evidence.audit(task)?)?);
         },
         [task, depth, output] => {
             let result = match run(task, depth.parse()?, Path::new(output)).await {

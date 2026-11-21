@@ -96,7 +96,7 @@ pub(crate) fn one<T>(items: impl Iterator<Item = T>) -> Result<T> {
     Ok(frame)
 }
 /// Match the physical participant roster to the original benchmark description.
-pub(crate) fn participants<'a>(fixture: &'a Value, description: &str) -> Result<&'a [Value]> {
+fn participants<'a>(fixture: &'a Value, description: &str) -> Result<&'a [Value]> {
     let metadata: Value = serde_json::from_str(description)?;
     let expected = metadata["agents"]
         .as_array()
@@ -152,10 +152,17 @@ impl Evidence {
         })
     }
 
-    pub(crate) fn audit(
-        &self,
-        effects: fn(&[Value], &Value, &Value) -> Result<Value>,
-    ) -> Result<Value> {
+    pub(crate) fn audit(&self, task: &str) -> Result<Value> {
+        if self.projection["compiled"]["task"] != task
+            || self
+                .rows
+                .first()
+                .and_then(|row| row["message"]["task"].as_str())
+                != Some(task)
+        {
+            return Err("expected task differs from the compiled projection or run fixture".into());
+        }
+        let (_, effects) = crate::audit::task_audit(task)?;
         let execution = crate::projection::check_dynamic(&self.projection, &self.rows)?;
         let mut report = effects(&self.rows, &self.projection, &execution)?;
         report["source_events_sha256"] = json!(self.events_hash);
@@ -313,17 +320,39 @@ pub(crate) fn check_close_pairs(frames: &BTreeMap<u64, Frame>, pairs: &[(u64, u6
 
 /// Correlated observations owned by the offline auditor, never runtime authority.
 pub(crate) struct Journal<'a> {
+    pub(crate) participants: &'a [Value],
     pub(crate) frames: BTreeMap<u64, Frame<'a>>,
     pub(crate) calls: BTreeMap<u64, Call<'a>>,
-    pub(crate) score: Value,
+    pub(crate) scored_events: &'a [Value],
+    pub(crate) simulator_complete: bool,
 }
 
 /// A completed trial must associate each physical frame with one EPF-checked
 /// receive, including when the transport owner flushes its journal after the commit.
 pub(crate) fn read<'a>(
     rows: &'a [Value],
+    artifact: &Value,
+    dynamic: &'a Value,
+) -> Result<Journal<'a>> {
+    let row = rows.first().ok_or("empty evidence journal")?;
+    let fixture = &row["message"];
+    if row["direction"] != "simulator"
+        || fixture["type"] != "fixtures"
+        || fixture["task"] != artifact["compiled"]["task"]
+    {
+        return Err("expected the original simulator fixture for the compiled task".into());
+    }
+    let (description, _) =
+        crate::audit::task_audit(fixture["task"].as_str().ok_or("fixture task")?)?;
+    let actors = participants(fixture, description)?;
+    let labels = crate::projection::frames(artifact, rows)?;
+    from_receipts(rows, &labels, actors, dynamic)
+}
+
+fn from_receipts<'a>(
+    rows: &'a [Value],
     labels: &BTreeMap<u64, u8>,
-    actors: &[Value],
+    actors: &'a [Value],
     dynamic: &'a Value,
 ) -> Result<Journal<'a>> {
     let mut acceptances = BTreeMap::new();
@@ -477,11 +506,24 @@ pub(crate) fn read<'a>(
     if score_at <= verdict {
         return Err("original score precedes runtime completion".into());
     }
-    let score = score.clone();
+    let scored_events = score["events"].as_array().ok_or("missing scored events")?;
+    let simulator_complete = score["complete"]
+        .as_bool()
+        .ok_or("missing simulator outcome")?;
+    if !score["violations"].as_array().is_some_and(Vec::is_empty) {
+        return Err(
+            "original simulator score is missing its violation list or reports a violation".into(),
+        );
+    }
+    if scored_events.len() != calls.len() {
+        return Err("original simulator event count differs from actual effect count".into());
+    }
     Ok(Journal {
+        participants: actors,
         frames,
         calls,
-        score,
+        scored_events,
+        simulator_complete,
     })
 }
 
@@ -544,7 +586,7 @@ mod tests {
         let labels = crate::projection::frames(&artifact, &rows)?;
         let actors = [json!({"agent":"A"}), json!({"agent":"B"})];
         let checked = crate::projection::check_dynamic(&artifact, &rows)?;
-        let journal = read(&rows, &labels, &actors, &checked)?;
+        let journal = from_receipts(&rows, &labels, &actors, &checked)?;
         assert_eq!(journal.frames[&19].received, 4);
         assert_eq!(journal.frames[&19].first_poll, 1);
         let mut duplicate = checked.clone();
@@ -552,12 +594,12 @@ mod tests {
             .as_array_mut()
             .unwrap()
             .push(journal.frames[&19].receipt.clone());
-        assert!(read(&rows, &labels, &actors, &duplicate).is_err());
+        assert!(from_receipts(&rows, &labels, &actors, &duplicate).is_err());
         for (field, value) in [("source_event", 1), ("view", 7)] {
             let mut altered = checked.clone();
             altered["sessions"][0]["acceptances"][0]["receive_commit"][field] = json!(value);
             assert!(
-                read(&rows, &labels, &actors, &altered).is_err(),
+                from_receipts(&rows, &labels, &actors, &altered).is_err(),
                 "accepted {field}"
             );
         }
@@ -565,16 +607,16 @@ mod tests {
             let mut altered = checked.clone();
             altered["sessions"][0]["acceptances"][0][field] = value;
             assert!(
-                read(&rows, &labels, &actors, &altered).is_err(),
+                from_receipts(&rows, &labels, &actors, &altered).is_err(),
                 "accepted {field}"
             );
         }
         let mut wrong_session = checked.clone();
         wrong_session["sessions"][0]["session"] = json!(123456);
-        assert!(read(&rows, &labels, &actors, &wrong_session).is_err());
+        assert!(from_receipts(&rows, &labels, &actors, &wrong_session).is_err());
         let mut missing = checked.clone();
         missing["sessions"][0]["acceptances"] = json!([]);
-        assert!(read(&rows, &labels, &actors, &missing).is_err());
+        assert!(from_receipts(&rows, &labels, &actors, &missing).is_err());
         let mut orphan = checked.clone();
         let mut extra = journal.frames[&19].receipt.clone();
         extra["frame_id"] = json!(20);
@@ -582,7 +624,7 @@ mod tests {
             .as_array_mut()
             .unwrap()
             .push(extra);
-        assert!(read(&rows, &labels, &actors, &orphan).is_err());
+        assert!(from_receipts(&rows, &labels, &actors, &orphan).is_err());
         // The transport owner can flush its observations after the capture
         // owner has already recorded a successful receive commit.
         let mut late = rows.clone();
@@ -594,7 +636,7 @@ mod tests {
         late.retain(|row| row["message"]["type"] != "protocol_frame");
         late.splice(4..4, transport);
         let checked_late = crate::projection::check_dynamic(&artifact, &late)?;
-        let journal_late = read(&late, &labels, &actors, &checked_late)?;
+        let journal_late = from_receipts(&late, &labels, &actors, &checked_late)?;
         assert!(journal_late.frames[&19].sent > 3);
         assert_eq!(journal_late.frames[&19].received, 3);
         // EPF correctly permits a finite source prefix with an accepted send.
@@ -603,7 +645,7 @@ mod tests {
         rows[4]["message"]["checkpoint"] = json!(2);
         let prefix = crate::projection::check_dynamic(&artifact, &rows)?;
         assert_eq!(prefix["status"], "passed");
-        assert!(read(&rows, &labels, &actors, &prefix).is_err());
+        assert!(from_receipts(&rows, &labels, &actors, &prefix).is_err());
         Ok(())
     }
 
@@ -632,6 +674,9 @@ mod tests {
         let request = json!({"type":"execute","id":1,"agent":"A","tool":"write_section","arguments":{"section_name":"section_a"}});
         let result =
             json!({"tool_name":"write_section","success":true,"data":{"section":"section_a"}});
+        let args = json!({"section":"section_a"});
+        let scored = json!({"agent":"A","tool":"write_section","args":args,
+            "success":true,"result":result["data"],"violations":[]});
         let rows = vec![
             json!({"direction":"runtime","message":request}),
             json!({"direction":"domain_start","elapsed_seconds":0.1,"message":request}),
@@ -639,15 +684,12 @@ mod tests {
             json!({"direction":"simulator","message":{"type":"simulator_result","id":1,"result":result}}),
             json!({"direction":"runtime","message":{"type":"exit","agent":"A","status":0}}),
             json!({"direction":"runtime","message":{"type":"run_result","status":"complete"}}),
-            json!({"direction":"simulator","message":{"type":"score","complete":true,"events":[],"violations":[]}}),
+            json!({"direction":"simulator","message":{"type":"score","complete":true,"events":[scored],"violations":[]}}),
         ];
         let actors = [json!({"agent":"A"})];
         let dynamic = json!({"sessions":[]});
-        let journal = read(&rows, &BTreeMap::new(), &actors, &dynamic).unwrap();
+        let journal = from_receipts(&rows, &BTreeMap::new(), &actors, &dynamic).unwrap();
         let call = &journal.calls[&1];
-        let args = json!({"section":"section_a"});
-        let scored = json!({"agent":"A","tool":"write_section","args":args,
-            "success":true,"result":result["data"],"violations":[]});
         assert!(call.matches_score(&scored, &args));
         let mut repeated = vec![&scored, &scored];
         assert!(
@@ -676,41 +718,61 @@ mod tests {
         for row in &mut second {
             row["message"]["id"] = json!(2);
         }
-        let combined = [&rows[..2], &second[..], &rows[2..]].concat();
-        let paired = read(&combined, &BTreeMap::new(), &actors, &dynamic).unwrap();
+        let mut combined = [&rows[..2], &second[..], &rows[2..]].concat();
+        assert!(from_receipts(&combined, &BTreeMap::new(), &actors, &dynamic).is_err());
+        combined.last_mut().unwrap()["message"]["events"] = json!([scored, scored]);
+        let paired = from_receipts(&combined, &BTreeMap::new(), &actors, &dynamic).unwrap();
         assert!(paired.calls[&1].started.0 < paired.calls[&2].started.0);
         assert!(paired.calls[&2].result.0 < paired.calls[&1].ended.0);
+        for (field, value) in [
+            ("complete", Value::Null),
+            ("events", json!([])),
+            ("events", json!([scored, scored])),
+            ("violations", Value::Null),
+            ("violations", json!(["resource conflict"])),
+        ] {
+            let mut changed = rows.clone();
+            changed.last_mut().unwrap()["message"][field] = value;
+            assert!(from_receipts(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
+        }
+        let mut unfinished = rows.clone();
+        unfinished.last_mut().unwrap()["message"]["complete"] = json!(false);
+        assert!(
+            !from_receipts(&unfinished, &BTreeMap::new(), &actors, &dynamic)
+                .unwrap()
+                .simulator_complete
+        );
         for index in 0..4 {
             let mut duplicate = rows.clone();
             duplicate.insert(index, rows[index].clone());
-            assert!(read(&duplicate, &BTreeMap::new(), &actors, &dynamic).is_err());
+            assert!(from_receipts(&duplicate, &BTreeMap::new(), &actors, &dynamic).is_err());
             let mut orphan = rows.clone();
             orphan[index]["message"]["id"] = json!(2);
-            assert!(read(&orphan, &BTreeMap::new(), &actors, &dynamic).is_err());
+            assert!(from_receipts(&orphan, &BTreeMap::new(), &actors, &dynamic).is_err());
         }
         for removed in [0, 1, 2, 3, 4, 5, 6] {
             let mut changed = rows.clone();
             changed.remove(removed);
-            assert!(read(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
+            assert!(from_receipts(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
         }
         let mut changed = rows.clone();
         changed.swap(2, 3);
-        assert!(read(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
+        assert!(from_receipts(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
         let mut changed = rows.clone();
         changed.swap(5, 6);
-        assert!(read(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
+        assert!(from_receipts(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
         let mut changed = rows.clone();
         changed[1]["message"]["arguments"]["section_name"] = json!("section_b");
-        assert!(read(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
+        assert!(from_receipts(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
         let mut changed = rows.clone();
         changed[3]["message"]["result"]["success"] = json!(false);
-        assert!(read(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
+        assert!(from_receipts(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
         let mut changed = rows.clone();
         changed[2]["elapsed_seconds"] = json!(0.05);
-        assert!(read(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
+        assert!(from_receipts(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
         let mut changed = rows.clone();
         changed.insert(1, rows[0].clone());
-        assert!(read(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
+        assert!(from_receipts(&changed, &BTreeMap::new(), &actors, &dynamic).is_err());
     }
 
     #[test]

@@ -85,20 +85,17 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
             .as_u64()
             .ok_or_else(|| format!("compiled label {name}").into())
     };
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/6H/metadata.json"),
-    )?;
+    let journal = crate::journal::read(rows, projection, dynamic)?;
+    let actors = journal.participants;
 
-    let headers = crate::projection::frames(projection, rows)?;
-    let journal = crate::journal::read(rows, &headers, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
-        score,
+        scored_events,
+        simulator_complete,
+        ..
     } = journal;
-    if score["complete"] != true
-        || score["violations"] != json!([])
+    if !simulator_complete
         || frames
             .values()
             .any(|frame| frame.identity["session"] != compiled["session"])
@@ -137,14 +134,7 @@ pub(crate) fn check(rows: &[Value], projection: &Value, dynamic: &Value) -> Resu
     .into_iter()
     .map(role)
     .collect::<Result<BTreeSet<_>>>()?;
-    let mut scored = score["events"]
-        .as_array()
-        .ok_or("actual scored effects")?
-        .iter()
-        .collect::<Vec<_>>();
-    if scored.len() != calls.len() {
-        return Err("effect and score counts differ".into());
-    }
+    let mut scored = scored_events.iter().collect::<Vec<_>>();
     let mut ordered = calls.values().collect::<Vec<_>>();
     ordered.sort_by_key(|call| call.emitted);
     let mut used = BTreeSet::new();
@@ -822,11 +812,7 @@ pub fn check_mutants(path: &Path, output: &Path) -> Result<Value> {
     let rows = records(path)?;
     let dynamic = crate::projection::check_dynamic(&projection, &rows)?;
     let audited = check(&rows, &projection, &dynamic)?;
-    let headers = crate::projection::frames(&projection, &rows)?;
-    let actors = rows[0]["message"]["fixtures"]
-        .as_array()
-        .ok_or("original participants")?;
-    let journal = crate::journal::read(&rows, &headers, actors, &dynamic)?;
+    let journal = crate::journal::read(&rows, &projection, &dynamic)?;
     let roles = [
         "REPO",
         "REPO_OWNER",

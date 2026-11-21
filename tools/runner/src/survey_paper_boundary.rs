@@ -155,7 +155,7 @@ async fn seven_wasm_guests_publish_the_current_survey() -> Result<()> {
     );
     save(
         &directory.join("effect-audit.json"),
-        &crate::journal::Evidence::open(&events)?.audit(crate::survey_paper_audit::check)?,
+        &crate::journal::Evidence::open(&events)?.audit("3H")?,
     )?;
     Ok(())
 }

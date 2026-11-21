@@ -193,8 +193,7 @@ async fn actual_wasm_reconsideration() -> Result<()> {
         .as_array()
         .ok_or("14M effect journal")?;
     assert_eq!(effects.len(), effect_count);
-    let audit = crate::journal::Evidence::open(&output.join("events.jsonl"))?
-        .audit(crate::regulatory_discovery_audit::check)?;
+    let audit = crate::journal::Evidence::open(&output.join("events.jsonl"))?.audit("14M")?;
     assert_eq!(audit["domain_calls"], effect_count);
     assert_eq!(audit["rejections"], rejections);
     assert_eq!(audit["analysis_failures"], analysis_failures);

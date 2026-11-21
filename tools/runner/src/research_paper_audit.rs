@@ -30,10 +30,8 @@ const CHAPTERS: [(&str, &str, &str, &str, &str); 3] = [
 pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result<Value> {
     let compiled = &artifact["compiled"];
     let fixture = &rows.first().ok_or("empty paper history")?["message"];
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/3M/metadata.json"),
-    )?;
+    let history = crate::journal::read(rows, artifact, dynamic)?;
+    let actors = history.participants;
     if compiled["task"] != "3M" || fixture["type"] != "fixtures" || fixture["task"] != "3M" {
         return Err("foreign task fixture or projection".into());
     }
@@ -49,15 +47,8 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     };
     let labels = &compiled["labels"];
     let contracts = projection::contracts(compiled)?;
-    let frames = projection::frames(artifact, rows)?;
-    let history = journal::read(rows, &frames, actors, dynamic)?;
-    let evaluated = history.score["events"]
-        .as_array()
-        .ok_or("3M score events")?;
-    if history.score["complete"] != true
-        || history.score["violations"] != json!([])
-        || evaluated.len() != history.calls.len()
-    {
+    let evaluated = history.scored_events;
+    if !history.simulator_complete {
         return Err("incomplete paper score or resource violation".into());
     }
     journal::check_close_pairs(

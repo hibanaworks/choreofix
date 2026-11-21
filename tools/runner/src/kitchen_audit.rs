@@ -28,10 +28,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     if compiled["task"] != "12E" || fixture["task"] != "12E" || fixture["type"] != "fixtures" {
         return Err("kitchen source or input differs".into());
     }
-    let actors = crate::journal::participants(
-        fixture,
-        include_str!("../../../benchmark/descriptions/12E/metadata.json"),
-    )?;
+    let journal = crate::journal::read(rows, artifact, dynamic)?;
 
     let name = |group: &str, key: &str| -> Result<u64> {
         compiled[group][key]
@@ -39,16 +36,15 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
             .filter(|n| *n <= 255)
             .ok_or_else(|| format!("compiled {group} {key}").into())
     };
-    let labels = crate::projection::frames(artifact, rows)?;
-    let journal = crate::journal::read(rows, &labels, actors, dynamic)?;
     let crate::journal::Journal {
         frames,
         calls,
-        score,
+        scored_events,
+        simulator_complete,
+        ..
     } = journal;
     if calls.len() != 9
-        || score["complete"] != true
-        || score["violations"] != json!([])
+        || !simulator_complete
         || frames
             .values()
             .any(|f| f.identity["session"] != compiled["session"])
@@ -69,9 +65,7 @@ pub(crate) fn check(rows: &[Value], artifact: &Value, dynamic: &Value) -> Result
     let finish = name("roles", "FINISH")?;
     let oven = name("roles", "OVEN")?;
     let stove = name("roles", "STOVETOP")?;
-    let scored = score["events"]
-        .as_array()
-        .ok_or("kitchen original effects")?;
+    let scored = scored_events;
     let mut intervals = Vec::new();
     for (chef, letter, dish, ingredient, recipient, received) in recipes {
         let actor = name("roles", chef)?;
