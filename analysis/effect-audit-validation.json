@@ -698,5 +698,50 @@
     "mutated_journals_rejected": 55,
     "new_live_runs_in_this_replay": 0,
     "new_qualifications": 0
+  },
+  "frame_matching_follow_up": {
+    "checked_implementation": "6027de05b62f7f1fec1b8bda38fd53e899b65602",
+    "verifier_sha256": "73a314d6d2cf80d1b6e852d370007d50cd9bdc0e4fe4854787289ec8e51e28c7",
+    "raw_directory": "output/verification/audit-wasi-20261122/final",
+    "scope": "The three changed task checkers now use one single-use frame matcher. 4M also uses shared score consumption. Replayed those three assigned journals on this verifier after the 40-case replay above. The frame matcher requires one unused frame in the send interval with the declared edge, label and JSON value. Call sites retain their receive-commit checks.",
+    "reports": [
+      {
+        "task": "4M",
+        "audited_report_sha256": "74d1ddb3bf36a033b85d18ebd42f82a202e3a0279c4e98bcf84b68f945be9b1c"
+      },
+      {
+        "task": "6M",
+        "audited_report_sha256": "78addf6248b87ddc18b5613364cd6fcdcb01a2d045ae645c9c04288bf031d39b",
+        "changed_frames_rejected": 518,
+        "mutation_report_sha256": "a6fbd2a51223a95fada764c7ed93fba790de1a4339c0973ab47e9e50865c3d89"
+      },
+      {
+        "task": "6H",
+        "audited_report_sha256": "f8e4f0b7c04ac582411972e44342838befabed4aff0a72207faf29d0287ff64f",
+        "changed_frames_rejected": 506,
+        "mutation_report_sha256": "8f3f62cd51c5a3e2e6a91bef9dc9351f6be98809867ba847e018f7a2017881c4"
+      }
+    ],
+    "record_mutations": "6M and 6H change recorded frames with the original EPF receipts fixed to isolate the frame/effect checks. 4M replays both the changed journal and the full effect checker.",
+    "changed_publication": {
+      "task": "4M",
+      "frame_id": 499,
+      "row_zero_based": 3249,
+      "field": "arguments.branch",
+      "original": "module_a",
+      "changed": "module_b",
+      "journal_sha256": "48bd4cf891330f521ae418404db0fbb6c95bf5909be039e0ea151422f18409df",
+      "protocol_audit": "passed_protocol_audit",
+      "effect_audit_error": "Error: \"missing matching frame\""
+    },
+    "total_changed_records_rejected": 1025,
+    "changed_checkers_replayed": 3,
+    "task_checkers": 34,
+    "task_checker_lines": 18867,
+    "tools_rust_lines": 47901,
+    "shared_score_consumption_families": 15,
+    "runner_unit_tests_passed": 58,
+    "runner_opt_in_tests": 144,
+    "clippy_all_targets_deny_warnings": true
   }
 }

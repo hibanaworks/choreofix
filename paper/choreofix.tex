@@ -229,6 +229,12 @@ scored event. Task-specific rules supply the scored arguments when the
 simulator uses different names or values from the wire request.
 These rules run offline. They cannot grant a participant an operation.
 
+One recorded 4E write requested two bytes. Changing only the reply's
+acknowledged count from two to three preserved the EPF execution verdict.
+The file checker rejected the reply because it acknowledged a byte the guest
+had never supplied. The original journal and the changed frame are identified
+in \path{analysis/effect-audit-validation.json}.
+
 The project maintains both the localsides and these checkers. For example,
 the dining checker imports the application's role and message identifiers.
 The workshop checker separately encodes which worker and station correspond
