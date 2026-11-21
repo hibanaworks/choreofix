@@ -624,5 +624,79 @@
       "rejection": "Error: \"common score differs from the actual effect\""
     }
   ],
-  "diagnostics": "11M calls the journal's unique-match function on the scoring events. Its generic 'missing matching frame' message for the altered score refers to that lookup."
+  "diagnostics": "11M calls the journal's unique-match function on the scoring events. Its generic 'missing matching frame' message for the altered score refers to that lookup.",
+  "wasi_file_and_score_replay": {
+    "checked_implementation": "999c4baeb4df656f0c3b86cf2d8b91dc32dc7281",
+    "verifier_sha256": "f28a0ea9f66892c0ab50eefe693431d52c1dd19ff04236f98e0f1818148774d6",
+    "raw_directory": "output/verification/audit-wasi-20261122",
+    "command": "--audit TASK EVENTS",
+    "comparison": "Each input is the event journal in the corresponding cases entry above. Compare the new report stdout with its audited_report_sha256. In 6H replace only the digest of the new verifier with the previous digest for comparison.",
+    "cases": 40,
+    "byte_identical_reports": 39,
+    "identical_except_verifier_sha256": {
+      "task": "6H",
+      "audited_report_sha256": "e1abe7528b1e29f18edeae3f851b7b4c40fae963fb1d05261e97badce69ce2a7"
+    },
+    "replay_inventory_sha256": "30126924b84d04ba3327345c19267d2c7b0cc20a6aa947a9bf67488158ef3738",
+    "task_checkers": 34,
+    "task_checker_lines": 18911,
+    "tools_rust_lines": 47926,
+    "runner_unit_tests_passed": 58,
+    "runner_opt_in_tests": 144,
+    "clippy_all_targets_deny_warnings": true,
+    "mutated_journals": {
+      "8E": {
+        "command": "--check-api-mutants",
+        "rejected": 18,
+        "report_sha256": "75d506d49a3343cfde049bb73209d3bf37c1d051c386af324f2e34cdd3096381",
+        "epf_valid_before_effect_rejection": []
+      },
+      "9E": {
+        "command": "--check-philosophers-mutants",
+        "rejected": 20,
+        "report_sha256": "8a46c15dc352afc22ec048c4b7164a65700b25a7aa8576e630a491e6be9e69f2",
+        "epf_valid_before_effect_rejection": [
+          "effect_before_second_request",
+          "coherent_arguments",
+          "coherent_write_bytes",
+          "coherent_read_result",
+          "duplicate_effect_fresh_id"
+        ]
+      },
+      "16E": {
+        "command": "--check-cicd-mutants",
+        "rejected": 16,
+        "report_sha256": "46166f1007f7173eb6b29a98f03d6920be6fed52cfd7ca3eb80f359088f8cb9e",
+        "epf_valid_before_effect_rejection": []
+      }
+    },
+    "write_acknowledgement": {
+      "task": "4E",
+      "frame_id": 62,
+      "row_zero_based": 393,
+      "before": [
+        5,
+        2,
+        0,
+        0
+      ],
+      "after": [
+        5,
+        3,
+        0,
+        0
+      ],
+      "journal_sha256": "f4595d37d311798015c0c9d832236e89cb697876cb33360396f9706abc227fad",
+      "protocol_audit": "passed_protocol_audit",
+      "effect_audit_error": "Error: \"write fd or accepted byte count differs\""
+    },
+    "mismatched_task": {
+      "requested_task": "8E",
+      "evidence_task": "4E",
+      "error": "Error: \"expected task differs from the compiled projection or run fixture\""
+    },
+    "mutated_journals_rejected": 55,
+    "new_live_runs_in_this_replay": 0,
+    "new_qualifications": 0
+  }
 }

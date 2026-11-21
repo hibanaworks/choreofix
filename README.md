@@ -98,8 +98,12 @@ which resource receives authorize each effect and where the reply went. The
 project maintains these checkers alongside the localsides. Attributing an
 effect to a particular receive relies on the checker for that task and on the
 recorded inputs. The common simulator assigns the business score from its own
-world state. The [audit validation record](analysis/effect-audit-validation.json)
-identifies each replayed trial and the records changed to test rejection.
+world state. Run `choreofix-experiments --audit TASK EVENTS` on an archived
+journal. The runner checks the requested task against both the compiled
+projection and the recorded fixture. The 4E, 8E, dining and 16E checkers
+share the reconstruction of accepted WASI bytes. A short write updates the
+file by exactly the acknowledged count. The [audit validation record](analysis/effect-audit-validation.json)
+identifies the replayed trials and the records changed to test rejection.
 
 ## Build and validation
 

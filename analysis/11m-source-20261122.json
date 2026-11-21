@@ -1,0 +1,85 @@
+{
+  "runtime_build_receipt": "output/verification/11m-source-20261122/frozen/manufacturing-build-receipt.json",
+  "build_receipt_sha256": "3fe77df402035802db1b66c6c25aabd81fc0a0eb7860499eb46481316a615937",
+  "runtime_binary_sha256": "2e1fd419eaa7613ccbb2514f0f7020c7a97a93012fd8b95a580c0de11cbaf309",
+  "source_git": {
+    "hibana": "27c7a8f4ad597843761013f6ace8d0a7fcdbe9b1",
+    "hibana-epf": "f966c2817c68994315033fa65fbf72390fa107b4",
+    "hibana-runtime": "4e29a837eaf72247a6803ffbbff0c257519df0a5",
+    "hibana-wasip1-runtime": "94ed8a88026f3f1c58e8b35e3766d8b9a83cb334",
+    "source": "8c59dc73e1deb3466feeb0ca032a9814466035b1"
+  },
+  "live_depth_two": {
+    "directory": "output/verification/11m-source-20261122/live-depth2",
+    "participants": 5,
+    "elapsed_seconds": 805.199091875,
+    "inclusive_tokens": 2649725,
+    "events_sha256": "d8c78574ba1cdf7958484a43739e69d2177ff676073496df63bf23ecbebeee88",
+    "result_sha256": "2160ba7d1b0a0796a951ee298a5e6e99f440b8a02996342bdd0d7973db59d06a",
+    "observed_simulator_effects": {
+      "do_job": 6,
+      "inspect_quality": 5,
+      "dispatch_rework": 1
+    },
+    "simulator_complete": false,
+    "simulator_violations": 0,
+    "terminal_producer_checkpoints": 0,
+    "run_error": "guest runtime failed: exit=null, protocol=null, error=\"model participant \\\"DISPATCHER\\\": status=\\\"harness_error\\\", error=\\\"turn completed with a pending tool request\\\"\", backend_errors=[]",
+    "audit": "Error: \"failed or altered case result\"",
+    "scored": false
+  },
+  "scripted_first_attempt": {
+    "status": "interrupted",
+    "error": "guest runtime closed before command reply",
+    "allotted_cases": 30,
+    "incomplete_case": "5-contended",
+    "partial_journal_sha256": "f42cca7cd64b8d96fb532b48582c34e694433e58ce05e3677870d411ee29dfc1",
+    "last_journal_record_complete": false,
+    "storage": "A subsequent write on the same volume failed with ENOSPC.",
+    "checked": {
+      "directory": "output/verification/11m-source-20261122/orders",
+      "completed": 27,
+      "profiles": {
+        "contended": 5,
+        "dispatch-during-work": 5,
+        "other-station-rejections": 6,
+        "serial": 6,
+        "three-rejections": 5
+      },
+      "effects": {
+        "dispatch_rework": 48,
+        "do_job": 210,
+        "inspect_quality": 210
+      },
+      "repairs": 48,
+      "captured_records": 223232,
+      "case_inventory": "checked-cases.json",
+      "case_inventory_sha256": "b1bea57b4279f2002f271ab1f2aded2da9316998af5738fb4dae963f67468555"
+    }
+  },
+  "new_task_qualifications": 0,
+  "new_scored_runs": 0,
+  "scripted_retry": {
+    "directory": "output/verification/11m-source-20261122/orders-retry",
+    "completed": 30,
+    "profiles": {
+      "contended": 6,
+      "dispatch-during-work": 6,
+      "other-station-rejections": 6,
+      "serial": 6,
+      "three-rejections": 6
+    },
+    "effects": {
+      "dispatch_rework": 54,
+      "do_job": 234,
+      "inspect_quality": 234
+    },
+    "repairs": 54,
+    "captured_records": 248625,
+    "case_inventory": "checked-cases.json",
+    "case_inventory_sha256": "0a8339ec634c4dc2a86640360e4fca82325871161533418f6aa717b65adc5264",
+    "status": "passed",
+    "model_calls": 0,
+    "test_binary_sha256": "d182486bab6f442426c8a926ea1ac51da6b6a8a49d24b96ca556cc60e5e25c33"
+  }
+}
