@@ -11,7 +11,12 @@ pub(crate) mod imp {
 }
 #[path = "../../../src/tasks/manufacturing_rework/mod.rs"]
 pub mod manufacturing_rework;
-use hibana::runtime::{SessionKitStorage, ids::SessionId, resolver::ResolverRef, tap::TapEvent};
+use hibana::runtime::{
+    SessionKitStorage,
+    ids::SessionId,
+    resolver::{DecisionArm, ResolverError, ResolverRef},
+    tap::TapEvent,
+};
 use hibana_runtime::host::deadline;
 use manufacturing_rework::{global::*, imp as data, localside};
 use serde_json::{Value, json};
@@ -180,6 +185,17 @@ fn audit_execution<const N: usize>(
     Ok(audit.execution().order.len())
 }
 
+fn initial_quality(input: &Cell<Value>) -> Result<DecisionArm, ResolverError> {
+    let value = input.take();
+    let result = match value["success"].as_bool() {
+        Some(false) => Ok(DecisionArm::Left),
+        Some(true) => Ok(DecisionArm::Right),
+        None => Err(ResolverError::reject()),
+    };
+    input.set(value);
+    result
+}
+
 /// Complete native fixture for one job continuation, not the six-job station/
 /// tool allocator or a Wasm/model implementation of 11M.
 #[hibana_runtime::scope]
@@ -233,7 +249,7 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
     inspector_runtime
         .set_resolver(
             &inspector_program,
-            ResolverRef::<QUALITY_FIRST>::decision_state(&verdict, data::initial_quality),
+            ResolverRef::<QUALITY_FIRST>::decision_state(&verdict, initial_quality),
         )
         .map_err(|error| ShellError::message(format!("{error:?}")))?;
     let mut worker = worker_runtime.enter(session, &worker_program)?;
@@ -600,6 +616,9 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
             let mut a = caller.enter(session, &programs.a)?;
             let mut b = caller.enter(session, &programs.b)?;
             let mut c = caller.enter(session, &programs.c)?;
+            let mut alpha = caller.enter(session, &programs.alpha)?;
+            let mut beta = caller.enter(session, &programs.beta)?;
+            let mut gamma = caller.enter(session, &programs.gamma)?;
             let delays: [Duration; 3] = std::array::from_fn(|worker| {
                 Duration::from_millis(durations[order.iter().position(|id| *id == worker).unwrap()])
             });
@@ -623,6 +642,15 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                         )
                         .await
                         .map_err(|error| ShellError::message(format!("depot: {error}")))?;
+                    };
+                    async {
+                        localside::worker::run(&mut a).await?;
+                    };
+                    async {
+                        localside::worker::run(&mut b).await?;
+                    };
+                    async {
+                        localside::worker::run(&mut c).await?;
                     };
                     async {
                         bus.fixture_peer::<3>(&effects, &["do_job"]).await?;
@@ -649,9 +677,14 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                             }
                         }
                         hibana_runtime::host::sleep(delays[0]).await?;
-                        localside::worker::run(&mut a, &a_bytes)
-                            .await
-                            .map_err(|error| ShellError::message(format!("worker A: {error}")))?;
+                        let arguments = data::JobArguments::<WORKER_A>::from_bytes(&a_bytes)?;
+                        alpha.send::<StationJob<WORKER_A>>(&arguments).await?;
+                        let result = data::decode(alpha.recv::<JobResult>().await?)?;
+                        data::completed(
+                            &data::submission::<WORKER_A>(arguments.value()),
+                            &result,
+                            None,
+                        )?;
                     };
                     async {
                         if let Some(rank) = order
@@ -673,9 +706,14 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                             }
                         }
                         hibana_runtime::host::sleep(delays[1]).await?;
-                        localside::worker::run(&mut b, &b_bytes)
-                            .await
-                            .map_err(|error| ShellError::message(format!("worker B: {error}")))?;
+                        let arguments = data::JobArguments::<WORKER_B>::from_bytes(&b_bytes)?;
+                        beta.send::<StationJob<WORKER_B>>(&arguments).await?;
+                        let result = data::decode(beta.recv::<JobResult>().await?)?;
+                        data::completed(
+                            &data::submission::<WORKER_B>(arguments.value()),
+                            &result,
+                            None,
+                        )?;
                     };
                     async {
                         if let Some(rank) = order
@@ -697,9 +735,14 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                             }
                         }
                         hibana_runtime::host::sleep(delays[2]).await?;
-                        localside::worker::run(&mut c, &c_bytes)
-                            .await
-                            .map_err(|error| ShellError::message(format!("worker C: {error}")))?;
+                        let arguments = data::JobArguments::<WORKER_C>::from_bytes(&c_bytes)?;
+                        gamma.send::<StationJob<WORKER_C>>(&arguments).await?;
+                        let result = data::decode(gamma.recv::<JobResult>().await?)?;
+                        data::completed(
+                            &data::submission::<WORKER_C>(arguments.value()),
+                            &result,
+                            None,
+                        )?;
                     };
                     Ok::<(), ShellError>(())
                 },
@@ -865,6 +908,7 @@ async fn production_receiver_rejects_changed_tool_requests_before_effect() -> Sh
         let tool0 = host.enter(session, &programs.tool_0)?;
         let tool1 = host.enter(session, &programs.tool_1)?;
         let mut worker = caller.enter(session, &programs.a)?;
+        let mut alpha = caller.enter(session, &programs.alpha)?;
         let effects = ToolEffects {
             events: Cell::new(Vec::new()),
             delays: [Duration::ZERO; 3],
@@ -882,6 +926,8 @@ async fn production_receiver_rejects_changed_tool_requests_before_effect() -> Sh
                     let [mut intent, mut work] = worker.par()?;
                     let admitted =
                         data::JobArguments::<WORKER_A>::from_bytes(br#"{"job_id":"alpha_job_a"}"#)?;
+                    alpha.send::<StationJob<WORKER_A>>(&admitted).await?;
+                    let _station = intent.recv::<StationJob<WORKER_A>>().await?;
                     intent.send::<Intent<WORKER_A>>(&admitted).await?;
                     let mut tool = work.recv::<Loan0>().await?;
                     tool.send::<UntrustedRequest>(&Untrusted(bytes)).await?;

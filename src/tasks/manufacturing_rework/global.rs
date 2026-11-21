@@ -12,6 +12,9 @@ pub const WORKER_C: u8 = 2;
 pub const DEPOT: u8 = 3;
 pub const TOOL_0: u8 = 4;
 pub const TOOL_1: u8 = 5;
+pub const ALPHA: u8 = 6;
+pub const BETA: u8 = 7;
+pub const GAMMA: u8 = 8;
 pub const FIRST_A: u16 = 940;
 pub const FIRST_B: u16 = 941;
 pub const NEXT: u16 = 942;
@@ -23,6 +26,7 @@ pub const SESSION: u32 = 112;
 pub const INSPECTOR: u8 = 26;
 pub const DISPATCHER: u8 = 27;
 
+pub type StationJob<const WORKER: u8> = g::Msg<35, super::imp::JobArguments<WORKER>>;
 pub type Intent<const WORKER: u8> = g::Msg<10, super::imp::JobArguments<WORKER>>;
 pub type Loan0<'r> = g::Msg<1, Endpoint<'r, TOOL_0>>;
 pub type Loan1<'r> = g::Msg<2, Endpoint<'r, TOOL_1>>;
@@ -130,61 +134,79 @@ fn begin1<const WORKER: u8>() -> impl Projectable {
         g::send::<TOOL_1, DEPOT, Request1<WORKER>>(),
     )
 }
-fn finish0<const WORKER: u8>() -> impl Projectable {
+fn finish0<const WORKER: u8>(part: impl Projectable) -> impl Projectable {
     g::seq(
         g::send::<DEPOT, TOOL_0, Reply0>(),
-        g::send::<WORKER, DEPOT, Return0>(),
+        g::par(g::send::<WORKER, DEPOT, Return0>(), part),
     )
 }
-fn finish1<const WORKER: u8>() -> impl Projectable {
+fn finish1<const WORKER: u8>(part: impl Projectable) -> impl Projectable {
     g::seq(
         g::send::<DEPOT, TOOL_1, Reply1>(),
-        g::send::<WORKER, DEPOT, Return1>(),
+        g::par(g::send::<WORKER, DEPOT, Return1>(), part),
     )
 }
-fn whole0<const WORKER: u8>() -> impl Projectable {
-    g::seq(begin0::<WORKER>(), finish0::<WORKER>())
+fn whole0<const WORKER: u8>(part: impl Projectable) -> impl Projectable {
+    g::seq(begin0::<WORKER>(), finish0::<WORKER>(part))
 }
-fn whole1<const WORKER: u8>() -> impl Projectable {
-    g::seq(begin1::<WORKER>(), finish1::<WORKER>())
+fn whole1<const WORKER: u8>(part: impl Projectable) -> impl Projectable {
+    g::seq(begin1::<WORKER>(), finish1::<WORKER>(part))
 }
 
-fn last_two_order<const FIRST: u8, const LAST: u8>() -> impl Projectable {
+fn last_two_order<const FIRST: u8, const LAST: u8>(
+    first: impl Projectable + Copy,
+    last: impl Projectable + Copy,
+) -> impl Projectable {
     g::seq(
         begin0::<FIRST>(),
         g::route(
-            g::seq(finish0::<FIRST>(), whole0::<LAST>()),
-            g::par(finish0::<FIRST>(), whole1::<LAST>()),
+            g::seq(finish0::<FIRST>(first), whole0::<LAST>(last)),
+            g::par(finish0::<FIRST>(first), whole1::<LAST>(last)),
         )
         .resolve::<ARRIVAL_1>(),
     )
 }
-fn last_two<const A: u8, const B: u8>() -> impl Projectable {
-    g::route(last_two_order::<A, B>(), last_two_order::<B, A>()).resolve::<NEXT>()
+fn last_two<const A: u8, const B: u8>(
+    a: impl Projectable + Copy,
+    b: impl Projectable + Copy,
+) -> impl Projectable {
+    g::route(last_two_order::<A, B>(a, b), last_two_order::<B, A>(b, a)).resolve::<NEXT>()
 }
 
-fn two_running<const FIRST: u8, const SECOND: u8, const THIRD: u8>() -> impl Projectable {
+fn two_running<const FIRST: u8, const SECOND: u8, const THIRD: u8>(
+    first: impl Projectable + Copy,
+    second: impl Projectable + Copy,
+    third: impl Projectable + Copy,
+) -> impl Projectable {
     g::seq(
         begin1::<SECOND>(),
         g::route(
             g::par(
-                g::seq(finish0::<FIRST>(), whole0::<THIRD>()),
-                finish1::<SECOND>(),
+                g::seq(finish0::<FIRST>(first), whole0::<THIRD>(third)),
+                finish1::<SECOND>(second),
             ),
             g::par(
-                finish0::<FIRST>(),
-                g::seq(finish1::<SECOND>(), whole1::<THIRD>()),
+                finish0::<FIRST>(first),
+                g::seq(finish1::<SECOND>(second), whole1::<THIRD>(third)),
             ),
         )
         .resolve::<FINISHED_FIRST>(),
     )
 }
-fn first_job<const FIRST: u8, const A: u8, const B: u8>() -> impl Projectable {
+fn first_job<const FIRST: u8, const A: u8, const B: u8>(
+    first: impl Projectable + Copy,
+    a: impl Projectable + Copy,
+    b: impl Projectable + Copy,
+) -> impl Projectable {
     g::seq(
         begin0::<FIRST>(),
         g::route(
-            g::seq(finish0::<FIRST>(), last_two::<A, B>()),
-            g::route(two_running::<FIRST, A, B>(), two_running::<FIRST, B, A>()).resolve::<NEXT>(),
+            g::seq(finish0::<FIRST>(first), last_two::<A, B>(a, b)),
+            g::route(
+                two_running::<FIRST, A, B>(first, a, b),
+                two_running::<FIRST, B, A>(first, b, a),
+            )
+            .resolve::<NEXT>(),
         )
         .resolve::<ARRIVAL_0>(),
     )
@@ -192,17 +214,29 @@ fn first_job<const FIRST: u8, const A: u8, const B: u8>() -> impl Projectable {
 
 pub fn source() -> impl Projectable {
     let intents = g::par(
-        g::send::<WORKER_A, DEPOT, Intent<WORKER_A>>(),
+        g::seq(
+            g::send::<ALPHA, WORKER_A, StationJob<WORKER_A>>(),
+            g::send::<WORKER_A, DEPOT, Intent<WORKER_A>>(),
+        ),
         g::par(
-            g::send::<WORKER_B, DEPOT, Intent<WORKER_B>>(),
-            g::send::<WORKER_C, DEPOT, Intent<WORKER_C>>(),
+            g::seq(
+                g::send::<BETA, WORKER_B, StationJob<WORKER_B>>(),
+                g::send::<WORKER_B, DEPOT, Intent<WORKER_B>>(),
+            ),
+            g::seq(
+                g::send::<GAMMA, WORKER_C, StationJob<WORKER_C>>(),
+                g::send::<WORKER_C, DEPOT, Intent<WORKER_C>>(),
+            ),
         ),
     );
+    let alpha = g::send::<WORKER_A, ALPHA, JobResult>();
+    let beta = g::send::<WORKER_B, BETA, JobResult>();
+    let gamma = g::send::<WORKER_C, GAMMA, JobResult>();
     let serving = g::route(
-        first_job::<WORKER_A, WORKER_B, WORKER_C>(),
+        first_job::<WORKER_A, WORKER_B, WORKER_C>(alpha, beta, gamma),
         g::route(
-            first_job::<WORKER_B, WORKER_A, WORKER_C>(),
-            first_job::<WORKER_C, WORKER_A, WORKER_B>(),
+            first_job::<WORKER_B, WORKER_A, WORKER_C>(beta, alpha, gamma),
+            first_job::<WORKER_C, WORKER_A, WORKER_B>(gamma, alpha, beta),
         )
         .resolve::<FIRST_B>(),
     )
@@ -214,6 +248,9 @@ pub struct Programs {
     pub a: RoleProgram<WORKER_A>,
     pub b: RoleProgram<WORKER_B>,
     pub c: RoleProgram<WORKER_C>,
+    pub alpha: RoleProgram<ALPHA>,
+    pub beta: RoleProgram<BETA>,
+    pub gamma: RoleProgram<GAMMA>,
     pub depot: RoleProgram<DEPOT>,
     pub tool_0: RoleProgram<TOOL_0>,
     pub tool_1: RoleProgram<TOOL_1>,
@@ -224,6 +261,9 @@ pub fn programs() -> Programs {
         a: project::<WORKER_A>(&source),
         b: project::<WORKER_B>(&source),
         c: project::<WORKER_C>(&source),
+        alpha: project::<ALPHA>(&source),
+        beta: project::<BETA>(&source),
+        gamma: project::<GAMMA>(&source),
         depot: project::<DEPOT>(&source),
         tool_0: project::<TOOL_0>(&source),
         tool_1: project::<TOOL_1>(&source),

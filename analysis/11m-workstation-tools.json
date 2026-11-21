@@ -1,0 +1,262 @@
+{
+  "task": "11M",
+  "scope": "Three tool-requiring jobs on distinct workstations using two reusable tool Endpoints. Three scripted Wasm guests exercise all six submission orders, either reading after each submission or sending all requests before any read. The remaining three jobs, inspection and rework are outside this Wasm run.",
+  "archive": "output/verification/11m-stations-20261121.Kz7ZWU",
+  "source_manifest_sha256": "6cba4b8e63349402ad959329787a4b39774169abae1259eee080ccbc5a420374",
+  "build_receipt_sha256": "44c9ac8128cc4405b7e5be95804f216fbe37500733f09ca06c3ba2a3ce848048",
+  "runtime_sha256": "0b49287807257b39d243afa5d3138dcadcd088a7a854901f1a5aca3af25fa537",
+  "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+  "test_binary_sha256": "0ebaacca53c380ffe0d2b91d662891040d500248a476e2ffb8b88686b4f32c7a",
+  "model_calls": 0,
+  "live_task_qualified": false,
+  "scored_comparison": false,
+  "totals": {
+    "wasm_trials": 12,
+    "simulator_effects": 36,
+    "epf_records": 15280,
+    "wrong_worker_refusals": 36,
+    "duplicate_refusals": 36
+  },
+  "cases": [
+    {
+      "case": "0-contended",
+      "submission_order": [
+        "WORKER_A",
+        "WORKER_B",
+        "WORKER_C"
+      ],
+      "epf_records": 1272,
+      "simulator_effects": 3,
+      "wrong_worker_refusals": 3,
+      "duplicate_refusals": 3,
+      "simultaneous_simulator_jobs": 2,
+      "maximum_outstanding_jobs": 2,
+      "sha256": {
+        "audit": "0bc34a48d98cdc7522121cc88c3aa8abfa10a3f3f1d7913e0864c075d2694b7d",
+        "projection": "e53a48dc5d4ab765346e6642464441f4cec8ddb54093a835044e6f2bfdd00555",
+        "journal": "0c1064c2b8e4b5d6985d51481966df25d45b9ece7df382591d7a6e19469318b1",
+        "result": "8499e7e7a7593d62c7581a72e14016ac76428b824e75d383aa389cbc7f92942e"
+      }
+    },
+    {
+      "case": "0-serial",
+      "submission_order": [
+        "WORKER_A",
+        "WORKER_B",
+        "WORKER_C"
+      ],
+      "epf_records": 1272,
+      "simulator_effects": 3,
+      "wrong_worker_refusals": 3,
+      "duplicate_refusals": 3,
+      "simultaneous_simulator_jobs": 1,
+      "maximum_outstanding_jobs": 1,
+      "sha256": {
+        "audit": "2c35d95b9faec301075c127eef5913c0f7faf6017b964e987e1c9a667c417efc",
+        "projection": "e53a48dc5d4ab765346e6642464441f4cec8ddb54093a835044e6f2bfdd00555",
+        "journal": "47efbf7d40230c21b32026b001009988d06b0ac1dda19b663c5b574847da507e",
+        "result": "47597cdc31ca75894dde121f2b5ff9ef558cd1b33eb5d94ea4db8f81330b8385"
+      }
+    },
+    {
+      "case": "1-contended",
+      "submission_order": [
+        "WORKER_A",
+        "WORKER_C",
+        "WORKER_B"
+      ],
+      "epf_records": 1272,
+      "simulator_effects": 3,
+      "wrong_worker_refusals": 3,
+      "duplicate_refusals": 3,
+      "simultaneous_simulator_jobs": 2,
+      "maximum_outstanding_jobs": 2,
+      "sha256": {
+        "audit": "63fdaabdbdb641d0ed180330d5b88557e4bffc03bb043addad039dc23cf9a081",
+        "projection": "e53a48dc5d4ab765346e6642464441f4cec8ddb54093a835044e6f2bfdd00555",
+        "journal": "a79c1aa2d70e0c12df932526e55305ef788b6d33542ad504219ad6a0726a9380",
+        "result": "2a8940ef17064fb969a709af27ed089b8ecef5a736e19c3a05cd263d94a21667"
+      }
+    },
+    {
+      "case": "1-serial",
+      "submission_order": [
+        "WORKER_A",
+        "WORKER_C",
+        "WORKER_B"
+      ],
+      "epf_records": 1272,
+      "simulator_effects": 3,
+      "wrong_worker_refusals": 3,
+      "duplicate_refusals": 3,
+      "simultaneous_simulator_jobs": 1,
+      "maximum_outstanding_jobs": 1,
+      "sha256": {
+        "audit": "d916a6aed0dbac35fb79bbbca599df3cbfea6cd1ebbb1b0419c450bf8fe70e7b",
+        "projection": "e53a48dc5d4ab765346e6642464441f4cec8ddb54093a835044e6f2bfdd00555",
+        "journal": "16a385f97a78466e1b6e56214cfb0fae468bd416259155abdd19d9f2a7f72b91",
+        "result": "b8a80c0ec946777ac8a260cb6f3a3fb7edf14473e7c904c092e6f0f40de12dc8"
+      }
+    },
+    {
+      "case": "2-contended",
+      "submission_order": [
+        "WORKER_B",
+        "WORKER_A",
+        "WORKER_C"
+      ],
+      "epf_records": 1274,
+      "simulator_effects": 3,
+      "wrong_worker_refusals": 3,
+      "duplicate_refusals": 3,
+      "simultaneous_simulator_jobs": 2,
+      "maximum_outstanding_jobs": 2,
+      "sha256": {
+        "audit": "5f223adb32f284b486e1a9e6c28b371cc2ba9d81fc0fc01f5e92a114f05232cf",
+        "projection": "e53a48dc5d4ab765346e6642464441f4cec8ddb54093a835044e6f2bfdd00555",
+        "journal": "d8cad91c0e7e152a8944e4962fcf503e656df6d1b7ec8173ee2767a37fc69dfd",
+        "result": "ffd7b4515c83fa32423103c6979482ae9b573c921e13d427d8a3d667c436be4d"
+      }
+    },
+    {
+      "case": "2-serial",
+      "submission_order": [
+        "WORKER_B",
+        "WORKER_A",
+        "WORKER_C"
+      ],
+      "epf_records": 1274,
+      "simulator_effects": 3,
+      "wrong_worker_refusals": 3,
+      "duplicate_refusals": 3,
+      "simultaneous_simulator_jobs": 1,
+      "maximum_outstanding_jobs": 1,
+      "sha256": {
+        "audit": "1832335c1adfdf8fd32643b9f1d25e448a8400296e0d2fcd3c9aee5943930f37",
+        "projection": "e53a48dc5d4ab765346e6642464441f4cec8ddb54093a835044e6f2bfdd00555",
+        "journal": "49bd32a5841abc47318955998c0627aa4cd3712dd03bf0ab77de575b6b735693",
+        "result": "3ce136a66ae9a1c9b218b7867f37cdf629a78f6d2ed7f1a45fcc8cfcb9eb6f32"
+      }
+    },
+    {
+      "case": "3-contended",
+      "submission_order": [
+        "WORKER_B",
+        "WORKER_C",
+        "WORKER_A"
+      ],
+      "epf_records": 1274,
+      "simulator_effects": 3,
+      "wrong_worker_refusals": 3,
+      "duplicate_refusals": 3,
+      "simultaneous_simulator_jobs": 2,
+      "maximum_outstanding_jobs": 2,
+      "sha256": {
+        "audit": "bf366552a9abd0ab5fe64d9e3b9bee998eec68147435ae03b84041a81d3f24e6",
+        "projection": "e53a48dc5d4ab765346e6642464441f4cec8ddb54093a835044e6f2bfdd00555",
+        "journal": "cecc8064edae2e9f9f93825937de5331e6bcd44fe65594f81004f1acee49d002",
+        "result": "8e7e5f0ccade981f02d6f23bd37febd440928c148e492e8633a2004dc88783c7"
+      }
+    },
+    {
+      "case": "3-serial",
+      "submission_order": [
+        "WORKER_B",
+        "WORKER_C",
+        "WORKER_A"
+      ],
+      "epf_records": 1274,
+      "simulator_effects": 3,
+      "wrong_worker_refusals": 3,
+      "duplicate_refusals": 3,
+      "simultaneous_simulator_jobs": 1,
+      "maximum_outstanding_jobs": 1,
+      "sha256": {
+        "audit": "a632120a39056535b2fd60cc6495c2f307fbc313fa9e0e2a339f3c12cb0e18cf",
+        "projection": "e53a48dc5d4ab765346e6642464441f4cec8ddb54093a835044e6f2bfdd00555",
+        "journal": "1d5b9650fae5f440f265198712aaa2899ffbbe555bce2f7391bd204d5f3cddc6",
+        "result": "1c46d8daa14247bb7f8a55d10dcc0baf4440db1d3ac30e1f28d2f34c23396fe9"
+      }
+    },
+    {
+      "case": "4-contended",
+      "submission_order": [
+        "WORKER_C",
+        "WORKER_A",
+        "WORKER_B"
+      ],
+      "epf_records": 1274,
+      "simulator_effects": 3,
+      "wrong_worker_refusals": 3,
+      "duplicate_refusals": 3,
+      "simultaneous_simulator_jobs": 2,
+      "maximum_outstanding_jobs": 2,
+      "sha256": {
+        "audit": "6b8178de39422b443e8ad1e4b9ee00a41785791d6de2973476e81d6e9a28420b",
+        "projection": "e53a48dc5d4ab765346e6642464441f4cec8ddb54093a835044e6f2bfdd00555",
+        "journal": "4ac27abd1dcb308711f378373e9f0ff4bdfdbb6128403922bb6fee38493266b2",
+        "result": "b6c9b2613e8fa6df787cade6151e4c38d6fc186636bee9b7a0d41ff220ae0a73"
+      }
+    },
+    {
+      "case": "4-serial",
+      "submission_order": [
+        "WORKER_C",
+        "WORKER_A",
+        "WORKER_B"
+      ],
+      "epf_records": 1274,
+      "simulator_effects": 3,
+      "wrong_worker_refusals": 3,
+      "duplicate_refusals": 3,
+      "simultaneous_simulator_jobs": 1,
+      "maximum_outstanding_jobs": 1,
+      "sha256": {
+        "audit": "e1b2ae0400bcc5d1b6b121883aee6548ab90d98f621cd036c9afac3af17b72e4",
+        "projection": "e53a48dc5d4ab765346e6642464441f4cec8ddb54093a835044e6f2bfdd00555",
+        "journal": "7202482c4e8ec0548be690fe4d4ff6cbb9172c1b628aa3dcc3b5313ef824ccf0",
+        "result": "c9c36dd151c0824bdc399b166d1737b138208b136a7e84bf1bf3118e2af975b1"
+      }
+    },
+    {
+      "case": "5-contended",
+      "submission_order": [
+        "WORKER_C",
+        "WORKER_B",
+        "WORKER_A"
+      ],
+      "epf_records": 1274,
+      "simulator_effects": 3,
+      "wrong_worker_refusals": 3,
+      "duplicate_refusals": 3,
+      "simultaneous_simulator_jobs": 2,
+      "maximum_outstanding_jobs": 2,
+      "sha256": {
+        "audit": "6c8cf4cb6fb0a17ca16514540222a27997d087082952b65b473fb161fd4ae058",
+        "projection": "e53a48dc5d4ab765346e6642464441f4cec8ddb54093a835044e6f2bfdd00555",
+        "journal": "31fac40fd31b4fce29f187daec227d1ba3045a5fd94b7a8c4c66efd84478c6b0",
+        "result": "1d02ae99e7b59dadd2c6198512a3d0c22c1e04e58f6112b7c461266313a077f9"
+      }
+    },
+    {
+      "case": "5-serial",
+      "submission_order": [
+        "WORKER_C",
+        "WORKER_B",
+        "WORKER_A"
+      ],
+      "epf_records": 1274,
+      "simulator_effects": 3,
+      "wrong_worker_refusals": 3,
+      "duplicate_refusals": 3,
+      "simultaneous_simulator_jobs": 1,
+      "maximum_outstanding_jobs": 1,
+      "sha256": {
+        "audit": "a95735421bdbf2da84c3fb7b1c07988c4f16e5cc5221007e4611c4dc2834fc76",
+        "projection": "e53a48dc5d4ab765346e6642464441f4cec8ddb54093a835044e6f2bfdd00555",
+        "journal": "cc6f13d052b35988f72233254e825b316f919536c2a5118a8f87c2fcdfc9fb18",
+        "result": "214fd1a6f2aec5d0f897c0d60f48ede76f73d6d71196593157a666753da8cefa"
+      }
+    }
+  ]
+}

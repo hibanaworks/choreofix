@@ -338,17 +338,6 @@ pub fn worker_a(input: &Cell<Value>) -> Result<DecisionArm, ResolverError> {
     result
 }
 
-pub fn initial_quality(input: &Cell<Value>) -> Result<DecisionArm, ResolverError> {
-    let value = input.take();
-    let result = match value["success"].as_bool() {
-        Some(false) => Ok(DecisionArm::Left),
-        Some(true) => Ok(DecisionArm::Right),
-        None => Err(ResolverError::reject()),
-    };
-    input.set(value);
-    result
-}
-
 pub fn worker_b(input: &Cell<Value>) -> Result<DecisionArm, ResolverError> {
     let value = input.take();
     let result = match value["agent"].as_str() {

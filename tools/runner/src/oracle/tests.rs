@@ -984,7 +984,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                                     assert!(wrong["stdout"].as_str().is_some_and(|s| s.contains("Invalid argument")), "{wrong}");
                                     assert_eq!(guest.command(who, expose.into()).await?["stdout"], "wash> ");
                                 }
-                                let result = wafer_shell_result(&guest.command(who, "cat /service/run_stepper_exposure".into()).await?)?;
+                                let result = shell_json_result(&guest.command(who, "cat /service/run_stepper_exposure".into()).await?)?;
                                 assert_eq!(result["success"], true, "{result}");
                                 assert_eq!(result["data"]["process"], "photo_exposure");
                                 receipts.push(result["data"]["receipt"].clone());
@@ -1003,14 +1003,14 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                                 if exposure_first == Some(false) {
                                     assert_eq!(guest.command("LITHOGRAPHER", expose.into()).await?["stdout"], "wash> ");
                                 }
-                                let mut measured = wafer_shell_result(&guest.command(who, sample.clone()).await?)?;
+                                let mut measured = shell_json_result(&guest.command(who, sample.clone()).await?)?;
                                 if retry_control {
                                     assert_eq!(measured["data"]["status"], "check_failed");
                                     let early = guest.command(who, "echo ready | dd of=/service/fab_ready oflag=nonblock".into()).await?;
                                     assert!(early["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{early}");
-                                    measured = wafer_shell_result(&guest.command(who, sample).await?)?;
+                                    measured = shell_json_result(&guest.command(who, sample).await?)?;
                                 }
-                                let grown = wafer_shell_result(&guest.command(who, format!("cat {growth}")).await?)?;
+                                let grown = shell_json_result(&guest.command(who, format!("cat {growth}")).await?)?;
                                 assert_eq!(grown["success"], true, "{grown}");
                                 assert_eq!(measured["success"], true, "{measured}");
                                 assert_eq!(measured["data"]["inputs"], json!([grown["data"]["receipt"]]));
@@ -1021,13 +1021,13 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                                 let invalid = guest.command(who, format!("echo '{{\"process\":\"pattern_transfer_etch\"}}' | dd of={path} oflag=nonblock")).await?;
                                 assert!(invalid["stdout"].as_str().is_some_and(|s| s.contains("Invalid argument")), "{invalid}");
                                 let process = format!("echo '{{\"process\":\"reactive_ion_etch\"}}' > {path}; cat {path}");
-                                let mut result = wafer_shell_result(&guest.command(who, process.clone()).await?)?;
+                                let mut result = shell_json_result(&guest.command(who, process.clone()).await?)?;
                                 if retry_etch {
                                     assert_eq!(result["success"], false);
                                     assert_eq!(result["data"]["status"], "etch_failed");
                                     let early = guest.command(who, "echo ready | dd of=/service/fab_ready oflag=nonblock".into()).await?;
                                     assert!(early["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{early}");
-                                    result = wafer_shell_result(&guest.command(who, process).await?)?;
+                                    result = shell_json_result(&guest.command(who, process).await?)?;
                                 }
                                 assert_eq!(result["success"], true, "{result}");
                                 receipts.push(result["data"]["receipt"].clone());
@@ -1052,7 +1052,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                         let ready = guest
                             .command(measurer, format!("cat /service/{material}"))
                             .await?;
-                        assert_eq!(wafer_shell_result(&ready)?, inputs[i]);
+                        assert_eq!(shell_json_result(&ready)?, inputs[i]);
                         let command = format!(
                             "echo '{{\"measurement\":\"{dimension}\"}}' > /service/{dimension}; cat /service/{dimension}"
                         );
@@ -1063,7 +1063,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                         };
                         for n in 0..attempts {
                             let read = guest.command(measurer, command.clone()).await?;
-                            let value = wafer_shell_result(&read)?;
+                            let value = shell_json_result(&read)?;
                             if first_measure && retry && n == 0 {
                                 assert_eq!(value["success"], false, "{value}");
                                 assert_eq!(value["data"]["status"], "measurement_failed");
@@ -1142,7 +1142,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                         let read = guest
                             .command(controller, format!("cat /service/{}_report", materials[i]))
                             .await?;
-                        assert_eq!(wafer_shell_result(&read)?, readings[i]);
+                        assert_eq!(shell_json_result(&read)?, readings[i]);
                     }
                     let check = "echo '{\"check_type\":\"cross_reference\"}' > /service/check_monitoring; cat /service/check_monitoring";
                     let prospective = json!({"tool_name":"check_monitoring","success":true,"data":{
@@ -1152,14 +1152,14 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                     let early = format!("printf '%s' '{prospective}' | dd of=/service/all_validated oflag=nonblock");
                     let premature = guest.command(controller, early.clone()).await?;
                     assert!(premature["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{premature}");
-                    let mut validation = wafer_shell_result(&guest.command(controller, check.into()).await?)?;
+                    let mut validation = shell_json_result(&guest.command(controller, check.into()).await?)?;
                     let first_validation = validation.clone();
                     if retry_control {
                         assert_eq!(validation["success"], false, "{validation}");
                         assert_eq!(validation["data"]["status"], "check_failed");
                         let premature = guest.command(controller, early).await?;
                         assert!(premature["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{premature}");
-                        validation = wafer_shell_result(&guest.command(controller, check.into()).await?)?;
+                        validation = shell_json_result(&guest.command(controller, check.into()).await?)?;
                     }
                     assert_eq!(validation["success"], true, "{validation}");
                     assert_eq!(validation["data"]["inputs"], json!(readings.each_ref().map(|r| &r["data"]["receipt"])));
@@ -1189,7 +1189,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                     for i in broadcast.into_iter().rev() {
                         let (who, file) = if i == 3 { (agent, "all_validated") } else { (recipients[i].0, "process_validation") };
                         let read = guest.command(who, format!("cat /service/{file}")).await?;
-                        assert_eq!(wafer_shell_result(&read)?, validation, "{read}");
+                        assert_eq!(shell_json_result(&read)?, validation, "{read}");
                     }
                     for (who, measurement) in [("LITHOGRAPHER", "alignment_check"), ("DEPOSITOR", "thickness_verification")] {
                         let result = wafer_fixture_call(&world, who, "run_metrology_measurement", "measurement", measurement, measurement).await?;
@@ -1207,7 +1207,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                     let sent = guest.command(agent, measure_write.clone()).await?;
                     assert_eq!(sent["stdout"], "wash> ", "{sent}");
                     if retry {
-                        let failed = wafer_shell_result(&guest.command(agent, format!("cat {measure}")).await?)?;
+                        let failed = shell_json_result(&guest.command(agent, format!("cat {measure}")).await?)?;
                         assert_eq!(failed["success"], false, "{failed}");
                         assert_eq!(failed["data"]["status"], "measurement_failed");
                         let refused = guest.command(agent,
@@ -1218,11 +1218,11 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                         assert_eq!(sent["stdout"], "wash> ", "{sent}");
                     }
                     let (mounted, measured) = if order[0] == etch {
-                        let mounted = wafer_shell_result(&guest.command(agent, format!("cat {mount}")).await?)?;
-                        (mounted, wafer_shell_result(&guest.command(agent, format!("cat {measure}")).await?)?)
+                        let mounted = shell_json_result(&guest.command(agent, format!("cat {mount}")).await?)?;
+                        (mounted, shell_json_result(&guest.command(agent, format!("cat {measure}")).await?)?)
                     } else {
-                        let measured = wafer_shell_result(&guest.command(agent, format!("cat {measure}")).await?)?;
-                        (wafer_shell_result(&guest.command(agent, format!("cat {mount}")).await?)?, measured)
+                        let measured = shell_json_result(&guest.command(agent, format!("cat {measure}")).await?)?;
+                        (shell_json_result(&guest.command(agent, format!("cat {mount}")).await?)?, measured)
                     };
                     assert_eq!(mounted["success"], true, "{mounted}");
                     assert_eq!(measured["success"], true, "{measured}");
@@ -1261,7 +1261,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                                 ),
                             )
                             .await?;
-                        let result = wafer_shell_result(&reply)?;
+                        let result = shell_json_result(&reply)?;
                         assert_eq!(result["tool_name"], tool);
                         assert_eq!(result["success"], true);
                         inspection.insert(operation.into(), result["data"]["receipt"].clone());
@@ -1276,7 +1276,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                         let sent = guest.command(controller, format!("printf '%s' '{validation}' > /service/validated_etcher")).await?;
                         assert_eq!(sent["stdout"], "wash> ", "{sent}");
                         let read = guest.command("ETCHER", "cat /service/process_validation".into()).await?;
-                        assert_eq!(wafer_shell_result(&read)?, validation);
+                        assert_eq!(shell_json_result(&read)?, validation);
                     }
                     assert_eq!(guest.command(controller, "exit 0".into()).await?["exit_status"], 0);
                     let writes = delivery.map(|i| (i, true));
@@ -1292,7 +1292,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
                             assert_eq!(sent["stdout"], "wash> ", "{sent}");
                         } else {
                             let read = guest.command(recipient, "cat /service/lot_disposition".into()).await?;
-                            assert_eq!(wafer_shell_result(&read)?, decision, "{read}");
+                            assert_eq!(shell_json_result(&read)?, decision, "{read}");
                             assert_eq!(guest.command(recipient, "exit 0".into()).await?["exit_status"], 0);
                         }
                     }
@@ -1441,7 +1441,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
             assert!(matches.next().is_none());
             assert_eq!(call["send_actor"], roles["CONTROL"]);
             assert_eq!(call["receive_commit"]["actor"], roles[actor]);
-            let (sent, bytes) = wafer_frame(&rows, call)?;
+            let (sent, bytes) = json_frame(&rows, call)?;
             assert_eq!(bytes, validation["result"]);
             assert!(validation["reply_received_row"].as_u64().unwrap() < sent as u64);
             if view == "WAFER" {
@@ -1463,7 +1463,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
             {
                 continue;
             }
-            let (_, reply) = wafer_frame(&rows, call)?;
+            let (_, reply) = json_frame(&rows, call)?;
             inspections.insert(
                 reply["data"]["process"]
                     .as_str()
@@ -1502,7 +1502,7 @@ async fn wash_uses_the_same_reference_wafer_for_both_spot_checks() -> Result<()>
             assert!(matched.next().is_none());
             assert_eq!(call["send_actor"], instruments::ENGINEER);
             assert_eq!(call["receive_commit"]["actor"], vm);
-            let (sent, payload) = wafer_frame(&rows, call)?;
+            let (sent, payload) = json_frame(&rows, call)?;
             assert_eq!(payload, decision);
             assert!(sent as u64 > last_inspection_read);
             delivered.push(json!({"recipient":recipient,"frame":call["frame_id"],"send_row":sent,"receive_row":call["receive_commit"]["journal_row"]}));
@@ -1559,7 +1559,7 @@ impl choreofix::shell::imp::service::ReceivedEffects for Simulator {
     }
 }
 
-fn wafer_shell_result(reply: &Value) -> Result<Value> {
+fn shell_json_result(reply: &Value) -> Result<Value> {
     let stdout = reply["stdout"].as_str().ok_or("missing shell output")?;
     let offset = stdout
         .find('{')
@@ -1633,7 +1633,7 @@ async fn wafer_fixture_call(
     Ok(reply["result"].take())
 }
 
-fn wafer_frame(journal_rows: &[Value], call: &Value) -> Result<(usize, Value)> {
+fn json_frame(journal_rows: &[Value], call: &Value) -> Result<(usize, Value)> {
     let (index, row) = journal_rows
         .iter()
         .enumerate()
@@ -1649,7 +1649,7 @@ fn wafer_frame(journal_rows: &[Value], call: &Value) -> Result<(usize, Value)> {
     Ok((index, serde_json::from_slice(&bytes)?))
 }
 
-fn wafer_instrument_effect(
+fn received_instrument_effect(
     rows: &[Value],
     request: &Value,
     reply: &Value,
@@ -1665,8 +1665,8 @@ fn wafer_instrument_effect(
     let (end, finished) = ends.next().ok_or("missing instrument completion")?;
     assert!(ends.next().is_none(), "duplicate instrument completion");
     let finished = &finished["message"];
-    let (sent, args) = wafer_frame(rows, request)?;
-    let (reply_sent, result) = wafer_frame(rows, reply)?;
+    let (sent, args) = json_frame(rows, request)?;
+    let (reply_sent, result) = json_frame(rows, reply)?;
     assert_eq!(invoked["direction"], "domain_start");
     assert_eq!(finished["agent"], message["agent"]);
     assert_eq!(finished["tool"], message["tool"]);
@@ -1752,7 +1752,7 @@ fn check_dimension_reports(
         let [ready] = ready.as_slice() else {
             return Err("missing or duplicate fab-ready operation".into());
         };
-        let (ready_send, notice) = wafer_frame(rows, ready)?;
+        let (ready_send, notice) = json_frame(rows, ready)?;
         assert_eq!(ready["send_actor"], roles[vm]);
         assert_eq!(ready["receive_commit"]["actor"], roles["MEASURER"]);
         let inputs: Vec<_> = physical_inputs
@@ -1803,7 +1803,7 @@ fn check_dimension_reports(
             assert_eq!(requests[i]["receive_commit"]["actor"], roles["METROLOGY"]);
             assert_eq!(replies[i]["send_actor"], roles["METROLOGY"]);
             assert_eq!(replies[i]["receive_commit"]["actor"], roles["MEASURER"]);
-            let effect = wafer_instrument_effect(
+            let effect = received_instrument_effect(
                 rows,
                 requests[i],
                 replies[i],
@@ -1825,7 +1825,7 @@ fn check_dimension_reports(
         let [report] = reports.as_slice() else {
             return Err("missing or duplicate measurement report".into());
         };
-        let (report_send, reported) = wafer_frame(rows, report)?;
+        let (report_send, reported) = json_frame(rows, report)?;
         assert_eq!(report["send_actor"], roles["MEASURER"]);
         assert_eq!(report["receive_commit"]["actor"], roles["CONTROL"]);
         assert_eq!(actual["success"], true);
@@ -2036,7 +2036,7 @@ fn check_wafer_effects(
             assert_eq!(replies[i]["send_actor"], responder);
             assert_eq!(replies[i]["receive_commit"]["view"], caller);
             let effect =
-                wafer_instrument_effect(rows, requests[i], replies[i], starts[i], scored[i])?;
+                received_instrument_effect(rows, requests[i], replies[i], starts[i], scored[i])?;
             let confirmation = match request_label {
                 Measure::LOGICAL_LABEL => Some(reports[i]),
                 CrossReference::LOGICAL_LABEL => Some(checks[i]),
@@ -2045,7 +2045,7 @@ fn check_wafer_effects(
                 _ => None,
             };
             if let Some(report) = confirmation {
-                let (reported_at, reported) = wafer_frame(rows, report)?;
+                let (reported_at, reported) = json_frame(rows, report)?;
                 assert_eq!(report["send_actor"], actor);
                 assert_eq!(report["receive_commit"]["actor"], responder);
                 assert!(
@@ -2113,7 +2113,7 @@ fn check_spot_check_effects(
         };
         let request = accepted(WAFER, chamber)?;
         let reply = accepted(chamber, WAFER)?;
-        let (request_sent, _) = wafer_frame(journal_rows, request)?;
+        let (request_sent, _) = json_frame(journal_rows, request)?;
         if let Some(previous) = previous_reply {
             assert!(
                 previous < request_sent,
@@ -2149,7 +2149,7 @@ fn check_spot_check_effects(
             .filter(|e| e["agent"] == "INTEGRATION_ENGINEER" && e["tool"] == name);
         let effect = scored.next().ok_or("missing scored spot check")?;
         assert!(scored.next().is_none(), "extra scored spot check");
-        wafer_instrument_effect(journal_rows, request, reply, (start, invoked), effect)?;
+        received_instrument_effect(journal_rows, request, reply, (start, invoked), effect)?;
         assert_eq!(effect["success"], true);
     }
     Ok(())
@@ -2377,6 +2377,270 @@ async fn wafer_trial(etch_first: bool) -> Result<()> {
         println!("{}", directory.display());
     } else {
         fs::remove_dir_all(&directory)?;
+    }
+    Ok(())
+}
+
+#[hibana_runtime::main]
+#[test]
+#[ignore = "requires the built manufacturing runtime and wash guest"]
+async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Result<()> {
+    use crate::{evidence::archive_build_receipt, process, projection};
+    use std::path::PathBuf;
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()?;
+    std::env::set_current_dir(&root)?;
+    let binary = PathBuf::from(
+        std::env::var_os("CHOREOFIX_MANUFACTURING_WASI_BINARY").ok_or("manufacturing runtime")?,
+    )
+    .canonicalize()?;
+    let output =
+        PathBuf::from(std::env::var_os("CHOREOFIX_EVIDENCE_ROOT").ok_or("manufacturing evidence")?);
+    let receipt = PathBuf::from(
+        std::env::var_os("CHOREOFIX_MANUFACTURING_BUILD_RECEIPT")
+            .ok_or("manufacturing build receipt")?,
+    );
+    let wash = root.join("vendor/hibana-wash/target/wasm32-wasip1/release/hibana-wash.wasm");
+    fs::create_dir(&output)?;
+    archive_build_receipt(&binary, &receipt, &output)?;
+    let jobs = [
+        ("WORKER_A", "alpha_job_a", "ALPHA"),
+        ("WORKER_B", "beta_job_b", "BETA"),
+        ("WORKER_C", "gamma_job_c", "GAMMA"),
+    ];
+    for (index, order) in [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        for batch in [false, true] {
+            let directory = output.join(format!(
+                "{index}-{}",
+                if batch { "contended" } else { "serial" }
+            ));
+            fs::create_dir(&directory)?;
+            let journal = directory.join("events.jsonl");
+            let trace = Trace::create(&journal)?;
+            let artifact = projection::archive(&binary, &directory, "11M")?;
+            let (world, _) = Simulator::new("11M", 0, 1.0, trace.clone(), &[])?;
+            world.set_test_delays(json!({"do_job":[0.4,0.4]})).await?;
+            let (guest, runtime) =
+                process::guest(&binary, &wash, &["11M"], &directory, trace, world)?;
+            let (parts, outcome) = hibana_runtime::race(
+                async {
+                    async {
+                        let mut parts = Vec::new();
+                        for &i in &order {
+                            let (agent, job, _) = jobs[i];
+                            let invalid = json!({"job_id":jobs[(i+1)%3].1});
+                            let refusal = guest
+                                .command(
+                                    agent,
+                                    format!("printf '%s' '{invalid}' > /service/do_job"),
+                                )
+                                .await?;
+                            assert!(
+                                refusal["stdout"]
+                                    .as_str()
+                                    .is_some_and(|s| s.contains("Invalid argument")),
+                                "{refusal}"
+                            );
+                            let args = json!({"job_id":job});
+                            let write = guest
+                                .command(agent, format!("printf '%s' '{args}' > /service/do_job"))
+                                .await?;
+                            assert_eq!(write["stdout"], "wash> ", "{write}");
+                            if !batch {
+                                let part = shell_json_result(
+                                    &guest.command(agent, "cat /service/do_job".into()).await?,
+                                )?;
+                                parts.push((i, part));
+                            }
+                        }
+                        if batch {
+                            for i in order.into_iter().rev() {
+                                let part = shell_json_result(
+                                    &guest
+                                        .command(jobs[i].0, "cat /service/do_job".into())
+                                        .await?,
+                                )?;
+                                parts.push((i, part));
+                            }
+                        }
+                        for &(agent, job, _) in &jobs {
+                            let args = json!({"job_id":job});
+                            let repeat = guest.command(agent, format!("printf '%s' '{args}' | dd of=/service/do_job oflag=nonblock")).await?;
+                            assert!(repeat["stdout"].as_str().is_some_and(|s|s.contains("Permission denied")),"{repeat}");
+                            assert_eq!(
+                                guest.command(agent, "exit 0".into()).await?["exit_status"],
+                                0
+                            );
+                        }
+                        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(parts)
+                    };
+                    async { runtime.await };
+                },
+                hibana_runtime::host::deadline(std::time::Duration::from_secs(30)),
+            )
+            .await?;
+            save(&directory.join("runtime-result.json"), &outcome)?;
+            assert_eq!(
+                outcome["protocol"],
+                json!({"type":"run_result","status":"complete","scope":"workstation_tool_jobs"}),
+                "{outcome}"
+            );
+            assert_eq!(outcome["runtime_exit_code"], 0);
+            assert_eq!(outcome["backend_errors"], json!([]));
+            assert_eq!(outcome["score"]["complete"], false);
+            assert_eq!(outcome["score"]["violations"], json!([]));
+            let events = outcome["score"]["events"]
+                .as_array()
+                .ok_or("station events")?;
+            assert_eq!(events.len(), 3);
+            let rows: Vec<Value> = fs::read_to_string(&journal)?
+                .lines()
+                .map(serde_json::from_str)
+                .collect::<std::result::Result<_, _>>()?;
+            let labels = projection::frames(&artifact, &rows)?;
+            let epf = projection::check_dynamic(&artifact, &rows)?;
+            let calls = epf["sessions"][0]["acceptances"]
+                .as_array()
+                .ok_or("EPF accepted calls")?;
+            let roles = &artifact["compiled"]["roles"];
+            let starts: Vec<_> = rows
+                .iter()
+                .enumerate()
+                .filter(|(_, row)| row["direction"] == "domain_start")
+                .collect();
+            assert_eq!(starts.len(), 3);
+            let mut effects = Vec::new();
+            for (i, part) in parts {
+                let (agent, job, station) = jobs[i];
+                assert_eq!(part["success"], true);
+                let (start, entry) = *starts
+                    .iter()
+                    .find(|(_, row)| row["message"]["agent"] == agent)
+                    .ok_or("missing worker call")?;
+                let find = |permitted: &[u8], sender: &Value, receiver: &Value| -> Result<&Value> {
+                    let mut matches = calls.iter().filter(|call| {
+                        call["send_actor"] == *sender
+                            && call["receive_commit"]["actor"] == *receiver
+                            && call["frame_id"]
+                                .as_u64()
+                                .and_then(|id| labels.get(&id))
+                                .is_some_and(|l| permitted.contains(l))
+                    });
+                    let call = matches
+                        .next()
+                        .ok_or("missing EPF workstation or tool delivery")?;
+                    assert!(matches.next().is_none());
+                    Ok(call)
+                };
+                let vm = &roles[["A_VM", "B_VM", "C_VM"][i]];
+                let worker = &roles[agent];
+                let depot = &roles["DEPOT"];
+                let submitted = find(&[35], vm, worker)?;
+                let returned = find(&[21], worker, vm)?;
+                assert_eq!(submitted["send_view"], roles[station]);
+                assert_eq!(returned["receive_commit"]["view"], roles[station]);
+                let using_tool = find(&[3, 4], worker, depot)?;
+                let tool_reply = find(&[5, 6], depot, worker)?;
+                assert_eq!(
+                    using_tool["send_view"],
+                    tool_reply["receive_commit"]["view"]
+                );
+                assert_eq!(json_frame(&rows, submitted)?.1, json!({"job_id":job}));
+                assert_eq!(json_frame(&rows, returned)?.1, part);
+                assert!(
+                    submitted["receive_commit"]["journal_row"]
+                        .as_u64()
+                        .ok_or("station receipt")?
+                        < json_frame(&rows, using_tool)?.0 as u64
+                );
+                assert!(
+                    tool_reply["receive_commit"]["journal_row"]
+                        .as_u64()
+                        .ok_or("tool result receipt")?
+                        < json_frame(&rows, returned)?.0 as u64
+                );
+                let event = events
+                    .iter()
+                    .find(|e| e["agent"] == agent)
+                    .ok_or("worker score")?;
+                let effect = received_instrument_effect(
+                    &rows,
+                    using_tool,
+                    tool_reply,
+                    (start, entry),
+                    event,
+                )?;
+                assert_eq!(effect["arguments"], json!({"job_id":job}));
+                assert_eq!(effect["result"], part);
+                assert_eq!(
+                    part["data"]["part"]["station"],
+                    format!("STATION_{station}")
+                );
+                effects.push(json!({"worker":agent,"station_request":submitted["frame_id"],"station_result":returned["frame_id"],"tool":using_tool["send_view"],"effect":effect}));
+            }
+            if !batch {
+                assert_eq!(
+                    starts
+                        .iter()
+                        .map(|(_, r)| r["message"]["agent"].as_str().unwrap())
+                        .collect::<Vec<_>>(),
+                    order.map(|i| jobs[i].0)
+                );
+            }
+            let peak = starts
+                .iter()
+                .map(|(t, _)| {
+                    effects
+                        .iter()
+                        .filter(|e| {
+                            e["effect"]["effect_start_row"].as_u64().unwrap() <= *t as u64
+                                && e["effect"]["effect_end_row"].as_u64().unwrap() > *t as u64
+                        })
+                        .count()
+                })
+                .max()
+                .unwrap();
+            assert_eq!(peak, if batch { 2 } else { 1 }, "{directory:?} {effects:?}");
+            let intervals = events
+                .iter()
+                .map(|event| {
+                    let start = event["timestamp"].as_f64().ok_or("simulator job start")?;
+                    let end = event["completed_at"]
+                        .as_f64()
+                        .ok_or("simulator job finish")?;
+                    if end <= start {
+                        return Err("invalid simulator job interval");
+                    }
+                    Ok((start, end))
+                })
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let simulator_peak = intervals
+                .iter()
+                .map(|&(t, _)| {
+                    intervals
+                        .iter()
+                        .filter(|&&(start, end)| start <= t && t < end)
+                        .count()
+                })
+                .max()
+                .ok_or("no job intervals")?;
+            assert_eq!(simulator_peak, peak);
+            save(
+                &directory.join("checked.json"),
+                &json!({"order":order,"submitted_before_reads":batch,"maximum_outstanding_jobs":peak,"maximum_simultaneous_effects":simulator_peak,"epf_records":epf["captured_records"],"effects":effects,"score_complete":false,"model_calls":0}),
+            )?;
+        }
     }
     Ok(())
 }

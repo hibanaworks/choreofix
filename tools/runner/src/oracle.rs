@@ -252,7 +252,7 @@ impl Simulator {
             Ok((sim.unbind(), registry.unbind(), inputs))
         })?;
         let mut inputs = json!(inputs);
-        if matches!(task, "4H" | "7H" | "8M" | "14H" | "15E" | "16M") {
+        if matches!(task, "4H" | "7H" | "8M" | "11M" | "14H" | "15E" | "16M") {
             inputs["tool_schemas"] = serde_json::from_slice(&fs::read(
                 source.join(format!("benchmark/descriptions/{task}/tools.json")),
             )?)?;
@@ -681,14 +681,14 @@ fn fixture(task: &str, metadata: &Value, inputs: &Value) -> Result<Value> {
             actors.push(json!({"agent":agent,"resources":resources,"operations":operations}));
             continue;
         }
-        if task == "16M" {
-            let name = agent.as_str().ok_or("pipeline participant name")?;
+        if matches!(task, "11M" | "16M") {
+            let name = agent.as_str().ok_or("participant name")?;
             let resources = metadata["agent_resources"][name]
                 .as_array()
-                .ok_or("pipeline resources")?;
+                .ok_or("declared participant resources")?;
             let operations = inputs["tool_schemas"]
                 .as_array()
-                .ok_or("pipeline domain schemas")?
+                .ok_or("declared operation schemas")?
                 .iter()
                 .map(|tool| &tool["function"])
                 .filter(|tool| {
@@ -700,7 +700,7 @@ fn fixture(task: &str, metadata: &Value, inputs: &Value) -> Result<Value> {
             if (operations.is_empty() && name != "BUILD_MASTER")
                 || resources.iter().any(|resource| !resource.is_string())
             {
-                return Err("pipeline participant lacks its declared inputs".into());
+                return Err("participant lacks its declared inputs".into());
             }
             actors.push(json!({"agent":agent,"resources":resources,"operations":operations}));
             continue;

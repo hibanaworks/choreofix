@@ -255,6 +255,14 @@ requests. EPF checked all 6,394 records. The controlled world recorded 246
 effects. The six-guest 15E Wasm regression exercised the same simulator reply
 code. Both sets of trials used scripted participants.
 
+In the [11M workstation trials](11m-workstation-tools.json), three wash guests
+submitted the tool-requiring jobs in all six orders. The common simulator
+recorded two overlapping jobs when the guests submitted all three before
+reading, and one active job when each guest read its part before the next
+submission. All 36 effects were traced back to the station and tool receives.
+The other three jobs and the inspection/rework cycle still require a combined
+five-participant run.
+
 The cohort-wide measurement is reproducible from the same source-bound trials.
 From the repository root, supply the verified cohort and a new output file:
 

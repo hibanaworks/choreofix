@@ -1,4 +1,4 @@
-//! 11M development: tool resource component; full task port is unfinished.
+//! Workstation submissions, reusable cabinet tools and inspection continuations for 11M.
 pub mod global;
 pub(crate) mod imp;
 pub mod localside;
