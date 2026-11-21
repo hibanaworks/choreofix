@@ -971,6 +971,17 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                             assert_eq!(notice["data"]["job_id"], data::JOBS[job]);
                             assert_eq!(notice["success"], true);
                         }
+                        for job in [ALPHA_JOB_C,BETA_JOB_A,GAMMA_JOB_B] {
+                            let notice=match job {
+                                ALPHA_JOB_C => dispatcher.recv::<Approved<ALPHA_JOB_C>>().await?,
+                                BETA_JOB_A => dispatcher.recv::<Approved<BETA_JOB_A>>().await?,
+                                GAMMA_JOB_B => dispatcher.recv::<Approved<GAMMA_JOB_B>>().await?,
+                                _=>unreachable!(),
+                            };
+                            let verdict=data::decode(notice)?;
+                            assert_eq!(verdict["data"]["job_id"],data::JOBS[job as usize]);
+                            assert_eq!(verdict["success"],true);
+                        }
                     };
                     async {
                         for worker in order {
@@ -1069,6 +1080,8 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                         alpha_other.send::<StationJob<ALPHA_JOB_C>>(&arguments).await?;
                         let result = data::decode(alpha_other.recv::<JobResult>().await?)?;
                         data::completed(&data::submission::<ALPHA_JOB_C>(arguments.value()), &result, None)?;
+                        let update = data::decode(alpha_other.recv::<JobUpdate>().await?)?;
+                        data::inspected(&result["data"]["part"], &arguments.value(), &update)?;
                     };
                     async {
                         if let Some(rank) = order
@@ -1105,6 +1118,8 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                         beta_other.send::<StationJob<BETA_JOB_A>>(&arguments).await?;
                         let result = data::decode(beta_other.recv::<JobResult>().await?)?;
                         data::completed(&data::submission::<BETA_JOB_A>(arguments.value()), &result, None)?;
+                        let update = data::decode(beta_other.recv::<JobUpdate>().await?)?;
+                        data::inspected(&result["data"]["part"], &arguments.value(), &update)?;
                     };
                     async {
                         if let Some(rank) = order
@@ -1141,6 +1156,8 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                         gamma_other.send::<StationJob<GAMMA_JOB_B>>(&arguments).await?;
                         let result = data::decode(gamma_other.recv::<JobResult>().await?)?;
                         data::completed(&data::submission::<GAMMA_JOB_B>(arguments.value()), &result, None)?;
+                        let update = data::decode(gamma_other.recv::<JobUpdate>().await?)?;
+                        data::inspected(&result["data"]["part"], &arguments.value(), &update)?;
                     };
                     Ok::<(), ShellError>(())
                 },

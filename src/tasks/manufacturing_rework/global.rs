@@ -315,7 +315,10 @@ fn workstation<
             ),
         ),
     );
-    let inspect = check_part::<SERVICE, OTHER_JOB>();
+    let inspect = g::seq(
+        check_part::<SERVICE, OTHER_JOB>(),
+        disposition::<SERVICE, OTHER_FILE, OTHER_JOB>(),
+    );
     g::route(
         g::seq(other, g::par(primary, inspect)),
         g::seq(primary, g::seq(other, inspect)),
@@ -394,22 +397,22 @@ fn tool_quality<const WORKER: u8, const FILE: u8>() -> impl Projectable {
             g::send::<WORKER, INSPECTOR, FinishedPart<WORKER>>(),
             check_part::<WORKER, WORKER>(),
         ),
-        disposition::<WORKER, FILE>(),
+        disposition::<WORKER, FILE, WORKER>(),
     )
 }
 
-fn disposition<const WORKER: u8, const STATION: u8>() -> impl Projectable {
+fn disposition<const WORKER: u8, const STATION: u8, const JOB: u8>() -> impl Projectable {
     g::route(
         g::seq(
-            g::send::<WORKER, DISPATCHER, Approved<WORKER>>(),
+            g::send::<WORKER, DISPATCHER, Approved<JOB>>(),
             g::send::<WORKER, STATION, JobUpdate>(),
         ),
         g::seq(
-            g::send::<WORKER, DISPATCHER, Failed<WORKER>>(),
+            g::send::<WORKER, DISPATCHER, Failed<JOB>>(),
             g::seq(
-                g::send::<DISPATCHER, WORKER, DispatchRequest<WORKER>>(),
+                g::send::<DISPATCHER, WORKER, DispatchRequest<JOB>>(),
                 g::par(
-                    g::send::<WORKER, DISPATCHER, WorkOrder<WORKER>>(),
+                    g::send::<WORKER, DISPATCHER, WorkOrder<JOB>>(),
                     g::send::<WORKER, STATION, JobUpdate>(),
                 ),
             ),

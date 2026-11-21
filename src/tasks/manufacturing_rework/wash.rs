@@ -85,8 +85,10 @@ const fn request_reply(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
 const JOB: ChoreoFsObject<'static> = request_reply(b"service/do_job", 4);
 const WORKSTATION_FILES: [ChoreoFsObject<'static>; 2] = [JOB, readable(b"service/job_update", 5)];
 const OTHER_JOB: ChoreoFsObject<'static> = request_reply(b"service/do_job_at_other_station", 6);
-const WORKER_FILES: [ChoreoFsObject<'static>; 3] = [JOB, WORKSTATION_FILES[1], OTHER_JOB];
-const ORDERS: [ChoreoFsObject<'static>; 9] = [
+const OTHER_UPDATE: ChoreoFsObject = readable(b"service/other_job_update", 7);
+const WORKER_FILES: [ChoreoFsObject<'static>; 4] =
+    [JOB, WORKSTATION_FILES[1], OTHER_JOB, OTHER_UPDATE];
+const ORDERS: [ChoreoFsObject<'static>; 18] = [
     readable(b"service/approved/alpha_job_a", 4),
     readable(b"service/approved/beta_job_b", 5),
     readable(b"service/approved/gamma_job_c", 6),
@@ -96,6 +98,15 @@ const ORDERS: [ChoreoFsObject<'static>; 9] = [
     request_reply(b"service/dispatch/alpha_job_a", 10),
     request_reply(b"service/dispatch/beta_job_b", 11),
     request_reply(b"service/dispatch/gamma_job_c", 12),
+    readable(b"service/approved/beta_job_a", 13),
+    readable(b"service/approved/gamma_job_b", 14),
+    readable(b"service/approved/alpha_job_c", 15),
+    readable(b"service/failed/beta_job_a", 16),
+    readable(b"service/failed/gamma_job_b", 17),
+    readable(b"service/failed/alpha_job_c", 18),
+    request_reply(b"service/dispatch/beta_job_a", 19),
+    request_reply(b"service/dispatch/gamma_job_b", 20),
+    request_reply(b"service/dispatch/alpha_job_c", 21),
 ];
 
 fn shell_io<const VM: u8, const STATION: u8, const FILES: u8, const TERM: u8>() -> impl Projectable
@@ -131,10 +142,13 @@ async fn worker_shell<
         .read_as::<JobUpdate>(&mut update);
     let mut other_request = vec![0; GUEST_MEMORY_BYTES];
     let mut other_result = vec![0; GUEST_MEMORY_BYTES];
+    let mut other_update = vec![0; GUEST_MEMORY_BYTES];
     let files = ChoreoFsFiles::new(vm).file(file)?.file(
         ChoreoFsFile::new(OTHER_JOB, other)
             .write_as::<StationJob<JOB_ID>>(&mut other_request)
-            .read_as::<JobResult>(&mut other_result),
+            .read_as::<JobResult>(&mut other_result)
+            .file(OTHER_UPDATE)?
+            .read_as::<JobUpdate>(&mut other_update),
     )?;
     let mut memory = vec![0; GUEST_MEMORY_BYTES];
     let mut storage = Box::new(HibanaWasiGuestStorage::uninit());
@@ -385,7 +399,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
     let (bus, simulator) = connection.split();
     bus.projected(projection);
     let capture = |row| bus.capture(row);
-    let mut slab = vec![0; 1024 * 1024];
+    let mut slab = vec![0; 2 * 1024 * 1024];
     let inputs = [const { Cell::new(Value::Null) }; 5];
     let next = (&inputs[0], &inputs[1]);
     let mut storage = SessionKitStorage::uninit();
@@ -465,6 +479,14 @@ pub async fn run(path: &str) -> ShellResult<()> {
                 mut order_b,
                 mut order_c,
             ] = [(); 6].map(|_| vec![0; GUEST_MEMORY_BYTES]);
+            let [mut approved_ba, mut approved_gb, mut approved_ac] =
+                [(); 3].map(|_| vec![0; GUEST_MEMORY_BYTES]);
+            let [mut failed_ba, mut failed_gb, mut failed_ac] =
+                [(); 3].map(|_| vec![0; GUEST_MEMORY_BYTES]);
+            let [mut request_ba, mut request_gb, mut request_ac] =
+                [(); 3].map(|_| vec![0; GUEST_MEMORY_BYTES]);
+            let [mut order_ba, mut order_gb, mut order_ac] =
+                [(); 3].map(|_| vec![0; GUEST_MEMORY_BYTES]);
             let orders = ChoreoFsFile::new(ORDERS[0], endpoint)
                 .read_as::<Approved<WORKER_A>>(&mut approved_a)
                 .file(ORDERS[1])?
@@ -485,7 +507,28 @@ pub async fn run(path: &str) -> ShellResult<()> {
                 .read_as::<WorkOrder<WORKER_B>>(&mut order_b)
                 .file(ORDERS[8])?
                 .write_as::<DispatchRequest<WORKER_C>>(&mut request_c)
-                .read_as::<WorkOrder<WORKER_C>>(&mut order_c);
+                .read_as::<WorkOrder<WORKER_C>>(&mut order_c)
+                .file(ORDERS[9])?
+                .read_as::<Approved<BETA_JOB_A>>(&mut approved_ba)
+                .file(ORDERS[10])?
+                .read_as::<Approved<GAMMA_JOB_B>>(&mut approved_gb)
+                .file(ORDERS[11])?
+                .read_as::<Approved<ALPHA_JOB_C>>(&mut approved_ac)
+                .file(ORDERS[12])?
+                .read_as::<Failed<BETA_JOB_A>>(&mut failed_ba)
+                .file(ORDERS[13])?
+                .read_as::<Failed<GAMMA_JOB_B>>(&mut failed_gb)
+                .file(ORDERS[14])?
+                .read_as::<Failed<ALPHA_JOB_C>>(&mut failed_ac)
+                .file(ORDERS[15])?
+                .write_as::<DispatchRequest<BETA_JOB_A>>(&mut request_ba)
+                .read_as::<WorkOrder<BETA_JOB_A>>(&mut order_ba)
+                .file(ORDERS[16])?
+                .write_as::<DispatchRequest<GAMMA_JOB_B>>(&mut request_gb)
+                .read_as::<WorkOrder<GAMMA_JOB_B>>(&mut order_gb)
+                .file(ORDERS[17])?
+                .write_as::<DispatchRequest<ALPHA_JOB_C>>(&mut request_ac)
+                .read_as::<WorkOrder<ALPHA_JOB_C>>(&mut order_ac);
             let files = ChoreoFsFiles::new(dispatcher_vm).file(orders)?;
             let mut memory = vec![0; GUEST_MEMORY_BYTES];
             let mut storage = Box::new(HibanaWasiGuestStorage::uninit());
@@ -584,7 +627,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
         let mut alpha_c_files = rv.enter(session, &alpha_c_files)?;
         let alpha_c = rv.enter(session, &alpha_c)?;
         async {
-            file_metadata::run(&mut alpha_c_files, alpha_c, [OTHER_JOB]).await?;
+            file_metadata::run(&mut alpha_c_files, alpha_c, [OTHER_JOB, OTHER_UPDATE]).await?;
         };
         let mut beta_owner = rv.enter(session, &beta_owner)?;
         let mut beta_service = rv.enter(session, &beta_service)?;
@@ -592,7 +635,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
         let mut beta_a_files = rv.enter(session, &beta_a_files)?;
         let beta_a = rv.enter(session, &beta_a)?;
         async {
-            file_metadata::run(&mut beta_a_files, beta_a, [OTHER_JOB]).await?;
+            file_metadata::run(&mut beta_a_files, beta_a, [OTHER_JOB, OTHER_UPDATE]).await?;
         };
         let mut gamma_owner = rv.enter(session, &gamma_owner)?;
         let mut gamma_service = rv.enter(session, &gamma_service)?;
@@ -600,7 +643,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
         let mut gamma_b_files = rv.enter(session, &gamma_b_files)?;
         let gamma_b = rv.enter(session, &gamma_b)?;
         async {
-            file_metadata::run(&mut gamma_b_files, gamma_b, [OTHER_JOB]).await?;
+            file_metadata::run(&mut gamma_b_files, gamma_b, [OTHER_JOB, OTHER_UPDATE]).await?;
         };
         async {
             file_metadata::run(&mut a_files, alpha, WORKSTATION_FILES).await?;

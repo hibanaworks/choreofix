@@ -1,0 +1,376 @@
+{
+  "task": "11M",
+  "scope": "Five scripted wash guests. A failed first inspection on any of six jobs admits a dispatch request and delivers the actual rework order to the assigned worker. Replacement manufacturing and reinspection in the integrated application remain open.",
+  "live_qualified": false,
+  "model_calls": 0,
+  "scored_comparisons": 0,
+  "archive": "output/verification/11m-rework.q6WjMRBZ",
+  "source_manifest_sha256": "c3c4e4c611a096247c321f564d04be1e53dd7e7b1e7f5edf18a0589aa2119f57",
+  "build_receipt_sha256": "311df3ee415ae66d201a960590255d5132140b7912cf797a48ccbacac5aa201e",
+  "binary_sha256": "abcd5c287be8f55f634759e9a0ec26be7a188a019aa425c8805ccc7927eab0ac",
+  "wash_sha256": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+  "test_binary_sha256": "280a25da8c76e71a8ee0556ebb4490d89053356262b1f74ad8264c82644003db",
+  "test_source_sha256": "69ad9ce5fa2fbcd6e9545c804e7d303684b557e03c8e0ea86ca00d284b3eb833",
+  "compiled_projection_sha256": "3278e958e35b79566e16d815a706e404b719807e2ed29609d9355b87f097c7c5",
+  "totals": {
+    "cases": 30,
+    "business_complete": 6,
+    "first_attempts_manufactured": 180,
+    "inspection_effects": 180,
+    "dispatch_effects": 48,
+    "epf_records": 203355,
+    "simulator_violations": 0
+  },
+  "dispatches_by_job": {
+    "alpha_job_a": 10,
+    "alpha_job_c": 6,
+    "beta_job_a": 6,
+    "beta_job_b": 10,
+    "gamma_job_b": 6,
+    "gamma_job_c": 10
+  },
+  "cases": [
+    {
+      "case": "0-contended",
+      "complete": false,
+      "rework_jobs": [
+        "beta_job_b"
+      ],
+      "epf_records": 6541,
+      "events_sha256": "6ce85a1bebaca508d337c279198f61ffb1d346dc0ae84b07ecb75d5736c3d9ea",
+      "checked_sha256": "274b682cb6c659d2ece7df84c393dfcd563645b4cd1922054df6de7416042c4a",
+      "result_sha256": "d25707c865c9267281829aa47bc2ff34b4dd3f6e80b1a2d972120cc2bb754538"
+    },
+    {
+      "case": "0-dispatch-during-work",
+      "complete": false,
+      "rework_jobs": [
+        "alpha_job_a"
+      ],
+      "epf_records": 6563,
+      "events_sha256": "3ed718c947cf431b96f4f5f37d3e90b78d6def75a7bedd9dd8720aeb4d4ff418",
+      "checked_sha256": "7ee02bfed42260b1519fff7aa96b78ab796de22db4abbebfc0b3a75fbe605896",
+      "result_sha256": "e257f3b60e8a7f6ebab9dd87b0893dbf443ea4298c1e427bbcebce0dbcde2947"
+    },
+    {
+      "case": "0-other-station-rejections",
+      "complete": false,
+      "rework_jobs": [
+        "alpha_job_c",
+        "beta_job_a",
+        "gamma_job_b"
+      ],
+      "epf_records": 7371,
+      "events_sha256": "2df54eb5ab97a638fed33761c83f12054c7a0b15693437b23aa4127023129889",
+      "checked_sha256": "51171377e1017934f488febb4d3ed166ce1f39870fdc559b9bc08396d5759927",
+      "result_sha256": "024a09c4006317c37dedb7cc35d5c15a1030b5c99834304256ce481976508200"
+    },
+    {
+      "case": "0-serial",
+      "complete": true,
+      "rework_jobs": [],
+      "epf_records": 6379,
+      "events_sha256": "17588c8948813a012eebce87d39411edb321b1756569278fa82c55add077c37e",
+      "checked_sha256": "aa38909edd946f23592a1f3853434331becae01d3ce14b169904b48fe6fb1366",
+      "result_sha256": "a1b337e43680664a79fa5d93ec12025697b616deedb4377877307d1c36f26bcd"
+    },
+    {
+      "case": "0-three-rejections",
+      "complete": false,
+      "rework_jobs": [
+        "alpha_job_a",
+        "beta_job_b",
+        "gamma_job_c"
+      ],
+      "epf_records": 7107,
+      "events_sha256": "4ec1ce2b89d164b50634c383cd361753437f0f4ab345c776b668a71c5d6cc3d0",
+      "checked_sha256": "132be0362957488fe34fbccc3d878313c172356e4ab0718c612774d7d75d5d48",
+      "result_sha256": "234f28febdc8107f0d73654458ce62219b1cf31a37c817ee122adc55896b25e5"
+    },
+    {
+      "case": "1-contended",
+      "complete": false,
+      "rework_jobs": [
+        "gamma_job_c"
+      ],
+      "epf_records": 6563,
+      "events_sha256": "6d499e9c886e30628f02da0f4dd97b64b605bfe663f8ce2b1ac252971c1d196a",
+      "checked_sha256": "aa4b31accc88b6f29ee9396768fcd6134aa7230538b867c8dedb996f0e6f2257",
+      "result_sha256": "be3312fe5f67c65099659160f3e2ceee64de0921a733a4d1062120cbbc301cf0"
+    },
+    {
+      "case": "1-dispatch-during-work",
+      "complete": false,
+      "rework_jobs": [
+        "alpha_job_a"
+      ],
+      "epf_records": 6563,
+      "events_sha256": "d1b9997937faa35fa5133af49e1853ec92936b88a43cc4305dbb88ecfb03f775",
+      "checked_sha256": "e37f6653eecb1666839186b46481e8f7bba4f79948b443c7c880a38aa8cccaf8",
+      "result_sha256": "d05cce2519478e68a3210e8ffadaba9af4e71c5b1f557d82e9a071c4a38a67c3"
+    },
+    {
+      "case": "1-other-station-rejections",
+      "complete": false,
+      "rework_jobs": [
+        "alpha_job_c",
+        "beta_job_a",
+        "gamma_job_b"
+      ],
+      "epf_records": 7371,
+      "events_sha256": "f1a74851241353d506d572285428e2c62b1aacfed85cda59934d68e7617fcde0",
+      "checked_sha256": "7b1986f23514316d993a386a31c3d645336566852c1ea334c0f4d6b428238c7b",
+      "result_sha256": "794e9936bb2f08cfac81d61445747ed47f27ebc789a5e2587ee9b48c775fc39e"
+    },
+    {
+      "case": "1-serial",
+      "complete": true,
+      "rework_jobs": [],
+      "epf_records": 6280,
+      "events_sha256": "c2e93f2680a19db35c110c472ab791d1a170e6dd7621446fb4cf9b7fd11257d9",
+      "checked_sha256": "5e3f38439c9584ebaf46b235d533dfb0c72ba580b68cec0f51e6a16f1a6f9f5e",
+      "result_sha256": "c8a8fb7f6d885927005fa397c93904f0b7c6858cd1436117e70e6da50a4578f2"
+    },
+    {
+      "case": "1-three-rejections",
+      "complete": false,
+      "rework_jobs": [
+        "alpha_job_a",
+        "beta_job_b",
+        "gamma_job_c"
+      ],
+      "epf_records": 7107,
+      "events_sha256": "c0b11adc000b70de3c802f87ac67fd7b19348800a2f8282c31544b1778c13af1",
+      "checked_sha256": "adb99a134813a867cdf05b8b75d37f9f7c1329f8bc0be22941b4edb468c9e488",
+      "result_sha256": "86c007ca69bb282fb5d2aa03d4db4506bc4a09c64b23613692d1d45758bb6cdf"
+    },
+    {
+      "case": "2-contended",
+      "complete": false,
+      "rework_jobs": [
+        "alpha_job_a"
+      ],
+      "epf_records": 6565,
+      "events_sha256": "40d38e5b7510deeea9930b1d1f7fdc5c9202371cb54e8ac4c3141d54fdf41e23",
+      "checked_sha256": "ffe0a36c97726c976ec62098d5ab7a759db3f3cdde54e3d71ce2f570430d5a2c",
+      "result_sha256": "75e1ec07593afb4112cae24a33d47bb78f312605d4f043712e4e61ee4cbae189"
+    },
+    {
+      "case": "2-dispatch-during-work",
+      "complete": false,
+      "rework_jobs": [
+        "beta_job_b"
+      ],
+      "epf_records": 6543,
+      "events_sha256": "9920b91752b9ce278081d308b954a92474ad3606997cb289e76b904069030158",
+      "checked_sha256": "1575cba2e06ff4874265eede4028ff24d5af01cd3060b3f385250a89204985a7",
+      "result_sha256": "6123b4224e2fe032758216124494fc5eebee665f4f4724ff2b830a92a37a4655"
+    },
+    {
+      "case": "2-other-station-rejections",
+      "complete": false,
+      "rework_jobs": [
+        "alpha_job_c",
+        "beta_job_a",
+        "gamma_job_b"
+      ],
+      "epf_records": 7373,
+      "events_sha256": "e2b6b6a36d7224f980883a764dda5b9edd074b013b3120a2325e34865fa53daf",
+      "checked_sha256": "6c715bb650dff19897d9f9d02e0bd986131ec91d9f2cf5d6fac6d62ed4abc8e7",
+      "result_sha256": "dbed109b064c58ffb9d9a5f1cddfb0528ac8e615918b6b75f4b8e89c08080751"
+    },
+    {
+      "case": "2-serial",
+      "complete": true,
+      "rework_jobs": [],
+      "epf_records": 6282,
+      "events_sha256": "6fd72d77f35ce42f41c0c847f206a968a03e7378468301974e475a3b0959ddf2",
+      "checked_sha256": "e7b27eea05ed62e31cf047b55a0fc3555dc592f667d946c8db062222938a9418",
+      "result_sha256": "4ebee62fff0ce51411aa3a83bc8b12f52dc13fa801b1ac18ff9f51fa8ef71476"
+    },
+    {
+      "case": "2-three-rejections",
+      "complete": false,
+      "rework_jobs": [
+        "alpha_job_a",
+        "beta_job_b",
+        "gamma_job_c"
+      ],
+      "epf_records": 7109,
+      "events_sha256": "1610fdac447824693c2e0ebe74bc13eb108fe7b547f898bc0706db9f73df5ef8",
+      "checked_sha256": "72888a979aad3842334751f4b7690b45a94a06ad21de986ad05959a392b7c98f",
+      "result_sha256": "de8713bf06477c26280ac6d02863def8c9e5eb1f39d8415e33f80f0b2a0ae4fe"
+    },
+    {
+      "case": "3-contended",
+      "complete": false,
+      "rework_jobs": [
+        "gamma_job_c"
+      ],
+      "epf_records": 6565,
+      "events_sha256": "144fec43085f7f8a5e1789c4b894ba3cc874354406c5084a9f14055d0c903cab",
+      "checked_sha256": "4787554eb2e233e18067510fd17ff09f5c5468486c1281ec05f366530b7f9276",
+      "result_sha256": "cae92cf6487ec1262598f717c2fbcc497fad18260a0bc0837a3475f8f07d105e"
+    },
+    {
+      "case": "3-dispatch-during-work",
+      "complete": false,
+      "rework_jobs": [
+        "beta_job_b"
+      ],
+      "epf_records": 6543,
+      "events_sha256": "ac580e4c1c8b59bdc05b6c7ddde83abd7f87ea8c6d99947889d5d7ea63fbec05",
+      "checked_sha256": "bf78d9444bf093bd7fafb75e1d0d26853b472e6a2598cb6cc8459ff70a545f29",
+      "result_sha256": "1d7e431088cceaa6668b3832e99ca0d65ef9f32f8f13a7e086a43412276af542"
+    },
+    {
+      "case": "3-other-station-rejections",
+      "complete": false,
+      "rework_jobs": [
+        "alpha_job_c",
+        "beta_job_a",
+        "gamma_job_b"
+      ],
+      "epf_records": 7373,
+      "events_sha256": "0f3d7f2b0f950f410d0e24b889e4c422d1f198cd80b89e739ef026d811df419c",
+      "checked_sha256": "ed6aa58215e07ef1215b3596778fd072d1a8c5cb2e88a95678f1ffc5e64cd93b",
+      "result_sha256": "265257fcca3a51e077362018eb148ed29e5d15dc18b717841d96d2f8704f80f4"
+    },
+    {
+      "case": "3-serial",
+      "complete": true,
+      "rework_jobs": [],
+      "epf_records": 6282,
+      "events_sha256": "375cc55e7343a8c9a1dcd86dd9ca68487f707b7bf150ec31bbcce43cd67680ec",
+      "checked_sha256": "97cf61d67ce96d29a1f49c0f9b97502f22b4428f612c5a13206b4cbdc26e0c99",
+      "result_sha256": "b61b694f1766ec3f9bac8e95abbb61a80f96971494ec840cd667b9a48b58df4d"
+    },
+    {
+      "case": "3-three-rejections",
+      "complete": false,
+      "rework_jobs": [
+        "alpha_job_a",
+        "beta_job_b",
+        "gamma_job_c"
+      ],
+      "epf_records": 7109,
+      "events_sha256": "fd38d7d7d5165143574191956de8b243d8f892ccc6fdff78304b211df77d15c9",
+      "checked_sha256": "025759d7fa0a63dda161c8a6269d0fc91658343d8b3d7a977fa396cd613cfb6c",
+      "result_sha256": "17443025c5a49d671b46cdc530d51ba1d8b374f4ae877324201b347ae1ac5c5e"
+    },
+    {
+      "case": "4-contended",
+      "complete": false,
+      "rework_jobs": [
+        "alpha_job_a"
+      ],
+      "epf_records": 6565,
+      "events_sha256": "c62c771c46ac181211fa0d9eaf752e29a927473188e4a93df53119f8561a94d5",
+      "checked_sha256": "9214b67e4012e083db60fb4d94b65d9d38228f5a86e1cc072999801138737958",
+      "result_sha256": "4d42e5d4d1850f5786bc4c578ad7caccc1036bd8c50cbdd0cd34d3e2180529cd"
+    },
+    {
+      "case": "4-dispatch-during-work",
+      "complete": false,
+      "rework_jobs": [
+        "gamma_job_c"
+      ],
+      "epf_records": 6565,
+      "events_sha256": "43ce2eb3daf3dee3336db4fe8cf85b6f926821dea516ba84d2789a86afcfa0f9",
+      "checked_sha256": "c9bb739f1362087a44f301d01a814ffb375ad870446d3611f3ca2cee58947db1",
+      "result_sha256": "1dc755bef9a88a3340900fc22dc794ad57997bdfc6a8fbfee01bc222d8e57e04"
+    },
+    {
+      "case": "4-other-station-rejections",
+      "complete": false,
+      "rework_jobs": [
+        "alpha_job_c",
+        "beta_job_a",
+        "gamma_job_b"
+      ],
+      "epf_records": 7373,
+      "events_sha256": "70cbd5dbdac6b90cb301a15d4806afc13c2fc32f904be87fb7dff016e64a7049",
+      "checked_sha256": "3bad0e808842505efeb06aaa6ae7d93282c3a2cb203ffd0eaad46db777968ca0",
+      "result_sha256": "5978d21f8c44ff5ec5a13181f0917b2ea6821dcae80f5fd6ee5a7bd7c47144b3"
+    },
+    {
+      "case": "4-serial",
+      "complete": true,
+      "rework_jobs": [],
+      "epf_records": 6282,
+      "events_sha256": "cb0b9f25569a091c5e75b6aaa9909aee4521519e593fb7579cf11e301da914dc",
+      "checked_sha256": "1bed0d8495118583d776f392d153d2b975960a7fa9ed46bf91468c7912290481",
+      "result_sha256": "c8ce2ce598c4d120627717bffcdfec776a25089ec38e189582ab4adb630ce281"
+    },
+    {
+      "case": "4-three-rejections",
+      "complete": false,
+      "rework_jobs": [
+        "alpha_job_a",
+        "beta_job_b",
+        "gamma_job_c"
+      ],
+      "epf_records": 7109,
+      "events_sha256": "80b87bc5b09e30fb82ccc564964ff7d3b3560398431309036591b540e63f9bcd",
+      "checked_sha256": "dcaca84c0e01b1e640e7409d4c38f457c174ce7132ea822fc26c6fc8e21371b1",
+      "result_sha256": "124559f242c1b2d00782f652a29788fe99491d7ff40c4131debd464f5738565a"
+    },
+    {
+      "case": "5-contended",
+      "complete": false,
+      "rework_jobs": [
+        "beta_job_b"
+      ],
+      "epf_records": 6543,
+      "events_sha256": "5b801c71705bdee3582bebe26ba3a1aeb267087b0bb3e467c68ada9317ea747d",
+      "checked_sha256": "681a6574b115606b3ccfe43e68872436653671c48c4e565bbd238906b905a4a7",
+      "result_sha256": "02dd1ec3f759a06a23ae3a6abf802c6e2a15a300d9266ce57094bf0b50314753"
+    },
+    {
+      "case": "5-dispatch-during-work",
+      "complete": false,
+      "rework_jobs": [
+        "gamma_job_c"
+      ],
+      "epf_records": 6565,
+      "events_sha256": "47cc5629007d9ffd3e93e00418149b2680927e8aa0e644f8ce8f60bf8676bbf0",
+      "checked_sha256": "676cd927c7c7ed4bb44cdcfb5bbb335df5d96fad8f0e2ff5450ee70bb53b9bb0",
+      "result_sha256": "5ac56cc27fe6870de43ea70c665213ddc2c71b84b37acca36b7ecf309aaae8b0"
+    },
+    {
+      "case": "5-other-station-rejections",
+      "complete": false,
+      "rework_jobs": [
+        "alpha_job_c",
+        "beta_job_a",
+        "gamma_job_b"
+      ],
+      "epf_records": 7373,
+      "events_sha256": "b7574a837507deaf70c6cc5bcfeb1a4e47f4794649bb03e5520beee38eeb8a12",
+      "checked_sha256": "06134e2c334d75213fbaf8be84b2ef94654841353f4c4b630a9da6b076f18258",
+      "result_sha256": "e2fbe17624dec98b57fa8408690b4edcdbc86e4a16d9ee445d5cb752dceb3826"
+    },
+    {
+      "case": "5-serial",
+      "complete": true,
+      "rework_jobs": [],
+      "epf_records": 6282,
+      "events_sha256": "3e97395cf5554952479d4c2677a2edecff6664512bf1fe91da23c9d5e7810ece",
+      "checked_sha256": "0c1d91db60ea11c7da78153baebee525c5fd48c4c3ee518a34d68b36d9cc6fbd",
+      "result_sha256": "eb937a1139737f735a22eadbafca32814f55dba1c16b52e63b47173400c506f3"
+    },
+    {
+      "case": "5-three-rejections",
+      "complete": false,
+      "rework_jobs": [
+        "alpha_job_a",
+        "beta_job_b",
+        "gamma_job_c"
+      ],
+      "epf_records": 7109,
+      "events_sha256": "cf172001984d1512053e171231fbc63697955cffed31b0151c45c4185a03f8d3",
+      "checked_sha256": "c53971010c4ca4b29e4d97535d0f6de8bbeb2a1a0829b47e79ce00285cde5b3f",
+      "result_sha256": "3e18b679c38e811c2e54e05759016d9faa8f48a6772c73c0504f5684512c805b"
+    }
+  ]
+}

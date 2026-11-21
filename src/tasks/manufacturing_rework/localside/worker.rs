@@ -178,5 +178,33 @@ pub async fn station_job<const SERVICE: u8, const MACHINE: u8, const JOB: u8>(
     endpoint.send::<CheckPart<JOB>>(&sample).await?;
     let verdict = imp::decode(endpoint.recv::<Measurement<JOB>>().await?)?;
     imp::inspected(material, &arguments, &verdict)?;
+    let bytes = imp::encode(&verdict)?;
+    if verdict["success"] == true {
+        endpoint
+            .send::<Approved<JOB>>(&imp::InspectionReply::from_bytes(&bytes)?)
+            .await?;
+        endpoint.send::<JobUpdate>(&bytes.as_slice()).await?;
+    } else {
+        endpoint
+            .send::<Failed<JOB>>(&imp::InspectionReply::from_bytes(&bytes)?)
+            .await?;
+        let request = endpoint.recv::<DispatchRequest<JOB>>().await?;
+        let arguments = imp::decode(request.as_bytes())?;
+        imp::rework_input(&verdict, &arguments)?;
+        let order = effects.apply(request).await?;
+        imp::dispatched(&verdict, &arguments, &order)?;
+        let bytes = imp::encode(&order)?;
+        async {
+            let [mut dispatcher, mut station] = endpoint.par()?;
+            async {
+                dispatcher.send::<WorkOrder<JOB>>(&bytes.as_slice()).await?;
+            };
+            async {
+                station.send::<JobUpdate>(&bytes.as_slice()).await?;
+            };
+            Ok(())
+        }
+        .await?;
+    }
     Ok(())
 }
