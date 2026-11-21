@@ -276,6 +276,13 @@ and concerned the part that the corresponding workstation had produced. Six
 trials completed the first inspection before the second job was submitted.
 The other six completed all inspections before reading the published parts.
 
+The [11M dispatch trials](11m-wash-dispatch.json) connect a fifth wash guest
+to the three tool-requiring jobs. All 24 rework orders matched their failed
+inspection and were delivered to the assigned worker. Across 18 runs, EPF
+checked 73,948 records and the common simulator recorded 132 effects. The
+per-trial evidence identifies the frames delivering each verdict and workstation
+update. Producing replacement parts and live qualification remain open.
+
 The cohort-wide measurement is reproducible from the same source-bound trials.
 From the repository root, supply the verified cohort and a new output file:
 

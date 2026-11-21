@@ -57,19 +57,51 @@ pub async fn run<const WORKER: u8>(
             _ => Err(ShellError::message("unexpected tool loan")),
         }?
     };
-    let [mut delivery, mut check] = endpoint.par()?;
-    async {
-        delivery
-            .send::<FinishedPart<WORKER>>(&imp::encode(&material)?.as_slice())
+    let (result, bytes) = async {
+        let [mut delivery, mut check] = endpoint.par()?;
+        async {
+            delivery
+                .send::<FinishedPart<WORKER>>(&imp::encode(&material)?.as_slice())
+                .await?;
+        };
+        let request = check.recv::<CheckPart<WORKER>>().await?;
+        let arguments = imp::decode(request.as_bytes())?;
+        imp::inspection_input(&material, &arguments)?;
+        let result = effects.apply(request).await?;
+        imp::inspected(&material, &arguments, &result)?;
+        let bytes = imp::encode(&result)?;
+        check.send::<InspectionResult>(&bytes.as_slice()).await?;
+        Ok((result, bytes))
+    }
+    .await?;
+    if result["success"] == true {
+        endpoint
+            .send::<Approved<WORKER>>(&imp::InspectionReply::from_bytes(&bytes)?)
             .await?;
-    };
-    let request = check.recv::<CheckPart<WORKER>>().await?;
-    let arguments = imp::decode(request.as_bytes())?;
-    imp::inspection_input(&material, &arguments)?;
-    let result = effects.apply(request).await?;
-    imp::inspected(&material, &arguments, &result)?;
-    check
-        .send::<InspectionResult>(&imp::encode(&result)?.as_slice())
+        endpoint.send::<JobUpdate>(&bytes.as_slice()).await?;
+    } else {
+        endpoint
+            .send::<Failed<WORKER>>(&imp::InspectionReply::from_bytes(&bytes)?)
+            .await?;
+        let request = endpoint.recv::<DispatchRequest<WORKER>>().await?;
+        let arguments = imp::decode(request.as_bytes())?;
+        imp::rework_input(&result, &arguments)?;
+        let order = effects.apply(request).await?;
+        imp::dispatched(&result, &arguments, &order)?;
+        let bytes = imp::encode(&order)?;
+        async {
+            let [mut dispatcher, mut station] = endpoint.par()?;
+            async {
+                dispatcher
+                    .send::<WorkOrder<WORKER>>(&bytes.as_slice())
+                    .await?;
+            };
+            async {
+                station.send::<JobUpdate>(&bytes.as_slice()).await?;
+            };
+            Ok(())
+        }
         .await?;
+    }
     Ok(())
 }

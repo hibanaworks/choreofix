@@ -640,6 +640,7 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
             let mut beta = caller.enter(session, &programs.beta)?;
             let mut gamma = caller.enter(session, &programs.gamma)?;
             let mut inspector = caller.enter(session, &programs.inspector)?;
+            let mut dispatcher = caller.enter(session, &programs.dispatcher)?;
             let delays: [Duration; 3] = std::array::from_fn(|worker| {
                 Duration::from_millis(durations[order.iter().position(|id| *id == worker).unwrap()])
             });
@@ -672,6 +673,19 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                     };
                     async {
                         localside::worker::run(&mut c, &simulator).await?;
+                    };
+                    async {
+                        for job in order {
+                            let notice = match job {
+                                0 => dispatcher.recv::<Approved<WORKER_A>>().await?,
+                                1 => dispatcher.recv::<Approved<WORKER_B>>().await?,
+                                2 => dispatcher.recv::<Approved<WORKER_C>>().await?,
+                                _ => unreachable!(),
+                            };
+                            let notice = data::decode(notice)?;
+                            assert_eq!(notice["data"]["job_id"], data::JOBS[job]);
+                            assert_eq!(notice["success"], true);
+                        }
                     };
                     async {
                         for worker in order {
@@ -745,6 +759,8 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                             &result,
                             None,
                         )?;
+                        let approval = data::decode(alpha.recv::<JobUpdate>().await?)?;
+                        data::inspected(&result["data"]["part"], &arguments.value(), &approval)?;
                     };
                     async {
                         if let Some(rank) = order
@@ -774,6 +790,8 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                             &result,
                             None,
                         )?;
+                        let approval = data::decode(beta.recv::<JobUpdate>().await?)?;
+                        data::inspected(&result["data"]["part"], &arguments.value(), &approval)?;
                     };
                     async {
                         if let Some(rank) = order
@@ -803,6 +821,8 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                             &result,
                             None,
                         )?;
+                        let approval = data::decode(gamma.recv::<JobUpdate>().await?)?;
+                        data::inspected(&result["data"]["part"], &arguments.value(), &approval)?;
                     };
                     Ok::<(), ShellError>(())
                 },

@@ -1,5 +1,4 @@
-//! 11M's first three tool-using jobs, preserving arrival and completion order.
-//! Workstation/QC/rework composition is still unfinished.
+//! Three workstation jobs share two tools. Their inspections can issue rework orders.
 use super::imp::{DO_JOB, INSPECT_QUALITY};
 use hibana::{
     Endpoint, g,
@@ -47,6 +46,8 @@ pub type Approved<'a, const JOB: u8> = g::Msg<25, super::imp::InspectionReply<'a
 pub type Failed<'a, const JOB: u8> = g::Msg<26, super::imp::InspectionReply<'a, JOB, false>>;
 pub type DispatchRequest<const JOB: u8> = g::Msg<27, super::imp::DispatchArguments<JOB>>;
 pub type Dispatched<'a> = g::Msg<28, &'a [u8]>;
+pub type WorkOrder<'a, const JOB: u8> = g::Msg<JOB, &'a [u8]>;
+pub type JobUpdate<'a> = g::Msg<36, &'a [u8]>;
 pub type OrderEvidence<'a> = g::Msg<29, &'a [u8]>;
 pub type ApprovalForWorker<'a, const JOB: u8> =
     g::Msg<31, super::imp::InspectionReply<'a, JOB, true>>;
@@ -260,7 +261,36 @@ pub fn source() -> impl Projectable {
             g::seq(c, g::route(g::seq(a, b), g::seq(b, a))),
         ),
     );
-    g::seq(g::par(intents, serving), g::par(parts, checks))
+    let dispatch = g::par(
+        disposition::<WORKER_A, ALPHA>(),
+        g::par(
+            disposition::<WORKER_B, BETA>(),
+            disposition::<WORKER_C, GAMMA>(),
+        ),
+    );
+    g::seq(
+        g::par(intents, serving),
+        g::seq(g::par(parts, checks), dispatch),
+    )
+}
+
+fn disposition<const WORKER: u8, const STATION: u8>() -> impl Projectable {
+    g::route(
+        g::seq(
+            g::send::<WORKER, DISPATCHER, Approved<WORKER>>(),
+            g::send::<WORKER, STATION, JobUpdate>(),
+        ),
+        g::seq(
+            g::send::<WORKER, DISPATCHER, Failed<WORKER>>(),
+            g::seq(
+                g::send::<DISPATCHER, WORKER, DispatchRequest<WORKER>>(),
+                g::par(
+                    g::send::<WORKER, DISPATCHER, WorkOrder<WORKER>>(),
+                    g::send::<WORKER, STATION, JobUpdate>(),
+                ),
+            ),
+        ),
+    )
 }
 
 fn check_part<const WORKER: u8>() -> impl Projectable + Copy {
@@ -271,6 +301,7 @@ fn check_part<const WORKER: u8>() -> impl Projectable + Copy {
 }
 
 pub struct Programs {
+    pub dispatcher: RoleProgram<DISPATCHER>,
     pub inspector: RoleProgram<INSPECTOR>,
     pub a: RoleProgram<WORKER_A>,
     pub b: RoleProgram<WORKER_B>,
@@ -285,6 +316,7 @@ pub struct Programs {
 pub fn programs() -> Programs {
     let source = source();
     Programs {
+        dispatcher: project::<DISPATCHER>(&source),
         inspector: project::<INSPECTOR>(&source),
         a: project::<WORKER_A>(&source),
         b: project::<WORKER_B>(&source),

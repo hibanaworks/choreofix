@@ -35,8 +35,11 @@ const C_FILES: u8 = 17;
 const INSPECTOR_VM: u8 = 18;
 const INSPECTOR_TERM: u8 = 19;
 const INSPECTOR_FILES: u8 = 20;
+const DISPATCHER_VM: u8 = 21;
+const DISPATCHER_TERM: u8 = 22;
+const DISPATCHER_FILES: u8 = 23;
 
-const fn part(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
+const fn readable(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
     ChoreoFsObject::readable(
         path,
         ObjectId(fd as u32),
@@ -54,26 +57,41 @@ const fn inspect(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
     )
 }
 const INSPECTION_FILES: [ChoreoFsObject<'static>; 7] = [
-    part(b"service/parts/alpha_job_a", 4),
-    part(b"service/parts/beta_job_b", 5),
-    part(b"service/parts/gamma_job_c", 6),
+    readable(b"service/parts/alpha_job_a", 4),
+    readable(b"service/parts/beta_job_b", 5),
+    readable(b"service/parts/gamma_job_c", 6),
     inspect(b"service/inspect/alpha_job_a", 7),
     inspect(b"service/inspect/beta_job_b", 8),
     inspect(b"service/inspect/gamma_job_c", 9),
-    part(b"service/inspection_result", 10),
+    readable(b"service/inspection_result", 10),
 ];
 
-const JOB: ChoreoFsObject<'static> = ChoreoFsObject::read_write(
-    b"service/do_job",
-    ObjectId(4),
-    FdSpec::new(4, 66),
-    b"",
-    FdBinding {
-        read: Some(FdReadRow::Base),
-        write: Some(FdWriteRow::Object),
-        readdir: None,
-    },
-);
+const fn request_reply(path: &'static [u8], fd: u8) -> ChoreoFsObject<'static> {
+    ChoreoFsObject::read_write(
+        path,
+        ObjectId(fd as u32),
+        FdSpec::new(fd, 66),
+        b"",
+        FdBinding {
+            read: Some(FdReadRow::Base),
+            write: Some(FdWriteRow::Object),
+            readdir: None,
+        },
+    )
+}
+const JOB: ChoreoFsObject<'static> = request_reply(b"service/do_job", 4);
+const WORKSTATION_FILES: [ChoreoFsObject<'static>; 2] = [JOB, readable(b"service/job_update", 5)];
+const ORDERS: [ChoreoFsObject<'static>; 9] = [
+    readable(b"service/approved/alpha_job_a", 4),
+    readable(b"service/approved/beta_job_b", 5),
+    readable(b"service/approved/gamma_job_c", 6),
+    readable(b"service/failed/alpha_job_a", 7),
+    readable(b"service/failed/beta_job_b", 8),
+    readable(b"service/failed/gamma_job_c", 9),
+    request_reply(b"service/dispatch/alpha_job_a", 10),
+    request_reply(b"service/dispatch/beta_job_b", 11),
+    request_reply(b"service/dispatch/gamma_job_c", 12),
+];
 
 fn shell_io<const VM: u8, const STATION: u8, const FILES: u8, const TERM: u8>() -> impl Projectable
 {
@@ -94,9 +112,12 @@ async fn worker_shell<const WORKER: u8, const VM: u8, const STATION: u8>(
     let station = vm.recv::<Loan<STATION>>().await?;
     let mut request = vec![0; GUEST_MEMORY_BYTES];
     let mut result = vec![0; GUEST_MEMORY_BYTES];
+    let mut update = vec![0; GUEST_MEMORY_BYTES];
     let file = ChoreoFsFile::new(JOB, station)
         .write_as::<StationJob<WORKER>>(&mut request)
-        .read_as::<JobResult>(&mut result);
+        .read_as::<JobResult>(&mut result)
+        .file(WORKSTATION_FILES[1])?
+        .read_as::<JobUpdate>(&mut update);
     let files = ChoreoFsFiles::new(vm).file(file)?;
     let mut memory = vec![0; GUEST_MEMORY_BYTES];
     let mut storage = Box::new(HibanaWasiGuestStorage::uninit());
@@ -131,17 +152,27 @@ pub async fn run(path: &str) -> ShellResult<()> {
     let global = g::seq(
         g::par(
             loans,
-            g::send::<INSPECTOR_FILES, INSPECTOR_VM, Loan<INSPECTOR>>(),
+            g::par(
+                g::send::<INSPECTOR_FILES, INSPECTOR_VM, Loan<INSPECTOR>>(),
+                g::send::<DISPATCHER_FILES, DISPATCHER_VM, Loan<DISPATCHER>>(),
+            ),
         ),
         g::par(
             source(),
             g::par(
                 io,
-                shell_io::<INSPECTOR_VM, INSPECTOR, INSPECTOR_FILES, INSPECTOR_TERM>(),
+                g::par(
+                    shell_io::<INSPECTOR_VM, INSPECTOR, INSPECTOR_FILES, INSPECTOR_TERM>(),
+                    shell_io::<DISPATCHER_VM, DISPATCHER, DISPATCHER_FILES, DISPATCHER_TERM>(),
+                ),
             ),
         ),
     );
     let inspector = project::<INSPECTOR>(&global);
+    let dispatcher = project::<DISPATCHER>(&global);
+    let dispatcher_vm = project::<DISPATCHER_VM>(&global);
+    let dispatcher_files = project::<DISPATCHER_FILES>(&global);
+    let dispatcher_term = project::<DISPATCHER_TERM>(&global);
     let inspector_vm = project::<INSPECTOR_VM>(&global);
     let inspector_files = project::<INSPECTOR_FILES>(&global);
     let inspector_term = project::<INSPECTOR_TERM>(&global);
@@ -165,8 +196,9 @@ pub async fn run(path: &str) -> ShellResult<()> {
     let c_files = project::<C_FILES>(&global);
     let projection = json!({
         "type": "compiled_projection", "format_version": 1, "task": "11M",
-        "scope": "tool-requiring jobs and part delivery", "session": SESSION,
+        "scope": "tool-requiring jobs, inspection and rework orders", "session": SESSION,
         "roles": {
+            "DISPATCHER": DISPATCHER, "DISPATCHER_VM": DISPATCHER_VM, "DISPATCHER_FILES": DISPATCHER_FILES, "DISPATCHER_TERM": DISPATCHER_TERM,
             "INSPECTOR": INSPECTOR, "INSPECTOR_VM": INSPECTOR_VM, "INSPECTOR_FILES": INSPECTOR_FILES, "INSPECTOR_TERM": INSPECTOR_TERM,
             "WORKER_A": WORKER_A, "WORKER_B": WORKER_B, "WORKER_C": WORKER_C, "DEPOT": DEPOT,
             "TOOL_0": TOOL_0, "TOOL_1": TOOL_1, "ALPHA": ALPHA, "BETA": BETA, "GAMMA": GAMMA,
@@ -175,6 +207,7 @@ pub async fn run(path: &str) -> ShellResult<()> {
             "A_FILES": A_FILES, "B_FILES": B_FILES, "C_FILES": C_FILES,
         },
         "programs": [
+            rows(&dispatcher), rows(&dispatcher_vm), rows(&dispatcher_files), rows(&dispatcher_term),
             rows(&inspector), rows(&inspector_vm), rows(&inspector_files), rows(&inspector_term),
             rows(&worker_a), rows(&worker_b), rows(&worker_c), rows(&depot),
             rows(&tool_0), rows(&tool_1), rows(&alpha), rows(&beta), rows(&gamma),
@@ -188,18 +221,34 @@ pub async fn run(path: &str) -> ShellResult<()> {
     }
     let module = std::fs::read(path)?;
     let session = SessionId::new(SESSION);
-    let (mut connection, mut io, [terminal_a, terminal_b, terminal_c, terminal_inspector]) =
-        Bus::open(
-            ["WORKER_A", "WORKER_B", "WORKER_C", "INSPECTOR"],
-            [
-                (session, TOOL_0),
-                (session, TOOL_1),
-                (session, ALPHA),
-                (session, BETA),
-                (session, GAMMA),
-                (session, INSPECTOR),
-            ],
-        );
+    let (
+        mut connection,
+        mut io,
+        [
+            terminal_a,
+            terminal_b,
+            terminal_c,
+            terminal_inspector,
+            terminal_dispatcher,
+        ],
+    ) = Bus::open(
+        [
+            "WORKER_A",
+            "WORKER_B",
+            "WORKER_C",
+            "INSPECTOR",
+            "DISPATCHER",
+        ],
+        [
+            (session, TOOL_0),
+            (session, TOOL_1),
+            (session, ALPHA),
+            (session, BETA),
+            (session, GAMMA),
+            (session, INSPECTOR),
+            (session, DISPATCHER),
+        ],
+    );
     let (bus, simulator) = connection.split();
     bus.projected(projection);
     let capture = |row| bus.capture(row);
@@ -242,6 +291,72 @@ pub async fn run(path: &str) -> ShellResult<()> {
         )
         .map_err(|e| ShellError::message(format!("{e:?}")))?;
         let mut inspector_files = rv.enter(session, &inspector_files)?;
+        let mut dispatcher_files = rv.enter(session, &dispatcher_files)?;
+        let dispatcher = rv.enter(session, &dispatcher)?;
+        let mut dispatcher_vm = rv.enter(session, &dispatcher_vm)?;
+        let mut dispatcher_term = rv.enter(session, &dispatcher_term)?;
+        async {
+            file_metadata::run(&mut dispatcher_files, dispatcher, ORDERS).await?;
+        };
+        async {
+            private_io::run(
+                &mut dispatcher_term,
+                PrivateFs::new(terminal_dispatcher, bus, &ORDERS),
+            )
+            .await?;
+        };
+        async {
+            let endpoint = dispatcher_vm.recv::<Loan<DISPATCHER>>().await?;
+            let [
+                mut approved_a,
+                mut approved_b,
+                mut approved_c,
+                mut failed_a,
+                mut failed_b,
+                mut failed_c,
+            ] = [(); 6].map(|_| vec![0; GUEST_MEMORY_BYTES]);
+            let [
+                mut request_a,
+                mut request_b,
+                mut request_c,
+                mut order_a,
+                mut order_b,
+                mut order_c,
+            ] = [(); 6].map(|_| vec![0; GUEST_MEMORY_BYTES]);
+            let orders = ChoreoFsFile::new(ORDERS[0], endpoint)
+                .read_as::<Approved<WORKER_A>>(&mut approved_a)
+                .file(ORDERS[1])?
+                .read_as::<Approved<WORKER_B>>(&mut approved_b)
+                .file(ORDERS[2])?
+                .read_as::<Approved<WORKER_C>>(&mut approved_c)
+                .file(ORDERS[3])?
+                .read_as::<Failed<WORKER_A>>(&mut failed_a)
+                .file(ORDERS[4])?
+                .read_as::<Failed<WORKER_B>>(&mut failed_b)
+                .file(ORDERS[5])?
+                .read_as::<Failed<WORKER_C>>(&mut failed_c)
+                .file(ORDERS[6])?
+                .write_as::<DispatchRequest<WORKER_A>>(&mut request_a)
+                .read_as::<WorkOrder<WORKER_A>>(&mut order_a)
+                .file(ORDERS[7])?
+                .write_as::<DispatchRequest<WORKER_B>>(&mut request_b)
+                .read_as::<WorkOrder<WORKER_B>>(&mut order_b)
+                .file(ORDERS[8])?
+                .write_as::<DispatchRequest<WORKER_C>>(&mut request_c)
+                .read_as::<WorkOrder<WORKER_C>>(&mut order_c);
+            let files = ChoreoFsFiles::new(dispatcher_vm).file(orders)?;
+            let mut memory = vec![0; GUEST_MEMORY_BYTES];
+            let mut storage = Box::new(HibanaWasiGuestStorage::uninit());
+            let guest = storage.init(&module, GuestMemory::new(&mut memory), files)?;
+            let (exit, files) = guest.run().await?;
+            let status = exit.status() as i32;
+            let (mut vm, (orders, ())) = files.into_parts();
+            async {
+                orders.into_endpoint().send::<FileExit>(&status).await?;
+            };
+            vm.send::<Exit>(&status).await?;
+            Ok(())
+        };
         let inspector = rv.enter(session, &inspector)?;
         let mut inspector_vm = rv.enter(session, &inspector_vm)?;
         let mut inspector_term = rv.enter(session, &inspector_term)?;
@@ -315,10 +430,14 @@ pub async fn run(path: &str) -> ShellResult<()> {
             worker_shell::<WORKER_A, A_VM, ALPHA>(a_vm, &module).await?;
         };
         async {
-            file_metadata::run(&mut a_files, alpha, [JOB]).await?;
+            file_metadata::run(&mut a_files, alpha, WORKSTATION_FILES).await?;
         };
         async {
-            private_io::run(&mut a_term, PrivateFs::new(terminal_a, bus, &[JOB])).await?;
+            private_io::run(
+                &mut a_term,
+                PrivateFs::new(terminal_a, bus, &WORKSTATION_FILES),
+            )
+            .await?;
         };
         async {
             localside::worker::run(&mut worker_b, &simulator).await?;
@@ -327,10 +446,14 @@ pub async fn run(path: &str) -> ShellResult<()> {
             worker_shell::<WORKER_B, B_VM, BETA>(b_vm, &module).await?;
         };
         async {
-            file_metadata::run(&mut b_files, beta, [JOB]).await?;
+            file_metadata::run(&mut b_files, beta, WORKSTATION_FILES).await?;
         };
         async {
-            private_io::run(&mut b_term, PrivateFs::new(terminal_b, bus, &[JOB])).await?;
+            private_io::run(
+                &mut b_term,
+                PrivateFs::new(terminal_b, bus, &WORKSTATION_FILES),
+            )
+            .await?;
         };
         async {
             localside::worker::run(&mut worker_c, &simulator).await?;
@@ -339,10 +462,14 @@ pub async fn run(path: &str) -> ShellResult<()> {
             worker_shell::<WORKER_C, C_VM, GAMMA>(c_vm, &module).await?;
         };
         async {
-            file_metadata::run(&mut c_files, gamma, [JOB]).await?;
+            file_metadata::run(&mut c_files, gamma, WORKSTATION_FILES).await?;
         };
         async {
-            private_io::run(&mut c_term, PrivateFs::new(terminal_c, bus, &[JOB])).await?;
+            private_io::run(
+                &mut c_term,
+                PrivateFs::new(terminal_c, bus, &WORKSTATION_FILES),
+            )
+            .await?;
         };
         Ok::<(), ShellError>(())
     };
