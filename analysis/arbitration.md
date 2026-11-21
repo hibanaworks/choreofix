@@ -306,6 +306,8 @@ For the 9E ticket, record the upstream model's existing coverage separately. If 
 
 The primary measure is the number of independently maintained authorization decisions whose definitions must change. Count two manual rules that can disagree about the same request as two sites, even in one file. Count references and generated artifacts separately. Two reviewers label the edits independently and record disagreements and their resolution. Include the edits to task-specific auditors, scripted guests and acceptance tests in the total change cost. Report those edits separately from global, localside, simulator and engine edits. Also report elapsed editing time and failed acceptance cases. Report each paired ticket individually. The completion rate or token use of an agent episode does not measure any of these quantities.
 
+The [6E starting-procedure check](review-receipts.md#starting-procedure-for-the-maintenance-ticket) records the upstream model, the approvals observed in the Wasm runs, and the current scorer's judgments. The old score accepts one reviewer by design. The changed ticket needs a common observation of two distinct reviewers approving the same candidate before its merge in either implementation.
+
 ## Rechecking the four participant-order constraints
 
 | Task | Observed freedom on the revised choreography | Evidence |

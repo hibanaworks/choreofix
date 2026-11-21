@@ -61,8 +61,11 @@ same schedules, expose the same commands and replies, and let an agent recover
 from the same rejected calls. A native procedure that fixes resource priority
 or changes acquisition order is reported separately. The [experiment
 contract](benchmark/experiment-contract.json) records these distinctions.
-The [maintenance study](analysis/arbitration.md#maintenance-study) measures
-edits to authorization decisions directly. Comparison-client development is
+The [maintenance study](analysis/arbitration.md#maintenance-study) will count
+changes to authorization decisions. For its first ticket we checked the
+[one-reviewer starting procedure](analysis/review-receipts.md#starting-procedure-for-the-maintenance-ticket)
+in the upstream 6E model, archived ChoreoFix merges and the common scorer.
+Paired editing costs are still unmeasured. Comparison-client development is
 on hold while ChoreoFix's own task experiments continue.
 
 ## Protocols and participant code
@@ -85,6 +88,13 @@ Endpoint operations remain visible in the localsides. Filesystem data and
 external RPC bookkeeping belong to their I/O owners. Task permissions and
 progress belong to the projected protocol. The external simulator evaluates
 domain effects and outcomes.
+
+EPF checks recorded Endpoint execution against the compiled protocol. The
+runner's task-specific effect checkers match those observations to simulator
+calls and replies after the run. The project maintains these checkers alongside
+the localsides. Attributing an effect to a particular receive relies on the
+checker for that task and on the recorded inputs. The common simulator assigns
+the business score from its own world state.
 
 ## Build and validation
 

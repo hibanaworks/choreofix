@@ -210,7 +210,7 @@ file contents and supplied the operation name at the call site. Those receivers
 remain part of the trusted boundary. We found this interface in the archived
 receiver sources for 3E, 7E, 8E, 13E/M/H and 14E/M/H. Together these nine
 tasks account for 12 of the 43 selected conditions and 178 of their 732
-simulator calls. Their successful run audits establish correspondence for the
+simulator calls. The offline checkers found matching requests for those
 recorded calls. The receiver API in those builds still permits a host caller
 to supply the tool and arguments.
 In a subsequent 8E build, all three simulator calls consumed typed receives.
@@ -218,8 +218,31 @@ Two additional three-agent trials passed the protocol and effect audits.
 The original simulator scored the depth-zero trial complete and returned the
 injected terminal test failure at depth two. The 43-condition analysis uses the
 original builds.
-All trials trust the runtime, codecs, transport, executor and simulator integration. The simulator
-independently records actual domain effects and resource violations.
+The common simulator records the effects it executed and scores its world state.
+EPF checks the captured Endpoint execution against the compiled protocol.
+To attribute a simulator effect to particular Endpoint receives, we also trust
+the capture and its association with the run, the runner's journal reader, and
+the task-specific rules that match receives, arguments, effects and replies.
+These rules run offline. They cannot grant a participant an operation.
+
+The project maintains both the localsides and these checkers. For example,
+the dining checker imports the application's role and message identifiers.
+The workshop checker separately encodes which worker and station correspond
+to each job. A mistaken assignment can therefore be shared by the application
+and its checker. Rejection of a changed journal demonstrates sensitivity to
+that change. We have no independent implementation or third-party validation
+of the effect matchers. Runtime enforcement also relies on the codecs,
+transport, executor and physical simulator integration.
+
+The distinction is observable in the 30 scripted workshop runs archived in
+\path{analysis/11m-readable-closure.json}. We joined simulator-side call
+starts and finishes by ID and compared the multiset of participants,
+operations, arguments, success values and results with the final score events
+in each journal. All 522 effects matched: 234 manufacturing operations, 234
+inspections and 54 rework orders. All 30 scores reported completion and zero
+violations. This comparison used neither the task checker nor an EPF verdict.
+It establishes agreement between two records of simulator activity. Linking
+those effects to the machine and tool receives requires additional evidence.
 
 Endpoint conformance is not a proof of arbitrary program termination, review
 quality, or artifact correctness. Existing Hibana and WASI proofs cover stated
@@ -261,7 +284,7 @@ reached a state in which all three had finished. The earlier ChoreoFix 9E global
 
 In a separate unscored depth-zero trial on the same executable, three live
 agents chose their own shell commands. The simulator recorded meals in B,A,C
-order and scored the task complete with zero violations. The independent audit
+order and scored the task complete with zero violations. The offline audit
 checked all six fork returns and 1,578 EPF records from this execution.
 Two TLC builds gave the same terminal orders on the upstream translated source. Their exact hashes and revisions are recorded in the reproduction. Qualification with the historical compiler pin remains open.
 
@@ -493,7 +516,7 @@ families. Its mechanism suite contains 321 real Wasm conditions with
 scripted shell inputs, including four retained CI/CD conditions whose
 production-source continuity was checked. The separate live-agent suite
 contains 28 required task--depth conditions across those same 27 tasks. The
-accepted run for each condition has an independent audit. Across these runs,
+accepted run for each condition has a project-maintained offline audit. Across these runs,
 the audits cover 119 model participants, 419 actual effects, and 312,880 records
 from complete EPF captures. The recorded usage is 35,801,001 inclusive tokens.
 The common simulator reported task completion in 27 of the 28 conditions.
@@ -802,6 +825,20 @@ all six orders. An unmatched starting pair is recorded as such. We will freeze
 the starting revisions, editing budgets, editor assignment and the same
 observable acceptance cases for each pair before editing.
 
+We began the 6E study by checking its starting procedure. In the upstream
+three-role fixture, TLC explored all 500 distinct reachable states. At either
+developer's merge step, the sole reviewer had approved that developer's
+feature. The fixture exchanges approval labels and carries no candidate digest.
+In 34 archived ChoreoFix Wasm runs, all 68 merges referenced a successful
+review by one reviewer of the exact source receipt and digest before the
+merge. Either developer could merge first. The common simulator accepted both
+one approval and a repeated approval by the same reviewer. It recorded a
+violation when a developer merged a changed candidate using the earlier
+approval. These observations establish what the change must distinguish.
+A paired edit still requires both running systems to expose the candidate and
+reviewer identities at the effect boundary.
+\path{analysis/review-receipts.md}.
+
 The primary outcome per ticket is the number of independently maintained
 authorization decisions that must change. Two manual rules that can disagree
 about a request count separately even in the same file. Two reviewers will
@@ -815,11 +852,11 @@ Unfinished tickets retain their time and failing observations. Ticket-level
 results and missing pairs will be reported individually. No maintenance
 advantage has yet been measured.
 
-The main blockers to a completed empirical paper are completion of all task
-ports and independent fidelity acceptance of all 48, a runnable and accepted
-baseline corpus, the 2,160 main and 432 supplemental scored episodes, analysis
-with uncertainty, and the
-maintenance measurements. The shell profile also limits the kinds of work an
+Each maintenance ticket can start as soon as its pair is ready. The complete
+48-task comparison requires accepted ports and baseline inputs, the planned
+2,160 main and 432 supplemental scored episodes, and analysis with uncertainty.
+Unscored pilots and the inspection of frozen task records can proceed during
+regression testing. The shell profile also limits the kinds of work an
 agent can carry out. The original simulator checks coordination outcomes and
 does not establish the quality of arbitrary generated source code.
 

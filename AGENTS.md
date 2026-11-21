@@ -33,7 +33,7 @@ solely to the agent or substituting a nonblocking command for the repair.
 
 Qualify each task through the real model shell -> Wasm import -> Endpoint
 request -> ChoreoFS -> physical effect -> reply path. Use actual Wasm runs,
-real-model pilots, complete EPF captures and independent request/effect audits;
+real-model pilots, complete EPF captures and offline request/effect audits;
 score the real outcome in the method-neutral common simulator. Include legal
 alternative/retry/parallel executions and relevant illegal-effect probes.
 Scripted native participants, compilation or protocol completion alone do not
@@ -56,8 +56,10 @@ regression in the owning library, not per-task Miri jobs in ChoreoFix.
 
 Offline task audits must not replay a second choreography, current-holder table,
 or transfer-in-flight state machine. EPF checks source execution. Use its checked
-receive occurrences with the shared transport/effect journal for independent
-request-argument, effect, reply and simulator-score correspondence. A transport
+receive occurrences to match actual requests and arguments to effects, replies
+and common-simulator score events. For published results, identify which
+observations come from the Endpoint and which come from the simulator, and
+disclose task-specific matching rules and shared identities. A transport
 preview is not a committed request. Missing capture or receive evidence is not
 permission to fall back to the former auditor, and a valid finite source prefix
 alone does not establish a complete application effect.
@@ -77,7 +79,7 @@ Endpoint receive commits. Bind successful receives from complete EPF capture;
 do not add a second preview/requeue replay state machine to the auditor.
 
 Use native actual-Endpoint tests, actual Wasm/ChoreoFS execution, EPF dynamic
-source checks and independent effect/scorer audits for application obligations.
+source checks, offline effect matching and common-simulator scores for application obligations.
 Do not add Miri toolchain installation, application Miri commands or interpreter
 clocks to the experiment critical path. Historical Miri evidence stays bound
 to its original source and is not a new completion requirement.
@@ -696,6 +698,14 @@ and previously successful live-model conditions. Bind each new execution to its
 complete EPF capture, request/effect/reply audit and common-simulator score.
 Re-auditing saved records alone does not satisfy this post-core-change regression
 requirement. Keep historical success evidence tied to its original source.
+Within a frozen regression run, resume from its recorded condition IDs.
+Reuse a completed condition only with the same executable, inputs, execution
+settings and valid evidence. Keep failures and interruptions visible. A new
+checker or scorer requires reassessing its affected verdicts. Repeat the
+execution if the required observations are missing. A new core fix starts a
+new application regression. Analysis of an archived run
+and work on an individually matched maintenance ticket can proceed during
+that regression. Reassess any historical conclusion affected by a later defect.
 A consumer-discovered core defect needs an actual Endpoint
 regression and coverage of its structure, repeated message contracts and schedule
 in generated tests. Do not restore old defects for a separate rebuild. Identify whether

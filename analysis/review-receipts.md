@@ -39,3 +39,68 @@ The pilot used `choreofix-experiments 6E 2 NEW_LIVE_DIRECTORY` followed by
 `choreofix-experiments --audit-run NEW_LIVE_DIRECTORY`. The public repository
 contains the sources, commands and digests. The original live transcript is
 held in the research archive.
+
+## Starting procedure for the maintenance ticket
+
+The planned change adds a second, distinct reviewer for each exact candidate.
+On 22 November we checked the one-reviewer starting condition at three boundaries.
+
+* **Upstream model.** Both pinned TraceFix distributions supply the same 6E
+  translated fixture (SHA-256 `fcfef5688d735511e822018ae3c2ea248ffd93124a26fcea8357cb360fb02d20`).
+  Using the TLC JAR with SHA-256 `0f56d6a813368c48008dfbecb23a73ab43a4a5e1bf09f026782a674aa9d4b3c9`,
+  we checked the predicate below over `Init` and `Next` with the three role
+  constants assigned distinct model values. TLC generated 1,130 states,
+  visited 500 distinct states and exhausted its queue. The state dump contains
+  both a completed A with B still at its first edit and a completed B with A
+  still at its first edit. The model exchanges `approved` and `revise` labels.
+  It has no artifact digest or physical merge receipt.
+* **Observed merges.** We re-read all 34 scripted 6E journals from the November
+  20 binary identified above. Each contained one terminal simulator score,
+  identical to the one in its result. We verified the journal hashes and used
+  the source and review indices in each merge to look up the original simulator
+  events. All 68 merges named the same feature, source occurrence and candidate
+  digest as their successful review. The implementation finished before that
+  review started, and the review finished before the merge started. Counting
+  distinct successful reviewers of that source before the merge gave one in
+  all 68 cases. A merged first in 17 runs and B in 17. The schedules were
+  scripted. This is a new reading of the archived trials.
+* **Common scorer.** We ran five fresh depth-zero trials directly through
+  `load_tools("6E", sim=SharedUtilityFileSim())` on ChoreoFix revision
+  `de31bd9`, using a fresh world each time and zero simulated delay. A
+  implemented `user_authentication`, followed the actions below and merged
+  `dev_a_feature`. B then implemented `notification_feature`, got one review
+  and merged `dev_b_feature`. Every merge executed. The score and any
+  violation record what had happened by publication time.
+
+| A's actions between implementation and merge | Task complete | Violation |
+| --- | --- | --- |
+| No review | No | `unvalidated_publication` |
+| One successful review | Yes | None |
+| Two successful reviews by the same reviewer | Yes | None |
+| One successful review, then replace the source | No | `unvalidated_publication` |
+| One successful review, replace the source, then review it again | Yes | None |
+
+For replication, use the `6E/Protocol_translated.tla` fixture listed in
+`benchmark/runtime-manifest.json` as module `Protocol`. In a module extending
+it, run TLC with `INVARIANT MergeHasApproval`:
+
+```tla
+MergeHasApproval ==
+    /\ (pc[Dev_a] \in {"da_merge", "da_merge_rel", "Done"} => doneA[Reviewer])
+    /\ (pc[Dev_b] \in {"db_merge", "db_merge_rel", "Done"} => doneB[Reviewer])
+```
+
+The common-world trials used `implement_feature(feature_name=...)`,
+`code_review(pr_id=...)` by `REVIEWER`, and `merge_code(branch=...)` by the
+assigned developer. Replacement was a second implementation of the same
+feature with `source="replacement"`. No agent or Endpoint participated in
+these five trials. The outputs, exact commands and archive selection for
+all three checks are retained in `output/verification/6e-maintenance-start-20261122/receipt.json`.
+
+For the paired edit, both systems must expose the same candidate, distinct
+reviewer identities and their completed approvals at the actual merge. The
+common acceptance observations in the [maintenance ticket](arbitration.md#maintenance-study)
+include rejection of a duplicate approval by one reviewer, approvals in either
+order and a fresh review after an edit. The observations above establish the
+starting behavior on the measured inputs. Editing time, changed authorization
+decisions and comparative success rates remain unmeasured.
