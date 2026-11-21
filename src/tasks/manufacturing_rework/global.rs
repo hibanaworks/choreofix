@@ -66,6 +66,7 @@ pub type PartReady<'a> = g::Msg<22, &'a [u8]>;
 pub type JobLoan<'r, const CAP: u8> = g::Msg<23, Endpoint<'r, CAP>>;
 pub type Approved<'a, const JOB: u8> = g::Msg<25, super::imp::InspectionReply<'a, JOB, true>>;
 pub type Failed<'a, const JOB: u8> = g::Msg<26, super::imp::InspectionReply<'a, JOB, false>>;
+pub type FailureStream<'a, const JOB: u8> = g::Msg<26, super::imp::FailureItem<'a, JOB>>;
 pub type DispatchRequest<const JOB: u8> = g::Msg<27, super::imp::DispatchArguments<JOB>>;
 pub type Dispatched<'a> = g::Msg<28, &'a [u8]>;
 pub type WorkOrder<'a, const JOB: u8> = g::Msg<JOB, &'a [u8]>;
@@ -387,11 +388,11 @@ fn tool_quality<const WORKER: u8, const FILE: u8>() -> impl Projectable {
 fn disposition<const WORKER: u8, const STATION: u8, const JOB: u8>() -> impl Projectable {
     g::route(
         g::seq(
-            g::send::<WORKER, DISPATCHER, Approved<JOB>>(),
             g::send::<WORKER, STATION, JobUpdate>(),
+            g::send::<WORKER, DISPATCHER, FailureStream<JOB>>(),
         ),
         g::seq(
-            g::send::<WORKER, DISPATCHER, Failed<JOB>>(),
+            g::send::<WORKER, DISPATCHER, FailureStream<JOB>>(),
             g::seq(
                 g::send::<DISPATCHER, WORKER, DispatchRequest<JOB>>(),
                 g::par(

@@ -125,7 +125,7 @@ pub(super) fn verify(
         let mut frame = |from: u64,
                          to: u64,
                          label: u8,
-                         value: &Value,
+                         value: Option<&Value>,
                          after: Option<usize>,
                          before: Option<usize>|
          -> Result<&Frame> {
@@ -138,7 +138,10 @@ pub(super) fn verify(
                     !spent.contains(*n)
                         && f.direction(from, to)
                         && f.logical_label == label
-                        && f.value().is_ok_and(|v| v == *value)
+                        && match value {
+                            Some(expected) => f.value().is_ok_and(|v| v == *expected),
+                            None => f.bytes.is_empty(),
+                        }
                 })
                 .min_by_key(|(_, f)| f.sent)
                 .ok_or_else(|| format!("missing {job} {tool} frame {edge:?}"))?;
@@ -182,7 +185,7 @@ pub(super) fn verify(
                     file,
                     worker,
                     35,
-                    args,
+                    Some(args),
                     orders[i].map(|(_, at)| at),
                     Some(call.emitted),
                 )?
@@ -192,7 +195,7 @@ pub(super) fn verify(
                         machine,
                         depot,
                         10,
-                        args,
+                        Some(args),
                         Some(admission),
                         Some(call.emitted),
                     )?;
@@ -211,7 +214,7 @@ pub(super) fn verify(
                         tool_role[slot],
                         depot,
                         3 + slot as u8,
-                        args,
+                        Some(args),
                         Some(admission),
                         Some(call.emitted),
                     )?;
@@ -219,7 +222,7 @@ pub(super) fn verify(
                         depot,
                         tool_role[slot],
                         5 + slot as u8,
-                        result,
+                        Some(result),
                         Some(reply_at),
                         None,
                     )?
@@ -228,25 +231,25 @@ pub(super) fn verify(
                         depot,
                         machine,
                         machine.try_into()?,
-                        result,
+                        Some(result),
                         Some(reply_at),
                         None,
                     )?;
-                    frame(worker, file, 21, result, Some(tool_reply), None)?;
-                    frame(worker, inspector, index, part, Some(tool_reply), None)?;
+                    frame(worker, file, 21, Some(result), Some(tool_reply), None)?;
+                    frame(worker, inspector, index, Some(part), Some(tool_reply), None)?;
                 } else {
                     frame(
                         machine,
                         worker,
                         20,
-                        args,
+                        Some(args),
                         Some(admission),
                         Some(call.emitted),
                     )?;
-                    let returned =
-                        frame(worker, machine, 21, result, Some(reply_at), None)?.received()?;
-                    frame(worker, file, 21, result, Some(returned), None)?;
-                    frame(worker, inspector, index, part, Some(returned), None)?;
+                    let returned = frame(worker, machine, 21, Some(result), Some(reply_at), None)?
+                        .received()?;
+                    frame(worker, file, 21, Some(result), Some(returned), None)?;
+                    frame(worker, inspector, index, Some(part), Some(returned), None)?;
                 }
                 parts[i] = Some((part, reply_at));
                 readings[i] = None;
@@ -263,13 +266,20 @@ pub(super) fn verify(
                 {
                     return Err("wrong or repeated inspected part".into());
                 }
-                let submitted =
-                    frame(inspector, worker, index, args, None, Some(call.emitted))?.received()?;
+                let submitted = frame(
+                    inspector,
+                    worker,
+                    index,
+                    Some(args),
+                    None,
+                    Some(call.emitted),
+                )?
+                .received()?;
                 let presented = frame(
                     worker,
                     bench,
                     index,
-                    args,
+                    Some(args),
                     Some(submitted),
                     Some(call.emitted),
                 )?
@@ -278,27 +288,28 @@ pub(super) fn verify(
                     gauge,
                     readout,
                     index,
-                    args,
+                    Some(args),
                     Some(presented),
                     Some(call.emitted),
                 )?;
-                let actual = frame(readout, gauge, 34, result, Some(reply_at), None)?.received()?;
-                frame(gauge, inspector, 34, result, Some(actual), None)?;
+                let actual =
+                    frame(readout, gauge, 34, Some(result), Some(reply_at), None)?.received()?;
+                frame(gauge, inspector, 34, Some(result), Some(actual), None)?;
                 let measured =
-                    frame(bench, worker, index, result, Some(actual), None)?.received()?;
+                    frame(bench, worker, index, Some(result), Some(actual), None)?.received()?;
                 let approved = result["success"].as_bool().ok_or("missing gauge verdict")?;
+                if approved {
+                    frame(worker, file, 36, Some(result), Some(measured), None)?;
+                }
                 let delivered = frame(
                     worker,
                     dispatcher,
-                    if approved { 25 } else { 26 },
-                    result,
+                    26,
+                    (!approved).then_some(result),
                     Some(measured),
                     None,
                 )?
                 .received()?;
-                if approved {
-                    frame(worker, file, 36, result, Some(measured), None)?;
-                }
                 readings[i] = Some((result, delivered));
             }
             "dispatch_rework" => {
@@ -318,13 +329,20 @@ pub(super) fn verify(
                     dispatcher,
                     worker,
                     27,
-                    args,
+                    Some(args),
                     Some(delivered),
                     Some(call.emitted),
                 )?;
-                frame(worker, dispatcher, index, result, Some(reply_at), None)?;
+                frame(
+                    worker,
+                    dispatcher,
+                    index,
+                    Some(result),
+                    Some(reply_at),
+                    None,
+                )?;
                 let delivered =
-                    frame(worker, file, 36, result, Some(reply_at), None)?.received()?;
+                    frame(worker, file, 36, Some(result), Some(reply_at), None)?.received()?;
                 orders[i] = Some((result, delivered));
             }
             _ => unreachable!(),

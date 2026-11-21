@@ -1,0 +1,296 @@
+{
+  "task": "11M",
+  "condition": "No injected inspection failure (depth 0). Unscored live pilot. The six-job rework cycle remains incomplete.",
+  "archive": "output/verification/11m-dispatch.UDOTMzCb",
+  "runtime_source_git_baselines": {
+    "hibana": "331afd6e4b6315e103ce9cb9311f9d9140fc0e57",
+    "hibana-epf": "f966c2817c68994315033fa65fbf72390fa107b4",
+    "hibana-runtime": "4e29a837eaf72247a6803ffbbff0c257519df0a5",
+    "hibana-wasip1-runtime": "94ed8a88026f3f1c58e8b35e3766d8b9a83cb334",
+    "source": "bd504107635b5e1ba1b01d55a15c93c8a6a204c6"
+  },
+  "binaries_sha256": {
+    "runner": "faa1e236371b219b5e92de0d57781f18b6140d0fc6de42528acfa421bfd44bd3",
+    "runtime": "8e9e47ddbef4987b58824b98ecaa49f88f5713a6ad262e6d271853f5b93e1338",
+    "wash.wasm": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca"
+  },
+  "source_manifest_sha256": "c15ee3ebb4eeafc7bc166010647d3adc812eef922c9206b889d51146df3f3a12",
+  "runtime_source_manifest_sha256": "5c5945d6df3cf58a963bc3b6395a24295ac1e771c1247cbc7a7dc24a06cadb36",
+  "projection_sha256": "f118d23ae32f3a1cabc2303b03759e6926deeba2488f36af58025ab4672535c1",
+  "live": {
+    "model": "gpt-6-luna",
+    "effort": "xhigh",
+    "participants": [
+      {
+        "participant": "DISPATCHER",
+        "tool_calls": 10,
+        "inclusive_tokens": 274725
+      },
+      {
+        "participant": "INSPECTOR",
+        "tool_calls": 15,
+        "inclusive_tokens": 356054
+      },
+      {
+        "participant": "WORKER_A",
+        "tool_calls": 12,
+        "inclusive_tokens": 278281
+      },
+      {
+        "participant": "WORKER_B",
+        "tool_calls": 11,
+        "inclusive_tokens": 252089
+      },
+      {
+        "participant": "WORKER_C",
+        "tool_calls": 18,
+        "inclusive_tokens": 422204
+      }
+    ],
+    "elapsed_seconds": 168.79667225,
+    "inclusive_tokens": 1583353,
+    "runtime_exit_code": 0,
+    "protocol_status": "complete",
+    "simulator": "common-environment-v33",
+    "score_complete": true,
+    "violations": 0,
+    "effects": {
+      "do_job": 6,
+      "inspect_quality": 6
+    },
+    "epf_records": 8295,
+    "audit": "passed",
+    "evidence_sha256": {
+      "live-audit.json": "1fd045084a8a2553239ca186f099b5342665eade5d859483236f4e191de03039",
+      "live-0/result.json": "01b35b504da97ca25cf99b448cd8e506b0fdd726b3bc7dd94b33d4b11cf801de",
+      "live-0/events.jsonl": "d49958ebff881080adf1c3715ef6ddb3f2f7b6dd5c1fbdf08d2041a6b8e7d97d",
+      "live-0/versions.json": "1f517bf6aed1b2edc0891c3cbb875a38b9d854644fd8ac9347a0c318da4645a8",
+      "live-0/guest-outcome.json": "7bc0794bc01012c18ce0db27220d2f7ef23599cf4fd67d0b3245f0b925580eb8",
+      "live-0/model-outcomes.json": "5c755d4336d415047bf27cfd811ccb3fab3348ebaaf07fc58c2b423776235d00",
+      "live-0/build-receipt.json": "dc9616c2f67ee2da34aff6fb6d96d85194f8d61bb937e254a9c70fdd1ae1144b",
+      "live-0/source-manifest.json": "c15ee3ebb4eeafc7bc166010647d3adc812eef922c9206b889d51146df3f3a12"
+    }
+  },
+  "scripted_wasm": {
+    "cases": 30,
+    "business_complete": 6,
+    "business_incomplete_with_open_orders": 24,
+    "epf_records": 201540,
+    "do_job": 180,
+    "inspect_quality": 180,
+    "dispatch_rework": 48,
+    "trials": [
+      {
+        "case": "0-contended",
+        "simulator_complete": false,
+        "dispatched_orders": 1,
+        "epf_records": 6453,
+        "checked_sha256": "9de0838ec1f60556850da5654135dcb0e130d547f3be79ca4956b700fe475042"
+      },
+      {
+        "case": "0-dispatch-during-work",
+        "simulator_complete": false,
+        "dispatched_orders": 1,
+        "epf_records": 6475,
+        "checked_sha256": "07be78fe414671972c699b0324cfbb80d475c209f170273855fd8e62e887af7b"
+      },
+      {
+        "case": "0-other-station-rejections",
+        "simulator_complete": false,
+        "dispatched_orders": 3,
+        "epf_records": 7349,
+        "checked_sha256": "d633d1bd8ae1c3c5046ec030b0b34b5202ed4aa99ed25e6cf9c3d142deb618d2"
+      },
+      {
+        "case": "0-serial",
+        "simulator_complete": true,
+        "dispatched_orders": 0,
+        "epf_records": 6489,
+        "checked_sha256": "8d84a6852febe7f27d7bff2da7c77b8b8807d28f37acce69522834fa2308af84"
+      },
+      {
+        "case": "0-three-rejections",
+        "simulator_complete": false,
+        "dispatched_orders": 3,
+        "epf_records": 7085,
+        "checked_sha256": "8727d9409421f3e10d345faca20b37d2b231b3c96a47c9106d74b05134257d49"
+      },
+      {
+        "case": "1-contended",
+        "simulator_complete": false,
+        "dispatched_orders": 1,
+        "epf_records": 6475,
+        "checked_sha256": "882fc6d1041c776676c8ec94c3d91604b02a2700dc43a481d7604033270aacfd"
+      },
+      {
+        "case": "1-dispatch-during-work",
+        "simulator_complete": false,
+        "dispatched_orders": 1,
+        "epf_records": 6475,
+        "checked_sha256": "bef5fb8fe5d63476e15a06d5f03e551fdabcdd9036542e369bd5de967b25e877"
+      },
+      {
+        "case": "1-other-station-rejections",
+        "simulator_complete": false,
+        "dispatched_orders": 3,
+        "epf_records": 7349,
+        "checked_sha256": "edaa0c4b7ede447b44a09c402f093c54c0720e1c5e69624487aff15792c64b2c"
+      },
+      {
+        "case": "1-serial",
+        "simulator_complete": true,
+        "dispatched_orders": 0,
+        "epf_records": 6159,
+        "checked_sha256": "719af299ad4a5959538461a7944a994259ee531625bebd875d8facf4ab5cb11e"
+      },
+      {
+        "case": "1-three-rejections",
+        "simulator_complete": false,
+        "dispatched_orders": 3,
+        "epf_records": 7085,
+        "checked_sha256": "3760d7a3478cd84a7ecf1970b7bf5de93c2a2c149cf0fa4c43d999678a82968f"
+      },
+      {
+        "case": "2-contended",
+        "simulator_complete": false,
+        "dispatched_orders": 1,
+        "epf_records": 6477,
+        "checked_sha256": "27c8ec196effd1337012aadf731b822590196a15a6de3740dfdfae8e6713713a"
+      },
+      {
+        "case": "2-dispatch-during-work",
+        "simulator_complete": false,
+        "dispatched_orders": 1,
+        "epf_records": 6455,
+        "checked_sha256": "6df84c4e7b0db916e19db3732feb4fa0ea54624370feaa34a2bd3cd7aa4e2b41"
+      },
+      {
+        "case": "2-other-station-rejections",
+        "simulator_complete": false,
+        "dispatched_orders": 3,
+        "epf_records": 7351,
+        "checked_sha256": "2956d48c5343c4c439d038bb15d2b89afad4ae368fe988043f77c3735168a5f5"
+      },
+      {
+        "case": "2-serial",
+        "simulator_complete": true,
+        "dispatched_orders": 0,
+        "epf_records": 6161,
+        "checked_sha256": "20d863477f9966988bd70cb9ece22e24ffadb0baed8ea080db899ff2b895de4d"
+      },
+      {
+        "case": "2-three-rejections",
+        "simulator_complete": false,
+        "dispatched_orders": 3,
+        "epf_records": 7087,
+        "checked_sha256": "42d79ecd53af98033d86530cc2940a7d8d535bb0499291a144898e6c1746ebf2"
+      },
+      {
+        "case": "3-contended",
+        "simulator_complete": false,
+        "dispatched_orders": 1,
+        "epf_records": 6477,
+        "checked_sha256": "dfb69fd85c414a5fa0d067fbe79c5e82739ab36faaec16d123cbaccf89a02e8f"
+      },
+      {
+        "case": "3-dispatch-during-work",
+        "simulator_complete": false,
+        "dispatched_orders": 1,
+        "epf_records": 6455,
+        "checked_sha256": "12cb3ec743c8e8ebd45ff410d961ffb312c2ff3a9f4bf285dd5c91e3c124243d"
+      },
+      {
+        "case": "3-other-station-rejections",
+        "simulator_complete": false,
+        "dispatched_orders": 3,
+        "epf_records": 7351,
+        "checked_sha256": "44c20ecee334814a1265546743a093122f7d0d01ada6169b9d37332bbedee986"
+      },
+      {
+        "case": "3-serial",
+        "simulator_complete": true,
+        "dispatched_orders": 0,
+        "epf_records": 6161,
+        "checked_sha256": "2a5ab7b189b50fe1390311d972ac48e1d5b494287ddc9a8b148545427b0a523a"
+      },
+      {
+        "case": "3-three-rejections",
+        "simulator_complete": false,
+        "dispatched_orders": 3,
+        "epf_records": 7087,
+        "checked_sha256": "bfed5d142a4ad75fc14c4493d9c0ffc104649f666474c4a4cb115e36685526de"
+      },
+      {
+        "case": "4-contended",
+        "simulator_complete": false,
+        "dispatched_orders": 1,
+        "epf_records": 6477,
+        "checked_sha256": "49d5e1356b161de3abef032e5a10738bbd98336b30a319125a6390c0c924f085"
+      },
+      {
+        "case": "4-dispatch-during-work",
+        "simulator_complete": false,
+        "dispatched_orders": 1,
+        "epf_records": 6477,
+        "checked_sha256": "0dccf4dcba0eb0905638411bd80d8eda44d999d0c8479b1f5ff3791b424eff37"
+      },
+      {
+        "case": "4-other-station-rejections",
+        "simulator_complete": false,
+        "dispatched_orders": 3,
+        "epf_records": 7351,
+        "checked_sha256": "4b55f4f40095d9805778e056c24cf97db1a83be2bd55d760bdbf861b8261cf71"
+      },
+      {
+        "case": "4-serial",
+        "simulator_complete": true,
+        "dispatched_orders": 0,
+        "epf_records": 6161,
+        "checked_sha256": "a03ded4cf609d60455be0cfa13072f6b548bee91f2d88c06ac73f889785a79c4"
+      },
+      {
+        "case": "4-three-rejections",
+        "simulator_complete": false,
+        "dispatched_orders": 3,
+        "epf_records": 7087,
+        "checked_sha256": "ad12622174d642f37201eac3794698cdf8e8e09d55a11b904d05a0115730adb2"
+      },
+      {
+        "case": "5-contended",
+        "simulator_complete": false,
+        "dispatched_orders": 1,
+        "epf_records": 6455,
+        "checked_sha256": "c9289c0663e077e7870f01059ce8cad7000b6d138a9fc67f8b149809bb6fd388"
+      },
+      {
+        "case": "5-dispatch-during-work",
+        "simulator_complete": false,
+        "dispatched_orders": 1,
+        "epf_records": 6477,
+        "checked_sha256": "0f87831bc12a2ed3d5b8b0af2664ce057b8e9f5f0c4a19c594ef2baca1489202"
+      },
+      {
+        "case": "5-other-station-rejections",
+        "simulator_complete": false,
+        "dispatched_orders": 3,
+        "epf_records": 7351,
+        "checked_sha256": "65d9a8f181526ce1bd7a11dbab74814482e5ca44a504cbc1019c282bded7c394"
+      },
+      {
+        "case": "5-serial",
+        "simulator_complete": true,
+        "dispatched_orders": 0,
+        "epf_records": 6161,
+        "checked_sha256": "3958f577c689d22dc2c0436f475d3159b0bff6cb03427c88058a83797b102823"
+      },
+      {
+        "case": "5-three-rejections",
+        "simulator_complete": false,
+        "dispatched_orders": 3,
+        "epf_records": 7087,
+        "checked_sha256": "c8e5a8c14de6ac544c4d309726ae3bd990a42adba1ff440fa222cc4952089a48"
+      }
+    ]
+  },
+  "scored_comparison_runs": 0
+}

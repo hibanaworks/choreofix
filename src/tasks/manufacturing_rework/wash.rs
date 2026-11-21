@@ -88,25 +88,19 @@ const OTHER_JOB: ChoreoFsObject<'static> = request_reply(b"service/do_job_at_oth
 const OTHER_UPDATE: ChoreoFsObject = readable(b"service/other_job_update", 7);
 const WORKER_FILES: [ChoreoFsObject<'static>; 4] =
     [JOB, WORKSTATION_FILES[1], OTHER_JOB, OTHER_UPDATE];
-const ORDERS: [ChoreoFsObject<'static>; 18] = [
-    readable(b"service/approved/alpha_job_a", 4),
-    readable(b"service/approved/beta_job_b", 5),
-    readable(b"service/approved/gamma_job_c", 6),
-    readable(b"service/failed/alpha_job_a", 7),
-    readable(b"service/failed/beta_job_b", 8),
-    readable(b"service/failed/gamma_job_c", 9),
+const ORDERS: [ChoreoFsObject<'static>; 12] = [
+    readable(b"service/failed/alpha_job_a", 4),
+    readable(b"service/failed/beta_job_b", 5),
+    readable(b"service/failed/gamma_job_c", 6),
+    readable(b"service/failed/beta_job_a", 7),
+    readable(b"service/failed/gamma_job_b", 8),
+    readable(b"service/failed/alpha_job_c", 9),
     request_reply(b"service/dispatch_rework/alpha_job_a", 10),
     request_reply(b"service/dispatch_rework/beta_job_b", 11),
     request_reply(b"service/dispatch_rework/gamma_job_c", 12),
-    readable(b"service/approved/beta_job_a", 13),
-    readable(b"service/approved/gamma_job_b", 14),
-    readable(b"service/approved/alpha_job_c", 15),
-    readable(b"service/failed/beta_job_a", 16),
-    readable(b"service/failed/gamma_job_b", 17),
-    readable(b"service/failed/alpha_job_c", 18),
-    request_reply(b"service/dispatch_rework/beta_job_a", 19),
-    request_reply(b"service/dispatch_rework/gamma_job_b", 20),
-    request_reply(b"service/dispatch_rework/alpha_job_c", 21),
+    request_reply(b"service/dispatch_rework/beta_job_a", 13),
+    request_reply(b"service/dispatch_rework/gamma_job_b", 14),
+    request_reply(b"service/dispatch_rework/alpha_job_c", 15),
 ];
 
 fn shell_io<const VM: u8, const STATION: u8, const FILES: u8, const TERM: u8>() -> impl Projectable
@@ -474,41 +468,41 @@ pub async fn run(path: &str) -> ShellResult<()> {
         async {
             let endpoint = dispatcher_vm.recv::<Loan<DISPATCHER>>().await?;
             let [
-                mut approved_a,
-                mut approved_b,
-                mut approved_c,
                 mut failed_a,
                 mut failed_b,
                 mut failed_c,
+                mut failed_ba,
+                mut failed_gb,
+                mut failed_ac,
             ] = [(); 6].map(|_| vec![0; GUEST_MEMORY_BYTES]);
             let [
                 mut request_a,
                 mut request_b,
                 mut request_c,
+                mut request_ba,
+                mut request_gb,
+                mut request_ac,
+            ] = [(); 6].map(|_| vec![0; GUEST_MEMORY_BYTES]);
+            let [
                 mut order_a,
                 mut order_b,
                 mut order_c,
+                mut order_ba,
+                mut order_gb,
+                mut order_ac,
             ] = [(); 6].map(|_| vec![0; GUEST_MEMORY_BYTES]);
-            let [mut approved_ba, mut approved_gb, mut approved_ac] =
-                [(); 3].map(|_| vec![0; GUEST_MEMORY_BYTES]);
-            let [mut failed_ba, mut failed_gb, mut failed_ac] =
-                [(); 3].map(|_| vec![0; GUEST_MEMORY_BYTES]);
-            let [mut request_ba, mut request_gb, mut request_ac] =
-                [(); 3].map(|_| vec![0; GUEST_MEMORY_BYTES]);
-            let [mut order_ba, mut order_gb, mut order_ac] =
-                [(); 3].map(|_| vec![0; GUEST_MEMORY_BYTES]);
             let orders = ChoreoFsFile::new(ORDERS[0], endpoint)
-                .read_as::<Approved<WORKER_A>>(&mut approved_a)
+                .read_as::<FailureStream<WORKER_A>>(&mut failed_a)
                 .file(ORDERS[1])?
-                .read_as::<Approved<WORKER_B>>(&mut approved_b)
+                .read_as::<FailureStream<WORKER_B>>(&mut failed_b)
                 .file(ORDERS[2])?
-                .read_as::<Approved<WORKER_C>>(&mut approved_c)
+                .read_as::<FailureStream<WORKER_C>>(&mut failed_c)
                 .file(ORDERS[3])?
-                .read_as::<Failed<WORKER_A>>(&mut failed_a)
+                .read_as::<FailureStream<BETA_JOB_A>>(&mut failed_ba)
                 .file(ORDERS[4])?
-                .read_as::<Failed<WORKER_B>>(&mut failed_b)
+                .read_as::<FailureStream<GAMMA_JOB_B>>(&mut failed_gb)
                 .file(ORDERS[5])?
-                .read_as::<Failed<WORKER_C>>(&mut failed_c)
+                .read_as::<FailureStream<ALPHA_JOB_C>>(&mut failed_ac)
                 .file(ORDERS[6])?
                 .write_as::<DispatchRequest<WORKER_A>>(&mut request_a)
                 .read_as::<WorkOrder<WORKER_A>>(&mut order_a)
@@ -519,24 +513,12 @@ pub async fn run(path: &str) -> ShellResult<()> {
                 .write_as::<DispatchRequest<WORKER_C>>(&mut request_c)
                 .read_as::<WorkOrder<WORKER_C>>(&mut order_c)
                 .file(ORDERS[9])?
-                .read_as::<Approved<BETA_JOB_A>>(&mut approved_ba)
-                .file(ORDERS[10])?
-                .read_as::<Approved<GAMMA_JOB_B>>(&mut approved_gb)
-                .file(ORDERS[11])?
-                .read_as::<Approved<ALPHA_JOB_C>>(&mut approved_ac)
-                .file(ORDERS[12])?
-                .read_as::<Failed<BETA_JOB_A>>(&mut failed_ba)
-                .file(ORDERS[13])?
-                .read_as::<Failed<GAMMA_JOB_B>>(&mut failed_gb)
-                .file(ORDERS[14])?
-                .read_as::<Failed<ALPHA_JOB_C>>(&mut failed_ac)
-                .file(ORDERS[15])?
                 .write_as::<DispatchRequest<BETA_JOB_A>>(&mut request_ba)
                 .read_as::<WorkOrder<BETA_JOB_A>>(&mut order_ba)
-                .file(ORDERS[16])?
+                .file(ORDERS[10])?
                 .write_as::<DispatchRequest<GAMMA_JOB_B>>(&mut request_gb)
                 .read_as::<WorkOrder<GAMMA_JOB_B>>(&mut order_gb)
-                .file(ORDERS[17])?
+                .file(ORDERS[11])?
                 .write_as::<DispatchRequest<ALPHA_JOB_C>>(&mut request_ac)
                 .read_as::<WorkOrder<ALPHA_JOB_C>>(&mut order_ac);
             let files = ChoreoFsFiles::new(dispatcher_vm).file(orders)?;

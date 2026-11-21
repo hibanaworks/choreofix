@@ -2452,17 +2452,18 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                         let mut orders = Vec::new();
                         let disposition = async |agent: &str, job: &str, work_file: &str, inspection: &Value| -> Result<Option<Value>> {
                             let accepted = inspection["success"].as_bool().ok_or("inspection verdict")?;
-                            let verdict_dir = if accepted { "approved" } else { "failed" };
-                            let notice = shell_json_result(&guest.command("DISPATCHER", format!("cat /service/{verdict_dir}/{job}")).await?)?;
-                            assert_eq!(&notice, inspection);
                             let args = json!({"job_id":job,"reason":format!("inspect {} again",inspection["data"]["input_part"]["artifact_id"].as_str().ok_or("part ID")?)});
                             let path = format!("/service/dispatch_rework/{job}");
                             let nonblocking = format!("printf '%s' '{args}' | dd of={path} oflag=nonblock");
+                            let notice = guest.command("DISPATCHER", format!("cat /service/failed/{job}")).await?;
                             if accepted {
+                                assert_eq!(notice["stdout"], "wash> ", "approved job must close its failure stream: {notice}");
                                 let refused = guest.command("DISPATCHER", nonblocking).await?;
                                 assert!(refused["stdout"].as_str().is_some_and(|s|s.contains("Permission denied")), "{refused}");
                                 return Ok(None);
                             }
+                            let notice = shell_json_result(&notice)?;
+                            assert_eq!(&notice, inspection);
                             let job_args = json!({"job_id":job});
                             let premature = guest.command(agent, format!("printf '%s' '{job_args}' | dd of={work_file} oflag=nonblock")).await?;
                             assert!(premature["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{premature}");
@@ -3016,14 +3017,21 @@ async fn wash_manufactures_all_six_jobs_on_their_shared_workstations() -> Result
                 };
                 let worker = &roles[worker];
                 let dispatcher = &roles["DISPATCHER"];
-                let notice = wire(if approved { 25 } else { 26 }, worker, dispatcher)?;
+                let notice = wire(26, worker, dispatcher)?;
                 assert_eq!(notice["receive_commit"]["actor"], roles["DISPATCHER_VM"]);
-                assert_eq!(json_frame(&rows, notice)?.1, *result);
                 let (_, update) = json_frame(&rows, wire(36, worker, &roles[file])?)?;
                 if approved {
                     assert_eq!(update, *result);
+                    assert!(rows.iter().any(|row| {
+                        let message = &row["message"];
+                        message["type"] == "protocol_frame"
+                            && message["action"] == "send"
+                            && message["frame_id"] == notice["frame_id"]
+                            && message["payload"] == json!([])
+                    }));
                     continue;
                 }
+                assert_eq!(json_frame(&rows, notice)?.1, *result);
                 let request = wire(27, dispatcher, worker)?;
                 let reply = wire(job_id, worker, dispatcher)?;
                 let rpc = rows

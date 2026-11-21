@@ -999,25 +999,21 @@ async fn all_arrival_orders_preserve_two_tool_capacity_and_streaming() -> ShellR
                     async {
                         for job in order {
                             let notice = match job {
-                                0 => dispatcher.recv::<Approved<WORKER_A>>().await?,
-                                1 => dispatcher.recv::<Approved<WORKER_B>>().await?,
-                                2 => dispatcher.recv::<Approved<WORKER_C>>().await?,
+                                0 => dispatcher.recv::<FailureStream<WORKER_A>>().await?,
+                                1 => dispatcher.recv::<FailureStream<WORKER_B>>().await?,
+                                2 => dispatcher.recv::<FailureStream<WORKER_C>>().await?,
                                 _ => unreachable!(),
                             };
-                            let notice = data::decode(notice)?;
-                            assert_eq!(notice["data"]["job_id"], data::JOBS[job]);
-                            assert_eq!(notice["success"], true);
+                            assert!(notice.is_empty());
                         }
                         for job in [ALPHA_JOB_C,BETA_JOB_A,GAMMA_JOB_B] {
                             let notice=match job {
-                                ALPHA_JOB_C => dispatcher.recv::<Approved<ALPHA_JOB_C>>().await?,
-                                BETA_JOB_A => dispatcher.recv::<Approved<BETA_JOB_A>>().await?,
-                                GAMMA_JOB_B => dispatcher.recv::<Approved<GAMMA_JOB_B>>().await?,
+                                ALPHA_JOB_C => dispatcher.recv::<FailureStream<ALPHA_JOB_C>>().await?,
+                                BETA_JOB_A => dispatcher.recv::<FailureStream<BETA_JOB_A>>().await?,
+                                GAMMA_JOB_B => dispatcher.recv::<FailureStream<GAMMA_JOB_B>>().await?,
                                 _=>unreachable!(),
                             };
-                            let verdict=data::decode(notice)?;
-                            assert_eq!(verdict["data"]["job_id"],data::JOBS[job as usize]);
-                            assert_eq!(verdict["success"],true);
+                            assert!(notice.is_empty());
                         }
                     };
                     async {

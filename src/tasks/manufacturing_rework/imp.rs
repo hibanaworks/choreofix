@@ -160,6 +160,35 @@ impl<const JOB: u8, const APPROVED: bool> WirePayload for InspectionReply<'_, JO
         input.as_bytes()
     }
 }
+/// A job's failure stream carries the measured rejection, or EOF after approval.
+pub struct FailureItem<'a, const JOB: u8>(&'a [u8]);
+impl<'a, const JOB: u8> FailureItem<'a, JOB> {
+    pub fn closed(_: InspectionReply<JOB, true>) -> Self {
+        Self(&[])
+    }
+    pub fn rejected(reply: InspectionReply<'a, JOB, false>) -> Self {
+        Self(reply.0)
+    }
+}
+impl<const JOB: u8> WireEncode for FailureItem<'_, JOB> {
+    fn encode_into(&self, output: &mut [u8]) -> Result<usize, CodecError> {
+        self.0.encode_into(output)
+    }
+}
+impl<const JOB: u8> WirePayload for FailureItem<'_, JOB> {
+    const SCHEMA_ID: u32 = 0xac11_4000 | JOB as u32;
+    type Decoded<'a> = &'a [u8];
+    fn validate_payload(input: Payload<'_>) -> Result<(), CodecError> {
+        if input.as_bytes().is_empty() {
+            Ok(())
+        } else {
+            InspectionReply::<JOB, false>::validate_payload(input)
+        }
+    }
+    fn decode_validated_payload<'a>(input: ReceivedPayload<'a, Self>) -> &'a [u8] {
+        input.as_bytes()
+    }
+}
 pub fn submission<const JOB: u8>(arguments: Value) -> Value {
     json!({"agent":AGENTS[usize::from(JOB) % AGENTS.len()], "arguments":arguments})
 }

@@ -74,12 +74,12 @@ pub async fn run<const WORKER: u8, const MACHINE: u8>(
     }
     .await?;
     if result["success"] == true {
-        work.send::<Approved<WORKER>>(&imp::InspectionReply::from_bytes(&bytes)?)
-            .await?;
         work.send::<JobUpdate>(&bytes.as_slice()).await?;
+        let closed = imp::FailureItem::closed(imp::InspectionReply::from_bytes(&bytes)?);
+        work.send::<FailureStream<WORKER>>(&closed).await?;
     } else {
-        work.send::<Failed<WORKER>>(&imp::InspectionReply::from_bytes(&bytes)?)
-            .await?;
+        let failure = imp::FailureItem::rejected(imp::InspectionReply::from_bytes(&bytes)?);
+        work.send::<FailureStream<WORKER>>(&failure).await?;
         let request = work.recv::<DispatchRequest<WORKER>>().await?;
         let arguments = imp::decode(request.as_bytes())?;
         imp::rework_input(&result, &arguments)?;
@@ -168,14 +168,12 @@ pub async fn station_job<const SERVICE: u8, const MACHINE: u8, const JOB: u8>(
     imp::inspected(material, &arguments, &verdict)?;
     let bytes = imp::encode(&verdict)?;
     if verdict["success"] == true {
-        endpoint
-            .send::<Approved<JOB>>(&imp::InspectionReply::from_bytes(&bytes)?)
-            .await?;
         endpoint.send::<JobUpdate>(&bytes.as_slice()).await?;
+        let closed = imp::FailureItem::closed(imp::InspectionReply::from_bytes(&bytes)?);
+        endpoint.send::<FailureStream<JOB>>(&closed).await?;
     } else {
-        endpoint
-            .send::<Failed<JOB>>(&imp::InspectionReply::from_bytes(&bytes)?)
-            .await?;
+        let failure = imp::FailureItem::rejected(imp::InspectionReply::from_bytes(&bytes)?);
+        endpoint.send::<FailureStream<JOB>>(&failure).await?;
         let request = endpoint.recv::<DispatchRequest<JOB>>().await?;
         let arguments = imp::decode(request.as_bytes())?;
         imp::rework_input(&verdict, &arguments)?;
