@@ -9,6 +9,27 @@
     "hibana-wasip1-runtime": "94ed8a88026f3f1c58e8b35e3766d8b9a83cb334",
     "source": "8c59dc73e1deb3466feeb0ca032a9814466035b1"
   },
+  "live_depth_two_prospective_repeat": {
+    "directory": "output/verification/11m-depth2-prospective-20261122/live",
+    "assignment_sha256": "df9ffccfd1e01e71166cd50cc3a5c770447103cd9fb95826ee8df9808181c6e0",
+    "assigned_trials": 1,
+    "participants": 5,
+    "elapsed_seconds": 1461.211352833,
+    "inclusive_tokens": 2856260,
+    "events_sha256": "e06afc24d975ef26ad10325db5a5ee5616f8b966abf8db967b94f59af64d2cac",
+    "result_sha256": "d43f32e98a5923204bf849037c3acf4d84419a7e79d9baf5253f8c0fab0dd7b4",
+    "runtime_binary_sha256": "2e1fd419eaa7613ccbb2514f0f7020c7a97a93012fd8b95a580c0de11cbaf309",
+    "verifier_sha256": "cc53c129f0805cad0fcd6a0d487b61a6c8e48e6d3f496d251aa1896e9031bba2",
+    "compiled_projection_sha256": "aa6b32173c19454aa7d5f0b781c98f1cdffac2c9a836074a38cfbb0a2f79d8a8",
+    "observed_simulator_effects": {"do_job": 4, "inspect_quality": 1, "dispatch_rework": 1},
+    "simulator_complete": false,
+    "simulator_violations": 0,
+    "terminal_producer_checkpoints": 0,
+    "run_error": "turn completed with a pending tool request",
+    "audit_exit": 1,
+    "audit_error": "failed or altered case result",
+    "scored": false
+  },
   "live_depth_two": {
     "directory": "output/verification/11m-source-20261122/live-depth2",
     "participants": 5,
