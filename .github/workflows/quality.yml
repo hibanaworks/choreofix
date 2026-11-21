@@ -31,7 +31,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: hibanaworks/hibana
-          ref: 331afd6e4b6315e103ce9cb9311f9d9140fc0e57
+          ref: 27c7a8f4ad597843761013f6ace8d0a7fcdbe9b1
           path: hibana
       - uses: ./hibana/.github/actions/checkout-runtime
       - name: Check out the recorded WASI runtime
