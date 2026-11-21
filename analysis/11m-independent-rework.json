@@ -1,0 +1,549 @@
+{
+  "task": "11M",
+  "live_qualified": false,
+  "model_calls": 0,
+  "scored_comparisons": 0,
+  "archive": "output/verification/11m-independent-rework.EMFjec",
+  "parent": "6215c8c91e6b888f9c6ff65d2b55b0bc5770bfae",
+  "binary_sha256": {
+    "hibana-wash.wasm": "18f7b4135842d8e85d073cb640691e1d8a815fb0ba149015fe8b2ed290634fca",
+    "manufacturing-wasi": "1f7efe0f71e8d75537fa21afef46d795df8fb816c95419de2d05e2d87ef7e7ae",
+    "native": "78c45bd92d002224c2f1e940dd1c27715a44aab0ef20f6e7acf8c094d0c53c1f",
+    "runner": "fbdaf8be80a09d2730b94f3cc1df2942707bd1d11c0d796a7ff98b3d865c2644"
+  },
+  "build_receipt_sha256": "9dad183d55a8a5e87ac90e31f75167239707ba90d94b57f1a9a7951970f2635e",
+  "build_source_sha256": "bbe9d9bbcfc54bdce33a35888331507c899a1e44c0ad54ff9bf6638f48dee2ae",
+  "tested_files_sha256": {
+    "src/tasks/manufacturing_rework/global.rs": "b0e6ee2e4d60e22ca61bc752465f2a48b2ce78bb90e59d3c473aafd0d668a82e",
+    "proofs/endpoint-handoff/tests/tool_cabinet.rs": "e69516fc04dd2f2b250bb079fffe790d03cbe10032c08b57d75493d73c8fa3d8",
+    "tools/runner/src/oracle/tests.rs": "c42768a275e88fe18dd8fe3ec84e03ece490ca6537622926b520a566df59342f",
+    "benchmark/tests/test_manufacturing_rework.py": "f5b1fbce7478e8d896216e673540c98bce4d7a2b902e990fb4d73917bca62073"
+  },
+  "wasm": {
+    "scope": "Five scripted wash guests on the common simulator. Three tool jobs, inspection and order delivery. No replacement part in these runs.",
+    "cases": [
+      {
+        "case": "0-contended",
+        "epf_records": 4026,
+        "effects": 7,
+        "overlap": null,
+        "checked_sha256": "ef7c4bfc6beb2c0a0ac5c74a39c9781d53d27c8b6a3321d403bdba36fafbb529",
+        "events_sha256": "97597c2aa052180c59a5c5e101866722da3eb026c3b5e4265cf772fe3b7c8a23",
+        "result_sha256": "94d8e72065acb80cbbcfeb4a329399a54ae27ec4905a95859532844f34125482"
+      },
+      {
+        "case": "0-dispatch-during-work",
+        "epf_records": 3971,
+        "effects": 7,
+        "overlap": {
+          "active_job": "beta_job_b",
+          "dispatch_end_row": 2017,
+          "dispatch_start_row": 1967,
+          "last_job_start_row": 3562,
+          "other_job_end_row": 2399,
+          "other_job_start_row": 1123,
+          "rejected_job": "alpha_job_a",
+          "unsubmitted_job": "gamma_job_c"
+        },
+        "checked_sha256": "95686aa36b4e640d1759a16d12ce3992f906572f30d677e9e123d51002ceb370",
+        "events_sha256": "89445670dfcbaab7fb0ee6b933e126073aec3ac59ad1c7d6cf8b538bedae5276",
+        "result_sha256": "1e71f92b65fc9ee9dab3c4be2c159f5a71fff92831504d09e513c97c21778ca4"
+      },
+      {
+        "case": "0-serial",
+        "epf_records": 3688,
+        "effects": 6,
+        "overlap": null,
+        "checked_sha256": "7032cac0cd1c545ae9a43cae209f3a11101a72ed42c3f8db4440ecc827903735",
+        "events_sha256": "2bd47160ccf1e6fd2052ced2f579d46132fc07bb134f496bb0154ffdf142ca10",
+        "result_sha256": "e57e3a15d0209a7b8a1b6a687e66398ff866326884b23768b7c8cf28a19ce6dc"
+      },
+      {
+        "case": "0-three-rejections",
+        "epf_records": 4592,
+        "effects": 9,
+        "overlap": null,
+        "checked_sha256": "2989a7c581067e4dc9cc2ea9ebc64e03a7c67a8ebb2f14bb9de7bef7da38cd32",
+        "events_sha256": "3bca21d3796b3741595ae1227bab898e2257e9d370a74d4e60985c650873a595",
+        "result_sha256": "2979b27e889cc610b390d4b9613ea0f09fc96e80ad434217d2e3e0b7769229b2"
+      },
+      {
+        "case": "1-contended",
+        "epf_records": 4048,
+        "effects": 7,
+        "overlap": null,
+        "checked_sha256": "82db1c3a95b4a1c90e27c4ddaed79504fe3a289cb2cffafe445e97d47ed99685",
+        "events_sha256": "47f8160e43148e95f2ea2eb36e72760694956fde73d5e5cd2536f3356eed56de",
+        "result_sha256": "aba35d5d8a63e272efe9a25222288ce7542d1281bd776008e6b4c772c8557904"
+      },
+      {
+        "case": "1-dispatch-during-work",
+        "epf_records": 3971,
+        "effects": 7,
+        "overlap": {
+          "active_job": "gamma_job_c",
+          "dispatch_end_row": 2017,
+          "dispatch_start_row": 1967,
+          "last_job_start_row": 3562,
+          "other_job_end_row": 2397,
+          "other_job_start_row": 1123,
+          "rejected_job": "alpha_job_a",
+          "unsubmitted_job": "beta_job_b"
+        },
+        "checked_sha256": "02d8b9f49dec2ba5d6165fa70c0f20b365ac9ad2fa69c38c9aa355f028b270a2",
+        "events_sha256": "4f7197f86d1c524c17b22dbd2a8f97db9b6ebebbde2c9777ab8876a2d8d42d8f",
+        "result_sha256": "a3c39be0f9628906be85bdf4205d61c203f2e590e383a1756c9373508fc410ec"
+      },
+      {
+        "case": "1-serial",
+        "epf_records": 3688,
+        "effects": 6,
+        "overlap": null,
+        "checked_sha256": "4cd80a1199e22fe122481e07472f64982faf5dcb7f6323086463cbb015021f7c",
+        "events_sha256": "e2a8d4e6bcceb9b44555ea2ce3e8cbd24d9b6b0905c59e1dd029c01bf28d8ecd",
+        "result_sha256": "d1b39f1ebf971078971ce9c296256eed616a3a5c1c108c2f8265305a66905803"
+      },
+      {
+        "case": "1-three-rejections",
+        "epf_records": 4592,
+        "effects": 9,
+        "overlap": null,
+        "checked_sha256": "6d74e6a0970c6476ee2b007a7f5d9cc1356f39402d4979424ca9ec4ce24c578e",
+        "events_sha256": "dde67b9c2123e6884f8fafb9f912d17e8174bd677d59d4d759e14aa458d2b35f",
+        "result_sha256": "bae0454588338c22b8c14edd23be6584f53ef78a9c16abc95bf25b1cc41dfd9f"
+      },
+      {
+        "case": "2-contended",
+        "epf_records": 4050,
+        "effects": 7,
+        "overlap": null,
+        "checked_sha256": "5b099285c1761531211769d8f4b810afd9d953460d9752a1f226e377d68c005e",
+        "events_sha256": "5de66a25b26ec864294d4ce188522e9b824b7da1a9fc7db2fb073d6706c827fe",
+        "result_sha256": "bb696d77390700821dc771c78297faf338ea16020ad18d5fc67d825a20de9945"
+      },
+      {
+        "case": "2-dispatch-during-work",
+        "epf_records": 3951,
+        "effects": 7,
+        "overlap": {
+          "active_job": "alpha_job_a",
+          "dispatch_end_row": 2019,
+          "dispatch_start_row": 1969,
+          "last_job_start_row": 3538,
+          "other_job_end_row": 2373,
+          "other_job_start_row": 1125,
+          "rejected_job": "beta_job_b",
+          "unsubmitted_job": "gamma_job_c"
+        },
+        "checked_sha256": "871e67f3a289c9ec3b4f0ca3dd197580bcb5e63dd633403f3d27de46bbf306e7",
+        "events_sha256": "f88b7f83cdb35c881cd57c8ef4d88706deb85fd6c1b11c88314bba838e9febb3",
+        "result_sha256": "6480db94658c8c88d59bb2a8c306e06ed2025d8d0ad8d908bccdbeb810afc86c"
+      },
+      {
+        "case": "2-serial",
+        "epf_records": 3690,
+        "effects": 6,
+        "overlap": null,
+        "checked_sha256": "6a0e8c1a262773cfd04ba923f15c18ad01b5d87a49dbdb797298decd0534d08d",
+        "events_sha256": "3f7bb6bc6f107e46522631f9a2744f4762758f2ecd86c82be7e3f7796cfa528b",
+        "result_sha256": "abfb144617be5d5ce7e8b2ce992884ba21ccd24a22698b7ae3dd768889bc1c62"
+      },
+      {
+        "case": "2-three-rejections",
+        "epf_records": 4594,
+        "effects": 9,
+        "overlap": null,
+        "checked_sha256": "07e9b6403d4cefd4f064186d48650fce925eeb41a9d9547c95407fc4c1d8a69a",
+        "events_sha256": "c5e8199895a2678e6225b124cee87d4325d2295d684724e12f66199bd36f5bc4",
+        "result_sha256": "ab45c24f6de79ead91549974a41183f24559cecf3f0ec248e4e75a6e51ea14de"
+      },
+      {
+        "case": "3-contended",
+        "epf_records": 4050,
+        "effects": 7,
+        "overlap": null,
+        "checked_sha256": "b7de748bf5de9c27d8adcae578d8c49cb36810682d9e8d9997ee1adb368117bf",
+        "events_sha256": "aa9d70a8117c0cd373854371f2e0966556e5038b980fa19749f3a33170a954ae",
+        "result_sha256": "3b3beb02a88977d5220fae0b99eaa129403ab817619f13d58f0d1196821cd1e4"
+      },
+      {
+        "case": "3-dispatch-during-work",
+        "epf_records": 3951,
+        "effects": 7,
+        "overlap": {
+          "active_job": "gamma_job_c",
+          "dispatch_end_row": 2019,
+          "dispatch_start_row": 1969,
+          "last_job_start_row": 3538,
+          "other_job_end_row": 2373,
+          "other_job_start_row": 1125,
+          "rejected_job": "beta_job_b",
+          "unsubmitted_job": "alpha_job_a"
+        },
+        "checked_sha256": "169e040cf5b91dfb0b9e30d58fc186ee4ce3a2cba145472c0c001f5d4a995eb0",
+        "events_sha256": "328930366404fc501d1a9ddc696fdf705bbe0a38c63c8313776eab0d10c99db8",
+        "result_sha256": "f56b5d5e0044443bd78b3285376d3a57bf49e328cea4206e3a3954cf99d70c1b"
+      },
+      {
+        "case": "3-serial",
+        "epf_records": 3690,
+        "effects": 6,
+        "overlap": null,
+        "checked_sha256": "d35e1df7fe83e79aca34dc3238fb79a9a283f8958eea9e5f59980c6c2f9ddc1a",
+        "events_sha256": "c01669d543dfac14a13bee1cdd7ca6c716a4a4c89c29747978aa52fb88523010",
+        "result_sha256": "da957db579421f2468f3c566a08d2ce074abbc69263f2c88a46a0532489023fc"
+      },
+      {
+        "case": "3-three-rejections",
+        "epf_records": 4594,
+        "effects": 9,
+        "overlap": null,
+        "checked_sha256": "e3d3ab498fa2cd279695303b73a6f7c2f5a83bd12518f21bc324dfd4def7929e",
+        "events_sha256": "e051f370f545533bd5ec8f12e6669d3148e4351d82e352a5bf4ae9cdd3724f00",
+        "result_sha256": "1a2b6dc4ca441005cf971321f2329ced724388e21520d4a229d3258db5f8372b"
+      },
+      {
+        "case": "4-contended",
+        "epf_records": 4050,
+        "effects": 7,
+        "overlap": null,
+        "checked_sha256": "0b43bf40e6ef821973f01991725acb8bf1c2befa3cb00a31012f3c1442e66847",
+        "events_sha256": "b3cf9be518442fec472e1b9d4568fe680372f8b2aa8bd930ae29c939e3b02669",
+        "result_sha256": "646aa972f650465212bedee9cba99c44111a891ba5333e79cac7ef691857b420"
+      },
+      {
+        "case": "4-dispatch-during-work",
+        "epf_records": 3973,
+        "effects": 7,
+        "overlap": {
+          "active_job": "alpha_job_a",
+          "dispatch_end_row": 2019,
+          "dispatch_start_row": 1969,
+          "last_job_start_row": 3564,
+          "other_job_end_row": 2399,
+          "other_job_start_row": 1125,
+          "rejected_job": "gamma_job_c",
+          "unsubmitted_job": "beta_job_b"
+        },
+        "checked_sha256": "2a47330fc225ee7391d0b434c8451cce8729d999570ff292da6c5ffac12f2fb3",
+        "events_sha256": "7005c1922dae751545fb6dfe81fa34e7c554f10c6d754d5492757c24c24d04c6",
+        "result_sha256": "03e996494ef1b41e895066c938201735061bb15f7c122739b17eef4f7b737249"
+      },
+      {
+        "case": "4-serial",
+        "epf_records": 3690,
+        "effects": 6,
+        "overlap": null,
+        "checked_sha256": "3e1cb0216aac8ca50de0cbb86f262635b2b4783448fb10d0ca11b1f6f24a28f8",
+        "events_sha256": "2798dd5b2bb840bc005eb3f62f71b30dbcc4164bc9f08e4abd1f9aadc282d411",
+        "result_sha256": "868f9756f67c00b708b028dfc7b842bb9d1dc5eab3ddc580480e49c79c726e38"
+      },
+      {
+        "case": "4-three-rejections",
+        "epf_records": 4594,
+        "effects": 9,
+        "overlap": null,
+        "checked_sha256": "55c192d895cb9882027677b371fbdafd18223deeefcdd8b4cc2fffe4a268a53e",
+        "events_sha256": "6a0d4e484029d1a1c4f8b7708503196903d0ffa4218dcb41cf810883fcc45223",
+        "result_sha256": "69dcc3f3679d1fd689e5458e64dce5402d09f52ea8c305fd660cdbbe33e44015"
+      },
+      {
+        "case": "5-contended",
+        "epf_records": 4028,
+        "effects": 7,
+        "overlap": null,
+        "checked_sha256": "3b128eecabe84647f5ed9b88a1d46b12e96397eb2aec3b316d0e4188e24c5460",
+        "events_sha256": "9571aa498d3d57ee8b866f6c49a610940140fe77af766d43e31d90b9e6b635c8",
+        "result_sha256": "276b494225191b575bcd58fbaaab978071e48c8f6b891d17eecadb290c67058f"
+      },
+      {
+        "case": "5-dispatch-during-work",
+        "epf_records": 3973,
+        "effects": 7,
+        "overlap": {
+          "active_job": "beta_job_b",
+          "dispatch_end_row": 2019,
+          "dispatch_start_row": 1969,
+          "last_job_start_row": 3564,
+          "other_job_end_row": 2399,
+          "other_job_start_row": 1125,
+          "rejected_job": "gamma_job_c",
+          "unsubmitted_job": "alpha_job_a"
+        },
+        "checked_sha256": "34e7b2f8adeb96eda93cd744995c6266d4b48c72966ab6ff81d57d38840b2c4a",
+        "events_sha256": "d40c99721cc0ebb216930190ec5056a692be901e5333394a5378a350b256c8ad",
+        "result_sha256": "768895876b763b317db19400ab8ce745de7d25d15db43212c7853abd08c010e8"
+      },
+      {
+        "case": "5-serial",
+        "epf_records": 3690,
+        "effects": 6,
+        "overlap": null,
+        "checked_sha256": "c5b3888c04b6fd452418fd30690d57b9cb2b63c4ef30516e83acd98755583290",
+        "events_sha256": "a1cee1b7187c6964d9546731e5a7fea70c46d65b59dc5e42791bf35fc0ec1ed0",
+        "result_sha256": "23ceed7e2f9e6458d8020b2abb171470d210ee4da45f5c45562ed011ee243cd8"
+      },
+      {
+        "case": "5-three-rejections",
+        "epf_records": 4594,
+        "effects": 9,
+        "overlap": null,
+        "checked_sha256": "876ae6abb9c81ac13dc4ba6539c1fc4f9d1362001e97246f8d9bd8391c805d25",
+        "events_sha256": "633b703ef89fd113ef424d736169a92d6d2610f9aaf34dfb7f418bc651ebbb1f",
+        "result_sha256": "19439014ebe62407271a2d360efca1cea72fb1fe8cef3c27ce2e87f7658eb74d"
+      }
+    ],
+    "epf_records": 97738,
+    "simulator_effects": 174,
+    "overlapping_dispatches": 6
+  },
+  "native": {
+    "scope": "One job continuation per run. A second worker holds tool 1. Tool-consuming jobs borrow and return tool 0 on every attempt using the same lease fragment as wash. Other jobs run on their job continuation alone. Controlled effects, independent of the wash runs.",
+    "cases": [
+      {
+        "job": "alpha_job_a",
+        "rejections": 0,
+        "tool_requests": 1,
+        "epf_records": 92,
+        "fixture_effects": 2,
+        "sha256": "b32e620fc59b52d85cf27670d52447da83b311c6113fa6b40ddff56737af098a"
+      },
+      {
+        "job": "alpha_job_a",
+        "rejections": 1,
+        "tool_requests": 2,
+        "epf_records": 160,
+        "fixture_effects": 5,
+        "sha256": "de954c691e4c21c3b5a54b3d7703b77dbb88a4e4da7376376896ee75f18dfe99"
+      },
+      {
+        "job": "alpha_job_a",
+        "rejections": 2,
+        "tool_requests": 3,
+        "epf_records": 232,
+        "fixture_effects": 8,
+        "sha256": "007f2546a6191d53a188dde425882861776bffb60c94da4b6efc41ecbdb281a4"
+      },
+      {
+        "job": "alpha_job_a",
+        "rejections": 3,
+        "tool_requests": 4,
+        "epf_records": 304,
+        "fixture_effects": 11,
+        "sha256": "10336ac5e0ffb7814304ed995810379960ce0f7c99227d064c0eb2a14b787ade"
+      },
+      {
+        "job": "beta_job_b",
+        "rejections": 0,
+        "tool_requests": 1,
+        "epf_records": 92,
+        "fixture_effects": 2,
+        "sha256": "6e3573d4ac39ba0457b16d09e86c044da0a036bef6c5c66bbee3ccca63b0a329"
+      },
+      {
+        "job": "beta_job_b",
+        "rejections": 1,
+        "tool_requests": 2,
+        "epf_records": 160,
+        "fixture_effects": 5,
+        "sha256": "dcf5bdf9dc485ef4457d886644ea360132d34ecb490781acc29d7ba1e2731cd3"
+      },
+      {
+        "job": "beta_job_b",
+        "rejections": 2,
+        "tool_requests": 3,
+        "epf_records": 232,
+        "fixture_effects": 8,
+        "sha256": "c5e8db49e343115c1cc8e28c551b9e909da94010b877cee04a1426bd008b86f4"
+      },
+      {
+        "job": "beta_job_b",
+        "rejections": 3,
+        "tool_requests": 4,
+        "epf_records": 304,
+        "fixture_effects": 11,
+        "sha256": "4f173a049320a811be0878e0ab9c856d101b12a1137a832e479dcfbcd1dd6800"
+      },
+      {
+        "job": "gamma_job_c",
+        "rejections": 0,
+        "tool_requests": 1,
+        "epf_records": 92,
+        "fixture_effects": 2,
+        "sha256": "8633262a1408fe1a150ce480af9f5a11ba326c7db84934ff9d2269cda405ffc3"
+      },
+      {
+        "job": "gamma_job_c",
+        "rejections": 1,
+        "tool_requests": 2,
+        "epf_records": 160,
+        "fixture_effects": 5,
+        "sha256": "823a8cea65a50506b6796b72f961a897c0344e61f042653ed4b9a23b19bcf298"
+      },
+      {
+        "job": "gamma_job_c",
+        "rejections": 2,
+        "tool_requests": 3,
+        "epf_records": 232,
+        "fixture_effects": 8,
+        "sha256": "3004a193bf66236fbb60d36bed611b9ca9bd4d999a7689da285d9efcb701b7ce"
+      },
+      {
+        "job": "gamma_job_c",
+        "rejections": 3,
+        "tool_requests": 4,
+        "epf_records": 304,
+        "fixture_effects": 11,
+        "sha256": "3696aed72c23c2dab93c46eabbd918494a9c009138f54e888cefa3c9e93683e6"
+      },
+      {
+        "job": "beta_job_a",
+        "rejections": 0,
+        "tool_requests": 0,
+        "epf_records": 76,
+        "fixture_effects": 2,
+        "sha256": "4f82389fecd7770cf98a759634ef5ccfb80f15bb145139f7e4154d1bc7ed43be"
+      },
+      {
+        "job": "beta_job_a",
+        "rejections": 1,
+        "tool_requests": 0,
+        "epf_records": 128,
+        "fixture_effects": 5,
+        "sha256": "e324252825caa6514d578ab5e4a212e7cc64a7a648ea8431499b4f7305a6380a"
+      },
+      {
+        "job": "beta_job_a",
+        "rejections": 2,
+        "tool_requests": 0,
+        "epf_records": 184,
+        "fixture_effects": 8,
+        "sha256": "f4692fea2a27d167a90e43c2cbf37f5ba02e708df6069470bdbe5cd053f25113"
+      },
+      {
+        "job": "beta_job_a",
+        "rejections": 3,
+        "tool_requests": 0,
+        "epf_records": 240,
+        "fixture_effects": 11,
+        "sha256": "2fb0242ade248ae679920100a7e0d7cd4dcbe5dca55bc4ae3fde9d5472636c55"
+      },
+      {
+        "job": "gamma_job_b",
+        "rejections": 0,
+        "tool_requests": 0,
+        "epf_records": 76,
+        "fixture_effects": 2,
+        "sha256": "a2b322b766e9d76b220a1700e14182fb72cf4b8efc13ea5911876994e7d7c92d"
+      },
+      {
+        "job": "gamma_job_b",
+        "rejections": 1,
+        "tool_requests": 0,
+        "epf_records": 128,
+        "fixture_effects": 5,
+        "sha256": "4284b4cf43c4fd9622f82538901646da889bb9bf5f6947a8703a1f1e17308888"
+      },
+      {
+        "job": "gamma_job_b",
+        "rejections": 2,
+        "tool_requests": 0,
+        "epf_records": 184,
+        "fixture_effects": 8,
+        "sha256": "5801e2bd7528aa0492b0e7563cbbdc432a39b1217df94a7991234d33964660cb"
+      },
+      {
+        "job": "gamma_job_b",
+        "rejections": 3,
+        "tool_requests": 0,
+        "epf_records": 240,
+        "fixture_effects": 11,
+        "sha256": "7c796c9a7754c146a2af7f3f0cf4d66da353cd64e9c25af006f11fce07084fcd"
+      },
+      {
+        "job": "alpha_job_c",
+        "rejections": 0,
+        "tool_requests": 0,
+        "epf_records": 76,
+        "fixture_effects": 2,
+        "sha256": "188def8e86866caa7e90812c75857cbf032adf71f59e4aa46a367dd1bccbe623"
+      },
+      {
+        "job": "alpha_job_c",
+        "rejections": 1,
+        "tool_requests": 0,
+        "epf_records": 128,
+        "fixture_effects": 5,
+        "sha256": "df8a43c62b0dfdfb0a28273dd4da5134d7309f60a981e4ef8f09207ba568ba36"
+      },
+      {
+        "job": "alpha_job_c",
+        "rejections": 2,
+        "tool_requests": 0,
+        "epf_records": 184,
+        "fixture_effects": 8,
+        "sha256": "a5f7bcfd4c3e2c6bbdb9ce366b69ae724f785e3d4b1db7bacf1b66e10f92ef6b"
+      },
+      {
+        "job": "alpha_job_c",
+        "rejections": 3,
+        "tool_requests": 0,
+        "epf_records": 240,
+        "fixture_effects": 11,
+        "sha256": "a3d01a1f41e1f57d47ce4643ab2065c006f83da838116d8fc97a78c066a76582"
+      }
+    ],
+    "fixture_effects": 156,
+    "epf_records": 4248,
+    "tool_requests": 30
+  },
+  "common_simulator": {
+    "scope": "After the first inspection fails and dispatches rework, finish the other assigned job before using that order. Isolated common-world calls, no Endpoint or Wasm.",
+    "tla_fixture_sha256": "cceed62d5786999144a2e55b7ee6a23aa044785cb106981fb88356dd15903f01",
+    "raw_sha256": "480900d0ce0d2ddacc34ec9c243c397e124021bf0f1a0fbfb8311e4ba00155af",
+    "cases": [
+      {
+        "first_job": "alpha_job_a",
+        "other_job_before_rework": "beta_job_a",
+        "complete": true,
+        "violations": [],
+        "effects": 15
+      },
+      {
+        "first_job": "beta_job_a",
+        "other_job_before_rework": "alpha_job_a",
+        "complete": true,
+        "violations": [],
+        "effects": 15
+      },
+      {
+        "first_job": "beta_job_b",
+        "other_job_before_rework": "gamma_job_b",
+        "complete": true,
+        "violations": [],
+        "effects": 15
+      },
+      {
+        "first_job": "gamma_job_b",
+        "other_job_before_rework": "beta_job_b",
+        "complete": true,
+        "violations": [],
+        "effects": 15
+      },
+      {
+        "first_job": "gamma_job_c",
+        "other_job_before_rework": "alpha_job_c",
+        "complete": true,
+        "violations": [],
+        "effects": 15
+      },
+      {
+        "first_job": "alpha_job_c",
+        "other_job_before_rework": "gamma_job_c",
+        "complete": true,
+        "violations": [],
+        "effects": 15
+      }
+    ]
+  }
+}

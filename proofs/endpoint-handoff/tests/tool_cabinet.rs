@@ -201,27 +201,37 @@ fn initial_quality(input: &Cell<Value>) -> Result<DecisionArm, ResolverError> {
 #[hibana_runtime::scope]
 async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
     rejected: usize,
+    work: impl hibana::runtime::program::Projectable + Copy,
 ) -> ShellResult<Value> {
     use hibana::g::Message;
-    use hibana::{g, runtime::program::project};
-    let work = g::seq(
-        g::send::<CAP, DEPOT, JobIntent<JOB>>(),
-        g::send::<DEPOT, CAP, JobResult>(),
+    use hibana::runtime::program::project;
+    const OTHER_WORKER: u8 = 25;
+    let source = hibana::g::par(
+        job_quality::<JOB, WORKER, CAP>(work, work),
+        hibana::g::seq(
+            hibana::g::send::<DEPOT, OTHER_WORKER, Loan1>(),
+            hibana::g::send::<OTHER_WORKER, DEPOT, Return1>(),
+        ),
     );
-    let source = job_quality::<JOB, WORKER, CAP>(work, work);
     let worker_program = project::<WORKER>(&source);
     let job_program = project::<CAP>(&source);
     let inspector_program = project::<INSPECTOR>(&source);
     let dispatcher_program = project::<DISPATCHER>(&source);
     let depot_program = project::<DEPOT>(&source);
     let session = SessionId::new(SESSION + 1);
-    let (bus, _, _) = Bus::open(data::AGENTS, [(session, CAP)]);
+    let tool_program = project::<TOOL_0>(&source);
+    let other_program = project::<OTHER_WORKER>(&source);
+    let other_tool_program = project::<TOOL_1>(&source);
+    let (bus, _, _) = Bus::open(
+        data::AGENTS,
+        [(session, CAP), (session, TOOL_0), (session, TOOL_1)],
+    );
     let verdict = Cell::new(Value::Null);
-    let records: [Cell<Vec<hibana::runtime::tap::TapEvent>>; 4] =
+    let records: [Cell<Vec<hibana::runtime::tap::TapEvent>>; 5] =
         core::array::from_fn(|_| Cell::new(Vec::new()));
     let observed_producers = Cell::new(Vec::new());
     let observers =
-        [0, 1, 2, 3].map(|producer| observer(producer, &records[producer], &observed_producers));
+        [0, 1, 2, 3, 4].map(|producer| observer(producer, &records[producer], &observed_producers));
     let mut worker_slab = vec![0; 1024 * 1024];
     let mut inspector_slab = vec![0; 1024 * 1024];
     let mut dispatcher_slab = vec![0; 1024 * 1024];
@@ -242,6 +252,12 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
     let depot_runtime = depot_storage
         .init()
         .rendezvous(&mut depot_slab, &bus.transport)?;
+    let mut other_slab = vec![0; 1024 * 1024];
+    let mut other_storage = SessionKitStorage::uninit();
+    let other_runtime = other_storage
+        .init()
+        .rendezvous(&mut other_slab, &bus.transport)?;
+    other_runtime.observe(&observers[4]);
     worker_runtime.observe(&observers[0]);
     inspector_runtime.observe(&observers[1]);
     dispatcher_runtime.observe(&observers[2]);
@@ -256,9 +272,20 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
     let mut job = worker_runtime.enter(session, &job_program)?;
     let mut inspector = inspector_runtime.enter(session, &inspector_program)?;
     let mut dispatcher = dispatcher_runtime.enter(session, &dispatcher_program)?;
-    let mut depot = depot_runtime.enter(session, &depot_program)?;
+    let mut cabinet = depot_runtime.enter(session, &depot_program)?;
+    let [mut depot, mut other_loan] = cabinet.par()?;
+    let mut other = other_runtime.enter(session, &other_program)?;
+    let other_tool = depot_runtime.enter(session, &other_tool_program)?;
+    other_loan.send::<Loan1>(other_tool).await?;
+    let occupied = other.recv::<Loan1>().await?;
     let arguments_bytes = data::encode(&json!({"job_id":data::JOBS[usize::from(JOB)]}))?;
+    let intent = data::JobArguments::<JOB>::from_bytes(&arguments_bytes)?;
     let arguments = data::JobArguments::<JOB, { data::DO_JOB }>::from_bytes(&arguments_bytes)?;
+    let mut available = if JOB < 3 {
+        Some(depot_runtime.enter(session, &tool_program)?)
+    } else {
+        None
+    };
     let check = data::JobArguments::<JOB, { data::INSPECT_QUALITY }>::from_bytes(&arguments_bytes)?;
     let admitted = data::submission::<JOB>(arguments.value());
     let effects = QualityEffects {
@@ -268,13 +295,29 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
     };
     let ((), (), (), mut retired) = hibana_runtime::race(async {
         async {
-            job.send::<JobIntent<JOB>>(&arguments).await?;
-            let result = data::decode(job.recv::<JobResult>().await?)?;
-            data::completed(&admitted, &result, None)?;
-            let bytes = data::encode(&result["data"]["part"])?;
-            job.send::<PartReady>(&bytes.as_slice()).await?;
-            worker.send::<JobLoan<CAP>>(job).await?;
+            let mut previous: Option<Value> = None;
             loop {
+                let result = if JOB < 3 {
+                    job.send::<Intent<JOB>>(&intent).await?;
+                    let mut tool = worker.recv::<Loan0>().await?;
+                    let requested = data::JobArguments::<WORKER, {data::DO_JOB}>::from_bytes(&arguments_bytes)?;
+                    tool.send::<Request0<WORKER>>(&requested).await?;
+                    let bytes = tool.recv::<Reply0>().await?.to_vec();
+                    async {
+                        let [mut returned, mut issued] = worker.par()?;
+                        async { returned.send::<Return0>(tool).await?; };
+                        async { issued.send::<JobResult>(&bytes.as_slice()).await?; };
+                        Ok::<(),ShellError>(())
+                    }.await?;
+                    data::decode(job.recv::<JobResult>().await?)?
+                } else {
+                    job.send::<JobIntent<JOB>>(&arguments).await?;
+                    data::decode(job.recv::<JobResult>().await?)?
+                };
+                data::completed(&admitted, &result, previous.as_ref().map(|order| (&order["inspection"], &order["arguments"], &order["result"])))?;
+                let bytes = data::encode(&result["data"]["part"])?;
+                job.send::<PartReady>(&bytes.as_slice()).await?;
+                worker.send::<JobLoan<CAP>>(job).await?;
                 let branch = worker.offer().await?;
                 match branch.label() {
                     label if label == ApprovalForWorker::<JOB>::LOGICAL_LABEL => {
@@ -282,14 +325,8 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
                         break;
                     }
                     OrderForWorker::LOGICAL_LABEL => {
-                        let previous = data::decode(branch.recv::<OrderForWorker>().await?)?;
-                        let mut job = worker.recv::<JobLoan<CAP>>().await?;
-                        job.send::<JobIntent<JOB>>(&arguments).await?;
-                        let result = data::decode(job.recv::<JobResult>().await?)?;
-                        data::completed(&admitted, &result, Some((&previous["inspection"],&previous["arguments"],&previous["result"])))?;
-                        let bytes = data::encode(&result["data"]["part"])?;
-                        job.send::<PartReady>(&bytes.as_slice()).await?;
-                        worker.send::<JobLoan<CAP>>(job).await?;
+                        previous = Some(data::decode(branch.recv::<OrderForWorker>().await?)?);
+                        job = worker.recv::<JobLoan<CAP>>().await?;
                     }
                     _ => return Err(ShellError::message("unexpected worker quality continuation")),
                 }
@@ -364,40 +401,56 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
             }
         };
         async {
-            let result = effects.apply(depot.recv::<JobIntent<JOB>>().await?).await?;
-            data::completed(&admitted, &result, None)?;
-            let mut part = result["data"]["part"].clone();
-            let bytes = data::encode(&result)?;
-            depot.send::<JobResult>(&bytes.as_slice()).await?;
+            let mut previous: Option<Value> = None;
             loop {
+                let result = if let Some(tool) = available.take() {
+                    let submission = data::admitted(depot.recv::<Intent<JOB>>().await?)?;
+                    depot.send::<Loan0>(tool).await?;
+                    let request = depot.recv::<Request0<WORKER>>().await?;
+                    if data::decode(request.as_bytes())? != submission["arguments"] {
+                        return Err(ShellError::message("tool request differs from the submitted job"));
+                    }
+                    let result = effects.apply(request).await?;
+                    data::completed(&submission, &result, previous.as_ref().map(|order| (&order["inspection"], &order["arguments"], &order["result"])))?;
+                    let bytes = data::encode(&result)?;
+                    depot.send::<Reply0>(&bytes.as_slice()).await?;
+                    available = Some(depot.recv::<Return0>().await?);
+                    result
+                } else {
+                    let result = effects.apply(depot.recv::<JobIntent<JOB>>().await?).await?;
+                    data::completed(&admitted, &result, previous.as_ref().map(|order| (&order["inspection"], &order["arguments"], &order["result"])))?;
+                    let bytes = data::encode(&result)?;
+                    depot.send::<JobResult>(&bytes.as_slice()).await?;
+                    result
+                };
+                let part = &result["data"]["part"];
                 let branch = depot.offer().await?;
                 match branch.label() {
                     label if label == Approved::<JOB>::LOGICAL_LABEL => {
                         let approved = data::decode(branch.recv::<Approved<JOB>>().await?)?;
-                        data::inspected(&part, &arguments.value(), &approved)?;
+                        data::inspected(part, &arguments.value(), &approved)?;
                         let retired = depot.recv::<JobLoan<CAP>>().await?;
                         return Ok::<_, ShellError>(retired);
                     }
                     OrderEvidence::LOGICAL_LABEL => {
-                        let previous = data::decode(branch.recv::<OrderEvidence>().await?)?;
-                        data::inspected(&part, &arguments.value(), &previous["inspection"])?;
-                        data::dispatched(&previous["inspection"],&previous["arguments"],&previous["result"])?;
-                        let result = effects.apply(depot.recv::<JobIntent<JOB>>().await?).await?;
-                        data::completed(&admitted,&result,Some((&previous["inspection"],&previous["arguments"],&previous["result"])))?;
-                        part=result["data"]["part"].clone();
-                        let bytes=data::encode(&result)?;
-                        depot.send::<JobResult>(&bytes.as_slice()).await?;
+                        let order = data::decode(branch.recv::<OrderEvidence>().await?)?;
+                        data::inspected(part, &arguments.value(), &order["inspection"])?;
+                        data::dispatched(&order["inspection"],&order["arguments"],&order["result"])?;
+                        previous = Some(order);
                     }
                     _ => return Err(ShellError::message("unexpected physical job continuation")),
                 }
             }
         };
     },deadline(Duration::from_secs(5))).await?;
+    other.send::<Return1>(occupied).await?;
+    let _returned = other_loan.recv::<Return1>().await?;
     let checkpoints = [
         worker_runtime.tap().checkpoint(),
         inspector_runtime.tap().checkpoint(),
         dispatcher_runtime.tap().checkpoint(),
         depot_runtime.tap().checkpoint(),
+        other_runtime.tap().checkpoint(),
     ];
     let captured = records.each_ref().map(|records| records.take());
     let observed_producers = observed_producers.take();
@@ -429,10 +482,12 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
     let mut frames: Vec<_> = bus.transport.take_observations().collect();
     let denied = hibana_runtime::race(
         async {
-            retired
-                .send::<JobIntent<JOB>>(&arguments)
-                .await
-                .map_err(ShellError::from)
+            if JOB < 3 {
+                retired.send::<Intent<JOB>>(&intent).await
+            } else {
+                retired.send::<JobIntent<JOB>>(&arguments).await
+            }
+            .map_err(ShellError::from)
         },
         deadline(Duration::from_secs(1)),
     )
@@ -456,13 +511,34 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
         inspector_runtime.tap().checkpoint(),
         dispatcher_runtime.tap().checkpoint(),
         depot_runtime.tap().checkpoint(),
+        other_runtime.tap().checkpoint(),
     ];
     let terminal_probe_records = records.each_ref().map(|records| records.take());
     let events = effects.events.take();
     assert_eq!(events.len(), 3 * rejected + 2);
     frames.extend(bus.transport.take_observations());
+    let tool_requests = frames
+        .iter()
+        .filter(|frame| {
+            frame["action"] == "send" && frame["source"] == TOOL_0 && frame["target"] == DEPOT
+        })
+        .count();
+    assert_eq!(tool_requests, if JOB < 3 { rejected + 1 } else { 0 });
+    let sent = frames
+        .iter()
+        .filter(|frame| frame["action"] == "send")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        (sent[0]["source"].as_u64(), sent[0]["target"].as_u64()),
+        (Some(DEPOT.into()), Some(OTHER_WORKER.into()))
+    );
+    let last = sent.last().expect("returned second tool");
+    assert_eq!(
+        (last["source"].as_u64(), last["target"].as_u64()),
+        (Some(OTHER_WORKER.into()), Some(DEPOT.into()))
+    );
     let outcome = json!({"job":data::JOBS[usize::from(JOB)],"rejected_inspections":rejected,
-        "events":events,"frames":frames,"retired_request_rejected":true,"retired_request_error":rejection,"controlled_native_fixture":true,
+        "events":events,"frames":frames,"retired_request_rejected":true,"retired_request_error":rejection,"free_tool_requests":tool_requests,"independent_loan_frame":sent[0]["frame_id"],"independent_return_frame":last["frame_id"],"controlled_native_fixture":true,
         "full_11M_task":false,"model_calls":0,"dynamic_protocol":dynamic,"resolver_calls":resolver_calls,
         "session":session.raw(),"checkpoints":checkpoints,"observed_producers":observed_producers,
         "capture_scope":"complete producer prefixes through legitimate participants; the later rejected terminal probe is retained separately",
@@ -485,13 +561,26 @@ async fn quality_case<const JOB: u8, const WORKER: u8, const CAP: u8>(
 #[test]
 async fn all_six_quality_continuations_preserve_actual_rework_and_close_on_approval()
 -> ShellResult<()> {
+    use hibana::{g, runtime::program::Projectable};
+    fn tool_job<const JOB: u8, const CAP: u8>() -> impl Projectable + Copy {
+        g::seq(
+            g::send::<CAP, DEPOT, Intent<JOB>>(),
+            whole0::<JOB>(g::send::<JOB, CAP, JobResult>()),
+        )
+    }
+    fn station_job<const JOB: u8, const CAP: u8>() -> impl Projectable + Copy {
+        g::seq(
+            g::send::<CAP, DEPOT, JobIntent<JOB>>(),
+            g::send::<DEPOT, CAP, JobResult>(),
+        )
+    }
     for rejected in 0..=3 {
-        quality_case::<0, WORKER_A, 9>(rejected).await?;
-        quality_case::<1, WORKER_B, 10>(rejected).await?;
-        quality_case::<2, WORKER_C, 11>(rejected).await?;
-        quality_case::<3, WORKER_A, 12>(rejected).await?;
-        quality_case::<4, WORKER_B, 13>(rejected).await?;
-        quality_case::<5, WORKER_C, 14>(rejected).await?;
+        quality_case::<0, WORKER_A, 9>(rejected, tool_job::<0, 9>()).await?;
+        quality_case::<1, WORKER_B, 10>(rejected, tool_job::<1, 10>()).await?;
+        quality_case::<2, WORKER_C, 11>(rejected, tool_job::<2, 11>()).await?;
+        quality_case::<3, WORKER_A, 12>(rejected, station_job::<3, 12>()).await?;
+        quality_case::<4, WORKER_B, 13>(rejected, station_job::<4, 13>()).await?;
+        quality_case::<5, WORKER_C, 14>(rejected, station_job::<5, 14>()).await?;
     }
     Ok(())
 }

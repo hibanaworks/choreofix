@@ -106,6 +106,31 @@ class ManufacturingReworkWorld(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.sim.violations), 1)
         self.assertIn('INSPECTOR', self.sim.violations[0].message)
 
+    async def test_worker_can_finish_the_other_job_before_using_a_rework_order(self):
+        for first, (worker, job, _, _) in enumerate(JOBS):
+            with self.subTest(first=job):
+                self.setUp()
+                self.sim._failure_specs = [FailureSpec('inspect_quality', call_index=0)]
+                material = await self.job(first)
+                failed = await self.inspect(first)
+                self.assertFalse(failed.success)
+                self.assertEqual(failed.data['input_part'], material.data['part'])
+                order = await self.dispatch(first)
+                self.assertEqual(order.data['inspection'], failed.data['receipt'])
+
+                other = next(i for i, (w, *_) in enumerate(JOBS) if w == worker and i != first)
+                for current in [other, first, *(i for i in range(6) if i not in (first, other))]:
+                    part = await self.job(current)
+                    self.assertTrue(part.success)
+                    if current == first:
+                        self.assertEqual(part.data['rework_order'], order.data['order'])
+                        self.assertEqual(part.data['part']['attempt'], material.data['part']['attempt'] + 1)
+                    verdict = await self.inspect(current)
+                    self.assertTrue(verdict.success)
+                    self.assertEqual(verdict.data['input_part'], part.data['part'])
+                self.assertTrue(self.sim.is_complete())
+                self.assertEqual(self.sim.violations, [])
+
     async def test_each_failed_part_requires_actual_dispatched_rework(self):
         for index in range(6):
             for count in (1, 2, 3):

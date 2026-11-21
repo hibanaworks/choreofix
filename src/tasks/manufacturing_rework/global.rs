@@ -125,7 +125,7 @@ pub fn job_quality<const JOB: u8, const WORKER: u8, const CAP: u8>(
     )
 }
 
-fn begin0<const WORKER: u8>() -> impl Projectable {
+fn begin0<const WORKER: u8>() -> impl Projectable + Copy {
     g::seq(
         g::send::<DEPOT, WORKER, Loan0>(),
         g::send::<TOOL_0, DEPOT, Request0<WORKER>>(),
@@ -137,7 +137,7 @@ fn begin1<const WORKER: u8>() -> impl Projectable {
         g::send::<TOOL_1, DEPOT, Request1<WORKER>>(),
     )
 }
-fn finish0<const WORKER: u8>(part: impl Projectable) -> impl Projectable {
+fn finish0<const WORKER: u8>(part: impl Projectable + Copy) -> impl Projectable + Copy {
     g::seq(
         g::send::<DEPOT, TOOL_0, Reply0>(),
         g::par(g::send::<WORKER, DEPOT, Return0>(), part),
@@ -149,7 +149,7 @@ fn finish1<const WORKER: u8>(part: impl Projectable) -> impl Projectable {
         g::par(g::send::<WORKER, DEPOT, Return1>(), part),
     )
 }
-fn whole0<const WORKER: u8>(part: impl Projectable) -> impl Projectable {
+pub(crate) fn whole0<const WORKER: u8>(part: impl Projectable + Copy) -> impl Projectable + Copy {
     g::seq(begin0::<WORKER>(), finish0::<WORKER>(part))
 }
 fn whole1<const WORKER: u8>(part: impl Projectable) -> impl Projectable {

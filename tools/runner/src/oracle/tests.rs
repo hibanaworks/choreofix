@@ -2423,6 +2423,7 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
         for (profile, failures) in [
             ("serial", &[][..]),
             ("contended", &[("inspect_quality", 0)][..]),
+            ("dispatch-during-work", &[("inspect_quality", 0)][..]),
             (
                 "three-rejections",
                 &[
@@ -2432,15 +2433,17 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
                 ][..],
             ),
         ] {
-            let batch = !failures.is_empty();
+            let batch = matches!(profile, "contended" | "three-rejections");
+            let streamed = profile == "dispatch-during-work";
             let directory = output.join(format!("{index}-{profile}"));
             fs::create_dir(&directory)?;
             let journal = directory.join("events.jsonl");
             let trace = Trace::create(&journal)?;
             let artifact = projection::archive(&binary, &directory, "11M")?;
             let (world, _) = Simulator::new("11M", 0, 1.0, trace.clone(), failures)?;
+            let job_seconds = if streamed { 1.6 } else { 0.4 };
             world
-                .set_test_delays(json!({"do_job":[0.4,0.4],"inspect_quality":[0.05,0.05],"dispatch_rework":[0.05,0.05]}))
+                .set_test_delays(json!({"do_job":[job_seconds,job_seconds],"inspect_quality":[0.05,0.05],"dispatch_rework":[0.05,0.05]}))
                 .await?;
             let (guest, runtime) =
                 process::guest(&binary, &wash, &["11M"], &directory, trace, world)?;
@@ -2464,6 +2467,9 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
                                 assert!(refused["stdout"].as_str().is_some_and(|s|s.contains("Permission denied")), "{refused}");
                                 return Ok(None);
                             }
+                            let job_args = json!({"job_id":job});
+                            let premature = guest.command(jobs[i].0, format!("printf '%s' '{job_args}' | dd of=/service/do_job oflag=nonblock")).await?;
+                            assert!(premature["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{premature}");
                             let other = json!({"job_id":jobs[(i+1)%3].1});
                             let invalid = guest.command("DISPATCHER", format!("printf '%s' '{other}' > {path}")).await?;
                             assert!(invalid["stdout"].as_str().is_some_and(|s|s.contains("Invalid argument")), "{invalid}");
@@ -2502,7 +2508,7 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
                         assert!(early["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{early}");
                         let premature = guest.command("DISPATCHER", "printf '%s' '{\"job_id\":\"alpha_job_a\"}' | dd of=/service/dispatch/alpha_job_a oflag=nonblock".into()).await?;
                         assert!(premature["stdout"].as_str().is_some_and(|s| s.contains("Permission denied") || s.contains("Resource temporarily unavailable")), "{premature}");
-                        for &i in &order {
+                        let submit = async |i: usize| -> Result<()> {
                             let (agent, job, _) = jobs[i];
                             let invalid = json!({"job_id":jobs[(i+1)%3].1});
                             let refusal = guest
@@ -2522,16 +2528,33 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
                                 .command(agent, format!("printf '%s' '{args}' > /service/do_job"))
                                 .await?;
                             assert_eq!(write["stdout"], "wash> ", "{write}");
+                            Ok(())
+                        };
+                        for &i in &order {
+                            let (agent, job, _) = jobs[i];
+                            if !(streamed && i == order[1]) {
+                                submit(i).await?;
+                            }
                             if !batch {
                                 let part = shell_json_result(
                                     &guest.command(agent, "cat /service/do_job".into()).await?,
                                 )?;
                                 let delivered = shell_json_result(&guest.command("INSPECTOR", format!("cat /service/parts/{job}")).await?)?;
                                 assert_eq!(delivered, part["data"]["part"]);
+                                if streamed && i == order[0] {
+                                    submit(order[1]).await?;
+                                }
                                 let inspected = inspect(i, &part, None).await?;
-                                let update = shell_json_result(&guest.command(agent, "cat /service/job_update".into()).await?)?;
-                                assert_eq!(update, inspected);
-                                assert!(disposition(i, &inspected).await?.is_none());
+                                if inspected["success"] == false {
+                                    let dispatched = disposition(i, &inspected).await?.ok_or("missing rework order")?;
+                                    let update = shell_json_result(&guest.command(agent, "cat /service/job_update".into()).await?)?;
+                                    assert_eq!(update, dispatched);
+                                    orders.push(dispatched);
+                                } else {
+                                    let update = shell_json_result(&guest.command(agent, "cat /service/job_update".into()).await?)?;
+                                    assert_eq!(update, inspected);
+                                    assert!(disposition(i, &inspected).await?.is_none());
+                                }
                                 inspections.push((i, inspected));
                                 parts.push((i, part));
                             }
@@ -2575,10 +2598,13 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
                         }
                         assert_eq!(guest.command("DISPATCHER", "exit 0".into()).await?["exit_status"], 0);
                         assert_eq!(guest.command("INSPECTOR", "exit 0".into()).await?["exit_status"], 0);
-                        for &(agent, job, _) in &jobs {
-                            let args = json!({"job_id":job});
-                            let repeat = guest.command(agent, format!("printf '%s' '{args}' | dd of=/service/do_job oflag=nonblock")).await?;
-                            assert!(repeat["stdout"].as_str().is_some_and(|s|s.contains("Permission denied")),"{repeat}");
+                        for (i, inspected) in &inspections {
+                            let (agent, job, _) = jobs[*i];
+                            if inspected["success"] == true {
+                                let args = json!({"job_id":job});
+                                let repeat = guest.command(agent, format!("printf '%s' '{args}' | dd of=/service/do_job oflag=nonblock")).await?;
+                                assert!(repeat["stdout"].as_str().is_some_and(|s|s.contains("Permission denied")),"{repeat}");
+                            }
                             assert_eq!(
                                 guest.command(agent, "exit 0".into()).await?["exit_status"],
                                 0
@@ -2825,9 +2851,54 @@ async fn wash_submits_the_three_tool_jobs_from_their_actual_workstations() -> Re
                 .max()
                 .ok_or("no job intervals")?;
             assert_eq!(simulator_peak, peak);
+            let dispatch_overlap = if streamed {
+                let job = |i: usize| {
+                    &effects
+                        .iter()
+                        .find(|entry| entry["worker"] == jobs[i].0)
+                        .unwrap()["effect"]
+                };
+                let order_effect = &checked_orders[0];
+                let other = job(order[1]);
+                let last = job(order[2]);
+                let row = |e: &Value, field: &str| e[field].as_u64().unwrap();
+                assert!(row(other, "effect_start_row") < row(order_effect, "effect_start_row"));
+                assert!(row(order_effect, "effect_end_row") < row(other, "effect_end_row"));
+                assert!(row(order_effect, "effect_end_row") < row(last, "effect_start_row"));
+                let score_event = |tool, i: usize| {
+                    events
+                        .iter()
+                        .find(|e| e["tool"] == tool && e["args"]["job_id"] == jobs[i].1)
+                        .unwrap()
+                };
+                let dispatch = score_event("dispatch_rework", order[0]);
+                let manufacturing = score_event("do_job", order[1]);
+                let start = dispatch["timestamp"].as_f64().ok_or("dispatch start")?;
+                let end = dispatch["completed_at"].as_f64().ok_or("dispatch end")?;
+                assert!(
+                    manufacturing["timestamp"]
+                        .as_f64()
+                        .ok_or("other job start")?
+                        < start
+                        && start < end
+                );
+                assert!(
+                    end < manufacturing["completed_at"]
+                        .as_f64()
+                        .ok_or("other job end")?
+                );
+                Some(
+                    json!({"rejected_job":jobs[order[0]].1,"active_job":jobs[order[1]].1,"unsubmitted_job":jobs[order[2]].1,
+                    "dispatch_start_row":order_effect["effect_start_row"],"dispatch_end_row":order_effect["effect_end_row"],
+                    "other_job_start_row":other["effect_start_row"],"other_job_end_row":other["effect_end_row"],
+                    "last_job_start_row":last["effect_start_row"]}),
+                )
+            } else {
+                None
+            };
             save(
                 &directory.join("checked.json"),
-                &json!({"order":order,"submitted_before_reads":batch,"maximum_outstanding_jobs":peak,"maximum_simultaneous_effects":simulator_peak,"epf_records":epf["captured_records"],"effects":effects,"inspections":checked_inspections,"dispatches":checked_orders,"inspection_order":inspections.iter().map(|(i,_)|jobs[*i].1).collect::<Vec<_>>(),"score_complete":false,"model_calls":0}),
+                &json!({"order":order,"dispatch_while_other_job_active":dispatch_overlap,"submitted_before_reads":batch,"maximum_outstanding_jobs":peak,"maximum_simultaneous_effects":simulator_peak,"epf_records":epf["captured_records"],"effects":effects,"inspections":checked_inspections,"dispatches":checked_orders,"inspection_order":inspections.iter().map(|(i,_)|jobs[*i].1).collect::<Vec<_>>(),"score_complete":false,"model_calls":0}),
             )?;
         }
     }
